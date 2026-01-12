@@ -1,5 +1,11 @@
 """Unit tests for AI Orchestrator data classes and core functionality."""
 
+from unittest.mock import MagicMock
+from unittest.mock import Mock
+from unittest.mock import create_autospec
+from unittest.mock import patch
+
+from anthropic.types import TextBlock
 import pytest
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
@@ -193,3 +199,137 @@ class TestAIOrchestrator:
         """Test AIOrchestrator rejects negative retry_delay."""
         with pytest.raises(ValueError, match="retry_delay must be positive"):
             AIOrchestrator(api_key="test-api-key-123", retry_delay=-0.5)
+
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_with_valid_prompt_returns_result(
+        self,
+        mock_anthropic: Mock,
+    ) -> None:
+        """Test generate returns GenerationResult with valid prompt."""
+        # Setup mock API response
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.id = "msg_test123"
+
+        # Create a proper TextBlock mock
+        text_block = create_autospec(TextBlock, instance=True)
+        text_block.text = "Generated YAML content"
+        mock_response.content = [text_block]
+
+        mock_response.usage.input_tokens = 100
+        mock_response.usage.output_tokens = 50
+        mock_response.model = ModelConfig.SONNET
+        mock_client.messages.create.return_value = mock_response
+
+        orchestrator = AIOrchestrator(api_key="test-api-key")
+        result = orchestrator.generate(
+            prompt="Generate test config",
+            output_format="yaml",
+        )
+
+        assert isinstance(result, GenerationResult)
+        assert result.content == "Generated YAML content"
+        assert result.format == "yaml"
+        assert result.token_usage.input_tokens == 100
+        assert result.token_usage.output_tokens == 50
+        assert result.model == ModelConfig.SONNET
+        assert result.message_id == "msg_test123"
+
+    def test_generate_with_empty_prompt_raises_error(self) -> None:
+        """Test generate rejects empty prompt."""
+        orchestrator = AIOrchestrator(api_key="test-api-key")
+        with pytest.raises(ValueError, match="Prompt cannot be empty"):
+            orchestrator.generate(prompt="", output_format="yaml")
+
+    def test_generate_with_whitespace_prompt_raises_error(self) -> None:
+        """Test generate rejects whitespace-only prompt."""
+        orchestrator = AIOrchestrator(api_key="test-api-key")
+        with pytest.raises(ValueError, match="Prompt cannot be empty"):
+            orchestrator.generate(prompt="   ", output_format="yaml")
+
+    def test_generate_with_unsupported_format_raises_error(self) -> None:
+        """Test generate rejects unsupported output format."""
+        orchestrator = AIOrchestrator(api_key="test-api-key")
+        with pytest.raises(ValueError, match="Unsupported output format"):
+            orchestrator.generate(
+                prompt="Generate config",
+                output_format="invalid_format",  # type: ignore[arg-type]
+            )
+
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_supports_all_output_formats(
+        self,
+        mock_anthropic: Mock,
+    ) -> None:
+        """Test generate accepts all supported output formats."""
+        # Setup mock API response
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.id = "msg_test123"
+
+        # Create a proper TextBlock mock
+        text_block = create_autospec(TextBlock, instance=True)
+        text_block.text = "content"
+        mock_response.content = [text_block]
+
+        mock_response.usage.input_tokens = 10
+        mock_response.usage.output_tokens = 5
+        mock_response.model = ModelConfig.SONNET
+        mock_client.messages.create.return_value = mock_response
+
+        orchestrator = AIOrchestrator(api_key="test-api-key")
+
+        # All these should succeed
+        for fmt in ["yaml", "toml", "markdown", "bash"]:
+            result = orchestrator.generate(
+                prompt="Generate content",
+                output_format=fmt,  # type: ignore[arg-type]
+            )
+            assert result.format == fmt
+
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_api_error_raises_generation_error(
+        self,
+        mock_anthropic: Mock,
+    ) -> None:
+        """Test generate wraps API errors in GenerationError."""
+        # Setup mock to raise an exception
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+        api_error = Exception("API connection failed")
+        mock_client.messages.create.side_effect = api_error
+
+        orchestrator = AIOrchestrator(api_key="test-api-key")
+
+        with pytest.raises(GenerationError, match="Failed to generate content"):
+            orchestrator.generate(prompt="Generate config", output_format="yaml")
+
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_creates_client_with_api_key(
+        self,
+        mock_anthropic: Mock,
+    ) -> None:
+        """Test generate initializes Anthropic client with API key."""
+        # Setup mock API response
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.id = "msg_test123"
+
+        # Create a proper TextBlock mock
+        text_block = create_autospec(TextBlock, instance=True)
+        text_block.text = "content"
+        mock_response.content = [text_block]
+
+        mock_response.usage.input_tokens = 10
+        mock_response.usage.output_tokens = 5
+        mock_response.model = ModelConfig.SONNET
+        mock_client.messages.create.return_value = mock_response
+
+        orchestrator = AIOrchestrator(api_key="my-secret-key")
+        orchestrator.generate(prompt="Test prompt", output_format="yaml")
+
+        # Verify Anthropic was called with correct API key
+        mock_anthropic.assert_called_once_with(api_key="my-secret-key")

@@ -7,6 +7,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Final
+from typing import Literal
+
+from anthropic import Anthropic
+from anthropic.types import TextBlock
 
 
 class GenerationError(Exception):
@@ -129,3 +133,67 @@ class AIOrchestrator:
         self.model = model
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+
+    def generate(
+        self,
+        prompt: str,
+        output_format: Literal["yaml", "toml", "markdown", "bash"],
+    ) -> GenerationResult:
+        """Generate content using Claude API.
+
+        Args:
+            prompt: Prompt describing what to generate.
+            output_format: Desired output format (yaml, toml, markdown, bash).
+
+        Returns:
+            GenerationResult containing generated content and metadata.
+
+        Raises:
+            ValueError: If prompt is empty or format unsupported.
+            GenerationError: If API call fails or response invalid.
+        """
+        # Validate inputs
+        if not prompt or not prompt.strip():
+            msg = "Prompt cannot be empty"
+            raise ValueError(msg)
+
+        supported_formats = {"yaml", "toml", "markdown", "bash"}
+        if output_format not in supported_formats:
+            msg = f"Unsupported output format: {output_format}"
+            raise ValueError(msg)
+
+        # Call Anthropic API
+        try:
+            client = Anthropic(api_key=self.api_key)
+            response = client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"Generate {output_format} output:\n\n{prompt}",
+                    },
+                ],
+            )
+
+            # Extract content from response
+            first_block = response.content[0]
+            if not isinstance(first_block, TextBlock):
+                msg = "Expected TextBlock in response"
+                raise GenerationError(msg)  # noqa: TRY301
+            content = first_block.text
+
+            # Build result
+            return GenerationResult(
+                content=content,
+                format=output_format,
+                token_usage=TokenUsage(
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                ),
+                model=response.model,
+                message_id=response.id,
+            )
+        except Exception as e:
+            msg = "Failed to generate content"
+            raise GenerationError(msg, cause=e) from e
