@@ -16,14 +16,14 @@ from start_green_stay_green.github.issues import IssueConfig
 from start_green_stay_green.github.issues import MilestoneConfig
 
 __all__ = [
+    "GitHubActionsError",
+    "GitHubActionsManager",
     "GitHubClient",
     "GitHubError",
-    "RepositoryConfig",
-    "GitHubActionsManager",
-    "GitHubActionsError",
-    "WorkflowConfig",
-    "GitHubIssueManager",
     "GitHubIssueError",
+    "GitHubIssueManager",
     "IssueConfig",
     "MilestoneConfig",
+    "RepositoryConfig",
+    "WorkflowConfig",
 ]
