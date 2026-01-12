@@ -10,9 +10,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
+from typing import Literal
 
-from anthropic import APIError, APITimeoutError, Anthropic, RateLimitError
+from anthropic import APIError
+from anthropic import APITimeoutError
+from anthropic import Anthropic
+from anthropic import RateLimitError
 
 if TYPE_CHECKING:
     from anthropic.types import Message
