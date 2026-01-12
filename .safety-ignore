@@ -1,0 +1,2 @@
+# Ignore disputed CVE in py package (transitive dependency)
+51457
