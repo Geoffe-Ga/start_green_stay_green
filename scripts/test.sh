@@ -110,7 +110,14 @@ esac
 # Add coverage if requested
 if $COVERAGE; then
     echo "Coverage enabled"
-    PYTEST_ARGS+=(--cov=start_green_stay_green --cov-report=html --cov-report=term-missing)
+    PYTEST_ARGS+=(
+        --cov=start_green_stay_green
+        --cov-branch
+        --cov-report=term-missing
+        --cov-report=html
+        --cov-report=xml
+        --cov-fail-under=90
+    )
 fi
 
 # Run tests

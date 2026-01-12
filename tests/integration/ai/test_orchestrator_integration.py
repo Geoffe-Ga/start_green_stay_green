@@ -14,6 +14,7 @@ from start_green_stay_green.ai.orchestrator import ModelConfig
 from start_green_stay_green.ai.orchestrator import TokenUsage
 
 
+@pytest.mark.integration
 class TestOrchestratorEndToEndWorkflows:
     """Test complete orchestrator workflows from initialization to generation."""
 

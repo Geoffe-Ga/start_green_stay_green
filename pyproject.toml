@@ -228,12 +228,6 @@ addopts = [
     "--strict-config",
     "-p", "no:cacheprovider",
     "--tb=short",
-    "--cov=start_green_stay_green",
-    "--cov-branch",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-    "--cov-report=xml",
-    "--cov-fail-under=90",
     "--hypothesis-seed=0",
 ]
 testpaths = ["tests"]
