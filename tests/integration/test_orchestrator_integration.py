@@ -8,7 +8,6 @@ and response processing.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -100,7 +99,7 @@ class TestOrchestratorIntegration:
         orchestrator = AIOrchestrator(api_key="test-key-retry")
         call_count = 0
 
-        async def fail_then_succeed(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        async def fail_then_succeed(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count < 2:

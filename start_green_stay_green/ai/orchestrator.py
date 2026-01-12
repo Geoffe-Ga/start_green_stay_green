@@ -10,12 +10,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 from typing import Literal
+from typing import TYPE_CHECKING
 
+from anthropic import Anthropic
 from anthropic import APIError
 from anthropic import APITimeoutError
-from anthropic import Anthropic
 from anthropic import RateLimitError
 
 if TYPE_CHECKING:
@@ -289,7 +289,7 @@ class AIOrchestrator:
         *,
         max_tokens: int = 4096,
     ) -> str:
-        """Lightweight tuning pass to adapt content to specific repo.
+        r"""Lightweight tuning pass to adapt content to specific repo.
 
         Takes existing content and adapts it to match the target repository's
         context, conventions, and requirements. Uses a lighter model by default
@@ -310,7 +310,7 @@ class AIOrchestrator:
 
         Examples:
             >>> tuned = await orchestrator.tune(
-            ...     content="# Generic README\\n...",
+            ...     content="# Generic README\n...",
             ...     target_context="Python project using pytest and black",
             ... )
             >>> assert "pytest" in tuned or "black" in tuned
