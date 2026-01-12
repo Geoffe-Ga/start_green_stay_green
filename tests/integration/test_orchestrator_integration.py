@@ -14,7 +14,6 @@ from unittest.mock import patch
 import pytest
 
 from start_green_stay_green.ai import AIOrchestrator
-from start_green_stay_green.ai import GenerationError
 from start_green_stay_green.ai import ModelConfig
 
 if TYPE_CHECKING:
