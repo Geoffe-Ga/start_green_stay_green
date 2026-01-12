@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock
 from unittest.mock import Mock
+from unittest.mock import call
 from unittest.mock import create_autospec
 from unittest.mock import patch
 
@@ -333,3 +334,130 @@ class TestAIOrchestrator:
 
         # Verify Anthropic was called with correct API key
         mock_anthropic.assert_called_once_with(api_key="my-secret-key")
+
+    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_retries_on_failure(
+        self,
+        mock_anthropic: Mock,
+        mock_sleep: Mock,
+    ) -> None:
+        """Test generate retries on API failures."""
+        # Setup mock to fail twice, then succeed
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+
+        # Create successful response
+        mock_response = MagicMock()
+        mock_response.id = "msg_success"
+        text_block = create_autospec(TextBlock, instance=True)
+        text_block.text = "Success after retries"
+        mock_response.content = [text_block]
+        mock_response.usage.input_tokens = 10
+        mock_response.usage.output_tokens = 5
+        mock_response.model = ModelConfig.SONNET
+
+        # Fail twice, then succeed
+        mock_client.messages.create.side_effect = [
+            Exception("Temporary API error"),
+            Exception("Another temporary error"),
+            mock_response,
+        ]
+
+        orchestrator = AIOrchestrator(api_key="test-key", max_retries=3)
+        result = orchestrator.generate(prompt="Test", output_format="yaml")
+
+        # Should succeed after retries
+        assert result.content == "Success after retries"
+        # Should have called API 3 times (2 failures + 1 success)
+        assert mock_client.messages.create.call_count == 3
+        # Should have slept twice (after each failure)
+        assert mock_sleep.call_count == 2
+
+    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_exponential_backoff(
+        self,
+        mock_anthropic: Mock,
+        mock_sleep: Mock,
+    ) -> None:
+        """Test generate uses exponential backoff for retries."""
+        # Setup mock to fail twice, then succeed
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.id = "msg_success"
+        text_block = create_autospec(TextBlock, instance=True)
+        text_block.text = "Success"
+        mock_response.content = [text_block]
+        mock_response.usage.input_tokens = 10
+        mock_response.usage.output_tokens = 5
+        mock_response.model = ModelConfig.SONNET
+
+        mock_client.messages.create.side_effect = [
+            Exception("Error 1"),
+            Exception("Error 2"),
+            mock_response,
+        ]
+
+        orchestrator = AIOrchestrator(
+            api_key="test-key",
+            max_retries=3,
+            retry_delay=1.0,
+        )
+        orchestrator.generate(prompt="Test", output_format="yaml")
+
+        # Verify exponential backoff: 1.0, 2.0 seconds
+        mock_sleep.assert_has_calls([call(1.0), call(2.0)])
+
+    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_max_retries_exceeded(
+        self,
+        mock_anthropic: Mock,
+        mock_sleep: Mock,
+    ) -> None:
+        """Test generate raises error when max retries exceeded."""
+        # Setup mock to always fail
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+        mock_client.messages.create.side_effect = Exception("Persistent API error")
+
+        orchestrator = AIOrchestrator(api_key="test-key", max_retries=2)
+
+        with pytest.raises(GenerationError, match="Failed to generate content"):
+            orchestrator.generate(prompt="Test", output_format="yaml")
+
+        # Should have tried 3 times (initial + 2 retries)
+        assert mock_client.messages.create.call_count == 3
+        # Should have slept 2 times (after first 2 failures)
+        assert mock_sleep.call_count == 2
+
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_no_retry_on_success(
+        self,
+        mock_anthropic: Mock,
+    ) -> None:
+        """Test generate does not retry on immediate success."""
+        # Setup mock to succeed immediately
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.id = "msg_success"
+        text_block = create_autospec(TextBlock, instance=True)
+        text_block.text = "Immediate success"
+        mock_response.content = [text_block]
+        mock_response.usage.input_tokens = 10
+        mock_response.usage.output_tokens = 5
+        mock_response.model = ModelConfig.SONNET
+        mock_client.messages.create.return_value = mock_response
+
+        orchestrator = AIOrchestrator(api_key="test-key", max_retries=3)
+        result = orchestrator.generate(prompt="Test", output_format="yaml")
+
+        # Should succeed immediately
+        assert result.content == "Immediate success"
+        # Should have called API only once
+        mock_client.messages.create.assert_called_once()

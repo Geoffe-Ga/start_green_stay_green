@@ -6,6 +6,7 @@ Coordinates AI-powered generation tasks using Claude API.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Final
 from typing import Literal
 
@@ -162,38 +163,51 @@ class AIOrchestrator:
             msg = f"Unsupported output format: {output_format}"
             raise ValueError(msg)
 
-        # Call Anthropic API
-        try:
-            client = Anthropic(api_key=self.api_key)
-            response = client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"Generate {output_format} output:\n\n{prompt}",
-                    },
-                ],
-            )
+        # Retry loop with exponential backoff
+        client = Anthropic(api_key=self.api_key)
+        last_error: Exception | None = None
 
-            # Extract content from response
-            first_block = response.content[0]
-            if not isinstance(first_block, TextBlock):
-                msg = "Expected TextBlock in response"
-                raise GenerationError(msg)  # noqa: TRY301
-            content = first_block.text
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = client.messages.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": f"Generate {output_format} output:\n\n{prompt}",
+                        },
+                    ],
+                )
 
-            # Build result
-            return GenerationResult(
-                content=content,
-                format=output_format,
-                token_usage=TokenUsage(
-                    input_tokens=response.usage.input_tokens,
-                    output_tokens=response.usage.output_tokens,
-                ),
-                model=response.model,
-                message_id=response.id,
-            )
-        except Exception as e:
-            msg = "Failed to generate content"
-            raise GenerationError(msg, cause=e) from e
+                # Extract content from response
+                first_block = response.content[0]
+                if not isinstance(first_block, TextBlock):
+                    msg = "Expected TextBlock in response"
+                    raise GenerationError(msg)  # noqa: TRY301
+                content = first_block.text
+
+                # Build result
+                return GenerationResult(
+                    content=content,
+                    format=output_format,
+                    token_usage=TokenUsage(
+                        input_tokens=response.usage.input_tokens,
+                        output_tokens=response.usage.output_tokens,
+                    ),
+                    model=response.model,
+                    message_id=response.id,
+                )
+
+            except Exception as e:  # noqa: BLE001
+                last_error = e
+                # If we haven't exhausted retries, sleep and try again
+                if attempt < self.max_retries:
+                    # Exponential backoff: retry_delay * (2 ** attempt)
+                    delay = self.retry_delay * (2**attempt)
+                    time.sleep(delay)
+                    continue
+
+        # All retries exhausted
+        msg = "Failed to generate content"
+        raise GenerationError(msg, cause=last_error) from last_error
