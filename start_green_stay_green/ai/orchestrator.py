@@ -28,3 +28,22 @@ class TokenUsage:
             Sum of input and output tokens.
         """
         return self.input_tokens + self.output_tokens
+
+
+@dataclass(frozen=True)
+class GenerationResult:
+    """Result from AI generation request.
+
+    Attributes:
+        content: Generated content from the AI model.
+        format: Output format (yaml, toml, markdown, bash).
+        token_usage: Token usage statistics for the request.
+        model: Model identifier used for generation.
+        message_id: Unique identifier for the API message.
+    """
+
+    content: str
+    format: str
+    token_usage: TokenUsage
+    model: str
+    message_id: str
