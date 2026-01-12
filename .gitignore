@@ -96,3 +96,12 @@ npm-debug.log*
 
 # Import linter cache
 .import_linter_cache/
+
+# Claude Code agents and subagents
+agents/
+agent-*/
+*.agent.md
+.agent-state/
+
+# Git worktrees
+worktrees/
