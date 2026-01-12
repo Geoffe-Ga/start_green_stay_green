@@ -15,6 +15,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# HTTP status codes
+HTTP_OK = 200
+HTTP_BAD_REQUEST = 400
+
 # Error messages
 _ERR_EMPTY_REPO_NAME = "Repository name cannot be empty"
 _ERR_EMPTY_TOKEN = "Token cannot be empty"  # nosec B105  # noqa: S105
@@ -76,6 +80,27 @@ class RepositoryConfig:
             raise ValueError(_ERR_EMPTY_REPO_NAME)
 
 
+@dataclass
+class BranchProtectionConfig:
+    """Configuration for branch protection settings.
+
+    Attributes:
+        required_status_checks: Status checks configuration dict with
+            'strict' (bool) and 'contexts' (list) keys. Defaults to None.
+        dismiss_stale_reviews: Whether to dismiss stale reviews.
+            Defaults to False.
+        require_code_owner_reviews: Whether to require code owner reviews.
+            Defaults to False.
+        required_approving_review_count: Number of required approving reviews.
+            Defaults to 0.
+    """
+
+    required_status_checks: dict[str, Any] | None = None
+    dismiss_stale_reviews: bool = False
+    require_code_owner_reviews: bool = False
+    required_approving_review_count: int = 0
+
+
 class GitHubClient:
     """GitHub API client for repository operations.
 
@@ -123,9 +148,9 @@ class GitHubClient:
                     f"{self.base_url}/user",
                     headers=self._get_headers(),
                 )
-                return response.status_code == 200
-        except Exception as exc:
-            logger.error("Error verifying token: %s", exc)
+                return response.status_code == HTTP_OK
+        except (GitHubError, httpx.HTTPError):
+            logger.exception("Error verifying token")
             return False
 
     def get_authenticated_user(self) -> dict[str, Any]:
@@ -244,10 +269,7 @@ class GitHubClient:
         repo: str,
         branch: str,
         *,
-        required_status_checks: dict[str, Any] | None = None,
-        dismiss_stale_reviews: bool = False,
-        require_code_owner_reviews: bool = False,
-        required_approving_review_count: int = 0,
+        config: BranchProtectionConfig | None = None,
     ) -> dict[str, Any]:
         """Configure branch protection rules.
 
@@ -258,14 +280,7 @@ class GitHubClient:
             owner: Repository owner.
             repo: Repository name.
             branch: Branch name to protect (e.g., "main").
-            required_status_checks: Status checks configuration dict with
-                'strict' (bool) and 'contexts' (list) keys. Defaults to None.
-            dismiss_stale_reviews: Whether to dismiss stale reviews.
-                Defaults to False.
-            require_code_owner_reviews: Whether to require code owner reviews.
-                Defaults to False.
-            required_approving_review_count: Number of required approvals.
-                Defaults to 0.
+            config: Branch protection configuration. Defaults to default settings.
 
         Returns:
             Dictionary containing branch protection configuration.
@@ -275,27 +290,30 @@ class GitHubClient:
 
         Examples:
             >>> client = GitHubClient(token="ghp_...")
+            >>> protection_config = BranchProtectionConfig(
+            ...     required_status_checks={"strict": True, "contexts": ["ci/build"]},
+            ...     require_code_owner_reviews=True,
+            ...     required_approving_review_count=1,
+            ... )
             >>> client.set_branch_protection(
             ...     owner="myorg",
             ...     repo="my-repo",
             ...     branch="main",
-            ...     required_status_checks={
-            ...         "strict": True,
-            ...         "contexts": ["ci/build"],
-            ...     },
-            ...     require_code_owner_reviews=True,
-            ...     required_approving_review_count=1,
+            ...     config=protection_config,
             ... )
         """
+        if config is None:
+            config = BranchProtectionConfig()
+
         try:
             payload = {
-                "required_status_checks": required_status_checks,
+                "required_status_checks": config.required_status_checks,
                 "enforce_admins": True,
                 "required_pull_request_reviews": {
-                    "dismiss_stale_reviews": dismiss_stale_reviews,
-                    "require_code_owner_reviews": require_code_owner_reviews,
-                    "required_approving_review_count": required_approving_review_count,
-                } if required_approving_review_count > 0 or require_code_owner_reviews or dismiss_stale_reviews else None,
+                    "dismiss_stale_reviews": config.dismiss_stale_reviews,
+                    "require_code_owner_reviews": config.require_code_owner_reviews,
+                    "required_approving_review_count": config.required_approving_review_count,
+                } if config.required_approving_review_count > 0 or config.require_code_owner_reviews or config.dismiss_stale_reviews else None,
                 "restrictions": None,
             }
 
@@ -334,7 +352,7 @@ class GitHubClient:
         Raises:
             GitHubError: If response indicates an API error.
         """
-        if response.status_code >= 400:
+        if response.status_code >= HTTP_BAD_REQUEST:
             try:
                 error_data = response.json()
                 message = error_data.get("message", "Unknown error")

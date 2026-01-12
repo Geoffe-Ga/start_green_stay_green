@@ -14,6 +14,9 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# HTTP status codes
+HTTP_BAD_REQUEST = 400
+
 # Error messages
 _ERR_EMPTY_ISSUE_TITLE = "Issue title cannot be empty"
 _ERR_EMPTY_MILESTONE_TITLE = "Milestone title cannot be empty"
@@ -532,7 +535,7 @@ class GitHubIssueManager:
         Raises:
             GitHubIssueError: If response indicates an API error.
         """
-        if response.status_code >= 400:
+        if response.status_code >= HTTP_BAD_REQUEST:
             try:
                 error_data = response.json()
                 message = error_data.get("message", "Unknown error")
