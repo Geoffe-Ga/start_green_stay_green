@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from typing import Literal
 
-from anthropic import Anthropic
 from anthropic import APIError
 from anthropic import APITimeoutError
+from anthropic import Anthropic
 from anthropic import RateLimitError
 
 if TYPE_CHECKING:
@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 
 # Type alias for output formats
 OutputFormat = Literal["yaml", "toml", "markdown", "bash"]
+
+# Error messages
+_ERR_EMPTY_API_KEY = "API key cannot be empty"
+_ERR_EMPTY_PROMPT = "Prompt template cannot be empty"
+_ERR_EMPTY_CONTENT = "Content cannot be empty"
+_ERR_EMPTY_CONTEXT = "Target context cannot be empty"
 
 
 class ModelConfig:
@@ -139,7 +145,7 @@ class AIOrchestrator:
             ValueError: If api_key is empty or contains only whitespace.
         """
         if not api_key or not api_key.strip():
-            raise ValueError("API key cannot be empty")
+            raise ValueError(_ERR_EMPTY_API_KEY)
 
         self.api_key = api_key
         self.default_model = model
@@ -291,9 +297,9 @@ class AIOrchestrator:
         """
         # Validate inputs
         if not content or not content.strip():
-            raise ValueError("Content cannot be empty")
+            raise ValueError(_ERR_EMPTY_CONTENT)
         if not target_context or not target_context.strip():
-            raise ValueError("Target context cannot be empty")
+            raise ValueError(_ERR_EMPTY_CONTEXT)
 
         # Construct tuning prompt
         prompt = self._build_tuning_prompt(content, target_context)
