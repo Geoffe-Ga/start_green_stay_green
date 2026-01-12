@@ -24,7 +24,7 @@ start_green_stay_green/
 │   ├── ai/                      # AI orchestration and generation
 │   │   ├── orchestrator.py      # Central coordination
 │   │   ├── prompts/             # Prompt templates
-│   │   └── responses.py         # Response parsing
+│   │   └── tuner.py             # Response parsing and tuning
 │   │
 │   ├── config/                  # Configuration management
 │   │   ├── models.py            # Pydantic models for config
@@ -257,7 +257,6 @@ The following patterns are NEVER allowed without explicit justification and issu
 ./scripts/test.sh --e2e             # Run end-to-end tests only
 ./scripts/security.sh               # Run security scanners (bandit, safety)
 ./scripts/complexity.sh             # Check code complexity (radon, xenon)
-./scripts/docstring.sh              # Check docstring coverage (interrogate)
 ```
 
 ### Fixing Issues
@@ -274,8 +273,8 @@ The following patterns are NEVER allowed without explicit justification and issu
 ruff check . --fix                  # Let ruff auto-fix what it can
 black .                             # Format with black
 isort .                             # Sort imports
-mypy src/                           # Check types (no auto-fix)
-pylint src/                         # Lint (no auto-fix)
+mypy start_green_stay_green/        # Check types (no auto-fix)
+pylint start_green_stay_green/      # Lint (no auto-fix)
 ```
 
 ### Development Workflow
@@ -593,16 +592,13 @@ Run this checklist before every commit:
 # 4. Check security
 ./scripts/security.sh
 
-# 5. Verify docstring coverage
-./scripts/docstring.sh
-
-# 6. Or run everything at once
+# 5. Or run everything at once
 ./scripts/check-all.sh
 
-# 7. Verify commit message format
+# 6. Verify commit message format
 # feat(module): description (#issue-number)
 
-# 8. Push to feature branch and create PR
+# 7. Push to feature branch and create PR
 git push origin feature/your-feature
 # Create PR on GitHub
 ```
