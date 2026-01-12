@@ -27,26 +27,29 @@ start_green_stay_green/
 │   │   └── tuner.py             # Response parsing and tuning
 │   │
 │   ├── config/                  # Configuration management
-│   │   ├── models.py            # Pydantic models for config
-│   │   ├── loader.py            # Configuration loading
-│   │   └── validators.py        # Config validation
+│   │   ├── settings.py          # Application settings
+│   │   └── templates/           # Configuration templates
 │   │
 │   ├── generators/              # Component generators
 │   │   ├── base.py              # Base generator class
-│   │   ├── ci_generator.py      # CI/CD pipeline generation
-│   │   ├── scripts_generator.py # Quality script generation
-│   │   ├── config_generator.py  # Tool configuration
-│   │   └── subagent_generator.py # Subagent profile generation
+│   │   ├── ci.py                # CI/CD pipeline generation
+│   │   ├── scripts.py           # Quality script generation
+│   │   ├── claude_md.py         # CLAUDE.md generation
+│   │   ├── github_actions.py    # GitHub Actions generation
+│   │   ├── metrics.py           # Metrics generation
+│   │   ├── precommit.py         # Pre-commit hook generation
+│   │   ├── skills.py            # Skills generation
+│   │   ├── subagents.py         # Subagent profile generation
+│   │   └── architecture.py      # Architecture generation
 │   │
 │   ├── github/                  # GitHub integration
 │   │   ├── client.py            # GitHub API client
-│   │   ├── templates.py         # Issue/PR templates
-│   │   └── actions.py           # GitHub Actions utilities
+│   │   ├── actions.py           # GitHub Actions utilities
+│   │   └── issues.py            # Issue management
 │   │
 │   └── utils/                   # Common utilities
-│       ├── paths.py             # Path handling
-│       ├── file_ops.py          # File operations
-│       └── validation.py        # Validation utilities
+│       ├── fs.py                # File system operations
+│       └── templates.py         # Template utilities
 │
 ├── templates/                   # Jinja2 templates
 │   ├── python/                  # Python project templates
@@ -372,7 +375,7 @@ Every test suite must pass mutation testing. This ensures tests are effective at
 
 ```bash
 # Run mutation tests
-mutmut run --paths-to-mutate=src/
+mutmut run --paths-to-mutate=start_green_stay_green/
 
 # View results
 mutmut results
