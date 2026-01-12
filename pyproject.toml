@@ -118,6 +118,7 @@ target-version = "py311"
 line-length = 88
 src = ["start_green_stay_green", "tests"]
 
+[tool.ruff.lint]
 select = [
     "ALL"  # Enable ALL rules - no exceptions
 ]
@@ -128,7 +129,7 @@ ignore = [
     "ISC001",  # Conflicts with formatter
 ]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = [
     "S101",      # Allow assert in tests
     "PLR2004",   # Allow magic values in tests
@@ -139,21 +140,21 @@ ignore = [
     "T201",      # Allow print in CLI
 ]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 force-single-line = true
 force-sort-within-sections = true
 known-first-party = ["start_green_stay_green"]
 
-[tool.ruff.mccabe]
+[tool.ruff.lint.mccabe]
 max-complexity = 10  # Cyclomatic complexity ceiling
 
-[tool.ruff.pylint]
+[tool.ruff.lint.pylint]
 max-args = 5
 max-branches = 12
 max-returns = 6
 max-statements = 50
 
-[tool.ruff.pydocstyle]
+[tool.ruff.lint.pydocstyle]
 convention = "google"
 
 # Black configuration
