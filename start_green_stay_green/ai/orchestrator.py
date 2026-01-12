@@ -10,12 +10,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Literal
 from typing import TYPE_CHECKING
+from typing import Literal
 
-from anthropic import Anthropic
 from anthropic import APIError
 from anthropic import APITimeoutError
+from anthropic import Anthropic
 from anthropic import RateLimitError
 
 if TYPE_CHECKING:
@@ -458,8 +458,6 @@ Provide the tuned content:"""
                         },
                     ],
                 )
-                return message
-
             except RateLimitError as e:
                 last_error = e
                 logger.warning(
@@ -486,6 +484,9 @@ Provide the tuned content:"""
                 # Don't retry on general API errors
                 msg = f"{_ERR_API_ERROR}: {e}"
                 raise GenerationError(msg, cause=e) from e
+            else:
+                # Success - return the message
+                return message
 
         # All retries exhausted
         msg = f"{_ERR_GENERATION_FAILED} after {self._max_retries} attempts"
