@@ -2,8 +2,10 @@
 
 import pytest
 
+from start_green_stay_green.ai.orchestrator import GenerationError
 from start_green_stay_green.ai.orchestrator import GenerationResult
 from start_green_stay_green.ai.orchestrator import ModelConfig
+from start_green_stay_green.ai.orchestrator import PromptTemplateError
 from start_green_stay_green.ai.orchestrator import TokenUsage
 
 
@@ -100,3 +102,39 @@ class TestModelConfig:
         """Test ModelConfig constants are strings."""
         assert isinstance(ModelConfig.OPUS, str)
         assert isinstance(ModelConfig.SONNET, str)
+
+
+class TestGenerationError:
+    """Test GenerationError exception."""
+
+    def test_generation_error_with_message_only(self) -> None:
+        """Test creating GenerationError with just a message."""
+        error = GenerationError("Generation failed")
+        assert str(error) == "Generation failed"
+        assert error.cause is None
+
+    def test_generation_error_with_cause(self) -> None:
+        """Test creating GenerationError with underlying cause."""
+        cause = ValueError("Invalid input")
+        error = GenerationError("Generation failed", cause=cause)
+        assert str(error) == "Generation failed"
+        assert error.cause is cause
+
+    def test_generation_error_is_exception(self) -> None:
+        """Test GenerationError inherits from Exception."""
+        error = GenerationError("Test error")
+        assert isinstance(error, Exception)
+
+
+class TestPromptTemplateError:
+    """Test PromptTemplateError exception."""
+
+    def test_prompt_template_error_with_message(self) -> None:
+        """Test creating PromptTemplateError."""
+        error = PromptTemplateError("Invalid template")
+        assert str(error) == "Invalid template"
+
+    def test_prompt_template_error_is_exception(self) -> None:
+        """Test PromptTemplateError inherits from Exception."""
+        error = PromptTemplateError("Test error")
+        assert isinstance(error, Exception)

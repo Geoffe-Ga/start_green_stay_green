@@ -9,6 +9,28 @@ from dataclasses import dataclass
 from typing import Final
 
 
+class GenerationError(Exception):
+    """Raised when AI generation fails.
+
+    Attributes:
+        cause: Optional underlying exception that caused this error.
+    """
+
+    def __init__(self, message: str, *, cause: Exception | None = None) -> None:
+        """Initialize GenerationError.
+
+        Args:
+            message: Error message describing the failure.
+            cause: Optional underlying exception that caused this error.
+        """
+        super().__init__(message)
+        self.cause = cause
+
+
+class PromptTemplateError(Exception):
+    """Raised when prompt template is invalid or malformed."""
+
+
 class ModelConfig:
     """Claude model configuration constants.
 
