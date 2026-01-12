@@ -1,0 +1,165 @@
+# Pre-commit hooks configuration for Start Green Stay Green
+# Hooks are mapped to local scripts where feasible per SPEC.md Issue 1.3
+# Install: pre-commit install
+# Run manually: pre-commit run --all-files
+# Reference: MAXIMUM_QUALITY_ENGINEERING.md Section 2.1
+#
+# Script Mapping (per SPEC.md Issue 1.3 lines 193-201):
+#   - ruff → scripts/lint.sh --check
+#   - black → scripts/format.sh --check
+#   - mypy → scripts/typecheck.sh
+#   - bandit → scripts/security.sh
+#   - pytest → scripts/test.sh --unit (not in pre-commit, only in CI)
+#
+# Additional hooks from MAXIMUM_QUALITY_ENGINEERING.md:
+#   - Git checks (pre-commit-hooks)
+#   - Secrets detection (detect-secrets)
+#   - Commit message validation (commitizen)
+#   - Shell script linting (shellcheck)
+#   - Code modernization (pyupgrade, autoflake, refurb)
+#   - Exception handling (tryceratops)
+#   - Dead code detection (vulture)
+#   - Docstring coverage (interrogate) - 95% requirement
+#
+# Total hooks: 30
+
+default_language_version:
+  python: python3.11
+
+repos:
+  # Git checks - Basic integrity
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-toml
+      - id: check-yaml
+        args: ['--unsafe']
+      - id: check-json
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: fix-byte-order-marker
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+      - id: no-commit-to-branch
+        args: ['--branch', 'main', '--branch', 'master']
+      - id: trailing-whitespace
+      - id: check-ast
+      - id: debug-statements
+      - id: check-docstring-first
+
+  # Security - Bandit (local script mapping)
+  - repo: local
+    hooks:
+      - id: bandit-local
+        name: Bandit (Security)
+        entry: scripts/security.sh
+        language: script
+        types: [python]
+        pass_filenames: false
+
+  # Code formatting - Local script mappings
+  - repo: local
+    hooks:
+      - id: format-check
+        name: Format Check (Black + isort)
+        entry: scripts/format.sh --check
+        language: script
+        types: [python]
+        pass_filenames: false
+
+  # Linting - Local script mapping
+  - repo: local
+    hooks:
+      - id: lint-check
+        name: Lint Check (Ruff)
+        entry: scripts/lint.sh --check
+        language: script
+        types: [python]
+        pass_filenames: false
+
+  # Type checking - Local script mapping
+  - repo: local
+    hooks:
+      - id: typecheck-mypy
+        name: Type Check (MyPy)
+        entry: scripts/typecheck.sh
+        language: script
+        types: [python]
+        pass_filenames: false
+
+  # Secrets detection
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+
+  # Conventional commits
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.13.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+  # Shell script linting
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck
+
+  # Upgrade Python syntax
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.15.0
+    hooks:
+      - id: pyupgrade
+        args: ['--py311-plus']
+
+  # Remove unused imports/variables
+  - repo: https://github.com/PyCQA/autoflake
+    rev: v2.2.1
+    hooks:
+      - id: autoflake
+        args: [
+          '--in-place',
+          '--remove-all-unused-imports',
+          '--remove-unused-variables',
+          '--remove-duplicate-keys',
+          '--ignore-init-module-imports'
+        ]
+
+  # Exception handling best practices
+  - repo: https://github.com/guilatrova/tryceratops
+    rev: v2.3.2
+    hooks:
+      - id: tryceratops
+
+  # Modern Python suggestions
+  - repo: https://github.com/dosisod/refurb
+    rev: v1.26.0
+    hooks:
+      - id: refurb
+
+  # Dead code detection
+  - repo: https://github.com/jendrikseipp/vulture
+    rev: v2.10
+    hooks:
+      - id: vulture
+        args: ['start_green_stay_green/', '--min-confidence', '80']
+
+  # Docstring coverage
+  - repo: https://github.com/econchick/interrogate
+    rev: 1.5.0
+    hooks:
+      - id: interrogate
+        args: ['-vv', '--fail-under=95']
+
+# CI-specific configuration
+ci:
+  autofix_commit_msg: 'style: auto-fix by pre-commit hooks'
+  autoupdate_commit_msg: 'chore: update pre-commit hooks'
+  skip: []  # Don't skip anything in CI
