@@ -7,14 +7,15 @@ response handling, error handling, and retry logic.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from typing import Any
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import Mock
 from unittest.mock import patch
 
 import pytest
+
 from anthropic import APIError
 from anthropic import APITimeoutError
 from anthropic import RateLimitError
