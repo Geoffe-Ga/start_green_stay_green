@@ -31,14 +31,44 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Run Claude Code Review
+      - name: Run Comprehensive Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          prompt: |
+            Review PR ${{ github.repository }}/pull/${{ github.event.pull_request.number }} with comprehensive structure:
+
+            ## Summary
+            Brief overview (2-3 sentences)
+
+            ## Strengths
+            What's done well?
+
+            ## Security Concerns
+            Vulnerabilities? 🔴 BLOCKING | 🟡 HIGH | 🟢 LOW
+
+            ## Problems
+            Critical issues blocking merge (mark 🔴)
+
+            ## Code Quality
+            Non-blocking improvements
+
+            ## CLAUDE.md Adherence
+            ✅/❌ Coverage, linting, types, patterns, commits
+
+            ## Testing
+            Test quality evaluation
+
+            ## Documentation
+            Docs completeness
+
+            ## Requests
+            Medium-priority suggestions
+
+            ## Verdict
+            ✅ LGTM | 🔄 CHANGES_REQUESTED | 💬 COMMENTS
+            **Reasoning:** Specific references
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
