@@ -9,7 +9,7 @@ Successfully implemented `.pre-commit-config.yaml` for the Start Green Stay Gree
 ### 1. `.pre-commit-config.yaml` created
 **Status: COMPLETED**
 
-File location: `/Users/geoffgallinger/Projects/start_green_stay_green/worktrees/issue-3-precommit/.pre-commit-config.yaml`
+File location: `.pre-commit-config.yaml` (repository root)
 
 ### 2. All hooks from MAXIMUM_QUALITY_ENGINEERING.md Section 2.1 included
 **Status: VERIFIED**
@@ -34,6 +34,7 @@ All hooks from MAXIMUM_QUALITY_ENGINEERING.md Part 2.1 (lines 280-412) are inclu
 - [x] Exception handling (tryceratops) - Best practices validation
 - [x] Modern Python suggestions (refurb) - Code improvement suggestions
 - [x] Dead code detection (vulture) - Identifies unused code
+- [x] Docstring coverage (interrogate) - 95% docstring requirement validation
 
 ### 3. Hooks point to local scripts where feasible
 **Status: VERIFIED**
@@ -161,7 +162,7 @@ Exit codes: 0=success, 1=failure, 2=error
 
 ### Installation
 ```bash
-cd /Users/geoffgallinger/Projects/start_green_stay_green/worktrees/issue-3-precommit
+cd <repository-root>
 pre-commit install
 ```
 
@@ -189,7 +190,7 @@ pre-commit run --all-files --hook-stage=commit
 ## File Location
 
 - **Path**: `.pre-commit-config.yaml` (repository root)
-- **Size**: ~156 lines
+- **Size**: ~165 lines
 - **Format**: YAML
 - **Reference**: MAXIMUM_QUALITY_ENGINEERING.md Section 2.1
 
@@ -214,8 +215,11 @@ The configuration has been validated against:
 
 - The configuration does NOT include pytest as a pre-commit hook (per SPEC.md) - tests are run in CI via `scripts/test.sh --unit`
 - Black formatting hook is not included directly; instead, `scripts/format.sh --check` is used for consistency with ruff and isort
-- The `detect-secrets` hook requires a `.secrets.baseline` file if using baseline mode; this will be created by first run
+- The `detect-secrets` hook requires a `.secrets.baseline` file to use baseline mode; included in repository
 - Shell script checking via shellcheck applies only to files in the `scripts/` directory
+- The `check-added-large-files` hook is set to 500KB limit (`--maxkb=500`) to prevent large file commits
+- The `interrogate` hook validates 95% docstring coverage requirement from MAXIMUM_QUALITY_ENGINEERING.md
+- Total of 30 hooks configured: 16 pre-commit-hooks + 4 local scripts + 10 external tools
 
 ## Next Steps
 
