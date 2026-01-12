@@ -1,0 +1,34 @@
+# CODEOWNERS for Start Green Stay Green
+#
+# This file defines code ownership for automated review requests.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+* @geoffgallinger
+
+# Core infrastructure
+/start_green_stay_green/config/ @geoffgallinger
+/start_green_stay_green/cli.py @geoffgallinger
+
+# AI orchestration
+/start_green_stay_green/ai/ @geoffgallinger
+
+# Generators
+/start_green_stay_green/generators/ @geoffgallinger
+
+# GitHub integration
+/start_green_stay_green/github/ @geoffgallinger
+
+# Templates and reference implementations
+/templates/ @geoffgallinger
+/reference/ @geoffgallinger
+
+# Documentation
+/plan/ @geoffgallinger
+*.md @geoffgallinger
+
+# CI/CD configuration
+/.github/ @geoffgallinger
+
+# Quality control scripts
+/scripts/ @geoffgallinger
