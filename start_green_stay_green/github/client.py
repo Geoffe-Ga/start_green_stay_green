@@ -9,15 +9,19 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 from typing import Any
 
 import httpx
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
+
+# Error messages
+_ERR_EMPTY_REPO_NAME = "Repository name cannot be empty"
+_ERR_EMPTY_TOKEN = "Token cannot be empty"
+_ERR_GET_USER_FAILED = "Failed to get authenticated user"
+_ERR_CREATE_REPO_FAILED = "Failed to create repository"
+_ERR_GET_REPO_FAILED = "Failed to get repository"
+_ERR_SET_PROTECTION_FAILED = "Failed to set branch protection"
 
 
 class GitHubError(Exception):
@@ -69,7 +73,7 @@ class RepositoryConfig:
             ValueError: If name is empty or invalid.
         """
         if not self.name or not self.name.strip():
-            raise ValueError("Repository name cannot be empty")
+            raise ValueError(_ERR_EMPTY_REPO_NAME)
 
 
 class GitHubClient:
@@ -99,7 +103,7 @@ class GitHubClient:
             ValueError: If token is empty or contains only whitespace.
         """
         if not token or not token.strip():
-            raise ValueError("Token cannot be empty")
+            raise ValueError(_ERR_EMPTY_TOKEN)
 
         self.token = token
         self.base_url = base_url
@@ -146,7 +150,8 @@ class GitHubClient:
         except GitHubError:
             raise
         except Exception as exc:
-            raise GitHubError(f"Failed to get authenticated user: {exc}") from exc
+            msg = f"{_ERR_GET_USER_FAILED}: {exc}"
+            raise GitHubError(msg) from exc
 
     def create_repository(
         self,
@@ -197,7 +202,8 @@ class GitHubClient:
         except GitHubError:
             raise
         except Exception as exc:
-            raise GitHubError(f"Failed to create repository: {exc}") from exc
+            msg = f"{_ERR_CREATE_REPO_FAILED}: {exc}"
+            raise GitHubError(msg) from exc
 
     def get_repository(
         self,
@@ -229,7 +235,8 @@ class GitHubClient:
         except GitHubError:
             raise
         except Exception as exc:
-            raise GitHubError(f"Failed to get repository: {exc}") from exc
+            msg = f"{_ERR_GET_REPO_FAILED}: {exc}"
+            raise GitHubError(msg) from exc
 
     def set_branch_protection(
         self,
@@ -303,7 +310,8 @@ class GitHubClient:
         except GitHubError:
             raise
         except Exception as exc:
-            raise GitHubError(f"Failed to set branch protection: {exc}") from exc
+            msg = f"{_ERR_SET_PROTECTION_FAILED}: {exc}"
+            raise GitHubError(msg) from exc
 
     def _get_headers(self) -> dict[str, str]:
         """Get HTTP headers for GitHub API requests.

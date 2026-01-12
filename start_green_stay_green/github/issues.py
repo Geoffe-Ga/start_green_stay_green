@@ -8,15 +8,24 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 from typing import Any
 
 import httpx
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
+
+# Error messages
+_ERR_EMPTY_ISSUE_TITLE = "Issue title cannot be empty"
+_ERR_EMPTY_MILESTONE_TITLE = "Milestone title cannot be empty"
+_ERR_EMPTY_TOKEN = "Token cannot be empty"
+_ERR_CREATE_ISSUE_FAILED = "Failed to create issue"
+_ERR_GET_ISSUE_FAILED = "Failed to get issue"
+_ERR_LIST_ISSUES_FAILED = "Failed to list issues"
+_ERR_CREATE_MILESTONE_FAILED = "Failed to create milestone"
+_ERR_GET_MILESTONE_FAILED = "Failed to get milestone"
+_ERR_LIST_MILESTONES_FAILED = "Failed to list milestones"
+_ERR_CREATE_LABEL_FAILED = "Failed to create label"
+_ERR_LIST_LABELS_FAILED = "Failed to list labels"
 
 
 class GitHubIssueError(Exception):
@@ -63,7 +72,7 @@ class IssueConfig:
             ValueError: If required fields are empty or invalid.
         """
         if not self.title or not self.title.strip():
-            raise ValueError("Issue title cannot be empty")
+            raise ValueError(_ERR_EMPTY_ISSUE_TITLE)
 
 
 @dataclass
@@ -87,7 +96,7 @@ class MilestoneConfig:
             ValueError: If title is empty or invalid.
         """
         if not self.title or not self.title.strip():
-            raise ValueError("Milestone title cannot be empty")
+            raise ValueError(_ERR_EMPTY_MILESTONE_TITLE)
 
 
 class GitHubIssueManager:
@@ -118,7 +127,7 @@ class GitHubIssueManager:
             ValueError: If token is empty or contains only whitespace.
         """
         if not token or not token.strip():
-            raise ValueError("Token cannot be empty")
+            raise ValueError(_ERR_EMPTY_TOKEN)
 
         self.token = token
         self.base_url = base_url
@@ -179,7 +188,8 @@ class GitHubIssueManager:
         except GitHubIssueError:
             raise
         except Exception as exc:
-            raise GitHubIssueError(f"Failed to create issue: {exc}") from exc
+            msg = f"{_ERR_CREATE_ISSUE_FAILED}: {exc}"
+            raise GitHubIssueError(msg) from exc
 
     def get_issue(
         self,
@@ -214,7 +224,8 @@ class GitHubIssueManager:
         except GitHubIssueError:
             raise
         except Exception as exc:
-            raise GitHubIssueError(f"Failed to get issue: {exc}") from exc
+            msg = f"{_ERR_GET_ISSUE_FAILED}: {exc}"
+            raise GitHubIssueError(msg) from exc
 
     def list_issues(
         self,
@@ -262,7 +273,8 @@ class GitHubIssueManager:
         except GitHubIssueError:
             raise
         except Exception as exc:
-            raise GitHubIssueError(f"Failed to list issues: {exc}") from exc
+            msg = f"{_ERR_LIST_ISSUES_FAILED}: {exc}"
+            raise GitHubIssueError(msg) from exc
 
     def create_milestone(
         self,
@@ -317,7 +329,8 @@ class GitHubIssueManager:
         except GitHubIssueError:
             raise
         except Exception as exc:
-            raise GitHubIssueError(f"Failed to create milestone: {exc}") from exc
+            msg = f"{_ERR_CREATE_MILESTONE_FAILED}: {exc}"
+            raise GitHubIssueError(msg) from exc
 
     def get_milestone(
         self,
@@ -351,7 +364,8 @@ class GitHubIssueManager:
         except GitHubIssueError:
             raise
         except Exception as exc:
-            raise GitHubIssueError(f"Failed to get milestone: {exc}") from exc
+            msg = f"{_ERR_GET_MILESTONE_FAILED}: {exc}"
+            raise GitHubIssueError(msg) from exc
 
     def list_milestones(
         self,
@@ -395,7 +409,8 @@ class GitHubIssueManager:
         except GitHubIssueError:
             raise
         except Exception as exc:
-            raise GitHubIssueError(f"Failed to list milestones: {exc}") from exc
+            msg = f"{_ERR_LIST_MILESTONES_FAILED}: {exc}"
+            raise GitHubIssueError(msg) from exc
 
     def create_label(
         self,
@@ -453,7 +468,8 @@ class GitHubIssueManager:
         except GitHubIssueError:
             raise
         except Exception as exc:
-            raise GitHubIssueError(f"Failed to create label: {exc}") from exc
+            msg = f"{_ERR_CREATE_LABEL_FAILED}: {exc}"
+            raise GitHubIssueError(msg) from exc
 
     def list_labels(
         self,
@@ -492,7 +508,8 @@ class GitHubIssueManager:
         except GitHubIssueError:
             raise
         except Exception as exc:
-            raise GitHubIssueError(f"Failed to list labels: {exc}") from exc
+            msg = f"{_ERR_LIST_LABELS_FAILED}: {exc}"
+            raise GitHubIssueError(msg) from exc
 
     def _get_headers(self) -> dict[str, str]:
         """Get HTTP headers for GitHub API requests.
