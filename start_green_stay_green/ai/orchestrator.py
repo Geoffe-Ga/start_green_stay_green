@@ -10,13 +10,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from anthropic import Anthropic
-from anthropic import APIError
-from anthropic import APITimeoutError
-from anthropic import RateLimitError
+from anthropic import APIError, APITimeoutError, Anthropic, RateLimitError
 
 if TYPE_CHECKING:
     from anthropic.types import Message
@@ -227,7 +223,10 @@ class AIOrchestrator:
         # Validate output format
         valid_formats = {"yaml", "toml", "markdown", "bash"}
         if output_format not in valid_formats:
-            msg = f"{_ERR_INVALID_FORMAT}: {output_format}. Must be one of {valid_formats}"
+            msg = (
+                f"{_ERR_INVALID_FORMAT}: {output_format}. "
+                f"Must be one of {valid_formats}"
+            )
             raise ValueError(msg)
 
         # Inject context into template
