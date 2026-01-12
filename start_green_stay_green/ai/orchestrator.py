@@ -202,7 +202,7 @@ class AIOrchestrator:
         """
         # Validate prompt template
         if not prompt_template or not prompt_template.strip():
-            raise PromptTemplateError("Prompt template cannot be empty")
+            raise PromptTemplateError(_ERR_EMPTY_PROMPT)
 
         # Validate output format
         valid_formats = {"yaml", "toml", "markdown", "bash"}

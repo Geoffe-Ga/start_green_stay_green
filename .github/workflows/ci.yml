@@ -148,18 +148,19 @@ jobs:
         run: ./scripts/audit-deps.sh
 
   # Job 5: Dependency Review (PR only)
-  dependency-review:
-    name: Dependency Review
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Dependency Review
-        uses: actions/dependency-review-action@v3
-        with:
-          fail-on-severity: moderate
+  # DISABLED: Requires GitHub Advanced Security which is not available
+  # dependency-review:
+  #   name: Dependency Review
+  #   runs-on: ubuntu-latest
+  #   if: github.event_name == 'pull_request'
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Dependency Review
+  #       uses: actions/dependency-review-action@v3
+  #       with:
+  #         fail-on-severity: moderate
 
   # Job 6: Coverage Artifacts
   coverage:
