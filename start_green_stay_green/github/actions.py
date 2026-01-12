@@ -9,14 +9,23 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Any
-from typing import TYPE_CHECKING
 
 import httpx
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
+
+# HTTP status codes
+HTTP_NO_CONTENT = 204
+HTTP_BAD_REQUEST = 400
+
+# Error messages
+_ERR_EMPTY_WORKFLOW_NAME = "Workflow name cannot be empty"
+_ERR_EMPTY_TOKEN = "Token cannot be empty"
+_ERR_GET_WORKFLOW_FAILED = "Failed to get workflow"
+_ERR_LIST_WORKFLOWS_FAILED = "Failed to list workflows"
+_ERR_TRIGGER_WORKFLOW_FAILED = "Failed to trigger workflow"
+_ERR_LIST_RUNS_FAILED = "Failed to list workflow runs"
+_ERR_GET_RUN_FAILED = "Failed to get workflow run"
 
 
 class GitHubActionsError(Exception):
@@ -59,7 +68,7 @@ class WorkflowConfig:
             ValueError: If name is empty or invalid.
         """
         if not self.name or not self.name.strip():
-            raise ValueError("Workflow name cannot be empty")
+            raise ValueError(_ERR_EMPTY_WORKFLOW_NAME)
 
 
 class GitHubActionsManager:
@@ -89,7 +98,7 @@ class GitHubActionsManager:
             ValueError: If token is empty or contains only whitespace.
         """
         if not token or not token.strip():
-            raise ValueError("Token cannot be empty")
+            raise ValueError(_ERR_EMPTY_TOKEN)
 
         self.token = token
         self.base_url = base_url
@@ -126,7 +135,8 @@ class GitHubActionsManager:
         except GitHubActionsError:
             raise
         except Exception as exc:
-            raise GitHubActionsError(f"Failed to get workflow: {exc}") from exc
+            msg = f"{_ERR_GET_WORKFLOW_FAILED}: {exc}"
+            raise GitHubActionsError(msg) from exc
 
     def list_workflows(
         self,
@@ -158,7 +168,8 @@ class GitHubActionsManager:
         except GitHubActionsError:
             raise
         except Exception as exc:
-            raise GitHubActionsError(f"Failed to list workflows: {exc}") from exc
+            msg = f"{_ERR_LIST_WORKFLOWS_FAILED}: {exc}"
+            raise GitHubActionsError(msg) from exc
 
     def trigger_workflow(
         self,
@@ -208,12 +219,12 @@ class GitHubActionsManager:
                     json=payload,
                 )
 
-                if response.status_code == 204:
+                if response.status_code == HTTP_NO_CONTENT:
                     return True
                 self._check_response(response)
                 return False
-        except Exception as exc:
-            logger.error("Failed to trigger workflow: %s", exc)
+        except (GitHubActionsError, httpx.HTTPError) as exc:
+            logger.exception(_ERR_TRIGGER_WORKFLOW_FAILED)
             return False
 
     def list_workflow_runs(
@@ -262,9 +273,8 @@ class GitHubActionsManager:
         except GitHubActionsError:
             raise
         except Exception as exc:
-            raise GitHubActionsError(
-                f"Failed to list workflow runs: {exc}",
-            ) from exc
+            msg = f"{_ERR_LIST_RUNS_FAILED}: {exc}"
+            raise GitHubActionsError(msg) from exc
 
     def get_workflow_run(
         self,
@@ -299,9 +309,8 @@ class GitHubActionsManager:
         except GitHubActionsError:
             raise
         except Exception as exc:
-            raise GitHubActionsError(
-                f"Failed to get workflow run: {exc}",
-            ) from exc
+            msg = f"{_ERR_GET_RUN_FAILED}: {exc}"
+            raise GitHubActionsError(msg) from exc
 
     def _get_headers(self) -> dict[str, str]:
         """Get HTTP headers for GitHub API requests.
@@ -324,7 +333,7 @@ class GitHubActionsManager:
         Raises:
             GitHubActionsError: If response indicates an API error.
         """
-        if response.status_code >= 400:
+        if response.status_code >= HTTP_BAD_REQUEST:
             try:
                 error_data = response.json()
                 message = error_data.get("message", "Unknown error")
