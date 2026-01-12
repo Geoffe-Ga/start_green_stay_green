@@ -2,6 +2,7 @@
 
 import pytest
 
+from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError
 from start_green_stay_green.ai.orchestrator import GenerationResult
 from start_green_stay_green.ai.orchestrator import ModelConfig
@@ -138,3 +139,57 @@ class TestPromptTemplateError:
         """Test PromptTemplateError inherits from Exception."""
         error = PromptTemplateError("Test error")
         assert isinstance(error, Exception)
+
+
+class TestAIOrchestrator:
+    """Test AIOrchestrator initialization and configuration."""
+
+    def test_orchestrator_initialization_with_valid_api_key(self) -> None:
+        """Test AIOrchestrator initializes with valid API key."""
+        orchestrator = AIOrchestrator(api_key="test-api-key-123")
+        assert orchestrator.api_key == "test-api-key-123"
+        assert orchestrator.model == ModelConfig.SONNET
+
+    def test_orchestrator_initialization_with_custom_model(self) -> None:
+        """Test AIOrchestrator accepts custom model."""
+        orchestrator = AIOrchestrator(
+            api_key="test-api-key-123",
+            model=ModelConfig.OPUS,
+        )
+        assert orchestrator.model == ModelConfig.OPUS
+
+    def test_orchestrator_initialization_rejects_empty_api_key(self) -> None:
+        """Test AIOrchestrator rejects empty API key."""
+        with pytest.raises(ValueError, match="API key cannot be empty"):
+            AIOrchestrator(api_key="")
+
+    def test_orchestrator_initialization_rejects_whitespace_api_key(self) -> None:
+        """Test AIOrchestrator rejects whitespace-only API key."""
+        with pytest.raises(ValueError, match="API key cannot be empty"):
+            AIOrchestrator(api_key="   ")
+
+    def test_orchestrator_initialization_with_retry_parameters(self) -> None:
+        """Test AIOrchestrator accepts retry configuration."""
+        orchestrator = AIOrchestrator(
+            api_key="test-api-key-123",
+            max_retries=5,
+            retry_delay=2.0,
+        )
+        assert orchestrator.max_retries == 5
+        assert orchestrator.retry_delay == 2.0
+
+    def test_orchestrator_initialization_with_default_retry_parameters(self) -> None:
+        """Test AIOrchestrator has sensible retry defaults."""
+        orchestrator = AIOrchestrator(api_key="test-api-key-123")
+        assert orchestrator.max_retries == 3
+        assert orchestrator.retry_delay == 1.0
+
+    def test_orchestrator_initialization_rejects_negative_max_retries(self) -> None:
+        """Test AIOrchestrator rejects negative max_retries."""
+        with pytest.raises(ValueError, match="max_retries must be non-negative"):
+            AIOrchestrator(api_key="test-api-key-123", max_retries=-1)
+
+    def test_orchestrator_initialization_rejects_negative_retry_delay(self) -> None:
+        """Test AIOrchestrator rejects negative retry_delay."""
+        with pytest.raises(ValueError, match="retry_delay must be positive"):
+            AIOrchestrator(api_key="test-api-key-123", retry_delay=-0.5)

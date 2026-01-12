@@ -81,3 +81,51 @@ class GenerationResult:
     token_usage: TokenUsage
     model: str
     message_id: str
+
+
+class AIOrchestrator:
+    """Orchestrates AI generation requests using Claude API.
+
+    This class manages API communication, retry logic, and response
+    parsing for AI-powered generation tasks.
+
+    Attributes:
+        api_key: Claude API key for authentication.
+        model: Claude model identifier to use for generation.
+        max_retries: Maximum number of retry attempts for failed requests.
+        retry_delay: Initial delay in seconds between retry attempts.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        model: str = ModelConfig.SONNET,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+    ) -> None:
+        """Initialize AIOrchestrator with configuration.
+
+        Args:
+            api_key: Claude API key for authentication.
+            model: Claude model identifier. Defaults to SONNET.
+            max_retries: Maximum retry attempts. Defaults to 3.
+            retry_delay: Initial retry delay in seconds. Defaults to 1.0.
+
+        Raises:
+            ValueError: If api_key is empty or parameters are invalid.
+        """
+        if not api_key or not api_key.strip():
+            msg = "API key cannot be empty"
+            raise ValueError(msg)
+        if max_retries < 0:
+            msg = "max_retries must be non-negative"
+            raise ValueError(msg)
+        if retry_delay <= 0:
+            msg = "retry_delay must be positive"
+            raise ValueError(msg)
+
+        self.api_key = api_key
+        self.model = model
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
