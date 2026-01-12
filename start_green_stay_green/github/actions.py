@@ -7,6 +7,7 @@ Supports triggering workflows, listing runs, and retrieving workflow status.
 from __future__ import annotations
 
 import logging
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -20,7 +21,7 @@ HTTP_BAD_REQUEST = 400
 
 # Error messages
 _ERR_EMPTY_WORKFLOW_NAME = "Workflow name cannot be empty"
-_ERR_EMPTY_TOKEN = "Token cannot be empty"
+_ERR_EMPTY_TOKEN = "Token cannot be empty"  # nosec B105  # noqa: S105
 _ERR_GET_WORKFLOW_FAILED = "Failed to get workflow"
 _ERR_LIST_WORKFLOWS_FAILED = "Failed to list workflows"
 _ERR_TRIGGER_WORKFLOW_FAILED = "Failed to trigger workflow"
@@ -223,7 +224,7 @@ class GitHubActionsManager:
                     return True
                 self._check_response(response)
                 return False
-        except (GitHubActionsError, httpx.HTTPError) as exc:
+        except (GitHubActionsError, httpx.HTTPError):
             logger.exception(_ERR_TRIGGER_WORKFLOW_FAILED)
             return False
 

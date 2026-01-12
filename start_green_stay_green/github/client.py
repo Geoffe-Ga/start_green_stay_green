@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Error messages
 _ERR_EMPTY_REPO_NAME = "Repository name cannot be empty"
-_ERR_EMPTY_TOKEN = "Token cannot be empty"
+_ERR_EMPTY_TOKEN = "Token cannot be empty"  # nosec B105  # noqa: S105
 _ERR_GET_USER_FAILED = "Failed to get authenticated user"
 _ERR_CREATE_REPO_FAILED = "Failed to create repository"
 _ERR_GET_REPO_FAILED = "Failed to get repository"

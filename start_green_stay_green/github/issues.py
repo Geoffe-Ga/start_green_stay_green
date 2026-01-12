@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # Error messages
 _ERR_EMPTY_ISSUE_TITLE = "Issue title cannot be empty"
 _ERR_EMPTY_MILESTONE_TITLE = "Milestone title cannot be empty"
-_ERR_EMPTY_TOKEN = "Token cannot be empty"
+_ERR_EMPTY_TOKEN = "Token cannot be empty"  # nosec B105  # noqa: S105
 _ERR_CREATE_ISSUE_FAILED = "Failed to create issue"
 _ERR_GET_ISSUE_FAILED = "Failed to get issue"
 _ERR_LIST_ISSUES_FAILED = "Failed to list issues"
