@@ -6,6 +6,18 @@ Coordinates AI-powered generation tasks using Claude API.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Final
+
+
+class ModelConfig:
+    """Claude model configuration constants.
+
+    This class provides model identifiers for Claude AI models used
+    in generation and tuning operations.
+    """
+
+    OPUS: Final[str] = "claude-opus-4-20250514"
+    SONNET: Final[str] = "claude-sonnet-4-20250514"
 
 
 @dataclass(frozen=True)

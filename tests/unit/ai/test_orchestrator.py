@@ -3,6 +3,7 @@
 import pytest
 
 from start_green_stay_green.ai.orchestrator import GenerationResult
+from start_green_stay_green.ai.orchestrator import ModelConfig
 from start_green_stay_green.ai.orchestrator import TokenUsage
 
 
@@ -80,3 +81,22 @@ class TestGenerationResult:
         )
         with pytest.raises(AttributeError):
             result.content = "Modified"  # type: ignore[misc]
+
+
+class TestModelConfig:
+    """Test ModelConfig constants."""
+
+    def test_model_config_has_opus_constant(self) -> None:
+        """Test ModelConfig has OPUS model constant."""
+        assert hasattr(ModelConfig, "OPUS")
+        assert ModelConfig.OPUS == "claude-opus-4-20250514"
+
+    def test_model_config_has_sonnet_constant(self) -> None:
+        """Test ModelConfig has SONNET model constant."""
+        assert hasattr(ModelConfig, "SONNET")
+        assert ModelConfig.SONNET == "claude-sonnet-4-20250514"
+
+    def test_model_config_constants_are_strings(self) -> None:
+        """Test ModelConfig constants are strings."""
+        assert isinstance(ModelConfig.OPUS, str)
+        assert isinstance(ModelConfig.SONNET, str)
