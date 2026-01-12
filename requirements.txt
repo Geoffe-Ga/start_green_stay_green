@@ -1,0 +1,24 @@
+# Core runtime dependencies for start-green-stay-green
+# Generated from pyproject.toml
+# Install with: pip install -r requirements.txt
+
+# CLI framework
+typer>=0.9.0,<1.0.0
+rich>=13.0.0,<14.0.0
+
+# Template engine
+jinja2>=3.1.0,<4.0.0
+
+# Configuration
+pyyaml>=6.0.0,<7.0.0
+toml>=0.10.2,<1.0.0
+
+# AI integration
+anthropic>=0.18.0,<1.0.0
+
+# HTTP client
+httpx>=0.25.0,<1.0.0
+
+# Data validation
+pydantic>=2.0.0,<3.0.0
+pydantic-settings>=2.0.0,<3.0.0
