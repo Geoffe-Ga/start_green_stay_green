@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from typing import Literal
 
+from anthropic import Anthropic
 from anthropic import APIError
 from anthropic import APITimeoutError
-from anthropic import Anthropic
 from anthropic import RateLimitError
 
 if TYPE_CHECKING:
