@@ -31,6 +31,11 @@ _ERR_EMPTY_API_KEY = "API key cannot be empty"
 _ERR_EMPTY_PROMPT = "Prompt template cannot be empty"
 _ERR_EMPTY_CONTENT = "Content cannot be empty"
 _ERR_EMPTY_CONTEXT = "Target context cannot be empty"
+_ERR_INVALID_FORMAT = "Invalid output format"
+_ERR_MISSING_CONTEXT_VAR = "Missing required context variable"
+_ERR_EMPTY_RESPONSE = "Empty response received from API"
+_ERR_GENERATION_FAILED = "Generation failed after all retries"
+_ERR_API_ERROR = "API error during generation"
 
 
 class ModelConfig:
@@ -56,6 +61,21 @@ class GenerationError(Exception):
 
 class PromptTemplateError(Exception):
     """Raised when prompt template is invalid or malformed."""
+
+
+@dataclass(frozen=True)
+class GenerationConfig:
+    """Configuration for AI generation request.
+
+    Attributes:
+        model: Claude model identifier to use. If None, uses orchestrator default.
+        max_tokens: Maximum tokens in response.
+        temperature: Sampling temperature (0.0-1.0).
+    """
+
+    model: str | None = None
+    max_tokens: int = 4096
+    temperature: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -166,9 +186,7 @@ class AIOrchestrator:
         context: dict[str, str],
         output_format: OutputFormat,
         *,
-        model: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 1.0,
+        config: GenerationConfig | None = None,
     ) -> GenerationResult:
         """Generate content using AI with injected context.
 
@@ -179,9 +197,8 @@ class AIOrchestrator:
             prompt_template: Prompt template with {variable} placeholders.
             context: Dictionary of variables to inject into template.
             output_format: Desired output format (yaml, toml, markdown, bash).
-            model: Override default model for this generation.
-            max_tokens: Maximum tokens in response. Defaults to 4096.
-            temperature: Sampling temperature (0.0-1.0). Defaults to 1.0.
+            config: Generation configuration (model, tokens, temperature).
+                Defaults to orchestrator settings if not provided.
 
         Returns:
             GenerationResult containing generated content and metadata.
@@ -200,6 +217,9 @@ class AIOrchestrator:
             >>> assert result.format == "markdown"
             >>> assert "MyApp" in result.content
         """
+        # Use default config if not provided
+        if config is None:
+            config = GenerationConfig()
         # Validate prompt template
         if not prompt_template or not prompt_template.strip():
             raise PromptTemplateError(_ERR_EMPTY_PROMPT)
@@ -207,36 +227,33 @@ class AIOrchestrator:
         # Validate output format
         valid_formats = {"yaml", "toml", "markdown", "bash"}
         if output_format not in valid_formats:
-            raise ValueError(
-                f"Invalid output format: {output_format}. "
-                f"Must be one of {valid_formats}",
-            )
+            msg = f"{_ERR_INVALID_FORMAT}: {output_format}. Must be one of {valid_formats}"
+            raise ValueError(msg)
 
         # Inject context into template
         try:
             prompt = self._inject_context(prompt_template, context)
         except KeyError as e:
-            raise PromptTemplateError(
-                f"Missing required context variable: {e}",
-            ) from e
+            msg = f"{_ERR_MISSING_CONTEXT_VAR}: {e}"
+            raise PromptTemplateError(msg) from e
 
         # Prepare format-specific instructions
         format_instructions = self._get_format_instructions(output_format)
         full_prompt = f"{prompt}\n\n{format_instructions}"
 
         # Generate with retry logic
-        model_to_use = model or self.default_model
+        model_to_use = config.model or self.default_model
         message = await self._generate_with_retry(
             prompt=full_prompt,
             model=model_to_use,
-            max_tokens=max_tokens,
-            temperature=temperature,
+            max_tokens=config.max_tokens,
+            temperature=config.temperature,
         )
 
         # Parse and validate response
         content = self._extract_content(message)
         if not content or not content.strip():
-            raise GenerationError("Empty response received from API")
+            raise GenerationError(_ERR_EMPTY_RESPONSE)
 
         # Build result
         token_usage = TokenUsage(
@@ -464,16 +481,12 @@ Provide the tuned content:"""
 
             except APIError as e:
                 # Don't retry on general API errors
-                raise GenerationError(
-                    f"API error during generation: {e}",
-                    cause=e,
-                ) from e
+                msg = f"{_ERR_API_ERROR}: {e}"
+                raise GenerationError(msg, cause=e) from e
 
         # All retries exhausted
-        raise GenerationError(
-            f"Generation failed after {self._max_retries} attempts",
-            cause=last_error,
-        )
+        msg = f"{_ERR_GENERATION_FAILED} after {self._max_retries} attempts"
+        raise GenerationError(msg, cause=last_error)
 
     def _extract_content(self, message: Message) -> str:
         """Extract text content from API message response.
