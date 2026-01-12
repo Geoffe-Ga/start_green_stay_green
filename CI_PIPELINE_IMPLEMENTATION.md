@@ -184,7 +184,8 @@ To test locally before pushing:
 
 ```bash
 # Validate YAML syntax
-python -m json.tool .github/workflows/ci.yml
+python -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"  # requires: pip install pyyaml
+# Or use: yamllint .github/workflows/ci.yml
 
 # Run scripts manually
 ./scripts/lint.sh
