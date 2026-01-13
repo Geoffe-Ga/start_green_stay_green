@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 FIX=false
-CHECK=false
+CHECK=true  # Default to check mode for consistency
 VERBOSE=false
 
 # Parse command line arguments
