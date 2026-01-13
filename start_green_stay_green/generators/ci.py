@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import cast
 
 import yaml
 
@@ -170,7 +171,6 @@ class CIGenerator(BaseGenerator):
         # Validate generated workflow
         return self._validate_and_parse(result.content)
 
-
     def _build_generation_context(
         self,
         language_config: dict[str, Any],
@@ -248,11 +248,109 @@ Generate a complete, valid GitHub Actions workflow in YAML format that:
 Output ONLY valid YAML - no markdown, no explanations, no code fences.
 Start with 'name:' and end with the last workflow configuration line."""
 
-        return self.orchestrator.generate(
+        result = self.orchestrator.generate(
             prompt=prompt,
             output_format="yaml",
         )
+        # Cast to satisfy mypy strict mode
+        # orchestrator.generate returns GenerationResult
+        return cast("GenerationResult", result)
 
+    def _validate_structure(self, parsed: dict[str, Any]) -> None:
+        """Validate basic workflow structure.
+
+        Args:
+            parsed: Parsed YAML content as dictionary.
+
+        Raises:
+            TypeError: If parsed content is not a dictionary.
+        """
+        if not isinstance(parsed, dict):
+            msg = "Generated workflow must be a YAML dictionary"
+            raise TypeError(msg)
+
+    def _validate_name_field(self, parsed: dict[str, Any]) -> None:
+        """Validate workflow has name field.
+
+        Args:
+            parsed: Parsed YAML content.
+
+        Raises:
+            ValueError: If 'name' field is missing.
+        """
+        if "name" not in parsed:
+            msg = "Workflow must have a 'name' field"
+            raise ValueError(msg)
+
+    def _validate_jobs_field(self, parsed: dict[str, Any]) -> None:
+        """Validate workflow has jobs field.
+
+        Args:
+            parsed: Parsed YAML content.
+
+        Raises:
+            ValueError: If 'jobs' field is missing.
+        """
+        if "jobs" not in parsed:
+            msg = "Workflow must have 'jobs' field"
+            raise ValueError(msg)
+
+    def _validate_jobs_type(self, parsed: dict[str, Any]) -> None:
+        """Validate jobs field is a dictionary.
+
+        Args:
+            parsed: Parsed YAML content.
+
+        Raises:
+            TypeError: If jobs field is not a dictionary.
+        """
+        if not isinstance(parsed["jobs"], dict):
+            msg = "Jobs must be a dictionary"
+            raise TypeError(msg)
+
+    def _validate_required_jobs(self, parsed: dict[str, Any]) -> None:
+        """Validate required jobs are present.
+
+        Args:
+            parsed: Parsed YAML content.
+
+        Raises:
+            ValueError: If required jobs are missing.
+        """
+        required_jobs = {"quality", "test"}
+        actual_jobs = set(parsed["jobs"].keys())
+        missing_jobs = required_jobs - actual_jobs
+        if missing_jobs:
+            msg = f"Workflow missing required jobs: {missing_jobs}"
+            raise ValueError(msg)
+
+    def _validate_quality_job(self, parsed: dict[str, Any]) -> None:
+        """Validate quality job has steps.
+
+        Args:
+            parsed: Parsed YAML content.
+
+        Raises:
+            ValueError: If quality job has no steps.
+        """
+        quality_job = parsed["jobs"].get("quality", {})
+        if "steps" not in quality_job or not quality_job["steps"]:
+            msg = "Quality job must have at least one step"
+            raise ValueError(msg)
+
+    def _validate_test_job(self, parsed: dict[str, Any]) -> None:
+        """Validate test job has steps.
+
+        Args:
+            parsed: Parsed YAML content.
+
+        Raises:
+            ValueError: If test job has no steps.
+        """
+        test_job = parsed["jobs"].get("test", {})
+        if "steps" not in test_job or not test_job["steps"]:
+            msg = "Test job must have at least one step"
+            raise ValueError(msg)
 
     def _validate_and_parse(self, yaml_content: str) -> CIWorkflow:
         """Validate and parse generated YAML workflow.
@@ -270,43 +368,14 @@ Start with 'name:' and end with the last workflow configuration line."""
             # Parse YAML to validate structure
             parsed = yaml.safe_load(yaml_content)
 
-            # Basic structure validation
-            if not isinstance(parsed, dict):
-                msg = "Generated workflow must be a YAML dictionary"
-                raise TypeError(msg)  # noqa: TRY301 - Direct validation in parsing context
-
-            if "name" not in parsed:
-                msg = "Workflow must have a 'name' field"
-                raise ValueError(msg)  # noqa: TRY301 - Direct validation in parsing context
-
-            if "jobs" not in parsed:
-                msg = "Workflow must have 'jobs' field"
-                raise ValueError(msg)  # noqa: TRY301 - Direct validation in parsing context
-
-            if not isinstance(parsed["jobs"], dict):
-                msg = "Jobs must be a dictionary"
-                raise TypeError(msg)  # noqa: TRY301 - Direct validation in parsing context
-
-            # Validate required jobs
-            required_jobs = {"quality", "test"}
-            actual_jobs = set(parsed["jobs"].keys())
-            missing_jobs = required_jobs - actual_jobs
-
-            if missing_jobs:
-                msg = f"Workflow missing required jobs: {missing_jobs}"
-                raise ValueError(msg)  # noqa: TRY301 - Direct validation in parsing context
-
-            # Validate quality job has steps
-            quality_job = parsed["jobs"].get("quality", {})
-            if "steps" not in quality_job or not quality_job["steps"]:
-                msg = "Quality job must have at least one step"
-                raise ValueError(msg)  # noqa: TRY301 - Direct validation in parsing context
-
-            # Validate test job has steps and matrix (if applicable)
-            test_job = parsed["jobs"].get("test", {})
-            if "steps" not in test_job or not test_job["steps"]:
-                msg = "Test job must have at least one step"
-                raise ValueError(msg)  # noqa: TRY301 - Direct validation in parsing context
+            # Run all validations
+            self._validate_structure(parsed)
+            self._validate_name_field(parsed)
+            self._validate_jobs_field(parsed)
+            self._validate_jobs_type(parsed)
+            self._validate_required_jobs(parsed)
+            self._validate_quality_job(parsed)
+            self._validate_test_job(parsed)
 
             return CIWorkflow(
                 name=parsed.get("name", "CI"),
