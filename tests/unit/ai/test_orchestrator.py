@@ -461,3 +461,353 @@ class TestAIOrchestrator:
         assert result.content == "Immediate success"
         # Should have called API only once
         mock_client.messages.create.assert_called_once()
+
+
+class TestMutationKillers:
+    """Targeted tests to kill specific mutations and achieve 80%+ mutation score.
+
+    These tests explicitly verify exact values, boundary conditions, and
+    arithmetic operations to ensure mutations are caught.
+    """
+
+    def test_token_usage_total_tokens_exact_sum(self) -> None:
+        """Test total_tokens is EXACTLY input_tokens + output_tokens.
+
+        Kills mutations: + → -, + → *, + → /
+        """
+        usage = TokenUsage(input_tokens=100, output_tokens=50)
+        assert usage.total_tokens == 150
+        assert usage.total_tokens == usage.input_tokens + usage.output_tokens
+        assert usage.total_tokens != usage.input_tokens - usage.output_tokens
+        assert usage.total_tokens != usage.input_tokens * usage.output_tokens
+
+    def test_token_usage_total_tokens_edge_cases(self) -> None:
+        """Test total_tokens with zero and boundary values.
+
+        Kills mutations in edge case handling.
+        """
+        # Zero inputs
+        usage_zero = TokenUsage(input_tokens=0, output_tokens=0)
+        assert usage_zero.total_tokens == 0
+
+        # One zero
+        usage_one_zero = TokenUsage(input_tokens=100, output_tokens=0)
+        assert usage_one_zero.total_tokens == 100
+
+        # Large values
+        usage_large = TokenUsage(input_tokens=10000, output_tokens=5000)
+        assert usage_large.total_tokens == 15000
+
+    def test_orchestrator_init_max_retries_zero_is_valid(self) -> None:
+        """Test max_retries=0 is valid (no retries, single attempt).
+
+        Kills mutations: < 0 → <= 0
+        """
+        orchestrator = AIOrchestrator(api_key="test-key", max_retries=0)
+        assert orchestrator.max_retries == 0
+
+    def test_orchestrator_init_max_retries_negative_raises(self) -> None:
+        """Test max_retries < 0 raises ValueError.
+
+        Ensures boundary condition is correct: < 0, not <= 0.
+        """
+        with pytest.raises(ValueError, match="max_retries must be non-negative"):
+            AIOrchestrator(api_key="test-key", max_retries=-1)
+
+    def test_orchestrator_init_retry_delay_zero_raises(self) -> None:
+        """Test retry_delay=0.0 raises ValueError.
+
+        Kills mutations: <= 0 → < 0
+        """
+        with pytest.raises(ValueError, match="retry_delay must be positive"):
+            AIOrchestrator(api_key="test-key", retry_delay=0.0)
+
+    def test_orchestrator_init_retry_delay_negative_raises(self) -> None:
+        """Test retry_delay < 0 raises ValueError."""
+        with pytest.raises(ValueError, match="retry_delay must be positive"):
+            AIOrchestrator(api_key="test-key", retry_delay=-0.5)
+
+    def test_orchestrator_init_retry_delay_very_small_positive_valid(
+        self,
+    ) -> None:
+        """Test very small positive retry_delay is valid.
+
+        Ensures boundary is > 0, not >= some minimum.
+        """
+        orchestrator = AIOrchestrator(api_key="test-key", retry_delay=0.001)
+        assert orchestrator.retry_delay == 0.001
+
+    def test_orchestrator_init_api_key_empty_string_raises(self) -> None:
+        """Test empty string api_key raises ValueError."""
+        with pytest.raises(ValueError, match="API key cannot be empty"):
+            AIOrchestrator(api_key="")
+
+    def test_orchestrator_init_api_key_whitespace_only_raises(self) -> None:
+        """Test whitespace-only api_key raises ValueError.
+
+        Kills mutations: or → and in validation logic.
+        """
+        with pytest.raises(ValueError, match="API key cannot be empty"):
+            AIOrchestrator(api_key="   ")
+
+        with pytest.raises(ValueError, match="API key cannot be empty"):
+            AIOrchestrator(api_key="\t\n  ")
+
+    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_retry_delay_exact_exponential_backoff(
+        self,
+        mock_anthropic: Mock,
+        mock_sleep: Mock,
+    ) -> None:
+        """Test retry delays follow EXACT exponential backoff formula.
+
+        Kills mutations:
+        - 2**attempt → 2*attempt (exponential to linear)
+        - retry_delay * X → retry_delay / X
+        - 2**attempt → 2**(attempt+1) or 2**(attempt-1)
+        """
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+
+        # Setup to fail 3 times then succeed
+        text_block = create_autospec(TextBlock, instance=True)
+        text_block.text = "Success"
+        success_response = MagicMock()
+        success_response.id = "msg_success"
+        success_response.content = [text_block]
+        success_response.usage.input_tokens = 10
+        success_response.usage.output_tokens = 5
+        success_response.model = ModelConfig.SONNET
+
+        mock_client.messages.create.side_effect = [
+            Exception("Error 1"),
+            Exception("Error 2"),
+            Exception("Error 3"),
+            success_response,
+        ]
+
+        orchestrator = AIOrchestrator(
+            api_key="test-key",
+            max_retries=3,
+            retry_delay=1.0,
+        )
+        result = orchestrator.generate(prompt="Test", output_format="yaml")
+
+        assert result.content == "Success"
+
+        # Verify EXACT sleep delays: retry_delay * (2 ** attempt)
+        # Attempt 0 fails → sleep 1.0 * (2**0) = 1.0
+        # Attempt 1 fails → sleep 1.0 * (2**1) = 2.0
+        # Attempt 2 fails → sleep 1.0 * (2**2) = 4.0
+        # Attempt 3 succeeds → no sleep
+        assert mock_sleep.call_count == 3
+        sleep_calls = [call[0][0] for call in mock_sleep.call_args_list]
+        assert sleep_calls == [
+            1.0,
+            2.0,
+            4.0,
+        ], f"Expected [1.0, 2.0, 4.0] but got {sleep_calls}"
+
+        # Verify these are NOT linear backoff (would be [1.0, 2.0, 3.0])
+        assert sleep_calls != [1.0, 2.0, 3.0]
+
+    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_retry_count_exact(
+        self,
+        mock_anthropic: Mock,
+        mock_sleep: Mock,
+    ) -> None:
+        """Test retry count is EXACTLY max_retries, not max_retries±1.
+
+        Kills mutations: max_retries + 1 → max_retries, + 1 → + 0, + 1 → + 2
+        """
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+
+        # Always fail to exhaust retries
+        mock_client.messages.create.side_effect = Exception("Persistent error")
+
+        orchestrator = AIOrchestrator(
+            api_key="test-key",
+            max_retries=2,
+            retry_delay=0.1,
+        )
+
+        with pytest.raises(GenerationError):
+            orchestrator.generate(prompt="Test", output_format="yaml")
+
+        # Should try exactly (max_retries + 1) times: 1 initial + 2 retries = 3
+        assert mock_client.messages.create.call_count == 3
+
+        # Should sleep exactly max_retries times (after each failure except last)
+        assert mock_sleep.call_count == 2
+
+    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_with_max_retries_zero(
+        self,
+        mock_anthropic: Mock,
+        mock_sleep: Mock,
+    ) -> None:
+        """Test max_retries=0 means single attempt with no retries.
+
+        Kills mutations in retry loop boundary condition.
+        """
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+        mock_client.messages.create.side_effect = Exception("Immediate failure")
+
+        orchestrator = AIOrchestrator(
+            api_key="test-key",
+            max_retries=0,
+            retry_delay=1.0,
+        )
+
+        with pytest.raises(GenerationError):
+            orchestrator.generate(prompt="Test", output_format="yaml")
+
+        # Should try exactly once (no retries)
+        assert mock_client.messages.create.call_count == 1
+        # Should never sleep (no retries)
+        mock_sleep.assert_not_called()
+
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_with_non_text_block_raises(
+        self,
+        mock_anthropic: Mock,
+    ) -> None:
+        """Test generate raises GenerationError with non-TextBlock content.
+
+        Kills mutations: not isinstance → isinstance
+        """
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+
+        # Create response with non-TextBlock content (e.g., ImageBlock)
+        mock_response = MagicMock()
+        mock_response.id = "msg_invalid"
+        # Simulate a different block type (not TextBlock)
+        non_text_block = MagicMock()
+        non_text_block.__class__.__name__ = "ImageBlock"
+        mock_response.content = [non_text_block]
+        mock_client.messages.create.return_value = mock_response
+
+        orchestrator = AIOrchestrator(api_key="test-key")
+
+        with pytest.raises(
+            GenerationError,
+            match="Expected TextBlock in response",
+        ):
+            orchestrator.generate(prompt="Test", output_format="yaml")
+
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generation_result_fields_exact_values(
+        self,
+        mock_anthropic: Mock,
+    ) -> None:
+        """Test GenerationResult contains exact expected values for all fields.
+
+        Kills mutations in field assignments and response parsing.
+        """
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+
+        text_block = create_autospec(TextBlock, instance=True)
+        text_block.text = "Test YAML content"
+
+        mock_response = MagicMock()
+        mock_response.id = "msg_exact_test"
+        mock_response.content = [text_block]
+        mock_response.usage.input_tokens = 123
+        mock_response.usage.output_tokens = 456
+        mock_response.model = ModelConfig.OPUS
+        mock_client.messages.create.return_value = mock_response
+
+        orchestrator = AIOrchestrator(
+            api_key="test-key",
+            model=ModelConfig.OPUS,
+        )
+        result = orchestrator.generate(prompt="Generate test", output_format="yaml")
+
+        # Verify EXACT field values
+        assert result.content == "Test YAML content"
+        assert result.format == "yaml"
+        assert result.message_id == "msg_exact_test"
+        assert result.model == ModelConfig.OPUS
+        assert isinstance(result.token_usage, TokenUsage)
+        assert result.token_usage.input_tokens == 123
+        assert result.token_usage.output_tokens == 456
+        assert result.token_usage.total_tokens == 579  # 123 + 456
+
+    def test_generation_error_with_cause_preserves_exception(self) -> None:
+        """Test GenerationError.cause preserves original exception.
+
+        Kills mutations that remove exception chaining.
+        """
+        original_error = ValueError("Original error message")
+        generation_error = GenerationError(
+            "Failed to generate",
+            cause=original_error,
+        )
+
+        assert generation_error.cause is original_error
+        assert str(generation_error) == "Failed to generate"
+
+    def test_generation_error_without_cause(self) -> None:
+        """Test GenerationError can be created without cause."""
+        error = GenerationError("Simple error")
+        assert error.cause is None
+        assert str(error) == "Simple error"
+
+    def test_model_config_values_exact(self) -> None:
+        """Test ModelConfig constants have exact expected values.
+
+        Kills mutations in string constants.
+        """
+        assert ModelConfig.OPUS == "claude-opus-4-5-20251101"
+        assert ModelConfig.SONNET == "claude-sonnet-4-5-20250929"
+
+        # Verify they're different
+        assert ModelConfig.OPUS != ModelConfig.SONNET
+
+        # Verify format pattern
+        assert "claude-opus" in ModelConfig.OPUS
+        assert "claude-sonnet" in ModelConfig.SONNET
+
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_prompt_format_in_api_call(
+        self,
+        mock_anthropic: Mock,
+    ) -> None:
+        """Test prompt is formatted correctly in API call.
+
+        Kills mutations in prompt string formatting.
+        """
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+
+        text_block = create_autospec(TextBlock, instance=True)
+        text_block.text = "Response"
+        mock_response = MagicMock()
+        mock_response.id = "msg_prompt_test"
+        mock_response.content = [text_block]
+        mock_response.usage.input_tokens = 10
+        mock_response.usage.output_tokens = 5
+        mock_response.model = ModelConfig.SONNET
+        mock_client.messages.create.return_value = mock_response
+
+        orchestrator = AIOrchestrator(api_key="test-key")
+        orchestrator.generate(
+            prompt="Create config",
+            output_format="toml",
+        )
+
+        # Verify API was called with correctly formatted prompt
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        messages = call_kwargs["messages"]
+        assert len(messages) == 1
+        assert messages[0]["role"] == "user"
+        expected_content = "Generate toml output:\n\nCreate config"
+        assert messages[0]["content"] == expected_content
