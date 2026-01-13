@@ -92,10 +92,32 @@ Run tests with **Pytest**.
 ./scripts/test.sh --e2e                # End-to-end tests
 ./scripts/test.sh --all                # All test types
 ./scripts/test.sh --unit --coverage    # With coverage report
-./scripts/test.sh --mutation           # Mutation tests
+./scripts/test.sh --mutation           # Mutation tests (uses mutation.sh)
 ```
 
 **Tools**: Pytest, pytest-cov, mutmut (optional)
+
+---
+
+### 4a. mutation.sh - Mutation Testing
+
+Run mutation tests with score validation.
+
+```bash
+./scripts/mutation.sh                  # Run with 80% minimum (MAXIMUM QUALITY)
+./scripts/mutation.sh --min-score 70   # Run with 70% minimum
+./scripts/mutation.sh --verbose        # Show detailed output
+```
+
+**Quality Standards**:
+- MAXIMUM QUALITY: 80% minimum mutation score
+- Good: 70-79%
+- Acceptable: 60-69%
+- Poor: <60%
+
+**Tools**: mutmut
+
+**Note**: Mutation testing can take several minutes to complete. It's run separately from regular tests and typically only in CI on main branch merges.
 
 ---
 
@@ -172,6 +194,8 @@ Runs in order:
 5. Complexity analysis
 6. Unit tests
 7. Coverage report
+
+**Note**: Mutation testing is NOT included in check-all.sh due to long runtime. Run separately with `./scripts/mutation.sh` or `./scripts/test.sh --mutation`
 
 ---
 

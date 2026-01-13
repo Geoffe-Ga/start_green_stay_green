@@ -380,6 +380,14 @@ ignore-comments = true
 ignore-docstrings = true
 ignore-imports = true
 
+# Mutmut configuration (mutation testing)
+[tool.mutmut]
+paths_to_mutate = "start_green_stay_green/"
+backup = false
+runner = "pytest -x --assert=plain --tb=short -q"
+tests_dir = "tests/"
+dict_synonyms = "Struct, NamedStruct"
+
 # Pre-commit configuration reference
 [tool.pre-commit]
 # Configuration in .pre-commit-config.yaml

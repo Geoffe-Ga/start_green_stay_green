@@ -583,12 +583,32 @@ Runs in order:
 5. Unit tests with coverage
 6. Coverage report validation (90% minimum)
 
+**Note**: Mutation testing is NOT included in check-all.sh due to long runtime. It runs automatically in CI on main branch merges.
+
 ```bash
 # Before committing - REQUIRED
 ./scripts/check-all.sh
 
 # Exit code 0 = all checks pass
 # Exit code 1 = some checks failed
+```
+
+#### `./scripts/mutation.sh`
+**Run mutation tests with score validation**
+
+Mutation testing introduces small changes (mutations) to your code to verify that your test suite catches them. A high mutation score indicates effective, high-quality tests.
+
+```bash
+# Run with 80% minimum (MAXIMUM QUALITY standard)
+./scripts/mutation.sh
+
+# Run with custom threshold
+./scripts/mutation.sh --min-score 70
+
+# Show detailed output
+./scripts/mutation.sh --verbose
+
+# This can take several minutes - be patient!
 ```
 
 #### `./scripts/format.sh`
@@ -716,14 +736,18 @@ vim tests/unit/test_my_module.py
 # 9. Final check before commit
 ./scripts/check-all.sh
 
-# 10. Commit (only if all checks pass)
+# 10. (Optional) Run mutation tests locally for significant changes
+# This takes several minutes and is automatically run in CI
+./scripts/mutation.sh
+
+# 11. Commit (only if all checks pass)
 git add .
 git commit -m "feat(module): add my feature (#123)"
 
-# 11. Push
+# 12. Push
 git push origin feature/my-feature
 
-# 12. Create PR (all CI checks will pass)
+# 13. Create PR (all CI checks will pass, including mutation testing on main)
 gh pr create --fill
 ```
 
@@ -890,15 +914,23 @@ def test_generator_empty_config_raises_validation_error():
 Every test suite must pass mutation testing. This ensures tests are effective at catching bugs:
 
 ```bash
-# Run mutation tests
-mutmut run --paths-to-mutate=start_green_stay_green/
+# Run mutation tests with 80% minimum score (MAXIMUM QUALITY)
+./scripts/mutation.sh
+
+# Run with custom threshold
+./scripts/mutation.sh --min-score 70
 
 # View results
 mutmut results
 mutmut html
 
-# Score must be 80%+
+# View specific surviving mutants
+mutmut show <id>
+
+# Score must be 80%+ for MAXIMUM QUALITY
 ```
+
+**Important**: Use `./scripts/mutation.sh` instead of running `mutmut` directly. The script enforces the 80% minimum threshold and provides clear feedback.
 
 ## AI Subagent Guidelines
 

@@ -132,12 +132,7 @@ echo "✓ Tests passed"
 # Run mutation tests if requested
 if $MUTATION; then
     echo "=== Running Mutation Tests ==="
-    if command -v mutmut &> /dev/null; then
-        mutmut run || { echo "✗ Mutation tests failed" >&2; exit 1; }
-        echo "✓ Mutation tests passed"
-    else
-        echo "Warning: mutmut not installed, skipping mutation tests" >&2
-    fi
+    "$SCRIPT_DIR/mutation.sh" || { echo "✗ Mutation tests failed" >&2; exit 1; }
 fi
 
 exit 0

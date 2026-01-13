@@ -119,7 +119,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run mutation tests
-        run: ./scripts/test.sh --mutation
+        run: ./scripts/mutation.sh
 
   # Job 4: Security Scanning
   security:
