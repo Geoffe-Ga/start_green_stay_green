@@ -1,7 +1,7 @@
 """Unit tests for Scripts Generator."""
 
-import tempfile
 from pathlib import Path
+import tempfile
 
 import pytest
 
@@ -96,7 +96,7 @@ class TestScriptsGeneratorInit:
                 language="python",
                 package_name="my_package",
             )
-            generator = ScriptsGenerator(nested_dir, config)
+            ScriptsGenerator(nested_dir, config)
             assert nested_dir.exists()
 
     def test_generator_initialization_with_empty_language_raises(self) -> None:
@@ -777,13 +777,13 @@ class TestMutationKillers:
 
             content = scripts["check-all.sh"].read_text()
             # Exact check names
-            assert 'lint.sh' in content
-            assert 'format.sh' in content
-            assert 'typecheck.sh' in content
-            assert 'security.sh' in content
-            assert 'complexity.sh' in content
-            assert 'test.sh' in content
-            assert 'coverage.sh' in content
+            assert "lint.sh" in content
+            assert "format.sh" in content
+            assert "typecheck.sh" in content
+            assert "security.sh" in content
+            assert "complexity.sh" in content
+            assert "test.sh" in content
+            assert "coverage.sh" in content
 
     def test_empty_language_error_exact_message(self) -> None:
         """Test exact error message for empty language.

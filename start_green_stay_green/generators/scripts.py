@@ -68,10 +68,12 @@ class ScriptsGenerator:
             ValueError: If configuration is invalid
         """
         if not self.config.language:
-            raise ValueError("Language cannot be empty")
+            msg = "Language cannot be empty"
+            raise ValueError(msg)
 
         if not self.config.package_name:
-            raise ValueError("Package name cannot be empty")
+            msg = "Package name cannot be empty"
+            raise ValueError(msg)
 
         # Ensure output directory exists
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -230,13 +232,13 @@ class ScriptsGenerator:
 
     def _python_check_all_script(self) -> str:
         """Generate Python check-all.sh script."""
-        return f'''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/check-all.sh - Run all quality checks
 # Usage: ./scripts/check-all.sh [--verbose] [--help]
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 VERBOSE=false
@@ -300,14 +302,14 @@ FAILED_CHECKS=()
 PASSED_CHECKS=()
 
 # Helper function to run a check
-run_check() {{
+run_check() {
     local check_name=$1
     local script=$2
     shift 2
     local args=("$@")
 
     echo "Running: $check_name"
-    if "$SCRIPT_DIR/$script" "${{args[@]+"${{args[@]}}"}}\" $VERBOSE_FLAG; then
+    if "$SCRIPT_DIR/$script" "${args[@]+"${args[@]}"}\" $VERBOSE_FLAG; then
         PASSED_CHECKS+=("$check_name")
         echo "✓ $check_name passed"
     else
@@ -315,7 +317,7 @@ run_check() {{
         echo "✗ $check_name failed" >&2
     fi
     echo ""
-}}
+}
 
 # Run all checks
 run_check "Linting" "lint.sh" --check
@@ -327,13 +329,13 @@ run_check "Unit tests" "test.sh" --unit
 run_check "Coverage report" "coverage.sh"
 
 echo "=== Quality Checks Summary ==="
-echo "Passed: ${{#PASSED_CHECKS[@]}}"
-echo "Failed: ${{#FAILED_CHECKS[@]}}"
+echo "Passed: ${#PASSED_CHECKS[@]}"
+echo "Failed: ${#FAILED_CHECKS[@]}"
 
-if [ ${{#FAILED_CHECKS[@]}} -gt 0 ]; then
+if [ ${#FAILED_CHECKS[@]} -gt 0 ]; then
     echo ""
     echo "Failed checks:"
-    for check in "${{FAILED_CHECKS[@]}}"; do
+    for check in "${FAILED_CHECKS[@]}"; do
         echo "  ✗ $check"
     done
     exit 1
@@ -342,11 +344,11 @@ else
     echo "✓ All quality checks passed!"
     exit 0
 fi
-'''
+"""
 
     def _python_format_script(self) -> str:
         """Generate Python format.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/format.sh - Format code with Black and isort
 # Usage: ./scripts/format.sh [--fix] [--check] [--verbose] [--help]
 
@@ -439,11 +441,11 @@ else
     echo "✓ Code formatted successfully"
 fi
 exit 0
-'''
+"""
 
     def _python_lint_script(self) -> str:
         """Generate Python lint.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/lint.sh - Run linting checks with Ruff
 # Usage: ./scripts/lint.sh [--fix] [--check] [--verbose] [--help]
 
@@ -532,11 +534,11 @@ else
     echo "✗ Linting checks failed" >&2
     exit 1
 fi
-'''
+"""
 
     def _python_test_script(self) -> str:
         """Generate Python test.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/test.sh - Run tests with Pytest
 # Usage: ./scripts/test.sh [--unit|--integration|--e2e|--all] [--coverage] [--mutation] [--verbose] [--help]
 
@@ -679,11 +681,11 @@ if $MUTATION; then
 fi
 
 exit 0
-'''
+"""
 
     def _python_fix_all_script(self) -> str:
         """Generate Python fix-all.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/fix-all.sh - Auto-fix all issues
 # Usage: ./scripts/fix-all.sh [--verbose] [--help]
 
@@ -785,11 +787,11 @@ else
     echo "Stage changes with: git add ."
     exit 0
 fi
-'''
+"""
 
     def _python_security_script(self) -> str:
         """Generate Python security.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/security.sh - Run security checks with Bandit and Safety
 # Usage: ./scripts/security.sh [--full] [--verbose] [--help]
 
@@ -883,11 +885,11 @@ fi
 
 echo "✓ Security checks passed"
 exit 0
-'''
+"""
 
     def _python_complexity_script(self) -> str:
         """Generate Python complexity.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/complexity.sh - Code complexity analysis
 # Usage: ./scripts/complexity.sh [--verbose] [--help]
 
@@ -975,13 +977,13 @@ fi
 
 echo "✓ Complexity analysis completed"
 exit 0
-'''
+"""
 
     # TypeScript script generators
 
     def _typescript_check_all_script(self) -> str:
         """Generate TypeScript check-all.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/check-all.sh - Run all quality checks
 # Usage: ./scripts/check-all.sh [--verbose] [--help]
 
@@ -1078,11 +1080,11 @@ else
     echo "✓ All quality checks passed!"
     exit 0
 fi
-'''
+"""
 
     def _typescript_format_script(self) -> str:
         """Generate TypeScript format.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/format.sh - Format code with Prettier
 # Usage: ./scripts/format.sh [--fix] [--check] [--verbose] [--help]
 
@@ -1157,11 +1159,11 @@ else
     echo "✓ Code formatted successfully"
 fi
 exit 0
-'''
+"""
 
     def _typescript_lint_script(self) -> str:
         """Generate TypeScript lint.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/lint.sh - Run linting checks with ESLint
 # Usage: ./scripts/lint.sh [--fix] [--check] [--verbose] [--help]
 
@@ -1236,11 +1238,11 @@ fi
 
 echo "✓ Linting checks passed"
 exit 0
-'''
+"""
 
     def _typescript_test_script(self) -> str:
         """Generate TypeScript test.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/test.sh - Run tests with Jest
 # Usage: ./scripts/test.sh [--coverage] [--watch] [--verbose] [--help]
 
@@ -1315,11 +1317,11 @@ npx jest "${JEST_ARGS[@]}" || { echo "✗ Tests failed" >&2; exit 1; }
 
 echo "✓ Tests passed"
 exit 0
-'''
+"""
 
     def _typescript_fix_all_script(self) -> str:
         """Generate TypeScript fix-all.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/fix-all.sh - Auto-fix all issues
 # Usage: ./scripts/fix-all.sh [--verbose] [--help]
 
@@ -1401,13 +1403,13 @@ else
     echo "✓ All auto-fixes completed successfully!"
     exit 0
 fi
-'''
+"""
 
     # Go script generators
 
     def _go_check_all_script(self) -> str:
         """Generate Go check-all.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/check-all.sh - Run all quality checks
 # Usage: ./scripts/check-all.sh [--verbose] [--help]
 
@@ -1495,11 +1497,11 @@ else
     echo "✓ All quality checks passed!"
     exit 0
 fi
-'''
+"""
 
     def _go_format_script(self) -> str:
         """Generate Go format.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/format.sh - Format Go code
 # Usage: ./scripts/format.sh [--fix] [--check] [--verbose] [--help]
 
@@ -1571,11 +1573,11 @@ fi
 
 echo "✓ Code formatted successfully"
 exit 0
-'''
+"""
 
     def _go_lint_script(self) -> str:
         """Generate Go lint.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/lint.sh - Run linting with golangci-lint
 # Usage: ./scripts/lint.sh [--fix] [--verbose] [--help]
 
@@ -1637,11 +1639,11 @@ fi
 
 echo "✓ Linting checks passed"
 exit 0
-'''
+"""
 
     def _go_test_script(self) -> str:
         """Generate Go test.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/test.sh - Run Go tests
 # Usage: ./scripts/test.sh [--coverage] [--verbose] [--help]
 
@@ -1703,13 +1705,13 @@ fi
 
 echo "✓ Tests passed"
 exit 0
-'''
+"""
 
     # Rust script generators
 
     def _rust_check_all_script(self) -> str:
         """Generate Rust check-all.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/check-all.sh - Run all quality checks
 # Usage: ./scripts/check-all.sh [--verbose] [--help]
 
@@ -1797,11 +1799,11 @@ else
     echo "✓ All quality checks passed!"
     exit 0
 fi
-'''
+"""
 
     def _rust_format_script(self) -> str:
         """Generate Rust format.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/format.sh - Format Rust code
 # Usage: ./scripts/format.sh [--fix] [--check] [--verbose] [--help]
 
@@ -1869,11 +1871,11 @@ else
     echo "✓ Code formatted successfully"
 fi
 exit 0
-'''
+"""
 
     def _rust_lint_script(self) -> str:
         """Generate Rust lint.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/lint.sh - Run linting with clippy
 # Usage: ./scripts/lint.sh [--fix] [--verbose] [--help]
 
@@ -1935,11 +1937,11 @@ fi
 
 echo "✓ Linting checks passed"
 exit 0
-'''
+"""
 
     def _rust_test_script(self) -> str:
         """Generate Rust test.sh script."""
-        return '''#!/usr/bin/env bash
+        return """#!/usr/bin/env bash
 # scripts/test.sh - Run Rust tests
 # Usage: ./scripts/test.sh [--coverage] [--verbose] [--help]
 
@@ -2001,7 +2003,7 @@ fi
 
 echo "✓ Tests passed"
 exit 0
-'''
+"""
 
     def _write_script(self, filename: str, content: str) -> Path:
         """Write a script file and make it executable.
