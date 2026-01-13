@@ -219,7 +219,7 @@ class TestCIGeneratorContextBuilding:
         mock_orchestrator = Mock(spec=AIOrchestrator)
         generator = CIGenerator(mock_orchestrator, "python")
 
-        context = generator._build_generation_context(LANGUAGE_CONFIGS["python"])
+        context = generator._build_generation_context(LANGUAGE_CONFIGS["python"])  # noqa: SLF001 - Testing internal method
 
         assert "PYTHON" in context
         assert "pytest" in context
@@ -235,7 +235,7 @@ class TestCIGeneratorContextBuilding:
         mock_orchestrator = Mock(spec=AIOrchestrator)
         generator = CIGenerator(mock_orchestrator, "python")
 
-        context = generator._build_generation_context(LANGUAGE_CONFIGS["python"])
+        context = generator._build_generation_context(LANGUAGE_CONFIGS["python"])  # noqa: SLF001 - Testing internal method
 
         assert "Code Coverage" in context
         assert "90%" in context
@@ -252,7 +252,7 @@ class TestCIGeneratorContextBuilding:
             framework="Django",
         )
 
-        context = generator._build_generation_context(LANGUAGE_CONFIGS["python"])
+        context = generator._build_generation_context(LANGUAGE_CONFIGS["python"])  # noqa: SLF001 - Testing internal method
 
         assert "Django" in context
 
@@ -263,7 +263,7 @@ class TestCIGeneratorContextBuilding:
         mock_orchestrator = Mock(spec=AIOrchestrator)
         generator = CIGenerator(mock_orchestrator, "python")
 
-        context = generator._build_generation_context(LANGUAGE_CONFIGS["python"])
+        context = generator._build_generation_context(LANGUAGE_CONFIGS["python"])  # noqa: SLF001 - Testing internal method
 
         assert "Framework:" not in context
 
@@ -295,7 +295,7 @@ jobs:
         mock_orchestrator = Mock(spec=AIOrchestrator)
         generator = CIGenerator(mock_orchestrator, "python")
 
-        workflow = generator._validate_and_parse(self._create_minimal_valid_workflow())
+        workflow = generator._validate_and_parse(self._create_minimal_valid_workflow())  # noqa: SLF001 - Testing internal method
 
         assert workflow.is_valid is True
         assert workflow.error_message is None
@@ -308,7 +308,7 @@ jobs:
         generator = CIGenerator(mock_orchestrator, "python")
 
         with pytest.raises(ValueError, match="Invalid YAML"):
-            generator._validate_and_parse("not: valid: yaml: [syntax")
+            generator._validate_and_parse("not: valid: yaml: [syntax")  # noqa: SLF001 - Testing internal method
 
     def test_validate_not_dict_raises_error(self) -> None:
         """Test validation fails when YAML is not a dictionary."""
@@ -316,7 +316,7 @@ jobs:
         generator = CIGenerator(mock_orchestrator, "python")
 
         with pytest.raises(ValueError, match="YAML dictionary"):
-            generator._validate_and_parse("- item1\n- item2")
+            generator._validate_and_parse("- item1\n- item2")  # noqa: SLF001 - Testing internal method
 
     def test_validate_missing_name_raises_error(self) -> None:
         """Test validation fails when 'name' field is missing."""
@@ -331,7 +331,7 @@ jobs:
       - run: echo test
 """
         with pytest.raises(ValueError, match="'name' field"):
-            generator._validate_and_parse(workflow_yaml)
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001 - Testing internal method
 
     def test_validate_missing_jobs_raises_error(self) -> None:
         """Test validation fails when 'jobs' field is missing."""
@@ -341,7 +341,7 @@ jobs:
         workflow_yaml = "name: Test CI\non: push"
 
         with pytest.raises(ValueError, match="'jobs' field"):
-            generator._validate_and_parse(workflow_yaml)
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001 - Testing internal method
 
     def test_validate_jobs_not_dict_raises_error(self) -> None:
         """Test validation fails when jobs is not a dictionary."""
@@ -355,7 +355,7 @@ jobs:
   - item2
 """
         with pytest.raises(ValueError, match="Jobs must be a dictionary"):
-            generator._validate_and_parse(workflow_yaml)
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001 - Testing internal method
 
     def test_validate_missing_required_jobs_raises_error(self) -> None:
         """Test validation fails when required jobs are missing."""
@@ -371,7 +371,7 @@ jobs:
       - run: echo test
 """
         with pytest.raises(ValueError, match="missing required jobs"):
-            generator._validate_and_parse(workflow_yaml)
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001 - Testing internal method
 
     def test_validate_quality_job_missing_steps_raises_error(
         self,
@@ -391,7 +391,7 @@ jobs:
       - run: echo test
 """
         with pytest.raises(ValueError, match="Quality job must have"):
-            generator._validate_and_parse(workflow_yaml)
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001 - Testing internal method
 
     def test_validate_test_job_missing_steps_raises_error(self) -> None:
         """Test validation fails when test job has no steps."""
@@ -409,7 +409,7 @@ jobs:
     runs-on: ubuntu-latest
 """
         with pytest.raises(ValueError, match="Test job must have"):
-            generator._validate_and_parse(workflow_yaml)
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001 - Testing internal method
 
     def test_validate_empty_steps_raises_error(self) -> None:
         """Test validation fails when steps list is empty."""
@@ -427,7 +427,7 @@ jobs:
     steps: []
 """
         with pytest.raises(ValueError, match="must have at least one step"):
-            generator._validate_and_parse(workflow_yaml)
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001 - Testing internal method
 
 
 class TestCIGeneratorGeneration:
@@ -710,12 +710,8 @@ jobs:
         """
         mock_orchestrator = Mock(spec=AIOrchestrator)
 
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValueError, match=r"Unsupported language.*cobol"):
             CIGenerator(mock_orchestrator, "cobol")
-
-        error_msg = str(exc_info.value)
-        assert "Unsupported language" in error_msg
-        assert "cobol" in error_msg
 
     def test_framework_stored_as_provided(self) -> None:
         """Test framework is stored exactly as provided.
@@ -779,7 +775,7 @@ jobs:
     steps:
       - run: test
 """
-        workflow = generator._validate_and_parse(valid_yaml)
+        workflow = generator._validate_and_parse(valid_yaml)  # noqa: SLF001 - Testing internal method
         assert workflow.is_valid is True
 
         # Should reject workflow with only quality (missing test)
@@ -792,7 +788,7 @@ jobs:
       - run: test
 """
         with pytest.raises(ValueError, match="missing required jobs"):
-            generator._validate_and_parse(missing_test)
+            generator._validate_and_parse(missing_test)  # noqa: SLF001 - Testing internal method
 
     def test_is_valid_flag_exact_true_when_successful(self) -> None:
         """Test is_valid is exactly True on successful validation.
@@ -814,7 +810,7 @@ jobs:
     steps:
       - run: test
 """
-        workflow = generator._validate_and_parse(valid_yaml)
+        workflow = generator._validate_and_parse(valid_yaml)  # noqa: SLF001 - Testing internal method
 
         assert workflow.is_valid is True
         assert workflow.is_valid == True  # noqa: E712
@@ -829,8 +825,8 @@ jobs:
         generator = CIGenerator(mock_orchestrator, "python")
 
         # safe_load prevents code injection
-        with pytest.raises(ValueError):
-            generator._validate_and_parse("!!python/object/new:os.system ['id']")
+        with pytest.raises(ValueError, match="Invalid YAML"):
+            generator._validate_and_parse("!!python/object/new:os.system ['id']")  # noqa: SLF001 - Testing internal method
 
     def test_generate_returns_dict_with_exact_keys(self) -> None:
         """Test generate returns dict with exactly expected keys.
@@ -912,7 +908,7 @@ jobs:
         mock_orchestrator = Mock(spec=AIOrchestrator)
         generator = CIGenerator(mock_orchestrator, "python")
 
-        workflow = generator._validate_and_parse(original_content)
+        workflow = generator._validate_and_parse(original_content)  # noqa: SLF001 - Testing internal method
 
         assert workflow.content == original_content
         # Should have exact whitespace preservation

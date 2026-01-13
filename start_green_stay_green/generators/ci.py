@@ -1,7 +1,8 @@
 """CI pipeline generator for target projects.
 
-Generates GitHub Actions workflows customized to target project language and framework.
-Integrates reference CI configurations and quality standards from MAXIMUM_QUALITY_ENGINEERING.md.
+Generates GitHub Actions workflows customized to target project language
+and framework. Integrates reference CI configurations and quality standards
+from MAXIMUM_QUALITY_ENGINEERING.md.
 """
 
 from __future__ import annotations
@@ -124,7 +125,8 @@ class CIGenerator(BaseGenerator):
 
         Args:
             orchestrator: AIOrchestrator instance for generation.
-            language: Target language (python, typescript, go, rust, java, csharp, ruby).
+            language: Target language (python, typescript, go, rust, java,
+                csharp, ruby).
             framework: Optional framework (e.g., FastAPI, Express, Gin).
 
         Raises:
@@ -134,7 +136,8 @@ class CIGenerator(BaseGenerator):
 
         language = language.lower()
         if language not in LANGUAGE_CONFIGS:
-            msg = f"Unsupported language: {language}. Supported: {', '.join(LANGUAGE_CONFIGS.keys())}"
+            supported = ", ".join(LANGUAGE_CONFIGS.keys())
+            msg = f"Unsupported language: {language}. Supported: {supported}"
             raise ValueError(msg)
 
         self.language = language
@@ -270,19 +273,19 @@ Start with 'name:' and end with the last workflow configuration line."""
             # Basic structure validation
             if not isinstance(parsed, dict):
                 msg = "Generated workflow must be a YAML dictionary"
-                raise ValueError(msg)
+                raise TypeError(msg)  # noqa: TRY301 - Direct validation in parsing context
 
             if "name" not in parsed:
                 msg = "Workflow must have a 'name' field"
-                raise ValueError(msg)
+                raise ValueError(msg)  # noqa: TRY301 - Direct validation in parsing context
 
             if "jobs" not in parsed:
                 msg = "Workflow must have 'jobs' field"
-                raise ValueError(msg)
+                raise ValueError(msg)  # noqa: TRY301 - Direct validation in parsing context
 
             if not isinstance(parsed["jobs"], dict):
                 msg = "Jobs must be a dictionary"
-                raise ValueError(msg)
+                raise TypeError(msg)  # noqa: TRY301 - Direct validation in parsing context
 
             # Validate required jobs
             required_jobs = {"quality", "test"}
@@ -291,19 +294,19 @@ Start with 'name:' and end with the last workflow configuration line."""
 
             if missing_jobs:
                 msg = f"Workflow missing required jobs: {missing_jobs}"
-                raise ValueError(msg)
+                raise ValueError(msg)  # noqa: TRY301 - Direct validation in parsing context
 
             # Validate quality job has steps
             quality_job = parsed["jobs"].get("quality", {})
             if "steps" not in quality_job or not quality_job["steps"]:
                 msg = "Quality job must have at least one step"
-                raise ValueError(msg)
+                raise ValueError(msg)  # noqa: TRY301 - Direct validation in parsing context
 
             # Validate test job has steps and matrix (if applicable)
             test_job = parsed["jobs"].get("test", {})
             if "steps" not in test_job or not test_job["steps"]:
                 msg = "Test job must have at least one step"
-                raise ValueError(msg)
+                raise ValueError(msg)  # noqa: TRY301 - Direct validation in parsing context
 
             return CIWorkflow(
                 name=parsed.get("name", "CI"),
