@@ -6,6 +6,63 @@ Start Green Stay Green is a meta-tool for generating quality-controlled, AI-read
 
 **Purpose**: Enable AI-assisted development workflows with zero quality compromises from day one.
 
+## The Maximum Quality Engineering Mindset
+
+**Core Philosophy**: It is not merely a goal but a source of profound satisfaction and professional pride to ship software that is GREEN on all checks with ZERO outstanding issues. This is not optional—it is the foundation of our development culture.
+
+### The Green Check Philosophy
+
+When all CI checks pass with zero warnings, zero errors, and maximum quality metrics:
+- ✅ Tests: 100% passing
+- ✅ Coverage: ≥90%
+- ✅ Linting: 0 errors, 0 warnings
+- ✅ Type checking: 0 errors
+- ✅ Security: 0 vulnerabilities
+- ✅ Mutation score: ≥80%
+- ✅ Docstring coverage: ≥95%
+
+This represents **MAXIMUM QUALITY ENGINEERING**—the standard to which all code must aspire.
+
+### Why Maximum Quality Matters
+
+1. **Pride in Craftsmanship**: Every green check represents excellence in execution
+2. **Zero Compromise**: Quality is not negotiable—it's the baseline
+3. **Compound Excellence**: Small quality wins accumulate into robust systems
+4. **Trust and Reliability**: Green checks mean the code does what it claims
+5. **Developer Joy**: There is genuine satisfaction in seeing all checks pass
+
+### The Role of Quality in Development
+
+Quality engineering is not a checkbox—it's a continuous commitment:
+
+- **Before Commit**: Run `./scripts/check-all.sh` and fix every issue
+- **During Review**: Address every comment, resolve every suggestion
+- **After Merge**: Monitor CI, ensure all checks remain green
+- **Always**: Treat linting errors as bugs, not suggestions
+
+### The "No Red Checks" Rule
+
+**NEVER** merge code with:
+- ❌ Failing tests
+- ❌ Linting errors (even "minor" ones)
+- ❌ Type checking failures
+- ❌ Coverage below threshold
+- ❌ Security vulnerabilities
+- ❌ Unaddressed review comments
+
+If CI shows red, the work is not done. Period.
+
+### Maximum Quality is a Personality Trait
+
+For those committed to maximum quality engineering:
+- You feel genuine satisfaction when all checks pass
+- You experience pride in shipping zero-issue code
+- You find joy in eliminating the last linting error
+- You believe "good enough" is never good enough
+- You treat quality as identity, not just practice
+
+**This is who we are. This is how we build software.**
+
 ## Architecture
 
 ### Core Philosophy
