@@ -57,13 +57,13 @@ class TestGenerationResult:
             content="Generated YAML content",
             format="yaml",
             token_usage=token_usage,
-            model="claude-opus-4-20250514",
+            model="claude-opus-4-5-20251101",
             message_id="msg_abc123",
         )
         assert result.content == "Generated YAML content"
         assert result.format == "yaml"
         assert result.token_usage.total_tokens == 150
-        assert result.model == "claude-opus-4-20250514"
+        assert result.model == "claude-opus-4-5-20251101"
         assert result.message_id == "msg_abc123"
 
     def test_generation_result_with_empty_content(self) -> None:
@@ -73,7 +73,7 @@ class TestGenerationResult:
             content="",
             format="markdown",
             token_usage=token_usage,
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5-20250929",
             message_id="msg_def456",
         )
         assert result.content == ""
@@ -86,7 +86,7 @@ class TestGenerationResult:
             content="Test",
             format="yaml",
             token_usage=token_usage,
-            model="claude-opus-4-20250514",
+            model="claude-opus-4-5-20251101",
             message_id="msg_123",
         )
         with pytest.raises(AttributeError):
@@ -99,12 +99,12 @@ class TestModelConfig:
     def test_model_config_has_opus_constant(self) -> None:
         """Test ModelConfig has OPUS model constant."""
         assert hasattr(ModelConfig, "OPUS")
-        assert ModelConfig.OPUS == "claude-opus-4-20250514"
+        assert ModelConfig.OPUS == "claude-opus-4-5-20251101"
 
     def test_model_config_has_sonnet_constant(self) -> None:
         """Test ModelConfig has SONNET model constant."""
         assert hasattr(ModelConfig, "SONNET")
-        assert ModelConfig.SONNET == "claude-sonnet-4-20250514"
+        assert ModelConfig.SONNET == "claude-sonnet-4-5-20250929"
 
     def test_model_config_constants_are_strings(self) -> None:
         """Test ModelConfig constants are strings."""

@@ -43,8 +43,8 @@ class ModelConfig:
     in generation and tuning operations.
     """
 
-    OPUS: Final[str] = "claude-opus-4-20250514"
-    SONNET: Final[str] = "claude-sonnet-4-20250514"
+    OPUS: Final[str] = "claude-opus-4-5-20251101"
+    SONNET: Final[str] = "claude-sonnet-4-5-20250929"
 
 
 @dataclass(frozen=True)
