@@ -7,6 +7,7 @@ including caching, validation, and language-specific rendering.
 import logging
 from pathlib import Path
 from typing import Any
+from typing import ClassVar
 
 from jinja2 import Environment
 from jinja2 import FileSystemLoader
@@ -29,8 +30,10 @@ class PromptManager:
     Supports language-specific template selection.
     """
 
-    SUPPORTED_LANGUAGES = {"python", "typescript", "go", "rust", "swift", "java"}
-    SUPPORTED_TEMPLATE_TYPES = {
+    SUPPORTED_LANGUAGES: ClassVar[set[str]] = {
+        "python", "typescript", "go", "rust", "swift", "java"
+    }
+    SUPPORTED_TEMPLATE_TYPES: ClassVar[set[str]] = {
         "ci_cd",
         "precommit",
         "quality_scripts",
@@ -112,11 +115,9 @@ class PromptManager:
 
             if not rendered or not rendered.strip():
                 msg = f"Template {filename} rendered to empty content"
-                raise PromptTemplateError(
-                    msg
-                )
+                raise PromptTemplateError(msg)  # noqa: TRY301 - Direct validation in rendering context
 
-            return rendered
+            return rendered  # noqa: TRY300 - Return in try block for clarity, validated above
         except TemplateNotFound as e:
             msg = f"Prompt template not found: {filename}"
             raise PromptTemplateError(msg) from e
@@ -152,7 +153,7 @@ class PromptManager:
         try:
             filename = f"{template_name}.jinja2"
             self._env.get_template(filename)
-            return True
+            return True  # noqa: TRY300 - Boolean validation pattern, clear intent
         except TemplateNotFound:
             return False
 
