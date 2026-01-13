@@ -18,9 +18,9 @@ from start_green_stay_green.ai.orchestrator import GenerationError
 from start_green_stay_green.ai.orchestrator import GenerationResult
 from start_green_stay_green.ai.orchestrator import ModelConfig
 from start_green_stay_green.ai.orchestrator import TokenUsage
-from start_green_stay_green.generators.ci import LANGUAGE_CONFIGS
 from start_green_stay_green.generators.ci import CIGenerator
 from start_green_stay_green.generators.ci import CIWorkflow
+from start_green_stay_green.generators.ci import LANGUAGE_CONFIGS
 
 
 class TestCIWorkflowDataClass:
