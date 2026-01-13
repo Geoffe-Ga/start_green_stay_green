@@ -925,6 +925,13 @@ When delegating work to subagents, provide:
    - Testing requirements
    - Documentation requirements
 
+5. **Execution Strategy**
+   - **ALWAYS prefer parallel approaches** when multiple independent tasks exist
+   - Launch multiple agents concurrently whenever possible
+   - Run integration and implementation tasks simultaneously
+   - Maximize throughput by executing non-dependent work in parallel
+   - Only execute sequentially when explicit dependencies exist
+
 ## Key Files
 
 ### Configuration Files
