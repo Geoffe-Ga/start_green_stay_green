@@ -7,14 +7,16 @@ Integrates reference CI configurations and quality standards from MAXIMUM_QUALIT
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from typing import Any
 
 import yaml
 
-from start_green_stay_green.ai.orchestrator import AIOrchestrator
-from start_green_stay_green.ai.orchestrator import GenerationResult
 from start_green_stay_green.generators.base import BaseGenerator
 
+if TYPE_CHECKING:
+    from start_green_stay_green.ai.orchestrator import AIOrchestrator
+    from start_green_stay_green.ai.orchestrator import GenerationResult
 
 # Supported languages and their configurations
 LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
@@ -163,9 +165,8 @@ class CIGenerator(BaseGenerator):
         result = self._generate_with_ai(context)
 
         # Validate generated workflow
-        workflow = self._validate_and_parse(result.content)
+        return self._validate_and_parse(result.content)
 
-        return workflow
 
     def _build_generation_context(
         self,
@@ -182,7 +183,7 @@ class CIGenerator(BaseGenerator):
         versions = ", ".join(language_config["supported_versions"])
         framework_info = f"Framework: {self.framework}" if self.framework else ""
 
-        context = f"""
+        return f"""
 Language: {self.language.upper()}
 {framework_info}
 Test Framework: {language_config['test_framework']}
@@ -213,7 +214,6 @@ The CI workflow MUST:
 9. Have clear job names and step descriptions
 10. Use appropriate GitHub Actions
 """
-        return context
 
     def _generate_with_ai(self, context: str) -> GenerationResult:
         """Generate workflow using AI orchestrator.
@@ -245,12 +245,11 @@ Generate a complete, valid GitHub Actions workflow in YAML format that:
 Output ONLY valid YAML - no markdown, no explanations, no code fences.
 Start with 'name:' and end with the last workflow configuration line."""
 
-        result = self.orchestrator.generate(
+        return self.orchestrator.generate(
             prompt=prompt,
             output_format="yaml",
         )
 
-        return result
 
     def _validate_and_parse(self, yaml_content: str) -> CIWorkflow:
         """Validate and parse generated YAML workflow.
@@ -348,7 +347,7 @@ Start with 'name:' and end with the last workflow configuration line."""
         Returns:
             List of supported language identifiers.
         """
-        return sorted(list(LANGUAGE_CONFIGS.keys()))
+        return sorted(LANGUAGE_CONFIGS.keys())
 
     @staticmethod
     def get_language_config(language: str) -> dict[str, Any]:

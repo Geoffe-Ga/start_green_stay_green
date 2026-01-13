@@ -9,23 +9,18 @@ Comprehensive tests for CI pipeline generation covering:
 - Static utility methods
 """
 
-from unittest.mock import MagicMock
 from unittest.mock import Mock
-from unittest.mock import create_autospec
-from unittest.mock import patch
 
-from anthropic.types import TextBlock
 import pytest
-import yaml
 
-from start_green_stay_green.generators.ci import LANGUAGE_CONFIGS
-from start_green_stay_green.generators.ci import CIGenerator
-from start_green_stay_green.generators.ci import CIWorkflow
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError
 from start_green_stay_green.ai.orchestrator import GenerationResult
 from start_green_stay_green.ai.orchestrator import ModelConfig
 from start_green_stay_green.ai.orchestrator import TokenUsage
+from start_green_stay_green.generators.ci import LANGUAGE_CONFIGS
+from start_green_stay_green.generators.ci import CIGenerator
+from start_green_stay_green.generators.ci import CIWorkflow
 
 
 class TestCIWorkflowDataClass:
@@ -71,7 +66,7 @@ class TestCIWorkflowDataClass:
 
     def test_ci_workflow_supports_all_languages(self) -> None:
         """Test CIWorkflow can represent any language."""
-        for lang in LANGUAGE_CONFIGS.keys():
+        for lang in LANGUAGE_CONFIGS:
             workflow = CIWorkflow(
                 name=f"{lang} CI",
                 content="content",
@@ -141,7 +136,7 @@ class TestCIGeneratorInitialization:
         """Test CIGenerator initializes with all supported languages."""
         mock_orchestrator = Mock(spec=AIOrchestrator)
 
-        for lang in LANGUAGE_CONFIGS.keys():
+        for lang in LANGUAGE_CONFIGS:
             generator = CIGenerator(mock_orchestrator, lang)
             assert generator.language == lang
 
@@ -224,9 +219,7 @@ class TestCIGeneratorContextBuilding:
         mock_orchestrator = Mock(spec=AIOrchestrator)
         generator = CIGenerator(mock_orchestrator, "python")
 
-        context = generator._build_generation_context(
-            LANGUAGE_CONFIGS["python"]
-        )
+        context = generator._build_generation_context(LANGUAGE_CONFIGS["python"])
 
         assert "PYTHON" in context
         assert "pytest" in context
@@ -242,9 +235,7 @@ class TestCIGeneratorContextBuilding:
         mock_orchestrator = Mock(spec=AIOrchestrator)
         generator = CIGenerator(mock_orchestrator, "python")
 
-        context = generator._build_generation_context(
-            LANGUAGE_CONFIGS["python"]
-        )
+        context = generator._build_generation_context(LANGUAGE_CONFIGS["python"])
 
         assert "Code Coverage" in context
         assert "90%" in context
@@ -261,9 +252,7 @@ class TestCIGeneratorContextBuilding:
             framework="Django",
         )
 
-        context = generator._build_generation_context(
-            LANGUAGE_CONFIGS["python"]
-        )
+        context = generator._build_generation_context(LANGUAGE_CONFIGS["python"])
 
         assert "Django" in context
 
@@ -274,9 +263,7 @@ class TestCIGeneratorContextBuilding:
         mock_orchestrator = Mock(spec=AIOrchestrator)
         generator = CIGenerator(mock_orchestrator, "python")
 
-        context = generator._build_generation_context(
-            LANGUAGE_CONFIGS["python"]
-        )
+        context = generator._build_generation_context(LANGUAGE_CONFIGS["python"])
 
         assert "Framework:" not in context
 
@@ -308,9 +295,7 @@ jobs:
         mock_orchestrator = Mock(spec=AIOrchestrator)
         generator = CIGenerator(mock_orchestrator, "python")
 
-        workflow = generator._validate_and_parse(
-            self._create_minimal_valid_workflow()
-        )
+        workflow = generator._validate_and_parse(self._create_minimal_valid_workflow())
 
         assert workflow.is_valid is True
         assert workflow.error_message is None
@@ -574,9 +559,7 @@ class TestCIGeneratorErrorHandling:
     def test_generate_workflow_orchestrator_error(self) -> None:
         """Test generate_workflow propagates orchestrator errors."""
         mock_orchestrator = Mock(spec=AIOrchestrator)
-        mock_orchestrator.generate.side_effect = GenerationError(
-            "API failed"
-        )
+        mock_orchestrator.generate.side_effect = GenerationError("API failed")
 
         generator = CIGenerator(mock_orchestrator, "python")
 
@@ -758,7 +741,7 @@ jobs:
         Kills mutations: sorted → unsorted, list.sort() removed
         """
         languages = CIGenerator.get_supported_languages()
-        expected = sorted(list(LANGUAGE_CONFIGS.keys()))
+        expected = sorted(LANGUAGE_CONFIGS.keys())
 
         assert languages == expected
         assert languages[0] <= languages[-1]  # First <= Last when sorted
@@ -835,7 +818,7 @@ jobs:
 
         assert workflow.is_valid is True
         assert workflow.is_valid == True  # noqa: E712
-        assert not (workflow.is_valid is False)
+        assert workflow.is_valid is not False
 
     def test_parse_yaml_safe_load_used(self) -> None:
         """Test yaml.safe_load is used (not unsafe load).
