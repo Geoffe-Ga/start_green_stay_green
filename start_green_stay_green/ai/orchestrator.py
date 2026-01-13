@@ -199,6 +199,9 @@ class AIOrchestrator:
                     message_id=response.id,
                 )
 
+            except GenerationError:
+                # Re-raise GenerationError directly without wrapping
+                raise
             except Exception as e:  # noqa: BLE001
                 last_error = e
                 # If we haven't exhausted retries, sleep and try again
