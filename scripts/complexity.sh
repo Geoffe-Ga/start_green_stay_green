@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/complexity.sh - Code complexity analysis
+# scripts/complexity.sh - Code complexity analysis with MAXIMUM QUALITY enforcement
 # Usage: ./scripts/complexity.sh [--verbose] [--help]
 
 set -euo pipefail
@@ -8,6 +8,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 VERBOSE=false
+
+# MAXIMUM QUALITY thresholds
+MAX_CYCLOMATIC_COMPLEXITY=10
+MIN_MAINTAINABILITY_INDEX=20
+MAX_COMPLEXITY_GRADE="A"  # A = 1-5 (best), B = 6-10, C = 11-20, etc.
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -20,24 +25,27 @@ while [[ $# -gt 0 ]]; do
             cat << EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Analyze code complexity using Radon and Xenon.
+Analyze code complexity and enforce MAXIMUM QUALITY thresholds.
 
-Metrics:
-  - Cyclomatic complexity (should be <= 10)
-  - Maintainability index (should be >= 20)
-  - Cognitive complexity
+MAXIMUM QUALITY THRESHOLDS:
+  - Cyclomatic Complexity: ≤ 10 per function
+  - Maintainability Index: ≥ 20
+  - Overall Grade: A (complexity 1-5)
+  - Max Arguments: 5 (enforced by ruff/pylint)
+  - Max Branches: 12 (enforced by ruff/pylint)
+  - Max Lines: 50 per function (enforced by ruff/pylint)
 
 OPTIONS:
     --verbose   Show detailed output
     --help      Display this help message
 
 EXIT CODES:
-    0           Complexity acceptable
-    1           Complexity exceeds thresholds
-    2           Error during analysis
+    0           All complexity thresholds met
+    1           One or more thresholds exceeded
+    2           Error during analysis (tools not installed)
 
 EXAMPLES:
-    $(basename "$0")          # Analyze complexity
+    $(basename "$0")          # Analyze with MAXIMUM QUALITY thresholds
     $(basename "$0") --verbose # Show detailed output
 EOF
             exit 0
@@ -56,33 +64,119 @@ if $VERBOSE; then
     set -x
 fi
 
-echo "=== Code Complexity Analysis ==="
+echo "=== Code Complexity Analysis (MAXIMUM QUALITY) ==="
+echo ""
 
-# Check Cyclomatic Complexity with Radon
-if command -v radon &> /dev/null; then
-    echo ""
-    echo "Cyclomatic Complexity (should be <= 10):"
-    radon cc -a start_green_stay_green/ || true
+FAILED_CHECKS=()
+PASSED_CHECKS=()
 
-    echo ""
-    echo "Maintainability Index (should be >= 20):"
-    radon mi -a start_green_stay_green/ || true
-else
-    echo "Warning: radon not installed, skipping cyclomatic complexity check" >&2
+# Check if tools are installed
+if ! command -v radon &> /dev/null; then
+    echo "Error: radon not installed" >&2
+    echo "Install with: pip install radon" >&2
+    exit 2
 fi
 
-# Check complexity with Xenon
+if ! command -v xenon &> /dev/null; then
+    echo "Warning: xenon not installed (recommended for strict enforcement)" >&2
+    echo "Install with: pip install xenon" >&2
+fi
+
+# 1. Check Cyclomatic Complexity with Radon
+echo "Checking Cyclomatic Complexity (max $MAX_CYCLOMATIC_COMPLEXITY)..."
+CC_OUTPUT=$(radon cc -s -a start_green_stay_green/ 2>&1)
+
+if $VERBOSE; then
+    echo "$CC_OUTPUT"
+fi
+
+# Check for C, D, E, or F grades (complexity > 10)
+if echo "$CC_OUTPUT" | grep -qE "^[[:space:]]*[C-F] "; then
+    FAILED_CHECKS+=("Cyclomatic Complexity")
+    echo "✗ Cyclomatic Complexity exceeds threshold (max $MAX_CYCLOMATIC_COMPLEXITY)" >&2
+    echo "" >&2
+    echo "Functions exceeding threshold:" >&2
+    echo "$CC_OUTPUT" | grep -E "^[[:space:]]*[C-F] " || true
+    echo "" >&2
+else
+    PASSED_CHECKS+=("Cyclomatic Complexity")
+    echo "✓ Cyclomatic Complexity: All functions ≤ $MAX_CYCLOMATIC_COMPLEXITY"
+fi
+
+echo ""
+
+# 2. Check Maintainability Index with Radon
+echo "Checking Maintainability Index (min $MIN_MAINTAINABILITY_INDEX)..."
+MI_OUTPUT=$(radon mi -s start_green_stay_green/ 2>&1)
+
+if $VERBOSE; then
+    echo "$MI_OUTPUT"
+fi
+
+# Check for C, D, E, or F grades (MI < 20)
+if echo "$MI_OUTPUT" | grep -qE "^[[:space:]]*[C-F] "; then
+    FAILED_CHECKS+=("Maintainability Index")
+    echo "✗ Maintainability Index below threshold (min $MIN_MAINTAINABILITY_INDEX)" >&2
+    echo "" >&2
+    echo "Modules below threshold:" >&2
+    echo "$MI_OUTPUT" | grep -E "^[[:space:]]*[C-F] " || true
+    echo "" >&2
+else
+    PASSED_CHECKS+=("Maintainability Index")
+    echo "✓ Maintainability Index: All modules ≥ $MIN_MAINTAINABILITY_INDEX"
+fi
+
+echo ""
+
+# 3. Check overall complexity with Xenon (if available)
 if command -v xenon &> /dev/null; then
-    if $VERBOSE; then
-        echo "Running Xenon complexity check..."
+    echo "Checking overall complexity grade (max grade $MAX_COMPLEXITY_GRADE)..."
+
+    # Xenon options:
+    # --max-absolute A: Maximum complexity grade (A = 1-5, B = 6-10, C = 11-20)
+    # --max-modules A: Maximum average complexity per module
+    # --max-average A: Maximum average complexity overall
+
+    if xenon --max-absolute A --max-modules A --max-average A start_green_stay_green/ 2>&1; then
+        PASSED_CHECKS+=("Xenon Complexity")
+        echo "✓ Xenon: All complexity metrics grade A"
+    else
+        FAILED_CHECKS+=("Xenon Complexity")
+        echo "✗ Xenon complexity checks failed (grade must be A)" >&2
+        echo "" >&2
+        echo "Run with --verbose to see details, or run directly:" >&2
+        echo "  xenon --max-absolute A start_green_stay_green/" >&2
     fi
-    xenon --max-absolute B --max-modules B --max-average B start_green_stay_green/ || \
-        { echo "✗ Complexity exceeds thresholds" >&2; exit 1; }
 else
-    if $VERBOSE; then
-        echo "Note: xenon not installed for strict complexity checks"
-    fi
+    echo "ℹ Xenon not available (skipping strict grade enforcement)"
 fi
 
-echo "✓ Complexity analysis completed"
-exit 0
+echo ""
+echo "=== Complexity Analysis Summary ==="
+echo "Passed: ${#PASSED_CHECKS[@]}"
+echo "Failed: ${#FAILED_CHECKS[@]}"
+
+if [ ${#FAILED_CHECKS[@]} -gt 0 ]; then
+    echo ""
+    echo "Failed checks:"
+    for check in "${FAILED_CHECKS[@]}"; do
+        echo "  ✗ $check"
+    done
+    echo ""
+    echo "MAXIMUM QUALITY STANDARDS:"
+    echo "  - Cyclomatic Complexity: ≤ $MAX_CYCLOMATIC_COMPLEXITY"
+    echo "  - Maintainability Index: ≥ $MIN_MAINTAINABILITY_INDEX"
+    echo "  - Complexity Grade: $MAX_COMPLEXITY_GRADE"
+    echo ""
+    echo "To fix:"
+    echo "  1. Refactor complex functions"
+    echo "  2. Extract helper methods"
+    echo "  3. Simplify branching logic"
+    echo "  4. Break large functions into smaller ones"
+    echo ""
+    exit 1
+else
+    echo ""
+    echo "✓ All complexity checks passed (MAXIMUM QUALITY)"
+    exit 0
+fi
