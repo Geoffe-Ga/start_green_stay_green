@@ -13,14 +13,12 @@ from jinja2 import FileSystemLoader
 from jinja2 import TemplateNotFound
 from jinja2 import select_autoescape
 
-
 logger = logging.getLogger(__name__)
 
 
 class PromptTemplateError(Exception):
     """Raised when prompt template operations fail."""
 
-    pass
 
 
 class PromptManager:
@@ -54,8 +52,9 @@ class PromptManager:
             template_dir = Path(__file__).parent / "templates"
 
         if not template_dir.exists():
+            msg = f"Prompt template directory not found: {template_dir}"
             raise PromptTemplateError(
-                f"Prompt template directory not found: {template_dir}"
+                msg
             )
 
         self.template_dir = template_dir
@@ -89,9 +88,12 @@ class PromptManager:
             ValueError: If language is not supported.
         """
         if language and language not in self.SUPPORTED_LANGUAGES:
-            raise ValueError(
+            msg = (
                 f"Unsupported language: {language}. "
                 f"Supported: {', '.join(sorted(self.SUPPORTED_LANGUAGES))}"
+            )
+            raise ValueError(
+                msg
             )
 
         # Build template filename with language variant if provided
@@ -109,18 +111,19 @@ class PromptManager:
             rendered = template.render(**context)
 
             if not rendered or not rendered.strip():
+                msg = f"Template {filename} rendered to empty content"
                 raise PromptTemplateError(
-                    f"Template {filename} rendered to empty content"
+                    msg
                 )
 
             return rendered
         except TemplateNotFound as e:
-            raise PromptTemplateError(
-                f"Prompt template not found: {filename}"
-            ) from e
+            msg = f"Prompt template not found: {filename}"
+            raise PromptTemplateError(msg) from e
         except Exception as e:
+            msg = f"Failed to render template {filename}: {e!s}"
             raise PromptTemplateError(
-                f"Failed to render template {filename}: {str(e)}"
+                msg
             ) from e
 
     def get_available_templates(self) -> list[str]:
@@ -135,7 +138,7 @@ class PromptManager:
             parts = template_file.stem.split(".")
             base_name = parts[0]
             templates.add(base_name)
-        return sorted(list(templates))
+        return sorted(templates)
 
     def validate_template(self, template_name: str) -> bool:
         """Validate that a template exists and is renderable.

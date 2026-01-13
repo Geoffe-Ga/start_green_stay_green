@@ -1,8 +1,6 @@
 """Unit tests for prompt template manager."""
 
 from pathlib import Path
-from unittest.mock import MagicMock
-from unittest.mock import patch
 
 import pytest
 
@@ -55,24 +53,24 @@ class TestPromptManagerInitialization:
 
     def test_init_supported_languages_constant(self) -> None:
         """Test SUPPORTED_LANGUAGES constant is properly defined."""
-        assert PromptManager.SUPPORTED_LANGUAGES == {
+        assert {
             "python",
             "typescript",
             "go",
             "rust",
             "swift",
             "java",
-        }
+        } == PromptManager.SUPPORTED_LANGUAGES
 
     def test_init_supported_template_types_constant(self) -> None:
         """Test SUPPORTED_TEMPLATE_TYPES constant is properly defined."""
-        assert PromptManager.SUPPORTED_TEMPLATE_TYPES == {
+        assert {
             "ci_cd",
             "precommit",
             "quality_scripts",
             "claude_md",
             "project_scaffolding",
-        }
+        } == PromptManager.SUPPORTED_TEMPLATE_TYPES
 
 
 class TestPromptManagerRender:
@@ -225,9 +223,7 @@ class TestPromptManagerRender:
         templates_dir.mkdir()
 
         template_file = templates_dir / "loop.jinja2"
-        template_file.write_text(
-            "{% for item in items %}{{ item }}\n{% endfor %}"
-        )
+        template_file.write_text("{% for item in items %}{{ item }}\n{% endfor %}")
 
         manager = PromptManager(template_dir=templates_dir)
         result = manager.render("loop", {"items": ["a", "b", "c"]})
@@ -346,7 +342,7 @@ class TestPromptManagerCacheManagement:
         manager.render("cached", {"value": "v2"})
 
         # Cache should have only one entry
-        cache_entries = [k for k in manager._template_cache.keys() if "cached" in k]
+        cache_entries = [k for k in manager._template_cache if "cached" in k]
         assert len(cache_entries) == 1
 
 
@@ -555,7 +551,9 @@ class TestPromptTemplateError:
     def test_prompt_template_error_with_cause(self) -> None:
         """Test PromptTemplateError can have underlying cause."""
         cause = FileNotFoundError("File not found")
-        error = PromptTemplateError("Failed to load", )
+        error = PromptTemplateError(
+            "Failed to load",
+        )
         # Standard exception chaining
         error.__cause__ = cause
         assert error.__cause__ is cause
@@ -574,9 +572,7 @@ class TestPromptManagerLanguageVariants:
 
         # Create both base and language-specific versions
         (templates_dir / "config.jinja2").write_text("Default config")
-        (templates_dir / "config.python.jinja2").write_text(
-            "Python-specific config"
-        )
+        (templates_dir / "config.python.jinja2").write_text("Python-specific config")
 
         manager = PromptManager(template_dir=templates_dir)
 
@@ -605,7 +601,7 @@ class TestPromptManagerLanguageVariants:
     def test_all_supported_languages_are_valid(self) -> None:
         """Test all supported languages are in the constant."""
         expected = {"python", "typescript", "go", "rust", "swift", "java"}
-        assert PromptManager.SUPPORTED_LANGUAGES == expected
+        assert expected == PromptManager.SUPPORTED_LANGUAGES
 
     def test_render_with_each_supported_language(self, tmp_path: Path) -> None:
         """Test rendering with each supported language (base template)."""
