@@ -7,6 +7,7 @@ with language-appropriate hooks for formatting, linting, security, and quality.
 from __future__ import annotations
 
 from typing import Any
+from typing import cast
 
 import yaml
 
@@ -386,9 +387,7 @@ class PreCommitGenerator(BaseGenerator):
                 f"Unsupported language: {config.language}. "
                 f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
             )
-            raise ValueError(
-                msg
-            )
+            raise ValueError(msg)
 
         language_config = LANGUAGE_CONFIGS[config.language]
 
@@ -475,10 +474,9 @@ class PreCommitGenerator(BaseGenerator):
                 f"Unsupported language: {language}. "
                 f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
             )
-            raise ValueError(
-                msg
-            )
-        return LANGUAGE_CONFIGS[language]["hooks"]
+            raise ValueError(msg)
+        # Cast to satisfy mypy strict mode - dict access returns Any
+        return cast("list[dict[str, Any]]", LANGUAGE_CONFIGS[language]["hooks"])
 
     def count_hooks_for_language(self, language: str) -> int:
         """Count total number of hooks configured for a language.
@@ -503,9 +501,7 @@ class PreCommitGenerator(BaseGenerator):
                 f"Unsupported language: {language}. "
                 f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
             )
-            raise ValueError(
-                msg
-            )
+            raise ValueError(msg)
 
         hooks_config = LANGUAGE_CONFIGS[language]["hooks"]
         total_hooks = 0
