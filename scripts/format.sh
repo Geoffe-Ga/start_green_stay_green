@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 FIX=false
-CHECK=false
+CHECK=true  # Default to check mode for consistency with CI
 VERBOSE=false
 
 # Parse command line arguments
@@ -66,11 +66,14 @@ fi
 
 echo "=== Formatting (Black + isort) ==="
 
-# Determine mode
-if $CHECK; then
+# Determine mode - check takes precedence, then fix
+if $CHECK && ! $FIX; then
     MODE="--check"
-else
+elif $FIX; then
+    CHECK=false  # Fix mode overrides check mode
     MODE=""
+else
+    MODE="--check"  # Default to check
 fi
 
 # Run isort
