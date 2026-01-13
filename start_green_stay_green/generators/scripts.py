@@ -540,7 +540,8 @@ fi
         """Generate Python test.sh script."""
         return """#!/usr/bin/env bash
 # scripts/test.sh - Run tests with Pytest
-# Usage: ./scripts/test.sh [--unit|--integration|--e2e|--all] [--coverage] [--mutation] [--verbose] [--help]
+# Usage: ./scripts/test.sh [--unit|--integration|--e2e|--all] [--coverage]
+#                          [--mutation] [--verbose] [--help]
 
 set -euo pipefail
 
@@ -866,7 +867,8 @@ if $VERBOSE; then
     echo "Running Safety dependency checker..."
 fi
 if [ -f "$PROJECT_ROOT/.safety-policy.yml" ]; then
-    safety check --policy-file "$PROJECT_ROOT/.safety-policy.yml" || { echo "✗ Safety found issues" >&2; exit 1; }
+    safety check --policy-file "$PROJECT_ROOT/.safety-policy.yml" || \\
+        { echo "✗ Safety found issues" >&2; exit 1; }
 else
     safety check || { echo "✗ Safety found issues" >&2; exit 1; }
 fi
@@ -1930,9 +1932,11 @@ fi
 echo "=== Linting (clippy) ==="
 
 if $FIX; then
-    cargo clippy --all --fix --allow-dirty --allow-staged || { echo "✗ Clippy fix failed" >&2; exit 1; }
+    cargo clippy --all --fix --allow-dirty --allow-staged || \\
+        { echo "✗ Clippy fix failed" >&2; exit 1; }
 else
-    cargo clippy --all -- -D warnings || { echo "✗ Clippy check failed" >&2; exit 1; }
+    cargo clippy --all -- -D warnings || \\
+        { echo "✗ Clippy check failed" >&2; exit 1; }
 fi
 
 echo "✓ Linting checks passed"
@@ -1996,7 +2000,9 @@ fi
 echo "=== Running Tests (cargo test) ==="
 
 if $COVERAGE; then
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-Cinstrument-coverage" LLVM_PROFILE_FILE="coverage-%p-%m.profraw" cargo test || { echo "✗ Tests failed" >&2; exit 1; }
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-Cinstrument-coverage" \\
+        LLVM_PROFILE_FILE="coverage-%p-%m.profraw" cargo test || \\
+        { echo "✗ Tests failed" >&2; exit 1; }
 else
     cargo test || { echo "✗ Tests failed" >&2; exit 1; }
 fi
