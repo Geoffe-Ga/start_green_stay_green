@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 from typing import TYPE_CHECKING
-from typing import cast
 
 import yaml
 
@@ -252,9 +251,7 @@ Start with 'name:' and end with the last workflow configuration line."""
             prompt=prompt,
             output_format="yaml",
         )
-        # Cast to satisfy mypy strict mode
-        # orchestrator.generate returns GenerationResult
-        return cast("GenerationResult", result)
+        return result
 
     def _validate_structure(self, parsed: dict[str, Any]) -> None:
         """Validate basic workflow structure.
