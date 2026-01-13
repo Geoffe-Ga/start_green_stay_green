@@ -68,11 +68,15 @@ bandit -r start_green_stay_green/ || { echo "✗ Bandit found issues" >&2; exit 
 
 echo "=== Security Checks (Safety) ==="
 
-# Run Safety
+# Run Safety with policy file
 if $VERBOSE; then
     echo "Running Safety dependency checker..."
 fi
-safety check || { echo "✗ Safety found issues" >&2; exit 1; }
+if [ -f "$PROJECT_ROOT/.safety-policy.yml" ]; then
+    safety check --policy-file "$PROJECT_ROOT/.safety-policy.yml" || { echo "✗ Safety found issues" >&2; exit 1; }
+else
+    safety check || { echo "✗ Safety found issues" >&2; exit 1; }
+fi
 
 if $FULL; then
     echo "=== Comprehensive Security Scan ==="

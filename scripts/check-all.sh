@@ -75,7 +75,7 @@ run_check() {
     local args=("$@")
 
     echo "Running: $check_name"
-    if "$SCRIPT_DIR/$script" "${args[@]}" $VERBOSE_FLAG; then
+    if "$SCRIPT_DIR/$script" "${args[@]+"${args[@]}"}" $VERBOSE_FLAG; then
         PASSED_CHECKS+=("$check_name")
         echo "✓ $check_name passed"
     else

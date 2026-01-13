@@ -82,9 +82,10 @@ jobs:
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
+        continue-on-error: true  # Don't fail CI if codecov has issues
         with:
           files: ./coverage.xml
-          fail_ci_if_error: true
+          fail_ci_if_error: false
           verbose: true
 
       - name: Upload test results
@@ -152,12 +153,14 @@ jobs:
     name: Dependency Review
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    continue-on-error: true  # Skip if not available (requires GitHub Advanced Security)
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
+        continue-on-error: true
         with:
           fail-on-severity: moderate
 

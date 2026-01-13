@@ -1,0 +1,16 @@
+# Safety vulnerability ignore policy
+# Only add entries here with clear justification and tracking issue
+
+security:
+  # Ignore specific vulnerabilities with justification
+  ignore-vulnerabilities:
+    # CVE-2022-42969: ReDoS in py package
+    # - Vulnerability ID: 51457
+    # - Package: py 1.11.0
+    # - Reason: DISPUTED CVE, no fix available, dev-only dependency
+    # - Required by: interrogate (docstring coverage tool)
+    # - Risk: Low - only used in CI/dev environment, not in production
+    # - Tracking: Accepted risk, will monitor for updates
+    51457:
+      reason: "DISPUTED CVE in development-only dependency with no fix available"
+      expires: "2026-06-01"
