@@ -318,9 +318,7 @@ jobs:
         generator = CIGenerator(mock_orchestrator, "python")
 
         with pytest.raises(ValueError, match="Invalid YAML"):
-            generator._validate_and_parse(  # noqa: SLF001
-                "not: valid: yaml: [syntax"
-            )
+            generator._validate_and_parse("not: valid: yaml: [syntax")  # noqa: SLF001
 
     def test_validate_not_dict_raises_error(self) -> None:
         """Test validation fails when YAML is not a dictionary."""
@@ -328,9 +326,7 @@ jobs:
         generator = CIGenerator(mock_orchestrator, "python")
 
         with pytest.raises(ValueError, match="YAML dictionary"):
-            generator._validate_and_parse(  # noqa: SLF001
-                "- item1\n- item2"
-            )
+            generator._validate_and_parse("- item1\n- item2")  # noqa: SLF001
 
     def test_validate_missing_name_raises_error(self) -> None:
         """Test validation fails when 'name' field is missing."""
@@ -345,9 +341,7 @@ jobs:
       - run: echo test
 """
         with pytest.raises(ValueError, match="'name' field"):
-            generator._validate_and_parse(  # noqa: SLF001
-                workflow_yaml
-            )
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001
 
     def test_validate_missing_jobs_raises_error(self) -> None:
         """Test validation fails when 'jobs' field is missing."""
@@ -357,9 +351,7 @@ jobs:
         workflow_yaml = "name: Test CI\non: push"
 
         with pytest.raises(ValueError, match="'jobs' field"):
-            generator._validate_and_parse(  # noqa: SLF001
-                workflow_yaml
-            )
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001
 
     def test_validate_jobs_not_dict_raises_error(self) -> None:
         """Test validation fails when jobs is not a dictionary."""
@@ -373,9 +365,7 @@ jobs:
   - item2
 """
         with pytest.raises(ValueError, match="Jobs must be a dictionary"):
-            generator._validate_and_parse(  # noqa: SLF001
-                workflow_yaml
-            )
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001
 
     def test_validate_missing_required_jobs_raises_error(self) -> None:
         """Test validation fails when required jobs are missing."""
@@ -391,9 +381,7 @@ jobs:
       - run: echo test
 """
         with pytest.raises(ValueError, match="missing required jobs"):
-            generator._validate_and_parse(  # noqa: SLF001
-                workflow_yaml
-            )
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001
 
     def test_validate_quality_job_missing_steps_raises_error(
         self,
@@ -413,9 +401,7 @@ jobs:
       - run: echo test
 """
         with pytest.raises(ValueError, match="Quality job must have"):
-            generator._validate_and_parse(  # noqa: SLF001
-                workflow_yaml
-            )
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001
 
     def test_validate_test_job_missing_steps_raises_error(self) -> None:
         """Test validation fails when test job has no steps."""
@@ -433,9 +419,7 @@ jobs:
     runs-on: ubuntu-latest
 """
         with pytest.raises(ValueError, match="Test job must have"):
-            generator._validate_and_parse(  # noqa: SLF001
-                workflow_yaml
-            )
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001
 
     def test_validate_empty_steps_raises_error(self) -> None:
         """Test validation fails when steps list is empty."""
@@ -453,9 +437,7 @@ jobs:
     steps: []
 """
         with pytest.raises(ValueError, match="must have at least one step"):
-            generator._validate_and_parse(  # noqa: SLF001
-                workflow_yaml
-            )
+            generator._validate_and_parse(workflow_yaml)  # noqa: SLF001
 
 
 class TestCIGeneratorGeneration:
@@ -803,9 +785,7 @@ jobs:
     steps:
       - run: test
 """
-        workflow = generator._validate_and_parse(  # noqa: SLF001
-            valid_yaml
-        )
+        workflow = generator._validate_and_parse(valid_yaml)  # noqa: SLF001
         assert workflow.is_valid is True
 
         # Should reject workflow with only quality (missing test)
@@ -818,9 +798,7 @@ jobs:
       - run: test
 """
         with pytest.raises(ValueError, match="missing required jobs"):
-            generator._validate_and_parse(  # noqa: SLF001
-                missing_test
-            )
+            generator._validate_and_parse(missing_test)  # noqa: SLF001
 
     def test_is_valid_flag_exact_true_when_successful(self) -> None:
         """Test is_valid is exactly True on successful validation.
@@ -842,9 +820,7 @@ jobs:
     steps:
       - run: test
 """
-        workflow = generator._validate_and_parse(  # noqa: SLF001
-            valid_yaml
-        )
+        workflow = generator._validate_and_parse(valid_yaml)  # noqa: SLF001
 
         assert workflow.is_valid is True
         assert workflow.is_valid == True  # noqa: E712
@@ -944,9 +920,7 @@ jobs:
         mock_orchestrator = Mock(spec=AIOrchestrator)
         generator = CIGenerator(mock_orchestrator, "python")
 
-        workflow = generator._validate_and_parse(  # noqa: SLF001
-            original_content
-        )
+        workflow = generator._validate_and_parse(original_content)  # noqa: SLF001
 
         assert workflow.content == original_content
         # Should have exact whitespace preservation
