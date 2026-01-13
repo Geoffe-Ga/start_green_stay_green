@@ -34,7 +34,7 @@ class TestPreCommitGeneratorIntegration:
             assert temp_path.exists()
 
             # Verify file can be read and parsed
-            with open(temp_path) as f:
+            with temp_path.open() as f:
                 content = f.read()
                 yaml_lines = [
                     line for line in content.split("\n") if not line.startswith("#")
@@ -65,7 +65,7 @@ class TestPreCommitGeneratorIntegration:
 
         try:
             assert temp_path.exists()
-            with open(temp_path) as f:
+            with temp_path.open() as f:
                 content = f.read()
                 yaml_lines = [
                     line for line in content.split("\n") if not line.startswith("#")

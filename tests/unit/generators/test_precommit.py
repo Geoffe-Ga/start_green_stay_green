@@ -613,7 +613,7 @@ class TestGenerateWithUnsupportedLanguage:
             output_path=Path(),
             language_config={},
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="language"):
             generator.generate(config)
 
 
@@ -901,13 +901,8 @@ class TestMutationKillers:
             output_path=Path(),
             language_config={},
         )
-        try:
+        with pytest.raises(ValueError, match=r"Unsupported language.*invalid"):
             generator.generate(config)
-            msg = "Should have raised ValueError"
-            raise AssertionError(msg)
-        except ValueError as e:
-            assert "Unsupported language" in str(e)
-            assert "invalid" in str(e)
 
     def test_header_comment_format(self) -> None:
         """Test header comment has exact format.
