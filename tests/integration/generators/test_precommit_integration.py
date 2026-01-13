@@ -1,7 +1,7 @@
 """Integration tests for Pre-commit Generator."""
 
-import tempfile
 from pathlib import Path
+import tempfile
 
 import pytest
 import yaml
@@ -20,14 +20,12 @@ class TestPreCommitGeneratorIntegration:
         config = GenerationConfig(
             project_name="integration-test",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(result)
             temp_path = Path(f.name)
 
@@ -56,14 +54,12 @@ class TestPreCommitGeneratorIntegration:
         config = GenerationConfig(
             project_name="ts-integration-test",
             language="typescript",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(result)
             temp_path = Path(f.name)
 
@@ -91,7 +87,7 @@ class TestPreCommitGeneratorIntegration:
             config = GenerationConfig(
                 project_name=f"{language}-project",
                 language=language,
-                output_path=Path("."),
+                output_path=Path(),
                 language_config={},
             )
             result = generator.generate(config)
@@ -106,7 +102,7 @@ class TestPreCommitGeneratorIntegration:
             config = GenerationConfig(
                 project_name="test",
                 language=language,
-                output_path=Path("."),
+                output_path=Path(),
                 language_config={},
             )
             result = generator.generate(config)
@@ -132,14 +128,12 @@ class TestPreCommitGeneratorIntegration:
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
 
-        yaml_lines = [
-            line for line in result.split("\n") if not line.startswith("#")
-        ]
+        yaml_lines = [line for line in result.split("\n") if not line.startswith("#")]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -158,14 +152,12 @@ class TestPreCommitGeneratorIntegration:
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
 
-        yaml_lines = [
-            line for line in result.split("\n") if not line.startswith("#")
-        ]
+        yaml_lines = [line for line in result.split("\n") if not line.startswith("#")]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -185,7 +177,7 @@ class TestPreCommitGeneratorIntegration:
             config = GenerationConfig(
                 project_name="test",
                 language=language,
-                output_path=Path("."),
+                output_path=Path(),
                 language_config={},
             )
             result = generator.generate(config)
@@ -215,7 +207,7 @@ class TestPreCommitGeneratorIntegration:
             config = GenerationConfig(
                 project_name=project_name,
                 language="python",
-                output_path=Path("."),
+                output_path=Path(),
                 language_config={},
             )
             result = generator.generate(config)
@@ -227,15 +219,13 @@ class TestPreCommitGeneratorIntegration:
         config = GenerationConfig(
             project_name="roundtrip-test",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         original = generator.generate(config)
 
         # Parse YAML
-        yaml_lines = [
-            line for line in original.split("\n") if not line.startswith("#")
-        ]
+        yaml_lines = [line for line in original.split("\n") if not line.startswith("#")]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -254,14 +244,12 @@ class TestPreCommitGeneratorIntegration:
         config = GenerationConfig(
             project_name="ts-test",
             language="typescript",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
 
-        yaml_lines = [
-            line for line in result.split("\n") if not line.startswith("#")
-        ]
+        yaml_lines = [line for line in result.split("\n") if not line.startswith("#")]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -277,14 +265,12 @@ class TestPreCommitGeneratorIntegration:
         config = GenerationConfig(
             project_name="go-test",
             language="go",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
 
-        yaml_lines = [
-            line for line in result.split("\n") if not line.startswith("#")
-        ]
+        yaml_lines = [line for line in result.split("\n") if not line.startswith("#")]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -300,14 +286,12 @@ class TestPreCommitGeneratorIntegration:
         config = GenerationConfig(
             project_name="rust-test",
             language="rust",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
 
-        yaml_lines = [
-            line for line in result.split("\n") if not line.startswith("#")
-        ]
+        yaml_lines = [line for line in result.split("\n") if not line.startswith("#")]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -346,14 +330,12 @@ class TestPreCommitGeneratorIntegration:
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
 
-        yaml_lines = [
-            line for line in result.split("\n") if not line.startswith("#")
-        ]
+        yaml_lines = [line for line in result.split("\n") if not line.startswith("#")]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -374,7 +356,7 @@ class TestPreCommitGeneratorIntegration:
             config = GenerationConfig(
                 project_name=f"perf-test-{i}",
                 language="python",
-                output_path=Path("."),
+                output_path=Path(),
                 language_config={},
             )
             result = generator.generate(config)

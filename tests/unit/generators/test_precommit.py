@@ -1,7 +1,6 @@
 """Unit tests for Pre-commit Generator."""
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
@@ -60,7 +59,7 @@ class TestGenerateWithPython:
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -73,7 +72,7 @@ class TestGenerateWithPython:
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -85,7 +84,7 @@ class TestGenerateWithPython:
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -98,7 +97,7 @@ class TestGenerateWithPython:
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -115,7 +114,7 @@ class TestGenerateWithPython:
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -133,7 +132,7 @@ class TestGenerateWithPython:
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -151,7 +150,7 @@ class TestGenerateWithPython:
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -169,7 +168,7 @@ class TestGenerateWithPython:
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -187,7 +186,7 @@ class TestGenerateWithPython:
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -205,7 +204,7 @@ class TestGenerateWithPython:
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -223,7 +222,7 @@ class TestGenerateWithPython:
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -244,7 +243,7 @@ class TestGenerateWithTypeScript:
         config = GenerationConfig(
             project_name="ts-project",
             language="typescript",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -257,7 +256,7 @@ class TestGenerateWithTypeScript:
         config = GenerationConfig(
             project_name="my-ts-app",
             language="typescript",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -269,7 +268,7 @@ class TestGenerateWithTypeScript:
         config = GenerationConfig(
             project_name="ts-project",
             language="typescript",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -291,7 +290,7 @@ class TestGenerateWithGo:
         config = GenerationConfig(
             project_name="go-project",
             language="go",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -304,7 +303,7 @@ class TestGenerateWithGo:
         config = GenerationConfig(
             project_name="go-project",
             language="go",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -326,7 +325,7 @@ class TestGenerateWithRust:
         config = GenerationConfig(
             project_name="rust-project",
             language="rust",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -339,7 +338,7 @@ class TestGenerateWithRust:
         config = GenerationConfig(
             project_name="rust-project",
             language="rust",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -350,7 +349,11 @@ class TestGenerateWithRust:
         repos = parsed["repos"]
         # Find the rust pre-commit repo
         rust_repo = next(
-            (repo for repo in repos if "doublify/pre-commit-rust" in repo.get("repo", "")),
+            (
+                repo
+                for repo in repos
+                if "doublify/pre-commit-rust" in repo.get("repo", "")
+            ),
             None,
         )
         assert rust_repo is not None
@@ -364,7 +367,7 @@ class TestGenerateWithRust:
         config = GenerationConfig(
             project_name="rust-project",
             language="rust",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -374,7 +377,11 @@ class TestGenerateWithRust:
         parsed = yaml.safe_load(yaml_content)
         repos = parsed["repos"]
         rust_repo = next(
-            (repo for repo in repos if "doublify/pre-commit-rust" in repo.get("repo", "")),
+            (
+                repo
+                for repo in repos
+                if "doublify/pre-commit-rust" in repo.get("repo", "")
+            ),
             None,
         )
         assert rust_repo is not None
@@ -579,7 +586,7 @@ class TestGenerateWithUnsupportedLanguage:
         config = GenerationConfig(
             project_name="test-project",
             language="cobol",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         with pytest.raises(ValueError, match="Unsupported language"):
@@ -591,7 +598,7 @@ class TestGenerateWithUnsupportedLanguage:
         config = GenerationConfig(
             project_name="test-project",
             language="unsupported",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         with pytest.raises(ValueError, match="Supported languages"):
@@ -603,7 +610,7 @@ class TestGenerateWithUnsupportedLanguage:
         config = GenerationConfig(
             project_name="test-project",
             language="",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         with pytest.raises(ValueError):
@@ -671,7 +678,7 @@ class TestEdgeCases:
         config = GenerationConfig(
             project_name="my-test-project_v2.0",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -683,7 +690,7 @@ class TestEdgeCases:
         config = GenerationConfig(
             project_name="projet-fr",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -696,7 +703,7 @@ class TestEdgeCases:
         config = GenerationConfig(
             project_name=long_name,
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -708,7 +715,7 @@ class TestEdgeCases:
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result1 = generator.generate(config)
@@ -723,13 +730,13 @@ class TestEdgeCases:
         config1 = GenerationConfig(
             project_name="project1",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         config2 = GenerationConfig(
             project_name="project2",
             language="typescript",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
 
@@ -750,7 +757,7 @@ class TestYAMLValidation:
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -766,7 +773,7 @@ class TestYAMLValidation:
         config = GenerationConfig(
             project_name="test",
             language="typescript",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -782,7 +789,7 @@ class TestYAMLValidation:
         config = GenerationConfig(
             project_name="test",
             language="go",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -798,7 +805,7 @@ class TestYAMLValidation:
         config = GenerationConfig(
             project_name="test",
             language="rust",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -817,12 +824,12 @@ class TestGenerationConfigCreation:
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         assert config.project_name == "test"
         assert config.language == "python"
-        assert config.output_path == Path(".")
+        assert config.output_path == Path()
 
     def test_generation_config_with_language_config(self) -> None:
         """Test GenerationConfig with language config dict."""
@@ -830,7 +837,7 @@ class TestGenerationConfigCreation:
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config=lang_config,
         )
         assert config.language_config == lang_config
@@ -868,7 +875,7 @@ class TestMutationKillers:
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -891,12 +898,13 @@ class TestMutationKillers:
         config = GenerationConfig(
             project_name="test",
             language="invalid",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         try:
             generator.generate(config)
-            assert False, "Should have raised ValueError"
+            msg = "Should have raised ValueError"
+            raise AssertionError(msg)
         except ValueError as e:
             assert "Unsupported language" in str(e)
             assert "invalid" in str(e)
@@ -910,7 +918,7 @@ class TestMutationKillers:
         config = GenerationConfig(
             project_name="my-project",
             language="python",
-            output_path=Path("."),
+            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)

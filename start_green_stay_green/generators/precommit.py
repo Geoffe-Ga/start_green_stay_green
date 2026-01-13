@@ -13,7 +13,6 @@ import yaml
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationConfig
 
-
 # Language-specific pre-commit hook configurations
 LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
     "python": {
@@ -308,7 +307,7 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
                         "entry": "cargo fmt --",
                         "language": "system",
                         "types": ["rust"],
-                        "pass_filenames": True,  # noqa: FBT003 (Issue #11: bool in YAML config)
+                        "pass_filenames": True,
                     },
                     {
                         "id": "clippy",
@@ -316,7 +315,7 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
                         "entry": "cargo clippy -- -D warnings",
                         "language": "system",
                         "types": ["rust"],
-                        "pass_filenames": False,  # noqa: FBT003 (Issue #11: bool in YAML config)
+                        "pass_filenames": False,
                     },
                 ],
             },
@@ -383,9 +382,12 @@ class PreCommitGenerator(BaseGenerator):
             ValueError: If language is not supported.
         """
         if config.language not in LANGUAGE_CONFIGS:
-            raise ValueError(
+            msg = (
                 f"Unsupported language: {config.language}. "
                 f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
+            )
+            raise ValueError(
+                msg
             )
 
         language_config = LANGUAGE_CONFIGS[config.language]
@@ -469,9 +471,12 @@ class PreCommitGenerator(BaseGenerator):
             True
         """
         if language not in LANGUAGE_CONFIGS:
-            raise ValueError(
+            msg = (
                 f"Unsupported language: {language}. "
                 f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
+            )
+            raise ValueError(
+                msg
             )
         return LANGUAGE_CONFIGS[language]["hooks"]
 
@@ -494,9 +499,12 @@ class PreCommitGenerator(BaseGenerator):
             True
         """
         if language not in LANGUAGE_CONFIGS:
-            raise ValueError(
+            msg = (
                 f"Unsupported language: {language}. "
                 f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
+            )
+            raise ValueError(
+                msg
             )
 
         hooks_config = LANGUAGE_CONFIGS[language]["hooks"]

@@ -9,8 +9,11 @@ from __future__ import annotations
 from abc import ABC
 from abc import abstractmethod
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @dataclass
@@ -59,4 +62,3 @@ class BaseGenerator(ABC):
             ValueError: If configuration is invalid or incomplete.
             NotImplementedError: If language is not supported.
         """
-        pass
