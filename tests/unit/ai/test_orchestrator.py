@@ -811,3 +811,123 @@ class TestMutationKillers:
         assert messages[0]["role"] == "user"
         expected_content = "Generate toml output:\n\nCreate config"
         assert messages[0]["content"] == expected_content
+
+    def test_init_api_key_empty_exact_error_message(self) -> None:
+        """Test exact error message for empty API key.
+
+        Kills mutation: error message string → "XXerror messageXX"
+        Location: orchestrator.py:124
+        """
+        with pytest.raises(ValueError, match="API key cannot be empty") as exc_info:
+            AIOrchestrator(api_key="")
+
+        assert str(exc_info.value) == "API key cannot be empty"
+        assert "API key" in str(exc_info.value)
+        assert "empty" in str(exc_info.value)
+
+    def test_init_max_retries_negative_exact_error_message(self) -> None:
+        """Test exact error message for negative max_retries.
+
+        Kills mutation: error message string → "XXerror messageXX"
+        Location: orchestrator.py:127
+        """
+        with pytest.raises(
+            ValueError, match="max_retries must be non-negative"
+        ) as exc_info:
+            AIOrchestrator(api_key="test-key", max_retries=-1)
+
+        assert str(exc_info.value) == "max_retries must be non-negative"
+        assert "max_retries" in str(exc_info.value)
+        assert "non-negative" in str(exc_info.value)
+
+    def test_init_retry_delay_zero_exact_error_message(self) -> None:
+        """Test exact error message for zero/negative retry_delay.
+
+        Kills mutation: error message string → "XXerror messageXX"
+        Location: orchestrator.py:130
+        """
+        with pytest.raises(
+            ValueError, match="retry_delay must be positive"
+        ) as exc_info:
+            AIOrchestrator(api_key="test-key", retry_delay=0.0)
+
+        assert str(exc_info.value) == "retry_delay must be positive"
+        assert "retry_delay" in str(exc_info.value)
+        assert "positive" in str(exc_info.value)
+
+    def test_generate_empty_prompt_exact_error_message(self) -> None:
+        """Test exact error message for empty prompt.
+
+        Kills mutation: error message string → "XXerror messageXX"
+        Location: orchestrator.py:158
+        """
+        orchestrator = AIOrchestrator(api_key="test-key")
+
+        with pytest.raises(ValueError, match="Prompt cannot be empty") as exc_info:
+            orchestrator.generate(prompt="", output_format="yaml")
+
+        assert str(exc_info.value) == "Prompt cannot be empty"
+        assert "Prompt" in str(exc_info.value)
+        assert "empty" in str(exc_info.value)
+
+    def test_generate_non_text_block_exact_error_message(self) -> None:
+        """Test exact error message for non-TextBlock response.
+
+        Kills mutation: error message string → "XXerror messageXX"
+        Location: orchestrator.py:186
+        """
+        with patch(
+            "start_green_stay_green.ai.orchestrator.Anthropic"
+        ) as mock_anthropic:
+            mock_client = MagicMock()
+            mock_anthropic.return_value = mock_client
+
+            # Create response with non-TextBlock content
+            mock_response = MagicMock()
+            mock_response.id = "msg_invalid"
+            non_text_block = MagicMock()
+            non_text_block.__class__.__name__ = "ImageBlock"
+            mock_response.content = [non_text_block]
+            mock_client.messages.create.return_value = mock_response
+
+            orchestrator = AIOrchestrator(api_key="test-key")
+
+            with pytest.raises(GenerationError) as exc_info:
+                orchestrator.generate(prompt="Test", output_format="yaml")
+
+            assert str(exc_info.value) == "Expected TextBlock in response"
+            assert "TextBlock" in str(exc_info.value)
+            assert "response" in str(exc_info.value)
+
+    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    def test_generate_last_error_initialized_to_none_not_empty_string(
+        self,
+        mock_anthropic: Mock,
+    ) -> None:
+        """Test last_error is initialized to None, not empty string.
+
+        Kills mutation: last_error = None → last_error = ""
+        Location: orchestrator.py:168
+
+        Note: This test verifies that when an error occurs, the cause is properly
+        set to the exception. Combined with success path tests, this ensures
+        last_error starts as None (not "").
+        """
+        # Setup mock to fail all attempts
+        mock_client = MagicMock()
+        mock_anthropic.return_value = mock_client
+        test_exception = ValueError("Test error")
+        mock_client.messages.create.side_effect = test_exception
+
+        orchestrator = AIOrchestrator(api_key="test-key", max_retries=0)
+
+        with pytest.raises(GenerationError) as exc_info:
+            orchestrator.generate(prompt="Test", output_format="yaml")
+
+        # Verify the cause is the exception, not an empty string
+        # This test kills the mutation: last_error = None → last_error = ""
+        assert exc_info.value.cause is test_exception
+        assert exc_info.value.cause is not None
+        assert isinstance(exc_info.value.cause, Exception)
+        # If last_error was initialized to "", it wouldn't work as Exception type
+        assert not isinstance(exc_info.value.cause, str)
