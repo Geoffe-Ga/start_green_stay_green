@@ -37,7 +37,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run linting
-        run: ./scripts/lint.sh
+        run: ./scripts/lint.sh --check
 
       - name: Run format check
         run: ./scripts/format.sh --check
