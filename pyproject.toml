@@ -127,6 +127,7 @@ ignore = [
     # Specific documented exceptions only
     "COM812",  # Conflicts with formatter
     "ISC001",  # Conflicts with formatter
+    "I001",    # Use isort for import sorting (configured separately)
 ]
 
 [tool.ruff.lint.per-file-ignores]
