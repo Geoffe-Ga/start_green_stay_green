@@ -9,6 +9,7 @@
 #   - black → scripts/format.sh --check
 #   - mypy → scripts/typecheck.sh
 #   - bandit → scripts/security.sh
+#   - radon/xenon → scripts/complexity.sh
 #   - pytest → scripts/test.sh --unit (not in pre-commit, only in CI)
 #
 # Additional hooks from MAXIMUM_QUALITY_ENGINEERING.md:
@@ -88,6 +89,16 @@ repos:
       - id: typecheck-mypy
         name: Type Check (MyPy)
         entry: scripts/typecheck.sh
+        language: script
+        types: [python]
+        pass_filenames: false
+
+  # Complexity analysis - Local script mapping
+  - repo: local
+    hooks:
+      - id: complexity-check
+        name: Complexity Check (Radon + Xenon)
+        entry: scripts/complexity.sh
         language: script
         types: [python]
         pass_filenames: false
