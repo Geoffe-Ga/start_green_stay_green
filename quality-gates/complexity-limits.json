@@ -1,0 +1,10 @@
+{
+  "max_cyclomatic_complexity": 10,
+  "max_cognitive_complexity": 15,
+  "max_maintainability_index_threshold": 20,
+  "max_arguments": 5,
+  "max_local_variables": 15,
+  "max_returns": 6,
+  "max_branches": 12,
+  "max_statements": 50
+}
