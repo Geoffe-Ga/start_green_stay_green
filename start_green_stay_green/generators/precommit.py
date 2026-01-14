@@ -504,7 +504,9 @@ class PreCommitGenerator(BaseGenerator):
             )
             raise ValueError(msg)
         # Cast to satisfy mypy strict mode - dict access returns Any
-        return cast("list[dict[str, Any]]", LANGUAGE_CONFIGS[language]["hooks"])
+        return cast(
+            "list[dict[str, Any]]", LANGUAGE_CONFIGS[language]["hooks"]
+        )
 
     def _sum_hooks_in_repos(
         self, repos_config: list[dict[str, Any]]
