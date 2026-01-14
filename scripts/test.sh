@@ -12,6 +12,10 @@ COVERAGE=false
 MUTATION=false
 VERBOSE=false
 
+# Source common utilities
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/common.sh"
+
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -85,6 +89,10 @@ cd "$PROJECT_ROOT"
 if $VERBOSE; then
     set -x
 fi
+
+# Ensure venv is available and set up cleanup
+setup_cleanup_trap
+ensure_venv || exit 2
 
 # Build pytest arguments
 PYTEST_ARGS=(-v)

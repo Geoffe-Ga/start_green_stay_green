@@ -9,6 +9,10 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 VERBOSE=false
 
+# Source common utilities
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/common.sh"
+
 # MAXIMUM QUALITY thresholds
 MAX_CYCLOMATIC_COMPLEXITY=10
 MIN_MAINTAINABILITY_INDEX=20
@@ -63,6 +67,10 @@ cd "$PROJECT_ROOT"
 if $VERBOSE; then
     set -x
 fi
+
+# Ensure venv is available and set up cleanup
+setup_cleanup_trap
+ensure_venv || exit 2
 
 echo "=== Code Complexity Analysis (MAXIMUM QUALITY) ==="
 echo ""

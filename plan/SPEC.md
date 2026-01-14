@@ -127,8 +127,8 @@ start_green_stay_green/
 **Goal**: Establish the Start Green Stay Green repository with its own quality controls (dogfooding).
 
 #### Issue 1.1: Repository Initialization
-**Type**: Task  
-**Priority**: P0 - Critical  
+**Type**: Task
+**Priority**: P0 - Critical
 **Estimate**: 1 hour
 
 **Description**:
@@ -153,8 +153,8 @@ gh api repos/{owner}/start_green_stay_green/branches/main/protection -X PUT -f r
 ---
 
 #### Issue 1.2: Python Project Configuration
-**Type**: Task  
-**Priority**: P0 - Critical  
+**Type**: Task
+**Priority**: P0 - Critical
 **Estimate**: 2 hours
 
 **Description**:
@@ -176,8 +176,8 @@ Set up `pyproject.toml` with all dependencies, tool configurations, and metadata
 ---
 
 #### Issue 1.3: Pre-commit Configuration
-**Type**: Task  
-**Priority**: P0 - Critical  
+**Type**: Task
+**Priority**: P0 - Critical
 **Estimate**: 1 hour
 
 **Description**:
@@ -206,8 +206,8 @@ Copy and adapt `.pre-commit-config.yaml` from MAXIMUM_QUALITY_ENGINEERING.md. Al
 ---
 
 #### Issue 1.4: Scripts Directory
-**Type**: Task  
-**Priority**: P0 - Critical  
+**Type**: Task
+**Priority**: P0 - Critical
 **Estimate**: 3 hours
 
 **Description**:
@@ -277,8 +277,8 @@ fi
 ---
 
 #### Issue 1.5: CI Pipeline
-**Type**: Task  
-**Priority**: P0 - Critical  
+**Type**: Task
+**Priority**: P0 - Critical
 **Estimate**: 3 hours
 
 **Description**:
@@ -333,8 +333,8 @@ jobs:
 ---
 
 #### Issue 1.6: CLAUDE.md Configuration
-**Type**: Task  
-**Priority**: P1 - High  
+**Type**: Task
+**Priority**: P1 - High
 **Estimate**: 2 hours
 
 **Description**:
@@ -397,8 +397,8 @@ Always run: `./scripts/check-all.sh`
 **Goal**: Implement the AI-powered generation system that creates customized quality infrastructure.
 
 #### Issue 2.1: AI Orchestrator Core
-**Type**: Feature  
-**Priority**: P0 - Critical  
+**Type**: Feature
+**Priority**: P0 - Critical
 **Estimate**: 4 hours
 
 **Description**:
@@ -446,8 +446,8 @@ class AIOrchestrator:
 ---
 
 #### Issue 2.2: Prompt Templates
-**Type**: Feature  
-**Priority**: P0 - Critical  
+**Type**: Feature
+**Priority**: P0 - Critical
 **Estimate**: 3 hours
 
 **Description**:
@@ -518,8 +518,8 @@ Do not include any explanation or markdown code fences.
 ---
 
 #### Issue 2.3: Tuning Pass System
-**Type**: Feature  
-**Priority**: P1 - High  
+**Type**: Feature
+**Priority**: P1 - High
 **Estimate**: 2 hours
 
 **Description**:
@@ -570,8 +570,8 @@ class ContentTuner:
 **Goal**: Implement individual generators for each deliverable type.
 
 #### Issue 3.1: CI Generator
-**Type**: Feature  
-**Priority**: P0 - Critical  
+**Type**: Feature
+**Priority**: P0 - Critical
 **Estimate**: 4 hours
 
 **Description**:
@@ -601,8 +601,8 @@ User Config → Prompt Template → AI Generation → YAML Validation → Output
 ---
 
 #### Issue 3.2: Pre-commit Generator
-**Type**: Feature  
-**Priority**: P0 - Critical  
+**Type**: Feature
+**Priority**: P0 - Critical
 **Estimate**: 3 hours
 
 **Description**:
@@ -623,8 +623,8 @@ Generate `.pre-commit-config.yaml` customized to target language. Must prefer lo
 ---
 
 #### Issue 3.3: Scripts Generator
-**Type**: Feature  
-**Priority**: P0 - Critical  
+**Type**: Feature
+**Priority**: P0 - Critical
 **Estimate**: 4 hours
 
 **Description**:
@@ -654,8 +654,8 @@ Generate the `/scripts/` directory with all quality control scripts adapted to t
 ---
 
 #### Issue 3.4: Skills Generator
-**Type**: Feature  
-**Priority**: P1 - High  
+**Type**: Feature
+**Priority**: P1 - High
 **Estimate**: 3 hours
 
 **Description**:
@@ -687,8 +687,8 @@ skills/
 ---
 
 #### Issue 3.5: Subagents Generator
-**Type**: Feature  
-**Priority**: P1 - High  
+**Type**: Feature
+**Priority**: P1 - High
 **Estimate**: 4 hours
 
 **Description**:
@@ -746,8 +746,8 @@ REVIEW_NEEDED: [package] - [concerns requiring human review]
 ---
 
 #### Issue 3.6: CLAUDE.md Generator
-**Type**: Feature  
-**Priority**: P0 - Critical  
+**Type**: Feature
+**Priority**: P0 - Critical
 **Estimate**: 3 hours
 
 **Description**:
@@ -769,8 +769,8 @@ Generate CLAUDE.md customized to the target project, incorporating project-speci
 ---
 
 #### Issue 3.7: GitHub Actions Code Review
-**Type**: Feature  
-**Priority**: P1 - High  
+**Type**: Feature
+**Priority**: P1 - High
 **Estimate**: 3 hours
 
 **Description**:
@@ -813,8 +813,8 @@ Generate GitHub Actions workflow for automated PR code review. Must provide uneq
 ---
 
 #### Issue 3.8: Quality Metrics Dashboard
-**Type**: Feature  
-**Priority**: P2 - Medium  
+**Type**: Feature
+**Priority**: P2 - Medium
 **Estimate**: 4 hours
 
 **Description**:
@@ -849,8 +849,8 @@ Generate quality metrics tracking configuration per MAXIMUM_QUALITY_ENGINEERING.
 ---
 
 #### Issue 3.9: Architecture Enforcement Generator
-**Type**: Feature  
-**Priority**: P1 - High  
+**Type**: Feature
+**Priority**: P1 - High
 **Estimate**: 3 hours
 
 **Description**:
@@ -885,8 +885,8 @@ plans/architecture/
 **Goal**: Implement the user-facing CLI for Start Green Stay Green.
 
 #### Issue 4.1: CLI Framework Setup
-**Type**: Task  
-**Priority**: P0 - Critical  
+**Type**: Task
+**Priority**: P0 - Critical
 **Estimate**: 2 hours
 
 **Description**:
@@ -918,8 +918,8 @@ green github                    # GitHub integration commands
 ---
 
 #### Issue 4.2: Init Command
-**Type**: Feature  
-**Priority**: P0 - Critical  
+**Type**: Feature
+**Priority**: P0 - Critical
 **Estimate**: 4 hours
 
 **Description**:
@@ -984,8 +984,8 @@ Next steps:
 ---
 
 #### Issue 4.3: GitHub Integration
-**Type**: Feature  
-**Priority**: P1 - High  
+**Type**: Feature
+**Priority**: P1 - High
 **Estimate**: 3 hours
 
 **Description**:
@@ -1026,8 +1026,8 @@ Parse this SPEC.md (or generated SPEC.md) and create GitHub issues for each Issu
 **Goal**: Create and maintain reference implementations that serve as context for AI generation.
 
 #### Issue 5.1: Copy Existing Start Green Stay Green Assets
-**Type**: Task  
-**Priority**: P0 - Critical  
+**Type**: Task
+**Priority**: P0 - Critical
 **Estimate**: 2 hours
 
 **Description**:
@@ -1098,8 +1098,8 @@ reference/
 ---
 
 #### Issue 5.2: Create Missing Skills
-**Type**: Task  
-**Priority**: P1 - High  
+**Type**: Task
+**Priority**: P1 - High
 **Estimate**: 3 hours
 
 **Description**:
@@ -1174,8 +1174,8 @@ Safe and efficient concurrent code patterns.
 ---
 
 #### Issue 5.3: Create Dependency Checker Subagent
-**Type**: Task  
-**Priority**: P1 - High  
+**Type**: Task
+**Priority**: P1 - High
 **Estimate**: 2 hours
 
 **Description**:
@@ -1198,8 +1198,8 @@ Create the dependency checker subagent that's mentioned in deliverables but not 
 **Goal**: Comprehensive testing and documentation for Start Green Stay Green itself.
 
 #### Issue 6.1: Unit Tests for Generators
-**Type**: Task  
-**Priority**: P0 - Critical  
+**Type**: Task
+**Priority**: P0 - Critical
 **Estimate**: 4 hours
 
 **Description**:
@@ -1219,8 +1219,8 @@ Write unit tests for all generator modules.
 ---
 
 #### Issue 6.2: Integration Tests
-**Type**: Task  
-**Priority**: P1 - High  
+**Type**: Task
+**Priority**: P1 - High
 **Estimate**: 3 hours
 
 **Description**:
@@ -1240,8 +1240,8 @@ Write integration tests that verify end-to-end generation flow.
 ---
 
 #### Issue 6.3: README Documentation
-**Type**: Task  
-**Priority**: P0 - Critical  
+**Type**: Task
+**Priority**: P0 - Critical
 **Estimate**: 2 hours
 
 **Description**:
@@ -1263,8 +1263,8 @@ Write comprehensive README for Start Green Stay Green.
 ---
 
 #### Issue 6.4: API Documentation
-**Type**: Task  
-**Priority**: P2 - Medium  
+**Type**: Task
+**Priority**: P2 - Medium
 **Estimate**: 2 hours
 
 **Description**:

@@ -6,13 +6,29 @@ with language-appropriate hooks for formatting, linting, security, and quality.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 from typing import cast
 
 import yaml
 
 from start_green_stay_green.generators.base import BaseGenerator
-from start_green_stay_green.generators.base import GenerationConfig
+
+
+@dataclass
+class GenerationConfig:
+    """Configuration for generating pre-commit hooks.
+
+    Attributes:
+        project_name: Name of the project.
+        language: Programming language (python, typescript, go, rust).
+        language_config: Additional language-specific configuration.
+    """
+
+    project_name: str
+    language: str
+    language_config: dict[str, Any]
+
 
 # Language-specific pre-commit hook configurations
 LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
@@ -417,7 +433,7 @@ class PreCommitGenerator(BaseGenerator):
             "# Run manually: pre-commit run --all-files\n\n"
         )
 
-    def generate(self, config: GenerationConfig) -> str:
+    def generate(self, config: GenerationConfig) -> str:  # type: ignore[override]
         """Generate .pre-commit-config.yaml content.
 
         Produces a complete pre-commit configuration file customized for the
@@ -506,9 +522,7 @@ class PreCommitGenerator(BaseGenerator):
         # Cast to satisfy mypy strict mode - dict access returns Any
         return cast("list[dict[str, Any]]", LANGUAGE_CONFIGS[language]["hooks"])
 
-    def _sum_hooks_in_repos(
-        self, repos_config: list[dict[str, Any]]
-    ) -> int:
+    def _sum_hooks_in_repos(self, repos_config: list[dict[str, Any]]) -> int:
         """Sum total hooks across all repository configurations.
 
         Args:
