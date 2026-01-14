@@ -1,51 +1,69 @@
 """Unit tests for Pre-commit Generator."""
 
-from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import yaml
 
-from start_green_stay_green.generators.base import GenerationConfig
+from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import LANGUAGE_CONFIGS
 from start_green_stay_green.generators.precommit import PreCommitGenerator
+
+
+@pytest.fixture
+def mock_orchestrator() -> Mock:
+    """Provide mock AIOrchestrator for testing.
+
+    Returns:
+        Mock object configured as AIOrchestrator.
+    """
+    return Mock()
 
 
 class TestPreCommitGeneratorInitialization:
     """Test PreCommitGenerator initialization and basic instantiation."""
 
-    def test_generator_can_be_instantiated(self) -> None:
+    def test_generator_can_be_instantiated(self, mock_orchestrator: Mock) -> None:
         """Test PreCommitGenerator can be created without arguments."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert generator is not None
         assert isinstance(generator, PreCommitGenerator)
 
-    def test_generator_has_generate_method(self) -> None:
+    def test_generator_has_generate_method(self, mock_orchestrator: Mock) -> None:
         """Test generator has generate method."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert hasattr(generator, "generate")
         assert callable(generator.generate)
 
-    def test_generator_has_validate_language_method(self) -> None:
+    def test_generator_has_validate_language_method(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generator has validate_language method."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert hasattr(generator, "validate_language")
         assert callable(generator.validate_language)
 
-    def test_generator_has_get_supported_languages_method(self) -> None:
+    def test_generator_has_get_supported_languages_method(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generator has get_supported_languages method."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert hasattr(generator, "get_supported_languages")
         assert callable(generator.get_supported_languages)
 
-    def test_generator_has_get_language_hooks_method(self) -> None:
+    def test_generator_has_get_language_hooks_method(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generator has get_language_hooks method."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert hasattr(generator, "get_language_hooks")
         assert callable(generator.get_language_hooks)
 
-    def test_generator_has_count_hooks_for_language_method(self) -> None:
+    def test_generator_has_count_hooks_for_language_method(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generator has count_hooks_for_language method."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert hasattr(generator, "count_hooks_for_language")
         assert callable(generator.count_hooks_for_language)
 
@@ -53,51 +71,51 @@ class TestPreCommitGeneratorInitialization:
 class TestGenerateWithPython:
     """Test content generation for Python projects."""
 
-    def test_generate_python_returns_string(self) -> None:
+    def test_generate_python_returns_string(self, mock_orchestrator: Mock) -> None:
         """Test generate returns string for Python."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_generate_python_includes_header_comment(self) -> None:
+    def test_generate_python_includes_header_comment(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generated Python config includes header comment."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
         assert "# Pre-commit hooks configuration for test-project" in result
 
-    def test_generate_python_includes_installation_instructions(self) -> None:
+    def test_generate_python_includes_installation_instructions(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generated Python config includes installation instructions."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
         assert "# Install: pre-commit install" in result
         assert "# Run manually: pre-commit run --all-files" in result
 
-    def test_generate_python_is_valid_yaml(self) -> None:
+    def test_generate_python_is_valid_yaml(self, mock_orchestrator: Mock) -> None:
         """Test generated Python config is valid YAML."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -108,13 +126,12 @@ class TestGenerateWithPython:
         parsed = yaml.safe_load(yaml_content)
         assert isinstance(parsed, dict)
 
-    def test_generate_python_has_repos_section(self) -> None:
+    def test_generate_python_has_repos_section(self, mock_orchestrator: Mock) -> None:
         """Test generated Python config has repos section."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -126,13 +143,14 @@ class TestGenerateWithPython:
         assert isinstance(parsed["repos"], list)
         assert len(parsed["repos"]) > 0
 
-    def test_generate_python_has_ci_configuration(self) -> None:
+    def test_generate_python_has_ci_configuration(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generated Python config has CI configuration."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -144,13 +162,12 @@ class TestGenerateWithPython:
         assert "autofix_commit_msg" in parsed["ci"]
         assert "autoupdate_commit_msg" in parsed["ci"]
 
-    def test_generate_python_includes_ruff(self) -> None:
+    def test_generate_python_includes_ruff(self, mock_orchestrator: Mock) -> None:
         """Test generated Python config includes ruff."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -162,13 +179,12 @@ class TestGenerateWithPython:
         repo_urls = [repo.get("repo", "") for repo in repos]
         assert any("ruff" in url for url in repo_urls)
 
-    def test_generate_python_includes_mypy(self) -> None:
+    def test_generate_python_includes_mypy(self, mock_orchestrator: Mock) -> None:
         """Test generated Python config includes mypy."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -180,13 +196,12 @@ class TestGenerateWithPython:
         repo_urls = [repo.get("repo", "") for repo in repos]
         assert any("mypy" in url for url in repo_urls)
 
-    def test_generate_python_includes_bandit(self) -> None:
+    def test_generate_python_includes_bandit(self, mock_orchestrator: Mock) -> None:
         """Test generated Python config includes bandit."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -198,13 +213,12 @@ class TestGenerateWithPython:
         repo_urls = [repo.get("repo", "") for repo in repos]
         assert any("bandit" in url for url in repo_urls)
 
-    def test_generate_python_includes_black(self) -> None:
+    def test_generate_python_includes_black(self, mock_orchestrator: Mock) -> None:
         """Test generated Python config includes black."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -216,13 +230,14 @@ class TestGenerateWithPython:
         repo_urls = [repo.get("repo", "") for repo in repos]
         assert any("black" in url for url in repo_urls)
 
-    def test_generate_python_has_default_language_version(self) -> None:
+    def test_generate_python_has_default_language_version(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generated Python config has default_language_version."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -237,38 +252,39 @@ class TestGenerateWithPython:
 class TestGenerateWithTypeScript:
     """Test content generation for TypeScript projects."""
 
-    def test_generate_typescript_returns_string(self) -> None:
+    def test_generate_typescript_returns_string(self, mock_orchestrator: Mock) -> None:
         """Test generate returns string for TypeScript."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="ts-project",
             language="typescript",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_generate_typescript_includes_project_name(self) -> None:
+    def test_generate_typescript_includes_project_name(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generated TypeScript config includes project name."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="my-ts-app",
             language="typescript",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
         assert "my-ts-app" in result
 
-    def test_generate_typescript_includes_prettier(self) -> None:
+    def test_generate_typescript_includes_prettier(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generated TypeScript config includes prettier."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="ts-project",
             language="typescript",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -284,26 +300,24 @@ class TestGenerateWithTypeScript:
 class TestGenerateWithGo:
     """Test content generation for Go projects."""
 
-    def test_generate_go_returns_string(self) -> None:
+    def test_generate_go_returns_string(self, mock_orchestrator: Mock) -> None:
         """Test generate returns string for Go."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="go-project",
             language="go",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_generate_go_includes_golangci_lint(self) -> None:
+    def test_generate_go_includes_golangci_lint(self, mock_orchestrator: Mock) -> None:
         """Test generated Go config includes golangci-lint."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="go-project",
             language="go",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -319,26 +333,24 @@ class TestGenerateWithGo:
 class TestGenerateWithRust:
     """Test content generation for Rust projects."""
 
-    def test_generate_rust_returns_string(self) -> None:
+    def test_generate_rust_returns_string(self, mock_orchestrator: Mock) -> None:
         """Test generate returns string for Rust."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="rust-project",
             language="rust",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_generate_rust_includes_rustfmt(self) -> None:
+    def test_generate_rust_includes_rustfmt(self, mock_orchestrator: Mock) -> None:
         """Test generated Rust config includes rustfmt."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="rust-project",
             language="rust",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -361,13 +373,12 @@ class TestGenerateWithRust:
         hook_ids = [hook.get("id", "") for hook in hooks]
         assert "fmt" in hook_ids
 
-    def test_generate_rust_includes_clippy(self) -> None:
+    def test_generate_rust_includes_clippy(self, mock_orchestrator: Mock) -> None:
         """Test generated Rust config includes clippy."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="rust-project",
             language="rust",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -393,39 +404,47 @@ class TestGenerateWithRust:
 class TestValidateLanguage:
     """Test language validation functionality."""
 
-    def test_validate_language_python_returns_true(self) -> None:
+    def test_validate_language_python_returns_true(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test validate_language returns True for Python."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert generator.validate_language("python") is True
 
-    def test_validate_language_typescript_returns_true(self) -> None:
+    def test_validate_language_typescript_returns_true(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test validate_language returns True for TypeScript."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert generator.validate_language("typescript") is True
 
-    def test_validate_language_go_returns_true(self) -> None:
+    def test_validate_language_go_returns_true(self, mock_orchestrator: Mock) -> None:
         """Test validate_language returns True for Go."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert generator.validate_language("go") is True
 
-    def test_validate_language_rust_returns_true(self) -> None:
+    def test_validate_language_rust_returns_true(self, mock_orchestrator: Mock) -> None:
         """Test validate_language returns True for Rust."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert generator.validate_language("rust") is True
 
-    def test_validate_language_unsupported_returns_false(self) -> None:
+    def test_validate_language_unsupported_returns_false(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test validate_language returns False for unsupported language."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert generator.validate_language("cobol") is False
 
-    def test_validate_language_empty_string_returns_false(self) -> None:
+    def test_validate_language_empty_string_returns_false(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test validate_language returns False for empty string."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert generator.validate_language("") is False
 
-    def test_validate_language_case_sensitive(self) -> None:
+    def test_validate_language_case_sensitive(self, mock_orchestrator: Mock) -> None:
         """Test validate_language is case sensitive."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert generator.validate_language("Python") is False
         assert generator.validate_language("PYTHON") is False
 
@@ -433,45 +452,55 @@ class TestValidateLanguage:
 class TestGetSupportedLanguages:
     """Test getting list of supported languages."""
 
-    def test_get_supported_languages_returns_list(self) -> None:
+    def test_get_supported_languages_returns_list(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test get_supported_languages returns list."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_supported_languages()
         assert isinstance(result, list)
 
-    def test_get_supported_languages_includes_python(self) -> None:
+    def test_get_supported_languages_includes_python(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test get_supported_languages includes python."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_supported_languages()
         assert "python" in result
 
-    def test_get_supported_languages_includes_typescript(self) -> None:
+    def test_get_supported_languages_includes_typescript(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test get_supported_languages includes typescript."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_supported_languages()
         assert "typescript" in result
 
-    def test_get_supported_languages_includes_go(self) -> None:
+    def test_get_supported_languages_includes_go(self, mock_orchestrator: Mock) -> None:
         """Test get_supported_languages includes go."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_supported_languages()
         assert "go" in result
 
-    def test_get_supported_languages_includes_rust(self) -> None:
+    def test_get_supported_languages_includes_rust(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test get_supported_languages includes rust."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_supported_languages()
         assert "rust" in result
 
-    def test_get_supported_languages_exact_count(self) -> None:
+    def test_get_supported_languages_exact_count(self, mock_orchestrator: Mock) -> None:
         """Test get_supported_languages returns expected count."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_supported_languages()
         assert len(result) == 4
 
-    def test_get_supported_languages_no_duplicates(self) -> None:
+    def test_get_supported_languages_no_duplicates(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test get_supported_languages has no duplicates."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_supported_languages()
         assert len(result) == len(set(result))
 
@@ -479,45 +508,55 @@ class TestGetSupportedLanguages:
 class TestGetLanguageHooks:
     """Test getting hooks for specific language."""
 
-    def test_get_language_hooks_python_returns_list(self) -> None:
+    def test_get_language_hooks_python_returns_list(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test get_language_hooks returns list for python."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_language_hooks("python")
         assert isinstance(result, list)
 
-    def test_get_language_hooks_python_not_empty(self) -> None:
+    def test_get_language_hooks_python_not_empty(self, mock_orchestrator: Mock) -> None:
         """Test get_language_hooks returns non-empty list for python."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_language_hooks("python")
         assert len(result) > 0
 
-    def test_get_language_hooks_typescript_returns_list(self) -> None:
+    def test_get_language_hooks_typescript_returns_list(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test get_language_hooks returns list for typescript."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_language_hooks("typescript")
         assert isinstance(result, list)
 
-    def test_get_language_hooks_go_returns_list(self) -> None:
+    def test_get_language_hooks_go_returns_list(self, mock_orchestrator: Mock) -> None:
         """Test get_language_hooks returns list for go."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_language_hooks("go")
         assert isinstance(result, list)
 
-    def test_get_language_hooks_rust_returns_list(self) -> None:
+    def test_get_language_hooks_rust_returns_list(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test get_language_hooks returns list for rust."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_language_hooks("rust")
         assert isinstance(result, list)
 
-    def test_get_language_hooks_unsupported_raises_error(self) -> None:
+    def test_get_language_hooks_unsupported_raises_error(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test get_language_hooks raises ValueError for unsupported language."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         with pytest.raises(ValueError, match="Unsupported language"):
             generator.get_language_hooks("cobol")
 
-    def test_get_language_hooks_python_has_repo_structure(self) -> None:
+    def test_get_language_hooks_python_has_repo_structure(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test Python hooks have proper repo structure."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_language_hooks("python")
         for repo in result:
             assert "repo" in repo or "id" in repo
@@ -527,51 +566,59 @@ class TestGetLanguageHooks:
 class TestCountHooksForLanguage:
     """Test counting hooks for specific language."""
 
-    def test_count_hooks_python_returns_int(self) -> None:
+    def test_count_hooks_python_returns_int(self, mock_orchestrator: Mock) -> None:
         """Test count_hooks_for_language returns int for python."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.count_hooks_for_language("python")
         assert isinstance(result, int)
 
-    def test_count_hooks_python_greater_than_zero(self) -> None:
+    def test_count_hooks_python_greater_than_zero(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test count_hooks_for_language returns positive int for python."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.count_hooks_for_language("python")
         assert result > 0
 
-    def test_count_hooks_python_greater_than_twenty(self) -> None:
+    def test_count_hooks_python_greater_than_twenty(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test Python has many hooks configured."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.count_hooks_for_language("python")
         assert result >= 20
 
-    def test_count_hooks_typescript_returns_int(self) -> None:
+    def test_count_hooks_typescript_returns_int(self, mock_orchestrator: Mock) -> None:
         """Test count_hooks_for_language returns int for typescript."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.count_hooks_for_language("typescript")
         assert isinstance(result, int)
 
-    def test_count_hooks_go_returns_int(self) -> None:
+    def test_count_hooks_go_returns_int(self, mock_orchestrator: Mock) -> None:
         """Test count_hooks_for_language returns int for go."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.count_hooks_for_language("go")
         assert isinstance(result, int)
 
-    def test_count_hooks_rust_returns_int(self) -> None:
+    def test_count_hooks_rust_returns_int(self, mock_orchestrator: Mock) -> None:
         """Test count_hooks_for_language returns int for rust."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         result = generator.count_hooks_for_language("rust")
         assert isinstance(result, int)
 
-    def test_count_hooks_unsupported_raises_error(self) -> None:
+    def test_count_hooks_unsupported_raises_error(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test count_hooks_for_language raises ValueError for unsupported language."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         with pytest.raises(ValueError, match="Unsupported language"):
             generator.count_hooks_for_language("cobol")
 
-    def test_count_hooks_python_less_than_typescript(self) -> None:
+    def test_count_hooks_python_less_than_typescript(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test Python typically has more hooks than TypeScript."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         python_count = generator.count_hooks_for_language("python")
         typescript_count = generator.count_hooks_for_language("typescript")
         assert python_count > typescript_count
@@ -580,37 +627,40 @@ class TestCountHooksForLanguage:
 class TestGenerateWithUnsupportedLanguage:
     """Test handling of unsupported languages."""
 
-    def test_generate_unsupported_language_raises_error(self) -> None:
+    def test_generate_unsupported_language_raises_error(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generate raises ValueError for unsupported language."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="cobol",
-            output_path=Path(),
             language_config={},
         )
         with pytest.raises(ValueError, match="Unsupported language"):
             generator.generate(config)
 
-    def test_generate_unsupported_language_mentions_supported(self) -> None:
+    def test_generate_unsupported_language_mentions_supported(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test error message mentions supported languages."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="unsupported",
-            output_path=Path(),
             language_config={},
         )
         with pytest.raises(ValueError, match="Supported languages"):
             generator.generate(config)
 
-    def test_generate_empty_language_raises_error(self) -> None:
+    def test_generate_empty_language_raises_error(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generate raises ValueError for empty language."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="",
-            output_path=Path(),
             language_config={},
         )
         with pytest.raises(ValueError, match="language"):
@@ -672,71 +722,69 @@ class TestLanguageConfigsStructure:
 class TestEdgeCases:
     """Test edge cases and special scenarios."""
 
-    def test_generate_with_special_characters_in_project_name(self) -> None:
+    def test_generate_with_special_characters_in_project_name(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generate handles special characters in project name."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="my-test-project_v2.0",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
         assert "my-test-project_v2.0" in result
 
-    def test_generate_with_unicode_in_project_name(self) -> None:
+    def test_generate_with_unicode_in_project_name(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generate handles unicode in project name."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="projet-fr",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
         assert "projet-fr" in result
 
-    def test_generate_with_long_project_name(self) -> None:
+    def test_generate_with_long_project_name(self, mock_orchestrator: Mock) -> None:
         """Test generate handles long project name."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         long_name = "a" * 100
         config = GenerationConfig(
             project_name=long_name,
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
         assert long_name in result
 
-    def test_generate_idempotent(self) -> None:
+    def test_generate_idempotent(self, mock_orchestrator: Mock) -> None:
         """Test generate produces same output when called multiple times."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result1 = generator.generate(config)
         result2 = generator.generate(config)
         assert result1 == result2
 
-    def test_multiple_generators_independent(self) -> None:
+    def test_multiple_generators_independent(self, mock_orchestrator: Mock) -> None:
         """Test multiple generator instances are independent."""
-        gen1 = PreCommitGenerator()
-        gen2 = PreCommitGenerator()
+        gen1 = PreCommitGenerator(mock_orchestrator)
+        gen2 = PreCommitGenerator(mock_orchestrator)
 
         config1 = GenerationConfig(
             project_name="project1",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         config2 = GenerationConfig(
             project_name="project2",
             language="typescript",
-            output_path=Path(),
             language_config={},
         )
 
@@ -751,13 +799,12 @@ class TestEdgeCases:
 class TestYAMLValidation:
     """Test YAML output validation for all languages."""
 
-    def test_python_output_is_valid_yaml(self) -> None:
+    def test_python_output_is_valid_yaml(self, mock_orchestrator: Mock) -> None:
         """Test Python output can be parsed as YAML."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -767,13 +814,12 @@ class TestYAMLValidation:
         parsed = yaml.safe_load(yaml_content)
         assert parsed is not None
 
-    def test_typescript_output_is_valid_yaml(self) -> None:
+    def test_typescript_output_is_valid_yaml(self, mock_orchestrator: Mock) -> None:
         """Test TypeScript output can be parsed as YAML."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test",
             language="typescript",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -783,13 +829,12 @@ class TestYAMLValidation:
         parsed = yaml.safe_load(yaml_content)
         assert parsed is not None
 
-    def test_go_output_is_valid_yaml(self) -> None:
+    def test_go_output_is_valid_yaml(self, mock_orchestrator: Mock) -> None:
         """Test Go output can be parsed as YAML."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test",
             language="go",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -799,13 +844,12 @@ class TestYAMLValidation:
         parsed = yaml.safe_load(yaml_content)
         assert parsed is not None
 
-    def test_rust_output_is_valid_yaml(self) -> None:
+    def test_rust_output_is_valid_yaml(self, mock_orchestrator: Mock) -> None:
         """Test Rust output can be parsed as YAML."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test",
             language="rust",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -824,12 +868,11 @@ class TestGenerationConfigCreation:
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         assert config.project_name == "test"
         assert config.language == "python"
-        assert config.output_path == Path()
+        assert config.language_config == {}
 
     def test_generation_config_with_language_config(self) -> None:
         """Test GenerationConfig with language config dict."""
@@ -837,7 +880,6 @@ class TestGenerationConfigCreation:
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path(),
             language_config=lang_config,
         )
         assert config.language_config == lang_config
@@ -846,36 +888,37 @@ class TestGenerationConfigCreation:
 class TestMutationKillers:
     """Targeted tests to kill mutations and achieve high mutation score."""
 
-    def test_validate_language_exact_comparison(self) -> None:
+    def test_validate_language_exact_comparison(self, mock_orchestrator: Mock) -> None:
         """Test validate_language uses exact comparison.
 
         Kills mutations: in → not in
         """
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         assert generator.validate_language("python") is True
         assert generator.validate_language("unknown") is False
 
-    def test_count_hooks_increments_correctly(self) -> None:
+    def test_count_hooks_increments_correctly(self, mock_orchestrator: Mock) -> None:
         """Test count_hooks_for_language increments by exact count.
 
         Kills mutations: += 1 → += 0, += 2
         """
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         python_count = generator.count_hooks_for_language("python")
         hooks = generator.get_language_hooks("python")
         total = sum(len(repo.get("hooks", [])) for repo in hooks)
         assert python_count == total
 
-    def test_generate_includes_all_required_sections(self) -> None:
+    def test_generate_includes_all_required_sections(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generate includes all required YAML sections.
 
         Kills mutations that remove sections.
         """
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -889,31 +932,29 @@ class TestMutationKillers:
         assert "repos" in parsed
         assert "ci" in parsed
 
-    def test_error_message_exact_text(self) -> None:
+    def test_error_message_exact_text(self, mock_orchestrator: Mock) -> None:
         """Test error message contains exact text.
 
         Kills mutations in error message strings.
         """
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test",
             language="invalid",
-            output_path=Path(),
             language_config={},
         )
         with pytest.raises(ValueError, match=r"Unsupported language.*invalid"):
             generator.generate(config)
 
-    def test_header_comment_format(self) -> None:
+    def test_header_comment_format(self, mock_orchestrator: Mock) -> None:
         """Test header comment has exact format.
 
         Kills mutations in string formatting.
         """
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="my-project",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)

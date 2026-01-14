@@ -2,25 +2,35 @@
 
 from pathlib import Path
 import tempfile
+from unittest.mock import Mock
 
 import pytest
 import yaml
 
-from start_green_stay_green.generators.base import GenerationConfig
+from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import PreCommitGenerator
+
+
+@pytest.fixture
+def mock_orchestrator() -> Mock:
+    """Provide mock AIOrchestrator for testing.
+
+    Returns:
+        Mock object configured as AIOrchestrator.
+    """
+    return Mock()
 
 
 @pytest.mark.integration
 class TestPreCommitGeneratorIntegration:
     """Test Pre-commit Generator in integration scenarios."""
 
-    def test_generate_and_write_python_config(self) -> None:
+    def test_generate_and_write_python_config(self, mock_orchestrator: Mock) -> None:
         """Test generating and writing Python pre-commit config."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="integration-test",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -48,13 +58,14 @@ class TestPreCommitGeneratorIntegration:
         finally:
             temp_path.unlink()
 
-    def test_generate_and_write_typescript_config(self) -> None:
+    def test_generate_and_write_typescript_config(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generating and writing TypeScript pre-commit config."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="ts-integration-test",
             language="typescript",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -78,31 +89,31 @@ class TestPreCommitGeneratorIntegration:
         finally:
             temp_path.unlink()
 
-    def test_multiple_languages_workflow(self) -> None:
+    def test_multiple_languages_workflow(self, mock_orchestrator: Mock) -> None:
         """Test generating configs for multiple languages."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         languages = ["python", "typescript", "go", "rust"]
 
         for language in languages:
             config = GenerationConfig(
                 project_name=f"{language}-project",
                 language=language,
-                output_path=Path(),
                 language_config={},
             )
             result = generator.generate(config)
             assert language in result or f"{language}-project" in result
             assert "repos" in result
 
-    def test_generated_config_has_valid_structure_for_all_languages(self) -> None:
+    def test_generated_config_has_valid_structure_for_all_languages(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test all language configs have valid YAML structure."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
 
         for language in generator.get_supported_languages():
             config = GenerationConfig(
                 project_name="test",
                 language=language,
-                output_path=Path(),
                 language_config={},
             )
             result = generator.generate(config)
@@ -122,13 +133,14 @@ class TestPreCommitGeneratorIntegration:
             assert isinstance(parsed["repos"], list)
             assert isinstance(parsed["ci"], dict)
 
-    def test_generated_repos_have_required_fields(self) -> None:
+    def test_generated_repos_have_required_fields(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test all generated repos have required fields."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -146,13 +158,14 @@ class TestPreCommitGeneratorIntegration:
             assert "hooks" in repo
             assert isinstance(repo["hooks"], list)
 
-    def test_python_config_includes_critical_hooks(self) -> None:
+    def test_python_config_includes_critical_hooks(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test Python config includes all critical hooks."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -169,15 +182,16 @@ class TestPreCommitGeneratorIntegration:
         for tool in critical_tools:
             assert any(tool in url for url in repo_urls), f"Missing {tool}"
 
-    def test_ci_configuration_present_in_all_languages(self) -> None:
+    def test_ci_configuration_present_in_all_languages(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test CI configuration is present for all languages."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
 
         for language in generator.get_supported_languages():
             config = GenerationConfig(
                 project_name="test",
                 language=language,
-                output_path=Path(),
                 language_config={},
             )
             result = generator.generate(config)
@@ -194,9 +208,9 @@ class TestPreCommitGeneratorIntegration:
             assert "autoupdate_commit_msg" in ci_config
             assert "skip" in ci_config
 
-    def test_project_name_appears_in_output(self) -> None:
+    def test_project_name_appears_in_output(self, mock_orchestrator: Mock) -> None:
         """Test project name appears in generated output."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         project_names = [
             "my-awesome-project",
             "test_project_123",
@@ -207,19 +221,17 @@ class TestPreCommitGeneratorIntegration:
             config = GenerationConfig(
                 project_name=project_name,
                 language="python",
-                output_path=Path(),
                 language_config={},
             )
             result = generator.generate(config)
             assert project_name in result
 
-    def test_yaml_roundtrip_consistency(self) -> None:
+    def test_yaml_roundtrip_consistency(self, mock_orchestrator: Mock) -> None:
         """Test YAML can be parsed, modified, and re-serialized."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="roundtrip-test",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         original = generator.generate(config)
@@ -238,13 +250,14 @@ class TestPreCommitGeneratorIntegration:
         reparsed = yaml.safe_load(reserialized)
         assert reparsed == parsed
 
-    def test_language_specific_hooks_for_typescript(self) -> None:
+    def test_language_specific_hooks_for_typescript(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test TypeScript config has prettier (language-specific)."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="ts-test",
             language="typescript",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -259,13 +272,12 @@ class TestPreCommitGeneratorIntegration:
         # TypeScript should have prettier
         assert any("prettier" in url for url in repo_urls)
 
-    def test_language_specific_hooks_for_go(self) -> None:
+    def test_language_specific_hooks_for_go(self, mock_orchestrator: Mock) -> None:
         """Test Go config has golangci-lint (language-specific)."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="go-test",
             language="go",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -280,13 +292,12 @@ class TestPreCommitGeneratorIntegration:
         # Go should have golangci-lint
         assert any("golangci-lint" in url for url in repo_urls)
 
-    def test_language_specific_hooks_for_rust(self) -> None:
+    def test_language_specific_hooks_for_rust(self, mock_orchestrator: Mock) -> None:
         """Test Rust config has clippy and rustfmt (language-specific)."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="rust-test",
             language="rust",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -307,9 +318,9 @@ class TestPreCommitGeneratorIntegration:
         assert "fmt" in hook_ids
         assert "clippy" in hook_ids
 
-    def test_shared_hooks_across_languages(self) -> None:
+    def test_shared_hooks_across_languages(self, mock_orchestrator: Mock) -> None:
         """Test common hooks appear in all language configs."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
 
         # Get hooks for all languages
         all_language_hooks = {
@@ -324,13 +335,12 @@ class TestPreCommitGeneratorIntegration:
                 "pre-commit/pre-commit-hooks" in url for url in repo_urls
             ), f"{language} missing basic pre-commit-hooks"
 
-    def test_all_hooks_have_id_or_entry(self) -> None:
+    def test_all_hooks_have_id_or_entry(self, mock_orchestrator: Mock) -> None:
         """Test all configured hooks have id or entry field."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test",
             language="python",
-            output_path=Path(),
             language_config={},
         )
         result = generator.generate(config)
@@ -348,15 +358,16 @@ class TestPreCommitGeneratorIntegration:
                     "id" in hook or "entry" in hook
                 ), f"Hook missing id or entry: {hook}"
 
-    def test_generator_performance_multiple_calls(self) -> None:
+    def test_generator_performance_multiple_calls(
+        self, mock_orchestrator: Mock
+    ) -> None:
         """Test generator performs well across multiple calls."""
-        generator = PreCommitGenerator()
+        generator = PreCommitGenerator(mock_orchestrator)
 
         for i in range(10):
             config = GenerationConfig(
                 project_name=f"perf-test-{i}",
                 language="python",
-                output_path=Path(),
                 language_config={},
             )
             result = generator.generate(config)
