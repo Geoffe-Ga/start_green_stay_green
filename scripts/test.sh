@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # scripts/test.sh - Run tests with Pytest
-# Usage: ./scripts/test.sh [--unit|--integration|--e2e|--all] [--coverage] [--mutation] [--verbose] [--help]
+# Usage: ./scripts/test.sh [--unit|--integration|--e2e|--all] [--coverage] [--mutation] [--verbose] [--json] [--version] [--help]
 
 set -euo pipefail
 
+VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
@@ -11,6 +12,8 @@ TEST_TYPE="unit"
 COVERAGE=false
 MUTATION=false
 VERBOSE=false
+JSON_OUTPUT=false
+START_TIME=$(date +%s)
 
 # Source common utilities
 # shellcheck disable=SC1091
@@ -47,6 +50,14 @@ while [[ $# -gt 0 ]]; do
             VERBOSE=true
             shift
             ;;
+        --json)
+            JSON_OUTPUT=true
+            shift
+            ;;
+        --version)
+            echo "$(basename "$0") version $VERSION"
+            exit 0
+            ;;
         --help)
             cat << EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -61,6 +72,8 @@ OPTIONS:
     --coverage      Generate coverage report
     --mutation      Run mutation tests
     --verbose       Show detailed output
+    --json          Output results in JSON format
+    --version       Show version and exit
     --help          Display this help message
 
 EXIT CODES:
@@ -73,6 +86,7 @@ EXAMPLES:
     $(basename "$0") --all               # Run all tests
     $(basename "$0") --unit --coverage   # Unit tests with coverage
     $(basename "$0") --mutation          # Run mutation tests
+    $(basename "$0") --json              # JSON output
 EOF
             exit 0
             ;;
@@ -97,27 +111,45 @@ ensure_venv || exit 2
 # Build pytest arguments
 PYTEST_ARGS=(-v)
 
-case "$TEST_TYPE" in
-    unit)
-        echo "=== Running Unit Tests ==="
-        PYTEST_ARGS+=(-m "not integration and not e2e")
-        ;;
-    integration)
-        echo "=== Running Integration Tests ==="
-        PYTEST_ARGS+=(-m "integration")
-        ;;
-    e2e)
-        echo "=== Running End-to-End Tests ==="
-        PYTEST_ARGS+=(-m "e2e")
-        ;;
-    all)
-        echo "=== Running All Tests ==="
-        ;;
-esac
+if ! $JSON_OUTPUT; then
+    case "$TEST_TYPE" in
+        unit)
+            echo "=== Running Unit Tests ==="
+            PYTEST_ARGS+=(-m "not integration and not e2e")
+            ;;
+        integration)
+            echo "=== Running Integration Tests ==="
+            PYTEST_ARGS+=(-m "integration")
+            ;;
+        e2e)
+            echo "=== Running End-to-End Tests ==="
+            PYTEST_ARGS+=(-m "e2e")
+            ;;
+        all)
+            echo "=== Running All Tests ==="
+            ;;
+    esac
+else
+    case "$TEST_TYPE" in
+        unit)
+            PYTEST_ARGS+=(-m "not integration and not e2e")
+            ;;
+        integration)
+            PYTEST_ARGS+=(-m "integration")
+            ;;
+        e2e)
+            PYTEST_ARGS+=(-m "e2e")
+            ;;
+        all)
+            ;;
+    esac
+fi
 
 # Add coverage if requested
 if $COVERAGE; then
-    echo "Coverage enabled"
+    if ! $JSON_OUTPUT; then
+        echo "Coverage enabled"
+    fi
     PYTEST_ARGS+=(
         --cov=start_green_stay_green
         --cov-branch
@@ -128,19 +160,59 @@ if $COVERAGE; then
     )
 fi
 
-# Run tests
-if $VERBOSE; then
-    echo "Running pytest with args: ${PYTEST_ARGS[*]}"
+# Add JSON output if requested
+if $JSON_OUTPUT; then
+    PYTEST_ARGS+=(--json-report --json-report-file=/tmp/pytest-report.json)
 fi
 
-pytest "${PYTEST_ARGS[@]}" tests/ || { echo "✗ Tests failed" >&2; exit 1; }
+# Run tests
+TEST_START=$(date +%s)
+if $VERBOSE; then
+    if ! $JSON_OUTPUT; then
+        echo "Running pytest with args: ${PYTEST_ARGS[*]}"
+    fi
+fi
 
-echo "✓ Tests passed"
+pytest "${PYTEST_ARGS[@]}" tests/ 2>/tmp/pytest-stderr.txt || {
+    TEST_END=$(date +%s)
+    TEST_TIME=$((TEST_END - TEST_START))
+    END_TIME=$(date +%s)
+    TOTAL_TIME=$((END_TIME - START_TIME))
+
+    if $JSON_OUTPUT; then
+        echo "{\"status\": \"fail\", \"duration_seconds\": $TOTAL_TIME, \"test_duration\": $TEST_TIME}"
+    else
+        echo "✗ Tests failed" >&2
+    fi
+    exit 1
+}
+
+TEST_END=$(date +%s)
+TEST_TIME=$((TEST_END - TEST_START))
+END_TIME=$(date +%s)
+TOTAL_TIME=$((END_TIME - START_TIME))
+
+if $JSON_OUTPUT; then
+    # Output JSON format
+    echo "{\"status\": \"pass\", \"duration_seconds\": $TOTAL_TIME, \"test_duration\": $TEST_TIME}"
+else
+    echo "✓ Tests passed"
+    if $VERBOSE; then
+        echo "Test execution time: $TEST_TIME seconds"
+    fi
+fi
 
 # Run mutation tests if requested
 if $MUTATION; then
-    echo "=== Running Mutation Tests ==="
-    "$SCRIPT_DIR/mutation.sh" || { echo "✗ Mutation tests failed" >&2; exit 1; }
+    if ! $JSON_OUTPUT; then
+        echo "=== Running Mutation Tests ==="
+    fi
+    "$SCRIPT_DIR/mutation.sh" || {
+        if ! $JSON_OUTPUT; then
+            echo "✗ Mutation tests failed" >&2
+        fi
+        exit 1
+    }
 fi
 
 exit 0
