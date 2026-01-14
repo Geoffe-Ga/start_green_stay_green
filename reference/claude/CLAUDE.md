@@ -58,15 +58,49 @@ Follow Conventional Commits:
 - `test:` Test additions/changes
 - `chore:` Maintenance tasks
 
-### Code Review Checklist
-- [ ] All tests passing
-- [ ] Coverage thresholds met (90%+ code, 95%+ docstrings)
-- [ ] No type errors (mypy strict)
-- [ ] No linting errors (ruff, pylint)
-- [ ] No security issues (bandit, safety)
-- [ ] Conventional commit format
-- [ ] Documentation updated
-- [ ] CHANGELOG updated (if applicable)
+### Stay Green Workflow
+
+**Policy**: Never request review with failing checks. Never merge without LGTM.
+
+Follow these **4 sequential gates** for every code change:
+
+**Gate 1: Local Pre-Commit** (Iterate Until Green)
+- Run `./scripts/check-all.sh`
+- Fix all formatting, linting, types, complexity, security issues
+- Fix tests and coverage (90%+ required)
+- Only push when all local checks pass (exit code 0)
+
+**Gate 2: CI Pipeline** (Iterate Until Green)
+- Push to branch: `git push origin feature-branch`
+- Monitor CI: `gh pr checks --watch`
+- If CI fails: fix locally, re-run Gate 1, push again
+- Only proceed when all CI jobs show ✅
+
+**Gate 3: Mutation Testing** (Iterate Until 80%+)
+- Run `./scripts/mutation.sh` (or wait for CI job)
+- If score < 80%: add tests to kill surviving mutants
+- Re-run Gate 1, push, wait for CI
+- Only proceed when mutation score ≥ 80%
+
+**Gate 4: Code Review** (Iterate Until LGTM)
+- Wait for code review (AI or human)
+- If feedback provided: address ALL concerns
+- Re-run Gate 1, push, wait for CI and mutation
+- Only merge when review shows LGTM with no reservations
+
+**Quick Checklist** before merging:
+- [ ] Gate 1: `./scripts/check-all.sh` passes locally (exit 0)
+- [ ] Gate 2: All CI jobs show ✅ (green)
+- [ ] Gate 3: Mutation score ≥ 80% (if applicable)
+- [ ] Gate 4: Code review shows LGTM
+- [ ] Ready to merge!
+
+**Anti-Patterns** (DO NOT DO):
+- ❌ Don't request review with failing CI
+- ❌ Don't skip local checks (`git commit --no-verify`)
+- ❌ Don't lower quality thresholds to pass
+- ❌ Don't ignore review feedback
+- ❌ Don't merge without LGTM
 
 ## Testing Strategy
 
