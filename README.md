@@ -24,6 +24,19 @@ _Coming soon - See Issue 4.2 for CLI implementation_
 
 This project follows the [Maximum Quality Engineering Framework](plan/MAXIMUM_QUALITY_ENGINEERING.md).
 
+### Quality Workflow
+
+We enforce the **Stay Green** workflow with 4 sequential quality gates:
+
+1. **Local Pre-Commit**: Run `./scripts/check-all.sh` - all checks must pass
+2. **CI Pipeline**: Push to branch - all CI jobs must show ✅
+3. **Mutation Testing**: Score must be ≥ 80%
+4. **Code Review**: Address all feedback - only merge with LGTM
+
+**Never request review with failing checks. Never merge without LGTM.**
+
+See [Stay Green Workflow](/reference/workflows/stay-green.md) for complete documentation.
+
 ### Project Structure
 
 ```
