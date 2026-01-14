@@ -30,6 +30,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: |
@@ -51,6 +54,18 @@ jobs:
       - name: Run complexity analysis
         run: ./scripts/complexity.sh
 
+      - name: Track job timing
+        if: always()
+        run: echo "$SECONDS" > quality-job-timing.txt
+
+      - name: Upload job timing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-timings-quality
+          path: quality-job-timing.txt
+          retention-days: 7
+
   # Job 2: Tests with Matrix
   test:
     name: Tests
@@ -68,6 +83,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: |
@@ -79,6 +97,13 @@ jobs:
 
       - name: Run integration tests
         run: ./scripts/test.sh --integration
+
+      - name: Extract coverage percentage
+        if: matrix.python-version == '3.11'
+        run: |
+          COVERAGE=$(coverage report | grep TOTAL | awk '{print $NF}' | sed 's/%//')
+          echo "COVERAGE_PERCENTAGE=$COVERAGE" >> $GITHUB_ENV
+          echo "Coverage: $COVERAGE%" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
@@ -97,6 +122,18 @@ jobs:
             junit.xml
             htmlcov/
 
+      - name: Track job timing
+        if: always()
+        run: echo "$SECONDS" > test-py${{ matrix.python-version }}-job-timing.txt
+
+      - name: Upload job timing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-timings-test-py${{ matrix.python-version }}
+          path: test-py${{ matrix.python-version }}-job-timing.txt
+          retention-days: 7
+
   # Job 3: Mutation Testing (main branch only)
   mutation:
     name: Mutation Testing
@@ -112,6 +149,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: |
@@ -120,6 +160,18 @@ jobs:
 
       - name: Run mutation tests
         run: ./scripts/mutation.sh
+
+      - name: Track job timing
+        if: always()
+        run: echo "$SECONDS" > mutation-job-timing.txt
+
+      - name: Upload job timing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-timings-mutation
+          path: mutation-job-timing.txt
+          retention-days: 7
 
   # Job 4: Security Scanning
   security:
@@ -136,6 +188,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: |
@@ -147,6 +202,18 @@ jobs:
 
       - name: Run dependency audit
         run: ./scripts/audit-deps.sh
+
+      - name: Track job timing
+        if: always()
+        run: echo "$SECONDS" > security-job-timing.txt
+
+      - name: Upload job timing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-timings-security
+          path: security-job-timing.txt
+          retention-days: 7
 
   # Job 5: Dependency Review (PR only)
   dependency-review:
@@ -164,11 +231,26 @@ jobs:
         with:
           fail-on-severity: moderate
 
-  # Job 6: Coverage Artifacts
+      - name: Track job timing
+        if: always()
+        run: echo "$SECONDS" > dependency-review-job-timing.txt
+
+      - name: Upload job timing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-timings-dependency-review
+          path: dependency-review-job-timing.txt
+          retention-days: 7
+
+  # Job 6: Coverage Artifacts & Badge Generation
   coverage:
     name: Coverage Report
     runs-on: ubuntu-latest
     needs: test
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -178,6 +260,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: |
@@ -187,8 +272,162 @@ jobs:
       - name: Generate coverage report
         run: ./scripts/coverage.sh --html
 
+      - name: Extract coverage metrics
+        id: coverage
+        run: |
+          COVERAGE=$(coverage report | grep TOTAL | awk '{print $NF}' | sed 's/%//')
+          echo "coverage=${COVERAGE}" >> $GITHUB_OUTPUT
+          # Determine status
+          if (( $(echo "$COVERAGE >= 95" | bc -l) )); then
+            STATUS="excellent"
+            COLOR="brightgreen"
+          elif (( $(echo "$COVERAGE >= 90" | bc -l) )); then
+            STATUS="good"
+            COLOR="green"
+          elif (( $(echo "$COVERAGE >= 80" | bc -l) )); then
+            STATUS="fair"
+            COLOR="yellow"
+          else
+            STATUS="poor"
+            COLOR="red"
+          fi
+          echo "status=${STATUS}" >> $GITHUB_OUTPUT
+          echo "color=${COLOR}" >> $GITHUB_OUTPUT
+
+      - name: Generate badge JSON
+        run: |
+          mkdir -p badges
+          cat > badges/coverage.json << 'EOF'
+          {
+            "schemaVersion": 1,
+            "label": "coverage",
+            "message": "${{ steps.coverage.outputs.coverage }}%",
+            "color": "${{ steps.coverage.outputs.color }}"
+          }
+          EOF
+          cat > badges/tests.json << 'EOF'
+          {
+            "schemaVersion": 1,
+            "label": "tests",
+            "message": "passing",
+            "color": "brightgreen"
+          }
+          EOF
+          cat > badges/quality.json << 'EOF'
+          {
+            "schemaVersion": 1,
+            "label": "quality",
+            "message": "maximum",
+            "color": "brightgreen"
+          }
+          EOF
+          echo "Badge files generated:"
+          ls -la badges/
+
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: htmlcov/
+          retention-days: 30
+
+      - name: Upload badge artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-badges
+          path: badges/
+          retention-days: 30
+
+      - name: Comment PR with coverage
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const coverage = "${{ steps.coverage.outputs.coverage }}";
+            const status = "${{ steps.coverage.outputs.status }}";
+            const threshold = "${{ env.COVERAGE_THRESHOLD }}";
+
+            // Determine pass/fail emoji
+            const passEmoji = coverage >= threshold ? "✅" : "⚠️";
+
+            const comment = `## Coverage Report ${passEmoji}
+
+            **Coverage**: ${coverage}% (Threshold: ${threshold}%)
+            **Status**: ${status}
+
+            | Metric | Value |
+            |--------|-------|
+            | Coverage | ${coverage}% |
+            | Threshold | ${threshold}% |
+            | Status | ${status} |
+
+            [View detailed HTML report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+
+            // Find existing coverage comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existingComment = comments.find(comment =>
+              comment.body.includes('## Coverage Report')
+            );
+
+            if (existingComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: comment,
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment,
+              });
+            }
+
+      - name: Track job timing
+        if: always()
+        run: echo "$SECONDS" > coverage-job-timing.txt
+
+      - name: Upload job timing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-timings-coverage
+          path: coverage-job-timing.txt
+          retention-days: 7
+
+  # Job 7: Job timing summary
+  timing-summary:
+    name: Job Timing Summary
+    runs-on: ubuntu-latest
+    needs: [quality, test, security, coverage]
+    if: always()
+    steps:
+      - name: Download all timing artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: job-timings-*
+          path: timings
+
+      - name: Generate timing report
+        run: |
+          echo "## CI Job Timing Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Duration (seconds) |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|-------------------|" >> $GITHUB_STEP_SUMMARY
+
+          for file in timings/job-timings-*/*.txt; do
+            if [ -f "$file" ]; then
+              JOB_NAME=$(basename "$file" -job-timing.txt | tr '-' ' ')
+              DURATION=$(cat "$file")
+              echo "| $JOB_NAME | $DURATION |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
