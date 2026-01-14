@@ -7,8 +7,8 @@ including caching, validation, and language-specific rendering.
 import logging
 from pathlib import Path
 from typing import Any
-from typing import cast
 from typing import ClassVar
+from typing import cast
 
 from jinja2 import Environment
 from jinja2 import FileSystemLoader
@@ -112,7 +112,7 @@ class PromptManager:
                 self._template_cache[filename] = self._env.get_template(filename)
 
             template = self._template_cache[filename]
-            rendered = cast(str, template.render(**context))
+            rendered = cast("str", template.render(**context))
 
             if not rendered or not rendered.strip():
                 msg = f"Template {filename} rendered to empty content"
