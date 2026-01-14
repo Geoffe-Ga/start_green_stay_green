@@ -63,6 +63,59 @@ For those committed to maximum quality engineering:
 
 **This is who we are. This is how we build software.**
 
+## Stay Green Workflow
+
+**Policy**: Never request review with failing checks. Never merge without LGTM.
+
+The Stay Green workflow enforces iterative quality improvement through **4 sequential gates**. Each gate must pass before proceeding to the next.
+
+### The Four Gates
+
+1. **Gate 1: Local Pre-Commit** (Iterate Until Green)
+   - Run `./scripts/check-all.sh`
+   - Fix all formatting, linting, types, complexity, security issues
+   - Fix tests and coverage (90%+ required)
+   - Only push when all local checks pass (exit code 0)
+
+2. **Gate 2: CI Pipeline** (Iterate Until Green)
+   - Push to branch: `git push origin feature-branch`
+   - Monitor CI: `gh pr checks --watch`
+   - If CI fails: fix locally, re-run Gate 1, push again
+   - Only proceed when all CI jobs show ✅
+
+3. **Gate 3: Mutation Testing** (Iterate Until 80%+)
+   - Run `./scripts/mutation.sh` (or wait for CI job)
+   - If score < 80%: add tests to kill surviving mutants
+   - Re-run Gate 1, push, wait for CI
+   - Only proceed when mutation score ≥ 80%
+
+4. **Gate 4: Claude Code Review** (Iterate Until LGTM)
+   - Wait for Claude code review CI job
+   - If feedback provided: address ALL concerns
+   - Re-run Gate 1, push, wait for CI and mutation
+   - Only merge when Claude gives LGTM with no reservations
+
+### Quick Checklist
+
+Before creating/updating a PR:
+
+- [ ] Gate 1: `./scripts/check-all.sh` passes locally (exit 0)
+- [ ] Push changes: `git push origin feature-branch`
+- [ ] Gate 2: All CI jobs show ✅ (green)
+- [ ] Gate 3: Mutation score ≥ 80% (if applicable)
+- [ ] Gate 4: Claude review shows LGTM
+- [ ] Ready to merge!
+
+### Anti-Patterns (DO NOT DO)
+
+❌ **Don't** request review with failing CI
+❌ **Don't** skip local checks (`git commit --no-verify`)
+❌ **Don't** lower quality thresholds to pass
+❌ **Don't** ignore Claude feedback
+❌ **Don't** merge without LGTM
+
+**For complete workflow documentation, see**: `/reference/workflows/stay-green.md`
+
 ## Architecture
 
 ### Core Philosophy
