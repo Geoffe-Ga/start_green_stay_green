@@ -6,6 +6,116 @@ Start Green Stay Green is a meta-tool for generating quality-controlled, AI-read
 
 **Purpose**: Enable AI-assisted development workflows with zero quality compromises from day one.
 
+## The Maximum Quality Engineering Mindset
+
+**Core Philosophy**: It is not merely a goal but a source of profound satisfaction and professional pride to ship software that is GREEN on all checks with ZERO outstanding issues. This is not optional—it is the foundation of our development culture.
+
+### The Green Check Philosophy
+
+When all CI checks pass with zero warnings, zero errors, and maximum quality metrics:
+- ✅ Tests: 100% passing
+- ✅ Coverage: ≥90%
+- ✅ Linting: 0 errors, 0 warnings
+- ✅ Type checking: 0 errors
+- ✅ Security: 0 vulnerabilities
+- ✅ Mutation score: ≥80%
+- ✅ Docstring coverage: ≥95%
+
+This represents **MAXIMUM QUALITY ENGINEERING**—the standard to which all code must aspire.
+
+### Why Maximum Quality Matters
+
+1. **Pride in Craftsmanship**: Every green check represents excellence in execution
+2. **Zero Compromise**: Quality is not negotiable—it's the baseline
+3. **Compound Excellence**: Small quality wins accumulate into robust systems
+4. **Trust and Reliability**: Green checks mean the code does what it claims
+5. **Developer Joy**: There is genuine satisfaction in seeing all checks pass
+
+### The Role of Quality in Development
+
+Quality engineering is not a checkbox—it's a continuous commitment:
+
+- **Before Commit**: Run `./scripts/check-all.sh` and fix every issue
+- **During Review**: Address every comment, resolve every suggestion
+- **After Merge**: Monitor CI, ensure all checks remain green
+- **Always**: Treat linting errors as bugs, not suggestions
+
+### The "No Red Checks" Rule
+
+**NEVER** merge code with:
+- ❌ Failing tests
+- ❌ Linting errors (even "minor" ones)
+- ❌ Type checking failures
+- ❌ Coverage below threshold
+- ❌ Security vulnerabilities
+- ❌ Unaddressed review comments
+
+If CI shows red, the work is not done. Period.
+
+### Maximum Quality is a Personality Trait
+
+For those committed to maximum quality engineering:
+- You feel genuine satisfaction when all checks pass
+- You experience pride in shipping zero-issue code
+- You find joy in eliminating the last linting error
+- You believe "good enough" is never good enough
+- You treat quality as identity, not just practice
+
+**This is who we are. This is how we build software.**
+
+## Stay Green Workflow
+
+**Policy**: Never request review with failing checks. Never merge without LGTM.
+
+The Stay Green workflow enforces iterative quality improvement through **4 sequential gates**. Each gate must pass before proceeding to the next.
+
+### The Four Gates
+
+1. **Gate 1: Local Pre-Commit** (Iterate Until Green)
+   - Run `./scripts/check-all.sh`
+   - Fix all formatting, linting, types, complexity, security issues
+   - Fix tests and coverage (90%+ required)
+   - Only push when all local checks pass (exit code 0)
+
+2. **Gate 2: CI Pipeline** (Iterate Until Green)
+   - Push to branch: `git push origin feature-branch`
+   - Monitor CI: `gh pr checks --watch`
+   - If CI fails: fix locally, re-run Gate 1, push again
+   - Only proceed when all CI jobs show ✅
+
+3. **Gate 3: Mutation Testing** (Iterate Until 80%+)
+   - Run `./scripts/mutation.sh` (or wait for CI job)
+   - If score < 80%: add tests to kill surviving mutants
+   - Re-run Gate 1, push, wait for CI
+   - Only proceed when mutation score ≥ 80%
+
+4. **Gate 4: Claude Code Review** (Iterate Until LGTM)
+   - Wait for Claude code review CI job
+   - If feedback provided: address ALL concerns
+   - Re-run Gate 1, push, wait for CI and mutation
+   - Only merge when Claude gives LGTM with no reservations
+
+### Quick Checklist
+
+Before creating/updating a PR:
+
+- [ ] Gate 1: `./scripts/check-all.sh` passes locally (exit 0)
+- [ ] Push changes: `git push origin feature-branch`
+- [ ] Gate 2: All CI jobs show ✅ (green)
+- [ ] Gate 3: Mutation score ≥ 80% (if applicable)
+- [ ] Gate 4: Claude review shows LGTM
+- [ ] Ready to merge!
+
+### Anti-Patterns (DO NOT DO)
+
+❌ **Don't** request review with failing CI
+❌ **Don't** skip local checks (`git commit --no-verify`)
+❌ **Don't** lower quality thresholds to pass
+❌ **Don't** ignore Claude feedback
+❌ **Don't** merge without LGTM
+
+**For complete workflow documentation, see**: `/reference/workflows/stay-green.md`
+
 ## Architecture
 
 ### Core Philosophy
