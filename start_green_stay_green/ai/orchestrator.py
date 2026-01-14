@@ -135,6 +135,117 @@ class AIOrchestrator:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
 
+    def _validate_prompt(self, prompt: str) -> None:
+        """Validate prompt is not empty.
+
+        Args:
+            prompt: Prompt to validate.
+
+        Raises:
+            ValueError: If prompt is empty or whitespace-only.
+        """
+        if not prompt or not prompt.strip():
+            msg = "Prompt cannot be empty"
+            raise ValueError(msg)
+
+    def _validate_output_format(
+        self,
+        output_format: str,
+    ) -> None:
+        """Validate output format is supported.
+
+        Args:
+            output_format: Format to validate.
+
+        Raises:
+            ValueError: If format is not supported.
+        """
+        supported_formats = {"yaml", "toml", "markdown", "bash"}
+        if output_format not in supported_formats:
+            msg = f"Unsupported output format: {output_format}"
+            raise ValueError(msg)
+
+    def _extract_content_from_response(self, response: object) -> str:
+        """Extract text content from API response.
+
+        Args:
+            response: Response object from Claude API.
+
+        Returns:
+            Text content from response.
+
+        Raises:
+            GenerationError: If response format is invalid.
+        """
+        first_block = response.content[0]  # type: ignore[index]
+        if not isinstance(first_block, TextBlock):
+            msg = "Expected TextBlock in response"
+            raise GenerationError(msg)
+        return first_block.text
+
+    def _build_generation_result(
+        self,
+        response: object,
+        output_format: str,
+        content: str,
+    ) -> GenerationResult:
+        """Build GenerationResult from API response.
+
+        Args:
+            response: Response object from Claude API.
+            output_format: Output format used.
+            content: Generated content text.
+
+        Returns:
+            GenerationResult with all metadata.
+        """
+        return GenerationResult(
+            content=content,
+            format=output_format,
+            token_usage=TokenUsage(
+                input_tokens=response.usage.input_tokens,  # type: ignore[attr-defined]
+                output_tokens=response.usage.output_tokens,  # type: ignore[attr-defined]
+            ),
+            model=response.model,  # type: ignore[attr-defined]
+            message_id=response.id,  # type: ignore[attr-defined]
+        )
+
+    def _make_api_call(
+        self,
+        client: Anthropic,
+        prompt: str,
+        output_format: str,
+    ) -> object:
+        """Make API call to Claude.
+
+        Args:
+            client: Anthropic client instance.
+            prompt: Prompt to send.
+            output_format: Desired output format.
+
+        Returns:
+            API response object.
+        """
+        return client.messages.create(
+            model=self.model,
+            max_tokens=4096,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"Generate {output_format} output:\n\n{prompt}",
+                },
+            ],
+        )
+
+    def _handle_retry_backoff(self, attempt: int) -> None:
+        """Sleep with exponential backoff.
+
+        Args:
+            attempt: Current attempt number (0-indexed).
+        """
+        delay = self.retry_delay * (2**attempt)
+        time.sleep(delay)
+
     def generate(
         self,
         prompt: str,
@@ -154,14 +265,8 @@ class AIOrchestrator:
             GenerationError: If API call fails or response invalid.
         """
         # Validate inputs
-        if not prompt or not prompt.strip():
-            msg = "Prompt cannot be empty"
-            raise ValueError(msg)
-
-        supported_formats = {"yaml", "toml", "markdown", "bash"}
-        if output_format not in supported_formats:
-            msg = f"Unsupported output format: {output_format}"
-            raise ValueError(msg)
+        self._validate_prompt(prompt)
+        self._validate_output_format(output_format)
 
         # Retry loop with exponential backoff
         client = Anthropic(api_key=self.api_key)
@@ -169,34 +274,12 @@ class AIOrchestrator:
 
         for attempt in range(self.max_retries + 1):
             try:
-                response = client.messages.create(
-                    model=self.model,
-                    max_tokens=4096,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": f"Generate {output_format} output:\n\n{prompt}",
-                        },
-                    ],
-                )
-
-                # Extract content from response
-                first_block = response.content[0]
-                if not isinstance(first_block, TextBlock):
-                    msg = "Expected TextBlock in response"
-                    raise GenerationError(msg)  # noqa: TRY301
-                content = first_block.text
-
-                # Build result
-                return GenerationResult(
-                    content=content,
-                    format=output_format,
-                    token_usage=TokenUsage(
-                        input_tokens=response.usage.input_tokens,
-                        output_tokens=response.usage.output_tokens,
-                    ),
-                    model=response.model,
-                    message_id=response.id,
+                response = self._make_api_call(client, prompt, output_format)
+                content = self._extract_content_from_response(response)
+                return self._build_generation_result(
+                    response,
+                    output_format,
+                    content,
                 )
 
             except GenerationError:
@@ -206,9 +289,7 @@ class AIOrchestrator:
                 last_error = e
                 # If we haven't exhausted retries, sleep and try again
                 if attempt < self.max_retries:
-                    # Exponential backoff: retry_delay * (2 ** attempt)
-                    delay = self.retry_delay * (2**attempt)
-                    time.sleep(delay)
+                    self._handle_retry_backoff(attempt)
                     continue
 
         # All retries exhausted
