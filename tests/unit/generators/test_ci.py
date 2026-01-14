@@ -273,7 +273,8 @@ class TestCIGeneratorContextBuilding:
             LANGUAGE_CONFIGS["python"]
         )
 
-        # Check that Framework: line doesn't appear (avoid false positive from "Test Framework:")
+        # Check Framework: line doesn't appear
+        # (avoid false positive from "Test Framework:")
         assert "\nFramework: " not in context
 
 

@@ -247,11 +247,10 @@ Generate a complete, valid GitHub Actions workflow in YAML format that:
 Output ONLY valid YAML - no markdown, no explanations, no code fences.
 Start with 'name:' and end with the last workflow configuration line."""
 
-        result = self.orchestrator.generate(
+        return self.orchestrator.generate(
             prompt=prompt,
             output_format="yaml",
         )
-        return result
 
     def _validate_structure(self, parsed: dict[str, Any]) -> None:
         """Validate basic workflow structure.
