@@ -1,0 +1,14 @@
+{
+  "forbidden_imports": [
+    {
+      "pattern": "start_green_stay_green.generators.*",
+      "from": "start_green_stay_green.ai.*",
+      "reason": "AI layer should not import from generators"
+    }
+  ],
+  "required_structure": {
+    "test_files_must_have_prefix": "test_",
+    "private_modules_must_start_with": "_",
+    "max_file_length_lines": 500
+  }
+}

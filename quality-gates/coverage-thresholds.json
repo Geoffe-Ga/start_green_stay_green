@@ -1,0 +1,12 @@
+{
+  "minimum_coverage": 90,
+  "minimum_branch_coverage": 90,
+  "minimum_docstring_coverage": 95,
+  "fail_below_threshold": true,
+  "exclude_patterns": [
+    "*/tests/*",
+    "*/fixtures/*",
+    "*/templates/*",
+    "*/reference/*"
+  ]
+}
