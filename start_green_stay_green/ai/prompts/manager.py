@@ -72,6 +72,33 @@ class PromptManager:
         )
         self._template_cache: dict[str, Any] = {}
 
+    def _validate_language(self, language: str) -> None:
+        """Validate language is supported."""
+        if language not in self.SUPPORTED_LANGUAGES:
+            msg = (
+                f"Unsupported language: {language}. "
+                f"Supported: {', '.join(sorted(self.SUPPORTED_LANGUAGES))}"
+            )
+            raise ValueError(msg)
+
+    def _build_filename(self, template_name: str, language: str | None) -> str:
+        """Build template filename with optional language variant."""
+        if language:
+            return f"{template_name}.{language}.jinja2"
+        return f"{template_name}.jinja2"
+
+    def _get_or_load_template(self, filename: str) -> Any:
+        """Get template from cache or load it."""
+        if filename not in self._template_cache:
+            self._template_cache[filename] = self._env.get_template(filename)
+        return self._template_cache[filename]
+
+    def _validate_rendered_content(self, rendered: str, filename: str) -> None:
+        """Validate rendered content is not empty."""
+        if not rendered or not rendered.strip():
+            msg = f"Template {filename} rendered to empty content"
+            raise PromptTemplateError(msg)  # noqa: TRY301
+
     def render(
         self,
         template_name: str,
@@ -93,32 +120,16 @@ class PromptManager:
             PromptTemplateError: If template not found or rendering fails.
             ValueError: If language is not supported.
         """
-        if language and language not in self.SUPPORTED_LANGUAGES:
-            msg = (
-                f"Unsupported language: {language}. "
-                f"Supported: {', '.join(sorted(self.SUPPORTED_LANGUAGES))}"
-            )
-            raise ValueError(msg)
-
-        # Build template filename with language variant if provided
         if language:
-            filename = f"{template_name}.{language}.jinja2"
-        else:
-            filename = f"{template_name}.jinja2"
+            self._validate_language(language)
+
+        filename = self._build_filename(template_name, language)
 
         try:
-            # Check cache first
-            if filename not in self._template_cache:
-                self._template_cache[filename] = self._env.get_template(filename)
-
-            template = self._template_cache[filename]
+            template = self._get_or_load_template(filename)
             rendered = cast("str", template.render(**context))
-
-            if not rendered or not rendered.strip():
-                msg = f"Template {filename} rendered to empty content"
-                raise PromptTemplateError(msg)  # noqa: TRY301
-
-            return rendered  # noqa: TRY300 - Return in try block for clarity, validated above
+            self._validate_rendered_content(rendered, filename)
+            return rendered  # noqa: TRY300
         except TemplateNotFound as e:
             msg = f"Prompt template not found: {filename}"
             raise PromptTemplateError(msg) from e
