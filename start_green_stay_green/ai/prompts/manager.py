@@ -7,6 +7,7 @@ including caching, validation, and language-specific rendering.
 import logging
 from pathlib import Path
 from typing import Any
+from typing import cast
 from typing import ClassVar
 
 from jinja2 import Environment
@@ -21,7 +22,6 @@ class PromptTemplateError(Exception):
     """Raised when prompt template operations fail."""
 
 
-
 class PromptManager:
     """Manages loading and rendering prompt templates.
 
@@ -31,7 +31,12 @@ class PromptManager:
     """
 
     SUPPORTED_LANGUAGES: ClassVar[set[str]] = {
-        "python", "typescript", "go", "rust", "swift", "java"
+        "python",
+        "typescript",
+        "go",
+        "rust",
+        "swift",
+        "java",
     }
     SUPPORTED_TEMPLATE_TYPES: ClassVar[set[str]] = {
         "ci_cd",
@@ -56,9 +61,7 @@ class PromptManager:
 
         if not template_dir.exists():
             msg = f"Prompt template directory not found: {template_dir}"
-            raise PromptTemplateError(
-                msg
-            )
+            raise PromptTemplateError(msg)
 
         self.template_dir = template_dir
         self._env = Environment(
@@ -95,9 +98,7 @@ class PromptManager:
                 f"Unsupported language: {language}. "
                 f"Supported: {', '.join(sorted(self.SUPPORTED_LANGUAGES))}"
             )
-            raise ValueError(
-                msg
-            )
+            raise ValueError(msg)
 
         # Build template filename with language variant if provided
         if language:
@@ -111,11 +112,11 @@ class PromptManager:
                 self._template_cache[filename] = self._env.get_template(filename)
 
             template = self._template_cache[filename]
-            rendered = template.render(**context)
+            rendered = cast(str, template.render(**context))
 
             if not rendered or not rendered.strip():
                 msg = f"Template {filename} rendered to empty content"
-                raise PromptTemplateError(msg)  # noqa: TRY301 - Direct validation in rendering context
+                raise PromptTemplateError(msg)  # noqa: TRY301
 
             return rendered  # noqa: TRY300 - Return in try block for clarity, validated above
         except TemplateNotFound as e:
@@ -123,9 +124,7 @@ class PromptManager:
             raise PromptTemplateError(msg) from e
         except Exception as e:
             msg = f"Failed to render template {filename}: {e!s}"
-            raise PromptTemplateError(
-                msg
-            ) from e
+            raise PromptTemplateError(msg) from e
 
     def get_available_templates(self) -> list[str]:
         """Get list of available template names.

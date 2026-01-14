@@ -243,6 +243,7 @@ markers = [
 filterwarnings = [
     "error",  # Turn all warnings into errors
     "ignore::DeprecationWarning:anthropic.*",
+    "ignore::DeprecationWarning:pytest_asyncio.*",
 ]
 
 # Coverage configuration

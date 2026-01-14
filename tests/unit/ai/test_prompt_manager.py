@@ -43,13 +43,13 @@ class TestPromptManagerInitialization:
         """Test PromptManager initializes Jinja2 environment."""
         manager = PromptManager()
         assert manager._env is not None  # noqa: SLF001 - Testing internal Jinja2 setup
-        assert manager._env.loader is not None  # noqa: SLF001 - Testing internal Jinja2 setup
+        assert manager._env.loader is not None  # noqa: SLF001
 
     def test_init_creates_empty_template_cache(self) -> None:
         """Test PromptManager initializes empty template cache."""
         manager = PromptManager()
-        assert manager._template_cache == {}  # noqa: SLF001 - Testing cache initialization
-        assert isinstance(manager._template_cache, dict)  # noqa: SLF001 - Testing cache type
+        assert manager._template_cache == {}  # noqa: SLF001
+        assert isinstance(manager._template_cache, dict)  # noqa: SLF001
 
     def test_init_supported_languages_constant(self) -> None:
         """Test SUPPORTED_LANGUAGES constant is properly defined."""
@@ -188,7 +188,7 @@ class TestPromptManagerRender:
 
         # First render
         manager.render("cached", {"value": "first"})
-        assert "cached.jinja2" in manager._template_cache  # noqa: SLF001 - Testing cache behavior
+        assert "cached.jinja2" in manager._template_cache  # noqa: SLF001
 
         # Modify template file (shouldn't affect next render due to cache)
         template_file.write_text("Modified: {{ value }}")
@@ -321,7 +321,7 @@ class TestPromptManagerCacheManagement:
 
         # Render to populate cache
         manager.render("test", {})
-        assert len(manager._template_cache) > 0  # noqa: SLF001 - Testing cache population
+        assert len(manager._template_cache) > 0  # noqa: SLF001
 
         # Clear cache
         manager.clear_cache()
@@ -342,7 +342,9 @@ class TestPromptManagerCacheManagement:
         manager.render("cached", {"value": "v2"})
 
         # Cache should have only one entry
-        cache_entries = [k for k in manager._template_cache if "cached" in k]  # noqa: SLF001 - Testing cache uniqueness
+        cache_entries = [
+            k for k in manager._template_cache if "cached" in k  # noqa: SLF001
+        ]
         assert len(cache_entries) == 1
 
 
