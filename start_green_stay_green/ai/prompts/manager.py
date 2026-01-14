@@ -8,7 +8,6 @@ import logging
 from pathlib import Path
 from typing import Any
 from typing import ClassVar
-from typing import cast
 
 from jinja2 import Environment
 from jinja2 import FileSystemLoader
@@ -71,7 +70,7 @@ class PromptManager:
             trim_blocks=True,
             lstrip_blocks=True,
         )
-        self._template_cache: dict[str, Any] = {}
+        self._template_cache: dict[str, Template] = {}
 
     def _validate_language(self, language: str) -> None:
         """Validate language is supported."""
@@ -128,7 +127,7 @@ class PromptManager:
 
         try:
             template = self._get_or_load_template(filename)
-            rendered = cast("str", template.render(**context))
+            rendered = template.render(**context)
             self._validate_rendered_content(rendered, filename)
             return rendered  # noqa: TRY300
         except TemplateNotFound as e:
