@@ -25,7 +25,7 @@
 # Total hooks: 30
 
 default_language_version:
-  python: python3.11
+  python: python3
 
 repos:
   # Git checks - Basic integrity

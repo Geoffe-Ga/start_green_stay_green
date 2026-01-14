@@ -373,6 +373,13 @@ Start with 'name:' and end with the last workflow configuration line."""
             self._validate_quality_job(parsed)
             self._validate_test_job(parsed)
 
+        except yaml.YAMLError as e:
+            msg = f"Invalid YAML in generated workflow: {e}"
+            raise ValueError(msg) from e
+        except (KeyError, TypeError, ValueError) as e:
+            msg = f"Workflow validation failed: {e}"
+            raise ValueError(msg) from e
+        else:
             return CIWorkflow(
                 name=parsed.get("name", "CI"),
                 content=yaml_content,
@@ -380,13 +387,6 @@ Start with 'name:' and end with the last workflow configuration line."""
                 is_valid=True,
                 error_message=None,
             )
-
-        except yaml.YAMLError as e:
-            msg = f"Invalid YAML in generated workflow: {e}"
-            raise ValueError(msg) from e
-        except (KeyError, TypeError, ValueError) as e:
-            msg = f"Workflow validation failed: {e}"
-            raise ValueError(msg) from e
 
     def generate(self) -> dict[str, Any]:
         """Generate complete CI infrastructure.
