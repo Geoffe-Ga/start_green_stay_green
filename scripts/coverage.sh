@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # scripts/coverage.sh - Generate coverage reports
-# Usage: ./scripts/coverage.sh [--html] [--verbose] [--help]
+# Usage: ./scripts/coverage.sh [--html] [--verbose] [--version] [--help]
 
 set -euo pipefail
 
+VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 HTML=false
 VERBOSE=false
+START_TIME=$(date +%s)
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -21,6 +23,10 @@ while [[ $# -gt 0 ]]; do
             VERBOSE=true
             shift
             ;;
+        --version)
+            echo "$(basename "$0") version $VERSION"
+            exit 0
+            ;;
         --help)
             cat << EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -30,6 +36,7 @@ Generate coverage reports using coverage/pytest-cov.
 OPTIONS:
     --html      Generate HTML coverage report
     --verbose   Show detailed output
+    --version   Show version and exit
     --help      Display this help message
 
 EXIT CODES:
@@ -72,7 +79,13 @@ if $VERBOSE; then
     echo "Running pytest with coverage..."
 fi
 
-pytest "${COVERAGE_ARGS[@]}" tests/ || { echo "✗ Coverage generation failed" >&2; exit 1; }
+COV_START=$(date +%s)
+pytest "${COVERAGE_ARGS[@]}" tests/ 2>/tmp/coverage-stderr.txt || {
+    echo "✗ Coverage generation failed" >&2
+    exit 1
+}
+COV_END=$(date +%s)
+COV_TIME=$((COV_END - COV_START))
 
 # Check coverage threshold (90%)
 COVERAGE_THRESHOLD=90
@@ -84,10 +97,17 @@ if command -v coverage &> /dev/null; then
     fi
 fi
 
+END_TIME=$(date +%s)
+TOTAL_TIME=$((END_TIME - START_TIME))
+
 if $HTML; then
     echo "✓ HTML coverage report generated in htmlcov/index.html"
 else
     echo "✓ Coverage report generated"
+fi
+
+if $VERBOSE; then
+    echo "Coverage execution time: $COV_TIME seconds"
 fi
 
 exit 0

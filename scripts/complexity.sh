@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # scripts/complexity.sh - Code complexity analysis with MAXIMUM QUALITY enforcement
-# Usage: ./scripts/complexity.sh [--verbose] [--help]
+# Usage: ./scripts/complexity.sh [--verbose] [--version] [--help]
 
 set -euo pipefail
 
+VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 VERBOSE=false
+START_TIME=$(date +%s)
 
 # Source common utilities
 # shellcheck disable=SC1091
@@ -25,6 +27,10 @@ while [[ $# -gt 0 ]]; do
             VERBOSE=true
             shift
             ;;
+        --version)
+            echo "$(basename "$0") version $VERSION"
+            exit 0
+            ;;
         --help)
             cat << EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -41,6 +47,7 @@ MAXIMUM QUALITY THRESHOLDS:
 
 OPTIONS:
     --verbose   Show detailed output
+    --version   Show version and exit
     --help      Display this help message
 
 EXIT CODES:
@@ -159,10 +166,17 @@ else
     echo "ℹ Xenon not available (skipping strict grade enforcement)"
 fi
 
+END_TIME=$(date +%s)
+TOTAL_TIME=$((END_TIME - START_TIME))
+
 echo ""
 echo "=== Complexity Analysis Summary ==="
 echo "Passed: ${#PASSED_CHECKS[@]}"
 echo "Failed: ${#FAILED_CHECKS[@]}"
+
+if $VERBOSE; then
+    echo "Execution time: $TOTAL_TIME seconds"
+fi
 
 if [ ${#FAILED_CHECKS[@]} -gt 0 ]; then
     echo ""
