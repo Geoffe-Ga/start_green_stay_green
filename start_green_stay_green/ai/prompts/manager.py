@@ -12,6 +12,7 @@ from typing import cast
 
 from jinja2 import Environment
 from jinja2 import FileSystemLoader
+from jinja2 import Template
 from jinja2 import TemplateNotFound
 from jinja2 import select_autoescape
 
@@ -87,7 +88,7 @@ class PromptManager:
             return f"{template_name}.{language}.jinja2"
         return f"{template_name}.jinja2"
 
-    def _get_or_load_template(self, filename: str) -> Any:
+    def _get_or_load_template(self, filename: str) -> Template:
         """Get template from cache or load it."""
         if filename not in self._template_cache:
             self._template_cache[filename] = self._env.get_template(filename)
@@ -97,7 +98,7 @@ class PromptManager:
         """Validate rendered content is not empty."""
         if not rendered or not rendered.strip():
             msg = f"Template {filename} rendered to empty content"
-            raise PromptTemplateError(msg)  # noqa: TRY301
+            raise PromptTemplateError(msg)
 
     def render(
         self,
