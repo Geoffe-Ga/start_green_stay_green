@@ -925,7 +925,7 @@ class TestMutationKillers:
         Kills mutations in LANGUAGE_CONFIGS.
         """
         python_hooks = LANGUAGE_CONFIGS["python"]["hooks"]
-        assert len(python_hooks) == 15
+        assert len(python_hooks) == 16
 
     def test_language_config_typescript_exact_hooks_count(self) -> None:
         """Test TypeScript has exact expected hook count."""
