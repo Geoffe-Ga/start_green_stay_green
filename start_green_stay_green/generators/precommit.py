@@ -366,6 +366,57 @@ class PreCommitGenerator(BaseGenerator):
         # Pre-commit configuration for my-project
     """
 
+    def _validate_language_supported(self, language: str) -> None:
+        """Validate that language is supported.
+
+        Args:
+            language: Language identifier to validate.
+
+        Raises:
+            ValueError: If language is not supported.
+        """
+        if language not in LANGUAGE_CONFIGS:
+            msg = (
+                f"Unsupported language: {language}. "
+                f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
+            )
+            raise ValueError(msg)
+
+    def _build_config_dict(self, language: str) -> dict[str, Any]:
+        """Build pre-commit configuration dictionary.
+
+        Args:
+            language: Language identifier.
+
+        Returns:
+            Configuration dictionary with repos, CI settings, and language versions.
+        """
+        language_config = LANGUAGE_CONFIGS[language]
+        return {
+            "default_language_version": language_config["default_language_version"],
+            "repos": language_config["hooks"],
+            "ci": {
+                "autofix_commit_msg": "style: auto-fix by pre-commit hooks",
+                "autoupdate_commit_msg": "chore: update pre-commit hooks",
+                "skip": [],
+            },
+        }
+
+    def _generate_header(self, project_name: str) -> str:
+        """Generate YAML header comment with instructions.
+
+        Args:
+            project_name: Name of the project.
+
+        Returns:
+            Header comment string.
+        """
+        return (
+            f"# Pre-commit hooks configuration for {project_name}\n"
+            "# Install: pre-commit install\n"
+            "# Run manually: pre-commit run --all-files\n\n"
+        )
+
     def generate(self, config: GenerationConfig) -> str:
         """Generate .pre-commit-config.yaml content.
 
@@ -382,25 +433,8 @@ class PreCommitGenerator(BaseGenerator):
         Raises:
             ValueError: If language is not supported.
         """
-        if config.language not in LANGUAGE_CONFIGS:
-            msg = (
-                f"Unsupported language: {config.language}. "
-                f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
-            )
-            raise ValueError(msg)
-
-        language_config = LANGUAGE_CONFIGS[config.language]
-
-        # Build configuration dictionary
-        config_dict: dict[str, Any] = {
-            "default_language_version": language_config["default_language_version"],
-            "repos": language_config["hooks"],
-            "ci": {
-                "autofix_commit_msg": "style: auto-fix by pre-commit hooks",
-                "autoupdate_commit_msg": "chore: update pre-commit hooks",
-                "skip": [],
-            },
-        }
+        self._validate_language_supported(config.language)
+        config_dict = self._build_config_dict(config.language)
 
         # Convert to YAML
         yaml_content = yaml.dump(
@@ -410,13 +444,7 @@ class PreCommitGenerator(BaseGenerator):
             allow_unicode=True,
         )
 
-        # Add header comment
-        header = (
-            f"# Pre-commit hooks configuration for {config.project_name}\n"
-            "# Install: pre-commit install\n"
-            "# Run manually: pre-commit run --all-files\n\n"
-        )
-
+        header = self._generate_header(config.project_name)
         return header + yaml_content
 
     def validate_language(self, language: str) -> bool:
@@ -478,6 +506,19 @@ class PreCommitGenerator(BaseGenerator):
         # Cast to satisfy mypy strict mode - dict access returns Any
         return cast("list[dict[str, Any]]", LANGUAGE_CONFIGS[language]["hooks"])
 
+    def _sum_hooks_in_repos(
+        self, repos_config: list[dict[str, Any]]
+    ) -> int:
+        """Sum total hooks across all repository configurations.
+
+        Args:
+            repos_config: List of repository configurations.
+
+        Returns:
+            Total count of hooks across all repositories.
+        """
+        return sum(len(repo.get("hooks", [])) for repo in repos_config)
+
     def count_hooks_for_language(self, language: str) -> int:
         """Count total number of hooks configured for a language.
 
@@ -504,10 +545,4 @@ class PreCommitGenerator(BaseGenerator):
             raise ValueError(msg)
 
         hooks_config = LANGUAGE_CONFIGS[language]["hooks"]
-        total_hooks = 0
-
-        for repo_config in hooks_config:
-            if "hooks" in repo_config:
-                total_hooks += len(repo_config["hooks"])
-
-        return total_hooks
+        return self._sum_hooks_in_repos(hooks_config)
