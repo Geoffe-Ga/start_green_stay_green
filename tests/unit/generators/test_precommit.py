@@ -1615,39 +1615,41 @@ class TestMutationKillers:
     def test_ci_autofix_commit_msg_exact(self, mock_orchestrator: Mock) -> None:
         """Test CI autofix_commit_msg is exact."""
         generator = PreCommitGenerator(mock_orchestrator)
-        config_dict = generator._build_config_dict("python")
-        assert config_dict["ci"]["autofix_commit_msg"] == "style: auto-fix by pre-commit hooks"
+        config_dict = generator._build_config_dict("python")  # noqa: SLF001
+        expected = "style: auto-fix by pre-commit hooks"
+        assert config_dict["ci"]["autofix_commit_msg"] == expected
 
     def test_ci_autoupdate_commit_msg_exact(self, mock_orchestrator: Mock) -> None:
         """Test CI autoupdate_commit_msg is exact."""
         generator = PreCommitGenerator(mock_orchestrator)
-        config_dict = generator._build_config_dict("python")
-        assert config_dict["ci"]["autoupdate_commit_msg"] == "chore: update pre-commit hooks"
+        config_dict = generator._build_config_dict("python")  # noqa: SLF001
+        expected = "chore: update pre-commit hooks"
+        assert config_dict["ci"]["autoupdate_commit_msg"] == expected
 
     def test_ci_skip_is_empty_list(self, mock_orchestrator: Mock) -> None:
         """Test CI skip is empty list."""
         generator = PreCommitGenerator(mock_orchestrator)
-        config_dict = generator._build_config_dict("python")
+        config_dict = generator._build_config_dict("python")  # noqa: SLF001
         assert config_dict["ci"]["skip"] == []
 
     # Header Generation Exact Tests
     def test_header_first_line_exact(self, mock_orchestrator: Mock) -> None:
         """Test header first line is exact."""
         generator = PreCommitGenerator(mock_orchestrator)
-        header = generator._generate_header("my-project")
+        header = generator._generate_header("my-project")  # noqa: SLF001
         lines = header.split("\n")
         assert lines[0] == "# Pre-commit hooks configuration for my-project"
 
     def test_header_second_line_exact(self, mock_orchestrator: Mock) -> None:
         """Test header second line is exact."""
         generator = PreCommitGenerator(mock_orchestrator)
-        header = generator._generate_header("my-project")
+        header = generator._generate_header("my-project")  # noqa: SLF001
         lines = header.split("\n")
         assert lines[1] == "# Install: pre-commit install"
 
     def test_header_third_line_exact(self) -> None:
         """Test header third line is exact."""
         generator = PreCommitGenerator(Mock())
-        header = generator._generate_header("my-project")
+        header = generator._generate_header("my-project")  # noqa: SLF001
         lines = header.split("\n")
         assert lines[2] == "# Run manually: pre-commit run --all-files"

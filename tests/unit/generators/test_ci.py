@@ -947,7 +947,8 @@ jobs:
 
     def test_python_supported_versions_exact(self) -> None:
         """Test Python supported_versions list is exact."""
-        assert LANGUAGE_CONFIGS["python"]["supported_versions"] == ["3.11", "3.12", "3.13"]
+        expected = ["3.11", "3.12", "3.13"]
+        assert LANGUAGE_CONFIGS["python"]["supported_versions"] == expected
 
     def test_python_package_manager_exact(self) -> None:
         """Test Python package_manager is exactly pip."""

@@ -916,7 +916,8 @@ class TestMutationKillers:
 
         manager = PromptManager(template_dir=templates_dir)
 
-        with pytest.raises(PromptTemplateError, match="Prompt template not found: test.jinja2"):
+        expected_msg = "Prompt template not found: test.jinja2"
+        with pytest.raises(PromptTemplateError, match=expected_msg):
             manager.render("test", {})
 
     def test_language_error_lists_supported_languages(self, tmp_path: Path) -> None:
@@ -930,5 +931,6 @@ class TestMutationKillers:
 
         manager = PromptManager(template_dir=templates_dir)
 
-        with pytest.raises(ValueError, match="Supported:.*python"):
+        expected_msg = "Supported:.*python"
+        with pytest.raises(ValueError, match=expected_msg):
             manager.render("test", {}, language="invalid")
