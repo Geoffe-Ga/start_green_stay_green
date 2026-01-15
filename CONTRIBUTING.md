@@ -38,7 +38,7 @@ gh pr create --fill
 ## Stay Green Workflow (4 Gates)
 
 1. **Gate 1:** Local checks pass (`./scripts/check-all.sh`)
-2. **Gate 2:** CI pipeline green  
+2. **Gate 2:** CI pipeline green
 3. **Gate 3:** Mutation score ≥80%
 4. **Gate 4:** Code review LGTM
 

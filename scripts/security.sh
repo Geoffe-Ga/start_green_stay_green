@@ -124,5 +124,6 @@ TOTAL_TIME=$((END_TIME - START_TIME))
 echo "✓ Security checks passed"
 if $VERBOSE; then
     echo "Security check execution time: $SEC_TIME seconds"
+    echo "Total execution time: $TOTAL_TIME seconds"
 fi
 exit 0

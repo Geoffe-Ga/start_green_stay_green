@@ -82,6 +82,7 @@ fi
 
 # Activate virtual environment
 echo "Activating virtual environment..."
+# shellcheck disable=SC1091  # .venv/bin/activate is dynamically generated
 source .venv/bin/activate || { echo "✗ Failed to activate virtual environment" >&2; exit 1; }
 echo "✓ Virtual environment activated"
 echo ""
