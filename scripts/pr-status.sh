@@ -5,14 +5,18 @@
 set -euo pipefail
 
 VERSION="1.0.0"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 VERBOSE=false
 JSON_OUTPUT=false
 WATCH_MODE=false
 WATCH_INTERVAL=30
 START_TIME=$(date +%s)
+
+# Detect if running in interactive terminal
+IS_INTERACTIVE=false
+if [[ -t 1 ]]; then
+    IS_INTERACTIVE=true
+fi
 
 # Parse command line arguments
 PR_NUMBERS=()
@@ -52,6 +56,7 @@ OPTIONS:
     --verbose       Show detailed output
     --json          Output results in JSON format
     --watch         Continuously monitor (refresh every 30s)
+                    Note: Auto-detects interactive terminal for optimal display
     --interval N    Set watch interval to N seconds (default: 30)
     --version       Show version and exit
     --help          Display this help message
@@ -60,6 +65,10 @@ EXIT CODES:
     0               All PRs passing or status retrieved successfully
     1               One or more PRs failing
     2               Error (missing dependencies, invalid arguments)
+
+WATCH MODE:
+    In interactive terminals: Clears screen between updates
+    In background/captured:   Uses separators with timestamps
 
 EXAMPLES:
     $(basename "$0") 63 64 65           # Check specific PRs
@@ -114,28 +123,33 @@ check_pr() {
     local pr_data
     local ci_checks
     local review_comments
-    
+
     # Get PR details
     pr_data=$(gh pr view "$pr_number" --json number,title,state,mergeable,url,author 2>/dev/null || echo "")
-    
+
     if [[ -z "$pr_data" ]]; then
         echo "Error: PR #$pr_number not found" >&2
         return 1
     fi
-    
-    local pr_title=$(echo "$pr_data" | jq -r '.title')
-    local pr_state=$(echo "$pr_data" | jq -r '.state')
-    local pr_mergeable=$(echo "$pr_data" | jq -r '.mergeable')
-    local pr_url=$(echo "$pr_data" | jq -r '.url')
-    local pr_author=$(echo "$pr_data" | jq -r '.author.login')
-    
+
+    local pr_title
+    local pr_state
+    local pr_mergeable
+    local pr_url
+    local pr_author
+    pr_title=$(echo "$pr_data" | jq -r '.title')
+    pr_state=$(echo "$pr_data" | jq -r '.state')
+    pr_mergeable=$(echo "$pr_data" | jq -r '.mergeable')
+    pr_url=$(echo "$pr_data" | jq -r '.url')
+    pr_author=$(echo "$pr_data" | jq -r '.author.login')
+
     # Get CI checks
     ci_checks=$(gh pr checks "$pr_number" 2>&1 || echo "no checks reported")
-    
+
     # Get Claude review comments
     review_comments=$(gh api "repos/$REPO_OWNER/$REPO_NAME/issues/$pr_number/comments" \
         --jq '.[] | select(.user.login == "claude[bot]") | {created_at: .created_at, body: .body}' 2>/dev/null || echo "")
-    
+
     # Count check statuses
     local total_checks=0
     local passing_checks=0
@@ -153,7 +167,7 @@ check_pr() {
         pending_checks=${pending_checks:-0}
         total_checks=${total_checks:-0}
     fi
-    
+
     # Determine overall status
     local overall_status="unknown"
     if [[ "$ci_checks" == "no checks reported"* ]]; then
@@ -165,7 +179,7 @@ check_pr() {
     elif [[ $passing_checks -gt 0 ]]; then
         overall_status="passing"
     fi
-    
+
     # Check for Claude LGTM
     local claude_lgtm="not_found"
     if [[ -n "$review_comments" ]]; then
@@ -175,7 +189,7 @@ check_pr() {
             claude_lgtm="commented"
         fi
     fi
-    
+
     # Output based on format
     if $JSON_OUTPUT; then
         cat << JSON
@@ -206,7 +220,7 @@ JSON
         echo "Mergeable: $pr_mergeable"
         echo "URL:       $pr_url"
         echo ""
-        
+
         # CI Status
         echo "CI Status: "
         case $overall_status in
@@ -226,12 +240,12 @@ JSON
                 echo "  ❓ UNKNOWN STATUS"
                 ;;
         esac
-        
+
         # Show individual checks in verbose mode
         if $VERBOSE && [[ "$ci_checks" != "no checks reported"* ]]; then
             echo ""
             echo "Check Details:"
-            echo "$ci_checks" | while IFS=$'\t' read -r name status time url; do
+            echo "$ci_checks" | while IFS=$'\t' read -r name status time _; do
                 case $status in
                     pass)
                         echo "  ✅ $name ($time)"
@@ -248,7 +262,7 @@ JSON
                 esac
             done
         fi
-        
+
         # Claude Review Status
         echo ""
         echo "Claude Review:"
@@ -263,7 +277,7 @@ JSON
                 echo "  ⏳ No review yet"
                 ;;
         esac
-        
+
         # Show review comments in verbose mode
         if $VERBOSE && [[ -n "$review_comments" ]]; then
             echo ""
@@ -271,15 +285,15 @@ JSON
             echo "$review_comments" | jq -r '.body' | head -20 | sed 's/^/  │ /'
             echo "  └─ [truncated, see PR for full review]"
         fi
-        
+
         echo ""
     fi
-    
+
     # Return failure if checks are failing
     if [[ "$overall_status" == "failing" ]]; then
         return 1
     fi
-    
+
     return 0
 }
 
@@ -287,51 +301,62 @@ JSON
 main() {
     local exit_code=0
     local iteration=1
-    
+
     while true; do
         if $WATCH_MODE && [[ $iteration -gt 1 ]]; then
-            clear
-            echo "🔄 Refreshing... (Iteration $iteration, Interval: ${WATCH_INTERVAL}s)"
+            # Only clear screen in interactive mode
+            if $IS_INTERACTIVE; then
+                clear
+                echo "🔄 Refreshing... (Iteration $iteration, Interval: ${WATCH_INTERVAL}s)"
+            else
+                # In non-interactive mode (background/capture), use separator with timestamp
+                echo ""
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo "🔄 Refresh #$iteration at $(date '+%H:%M:%S') (every ${WATCH_INTERVAL}s)"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            fi
             echo ""
         fi
-        
+
         if ! $JSON_OUTPUT; then
             echo "Monitoring ${#PR_NUMBERS[@]} PR(s) in $REPO_OWNER/$REPO_NAME"
         fi
-        
+
         if $JSON_OUTPUT; then
             echo "["
         fi
-        
+
         local first=true
         for pr in "${PR_NUMBERS[@]}"; do
             if $JSON_OUTPUT && ! $first; then
                 echo ","
             fi
-            
+
             if ! check_pr "$pr"; then
                 exit_code=1
             fi
-            
+
             first=false
         done
-        
+
         if $JSON_OUTPUT; then
             echo "]"
         fi
-        
+
         # Show timing in verbose mode
         if $VERBOSE && ! $JSON_OUTPUT; then
-            local end_time=$(date +%s)
-            local duration=$((end_time - START_TIME))
+            local end_time
+            local duration
+            end_time=$(date +%s)
+            duration=$((end_time - START_TIME))
             echo "Execution time: ${duration}s"
         fi
-        
+
         # Break if not in watch mode
         if ! $WATCH_MODE; then
             break
         fi
-        
+
         # Wait before next iteration
         if ! $JSON_OUTPUT; then
             echo ""
@@ -340,10 +365,9 @@ main() {
         sleep "$WATCH_INTERVAL"
         iteration=$((iteration + 1))
     done
-    
+
     return $exit_code
 }
 
 # Run main function
 main
-

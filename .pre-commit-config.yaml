@@ -117,11 +117,14 @@ repos:
       - id: commitizen
         stages: [commit-msg]
 
-  # Shell script linting
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.9.0.6
+  # Shell script linting (using system shellcheck for Apple Silicon compatibility)
+  - repo: local
     hooks:
       - id: shellcheck
+        name: shellcheck
+        entry: shellcheck
+        language: system
+        types: [shell]
 
   # Upgrade Python syntax
   - repo: https://github.com/asottile/pyupgrade

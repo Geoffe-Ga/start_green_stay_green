@@ -619,3 +619,318 @@ class TestPromptManagerLanguageVariants:
 
             result = manager.render("test", {}, language=lang)
             assert f"Test for {lang}" in result
+
+
+class TestMutationKillers:
+    """Targeted mutation tests to achieve 80%+ mutation score for manager.py.
+
+    These tests verify exact values, boundaries, and logic conditions.
+    """
+
+    def test_template_cache_initialized_as_empty_dict(self, tmp_path: Path) -> None:
+        """Test _template_cache is initialized as empty dict, not None or other type.
+
+        Kills mutations: {} → None, {} → {1:1}
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        manager = PromptManager(template_dir=templates_dir)
+
+        assert isinstance(manager._template_cache, dict)  # noqa: SLF001
+        assert len(manager._template_cache) == 0  # noqa: SLF001
+        assert manager._template_cache == {}  # noqa: SLF001
+        assert manager._template_cache is not None  # noqa: SLF001
+
+    def test_cache_hit_avoids_reload(self, tmp_path: Path) -> None:
+        """Test cached template is returned without reload.
+
+        Kills mutations: if filename not in cache → if filename in cache
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "test.jinja2").write_text("Test content")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        # First load - goes to cache
+        result1 = manager.render("test", {})
+        assert "Test content" in result1
+
+        # Verify it's in cache
+        assert "test.jinja2" in manager._template_cache  # noqa: SLF001
+
+        # Second load - should use cache
+        result2 = manager.render("test", {})
+        assert result2 == result1
+
+    def test_validate_rendered_content_empty_string_raises(
+        self, tmp_path: Path
+    ) -> None:
+        """Test validation rejects empty string.
+
+        Kills mutations: if not rendered → if rendered
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "empty.jinja2").write_text("")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        with pytest.raises(PromptTemplateError, match="rendered to empty content"):
+            manager.render("empty", {})
+
+    def test_validate_rendered_content_whitespace_only_raises(
+        self, tmp_path: Path
+    ) -> None:
+        """Test validation rejects whitespace-only content.
+
+        Kills mutations: if not rendered.strip() → if not rendered
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "whitespace.jinja2").write_text("   \n\t  ")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        with pytest.raises(PromptTemplateError, match="rendered to empty content"):
+            manager.render("whitespace", {})
+
+    def test_build_filename_with_language_exact_format(self, tmp_path: Path) -> None:
+        """Test _build_filename produces exact format with language.
+
+        Kills mutations: f"{name}.{lang}.jinja2" → f"{name}.{lang}"
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        manager = PromptManager(template_dir=templates_dir)
+
+        filename = manager._build_filename("test", "python")  # noqa: SLF001
+        assert filename == "test.python.jinja2"
+        assert filename.endswith(".jinja2")
+        assert ".python." in filename
+
+    def test_build_filename_without_language_exact_format(self, tmp_path: Path) -> None:
+        """Test _build_filename produces exact format without language.
+
+        Kills mutations: f"{name}.jinja2" → f"{name}"
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        manager = PromptManager(template_dir=templates_dir)
+
+        filename = manager._build_filename("test", None)  # noqa: SLF001
+        assert filename == "test.jinja2"
+        assert filename.endswith(".jinja2")
+        assert "." not in filename.replace(".jinja2", "")
+
+    def test_language_validation_called_when_language_provided(
+        self, tmp_path: Path
+    ) -> None:
+        """Test language validation is called when language is provided.
+
+        Kills mutations: if language → if not language
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "test.invalid.jinja2").write_text("Content")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        # Should raise because "invalid" is not a supported language
+        with pytest.raises(ValueError, match="Unsupported language"):
+            manager.render("test", {}, language="invalid")
+
+    def test_language_validation_skipped_when_no_language(self, tmp_path: Path) -> None:
+        """Test language validation is skipped when language is None.
+
+        Kills mutations: if language → if not language
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "test.jinja2").write_text("Content")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        # Should work without language validation
+        result = manager.render("test", {}, language=None)
+        assert "Content" in result
+
+    def test_supported_languages_exact_set(self) -> None:
+        """Test SUPPORTED_LANGUAGES contains exact set of languages.
+
+        Kills mutations: set contents changed
+        """
+        expected = {"python", "typescript", "go", "rust", "swift", "java"}
+        assert expected == PromptManager.SUPPORTED_LANGUAGES
+        assert len(PromptManager.SUPPORTED_LANGUAGES) == 6
+
+    def test_supported_languages_contains_python(self) -> None:
+        """Test SUPPORTED_LANGUAGES contains python."""
+        assert "python" in PromptManager.SUPPORTED_LANGUAGES
+
+    def test_supported_languages_contains_typescript(self) -> None:
+        """Test SUPPORTED_LANGUAGES contains typescript."""
+        assert "typescript" in PromptManager.SUPPORTED_LANGUAGES
+
+    def test_supported_languages_contains_go(self) -> None:
+        """Test SUPPORTED_LANGUAGES contains go."""
+        assert "go" in PromptManager.SUPPORTED_LANGUAGES
+
+    def test_supported_languages_contains_rust(self) -> None:
+        """Test SUPPORTED_LANGUAGES contains rust."""
+        assert "rust" in PromptManager.SUPPORTED_LANGUAGES
+
+    def test_supported_languages_contains_swift(self) -> None:
+        """Test SUPPORTED_LANGUAGES contains swift."""
+        assert "swift" in PromptManager.SUPPORTED_LANGUAGES
+
+    def test_supported_languages_contains_java(self) -> None:
+        """Test SUPPORTED_LANGUAGES contains java."""
+        assert "java" in PromptManager.SUPPORTED_LANGUAGES
+
+    def test_supported_template_types_exact_set(self) -> None:
+        """Test SUPPORTED_TEMPLATE_TYPES contains exact set."""
+        expected = {
+            "ci_cd",
+            "precommit",
+            "quality_scripts",
+            "claude_md",
+            "project_scaffolding",
+        }
+        assert expected == PromptManager.SUPPORTED_TEMPLATE_TYPES
+        assert len(PromptManager.SUPPORTED_TEMPLATE_TYPES) == 5
+
+    def test_supported_template_types_contains_ci_cd(self) -> None:
+        """Test SUPPORTED_TEMPLATE_TYPES contains ci_cd."""
+        assert "ci_cd" in PromptManager.SUPPORTED_TEMPLATE_TYPES
+
+    def test_supported_template_types_contains_precommit(self) -> None:
+        """Test SUPPORTED_TEMPLATE_TYPES contains precommit."""
+        assert "precommit" in PromptManager.SUPPORTED_TEMPLATE_TYPES
+
+    def test_supported_template_types_contains_quality_scripts(self) -> None:
+        """Test SUPPORTED_TEMPLATE_TYPES contains quality_scripts."""
+        assert "quality_scripts" in PromptManager.SUPPORTED_TEMPLATE_TYPES
+
+    def test_supported_template_types_contains_claude_md(self) -> None:
+        """Test SUPPORTED_TEMPLATE_TYPES contains claude_md."""
+        assert "claude_md" in PromptManager.SUPPORTED_TEMPLATE_TYPES
+
+    def test_supported_template_types_contains_project_scaffolding(self) -> None:
+        """Test SUPPORTED_TEMPLATE_TYPES contains project_scaffolding."""
+        assert "project_scaffolding" in PromptManager.SUPPORTED_TEMPLATE_TYPES
+
+    def test_render_returns_string_type(self, tmp_path: Path) -> None:
+        """Test render returns str type, not bytes or other.
+
+        Kills mutations: return type changes
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "test.jinja2").write_text("Content")
+
+        manager = PromptManager(template_dir=templates_dir)
+        result = manager.render("test", {})
+
+        assert isinstance(result, str)
+        assert not isinstance(result, bytes)
+
+    def test_clear_cache_empties_cache(self, tmp_path: Path) -> None:
+        """Test clear_cache empties the template cache.
+
+        Kills mutations: clear() → other operations
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "test.jinja2").write_text("Content")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        # Load template to populate cache
+        manager.render("test", {})
+        assert len(manager._template_cache) > 0  # noqa: SLF001
+
+        # Clear cache
+        manager.clear_cache()
+        assert len(manager._template_cache) == 0  # noqa: SLF001
+        assert manager._template_cache == {}  # noqa: SLF001
+
+    def test_validate_template_returns_true_when_exists(self, tmp_path: Path) -> None:
+        """Test validate_template returns exactly True when template exists.
+
+        Kills mutations: True → False
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "test.jinja2").write_text("Content")
+
+        manager = PromptManager(template_dir=templates_dir)
+        result = manager.validate_template("test")
+
+        assert result is True
+        assert result == True  # noqa: E712
+        assert result is not False
+
+    def test_validate_template_returns_false_when_not_exists(
+        self, tmp_path: Path
+    ) -> None:
+        """Test validate_template returns exactly False when template missing.
+
+        Kills mutations: False → True
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+
+        manager = PromptManager(template_dir=templates_dir)
+        result = manager.validate_template("nonexistent")
+
+        assert result is False
+        assert result == False  # noqa: E712
+        assert result is not True
+
+    def test_get_available_templates_returns_sorted_list(self, tmp_path: Path) -> None:
+        """Test get_available_templates returns sorted list.
+
+        Kills mutations: sorted() removed
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "z_template.jinja2").write_text("Z")
+        (templates_dir / "a_template.jinja2").write_text("A")
+        (templates_dir / "m_template.jinja2").write_text("M")
+
+        manager = PromptManager(template_dir=templates_dir)
+        result = manager.get_available_templates()
+
+        assert result == ["a_template", "m_template", "z_template"]
+        assert result == sorted(result)
+        assert result[0] < result[1] < result[2]
+
+    def test_error_message_format_exact(self, tmp_path: Path) -> None:
+        """Test error messages have exact expected format.
+
+        Kills mutations: string format changes
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        expected_msg = "Prompt template not found: test.jinja2"
+        with pytest.raises(PromptTemplateError, match=expected_msg):
+            manager.render("test", {})
+
+    def test_language_error_lists_supported_languages(self, tmp_path: Path) -> None:
+        """Test language validation error lists all supported languages.
+
+        Kills mutations: error message string construction
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "test.invalid.jinja2").write_text("Content")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        expected_msg = "Supported:.*python"
+        with pytest.raises(ValueError, match=expected_msg):
+            manager.render("test", {}, language="invalid")

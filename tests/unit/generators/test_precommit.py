@@ -982,3 +982,674 @@ class TestMutationKillers:
         """Test Rust has exact expected hook count."""
         rust_hooks = LANGUAGE_CONFIGS["rust"]["hooks"]
         assert len(rust_hooks) == 4
+
+    # Python Configuration - Exact URL and Version Tests
+    def test_python_pre_commit_hooks_repo_url_exact(self) -> None:
+        """Test Python pre-commit-hooks repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][0]
+        assert repo["repo"] == "https://github.com/pre-commit/pre-commit-hooks"
+
+    def test_python_pre_commit_hooks_rev_exact(self) -> None:
+        """Test Python pre-commit-hooks rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][0]
+        assert repo["rev"] == "v4.5.0"
+
+    def test_python_ruff_repo_url_exact(self) -> None:
+        """Test Python ruff repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][1]
+        assert repo["repo"] == "https://github.com/astral-sh/ruff-pre-commit"
+
+    def test_python_ruff_rev_exact(self) -> None:
+        """Test Python ruff rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][1]
+        assert repo["rev"] == "v0.2.0"
+
+    def test_python_black_repo_url_exact(self) -> None:
+        """Test Python black repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][2]
+        assert repo["repo"] == "https://github.com/psf/black"
+
+    def test_python_black_rev_exact(self) -> None:
+        """Test Python black rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][2]
+        assert repo["rev"] == "24.1.0"
+
+    def test_python_isort_repo_url_exact(self) -> None:
+        """Test Python isort repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][3]
+        assert repo["repo"] == "https://github.com/PyCQA/isort"
+
+    def test_python_isort_rev_exact(self) -> None:
+        """Test Python isort rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][3]
+        assert repo["rev"] == "5.13.0"
+
+    def test_python_mypy_repo_url_exact(self) -> None:
+        """Test Python mypy repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][4]
+        assert repo["repo"] == "https://github.com/pre-commit/mirrors-mypy"
+
+    def test_python_mypy_rev_exact(self) -> None:
+        """Test Python mypy rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][4]
+        assert repo["rev"] == "v1.8.0"
+
+    def test_python_bandit_repo_url_exact(self) -> None:
+        """Test Python bandit repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][5]
+        assert repo["repo"] == "https://github.com/PyCQA/bandit"
+
+    def test_python_bandit_rev_exact(self) -> None:
+        """Test Python bandit rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][5]
+        assert repo["rev"] == "1.7.7"
+
+    def test_python_safety_repo_url_exact(self) -> None:
+        """Test Python safety repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][6]
+        assert repo["repo"] == "https://github.com/Lucas-C/pre-commit-hooks-safety"
+
+    def test_python_safety_rev_exact(self) -> None:
+        """Test Python safety rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][6]
+        assert repo["rev"] == "v1.3.3"
+
+    def test_python_conventional_commit_repo_url_exact(self) -> None:
+        """Test Python conventional commit repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][7]
+        assert repo["repo"] == "https://github.com/compilerla/conventional-pre-commit"
+
+    def test_python_conventional_commit_rev_exact(self) -> None:
+        """Test Python conventional commit rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][7]
+        assert repo["rev"] == "v3.0.0"
+
+    def test_python_shellcheck_repo_url_exact(self) -> None:
+        """Test Python shellcheck repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][8]
+        assert repo["repo"] == "https://github.com/shellcheck-py/shellcheck-py"
+
+    def test_python_shellcheck_rev_exact(self) -> None:
+        """Test Python shellcheck rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][8]
+        assert repo["rev"] == "v0.9.0.6"
+
+    def test_python_pyupgrade_repo_url_exact(self) -> None:
+        """Test Python pyupgrade repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][9]
+        assert repo["repo"] == "https://github.com/asottile/pyupgrade"
+
+    def test_python_pyupgrade_rev_exact(self) -> None:
+        """Test Python pyupgrade rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][9]
+        assert repo["rev"] == "v3.15.0"
+
+    def test_python_autoflake_repo_url_exact(self) -> None:
+        """Test Python autoflake repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][10]
+        assert repo["repo"] == "https://github.com/PyCQA/autoflake"
+
+    def test_python_autoflake_rev_exact(self) -> None:
+        """Test Python autoflake rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][10]
+        assert repo["rev"] == "v2.2.1"
+
+    def test_python_tryceratops_repo_url_exact(self) -> None:
+        """Test Python tryceratops repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][11]
+        assert repo["repo"] == "https://github.com/guilatrova/tryceratops"
+
+    def test_python_tryceratops_rev_exact(self) -> None:
+        """Test Python tryceratops rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][11]
+        assert repo["rev"] == "v2.3.2"
+
+    def test_python_refurb_repo_url_exact(self) -> None:
+        """Test Python refurb repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][12]
+        assert repo["repo"] == "https://github.com/dosisod/refurb"
+
+    def test_python_refurb_rev_exact(self) -> None:
+        """Test Python refurb rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][12]
+        assert repo["rev"] == "v1.26.0"
+
+    def test_python_vulture_repo_url_exact(self) -> None:
+        """Test Python vulture repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][13]
+        assert repo["repo"] == "https://github.com/jendrikseipp/vulture"
+
+    def test_python_vulture_rev_exact(self) -> None:
+        """Test Python vulture rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][13]
+        assert repo["rev"] == "v2.10"
+
+    def test_python_interrogate_repo_url_exact(self) -> None:
+        """Test Python interrogate repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][14]
+        assert repo["repo"] == "https://github.com/econchick/interrogate"
+
+    def test_python_interrogate_rev_exact(self) -> None:
+        """Test Python interrogate rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][14]
+        assert repo["rev"] == "1.5.0"
+
+    def test_python_detect_secrets_repo_url_exact(self) -> None:
+        """Test Python detect-secrets repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][15]
+        assert repo["repo"] == "https://github.com/Yelp/detect-secrets"
+
+    def test_python_detect_secrets_rev_exact(self) -> None:
+        """Test Python detect-secrets rev is exact."""
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][15]
+        assert repo["rev"] == "v1.4.0"
+
+    # Python Hook IDs - Exact Tests
+    def test_python_trailing_whitespace_id_exact(self) -> None:
+        """Test trailing-whitespace hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[0]["id"] == "trailing-whitespace"
+
+    def test_python_end_of_file_fixer_id_exact(self) -> None:
+        """Test end-of-file-fixer hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[1]["id"] == "end-of-file-fixer"
+
+    def test_python_check_yaml_id_exact(self) -> None:
+        """Test check-yaml hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[2]["id"] == "check-yaml"
+
+    def test_python_check_toml_id_exact(self) -> None:
+        """Test check-toml hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[3]["id"] == "check-toml"
+
+    def test_python_check_json_id_exact(self) -> None:
+        """Test check-json hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[4]["id"] == "check-json"
+
+    def test_python_check_added_large_files_id_exact(self) -> None:
+        """Test check-added-large-files hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[5]["id"] == "check-added-large-files"
+
+    def test_python_check_added_large_files_args_exact(self) -> None:
+        """Test check-added-large-files args are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[5]["args"] == ["--maxkb=500"]
+
+    def test_python_check_case_conflict_id_exact(self) -> None:
+        """Test check-case-conflict hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[6]["id"] == "check-case-conflict"
+
+    def test_python_check_merge_conflict_id_exact(self) -> None:
+        """Test check-merge-conflict hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[7]["id"] == "check-merge-conflict"
+
+    def test_python_check_symlinks_id_exact(self) -> None:
+        """Test check-symlinks hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[8]["id"] == "check-symlinks"
+
+    def test_python_check_ast_id_exact(self) -> None:
+        """Test check-ast hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[9]["id"] == "check-ast"
+
+    def test_python_debug_statements_id_exact(self) -> None:
+        """Test debug-statements hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[10]["id"] == "debug-statements"
+
+    def test_python_check_docstring_first_id_exact(self) -> None:
+        """Test check-docstring-first hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[11]["id"] == "check-docstring-first"
+
+    def test_python_detect_private_key_id_exact(self) -> None:
+        """Test detect-private-key hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[12]["id"] == "detect-private-key"
+
+    def test_python_fix_byte_order_marker_id_exact(self) -> None:
+        """Test fix-byte-order-marker hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[13]["id"] == "fix-byte-order-marker"
+
+    def test_python_mixed_line_ending_id_exact(self) -> None:
+        """Test mixed-line-ending hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[14]["id"] == "mixed-line-ending"
+
+    def test_python_mixed_line_ending_args_exact(self) -> None:
+        """Test mixed-line-ending args are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[14]["args"] == ["--fix=lf"]
+
+    def test_python_no_commit_to_branch_id_exact(self) -> None:
+        """Test no-commit-to-branch hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[15]["id"] == "no-commit-to-branch"
+
+    def test_python_no_commit_to_branch_args_exact(self) -> None:
+        """Test no-commit-to-branch args are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][0]["hooks"]
+        assert hooks[15]["args"] == ["--branch", "main"]
+
+    def test_python_ruff_hook_id_exact(self) -> None:
+        """Test ruff hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][1]["hooks"]
+        assert hooks[0]["id"] == "ruff"
+
+    def test_python_ruff_args_exact(self) -> None:
+        """Test ruff args are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][1]["hooks"]
+        assert hooks[0]["args"] == ["--fix"]
+
+    def test_python_ruff_format_id_exact(self) -> None:
+        """Test ruff-format hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][1]["hooks"]
+        assert hooks[1]["id"] == "ruff-format"
+
+    def test_python_black_hook_id_exact(self) -> None:
+        """Test black hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][2]["hooks"]
+        assert hooks[0]["id"] == "black"
+
+    def test_python_black_language_version_exact(self) -> None:
+        """Test black language_version is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][2]["hooks"]
+        assert hooks[0]["language_version"] == "python3.11"
+
+    def test_python_isort_hook_id_exact(self) -> None:
+        """Test isort hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][3]["hooks"]
+        assert hooks[0]["id"] == "isort"
+
+    def test_python_mypy_hook_id_exact(self) -> None:
+        """Test mypy hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][4]["hooks"]
+        assert hooks[0]["id"] == "mypy"
+
+    def test_python_mypy_additional_dependencies_exact(self) -> None:
+        """Test mypy additional_dependencies are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][4]["hooks"]
+        assert hooks[0]["additional_dependencies"] == ["types-all"]
+
+    def test_python_mypy_args_exact(self) -> None:
+        """Test mypy args are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][4]["hooks"]
+        assert hooks[0]["args"] == ["--strict"]
+
+    def test_python_bandit_hook_id_exact(self) -> None:
+        """Test bandit hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][5]["hooks"]
+        assert hooks[0]["id"] == "bandit"
+
+    def test_python_bandit_args_exact(self) -> None:
+        """Test bandit args are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][5]["hooks"]
+        assert hooks[0]["args"] == ["-c", "pyproject.toml"]
+
+    def test_python_bandit_additional_dependencies_exact(self) -> None:
+        """Test bandit additional_dependencies are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][5]["hooks"]
+        assert hooks[0]["additional_dependencies"] == ["bandit[toml]"]
+
+    def test_python_safety_hook_id_exact(self) -> None:
+        """Test safety hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][6]["hooks"]
+        assert hooks[0]["id"] == "python-safety-dependencies-check"
+
+    def test_python_conventional_pre_commit_hook_id_exact(self) -> None:
+        """Test conventional-pre-commit hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][7]["hooks"]
+        assert hooks[0]["id"] == "conventional-pre-commit"
+
+    def test_python_conventional_pre_commit_stages_exact(self) -> None:
+        """Test conventional-pre-commit stages are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][7]["hooks"]
+        assert hooks[0]["stages"] == ["commit-msg"]
+
+    def test_python_shellcheck_hook_id_exact(self) -> None:
+        """Test shellcheck hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][8]["hooks"]
+        assert hooks[0]["id"] == "shellcheck"
+
+    def test_python_pyupgrade_hook_id_exact(self) -> None:
+        """Test pyupgrade hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][9]["hooks"]
+        assert hooks[0]["id"] == "pyupgrade"
+
+    def test_python_pyupgrade_args_exact(self) -> None:
+        """Test pyupgrade args are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][9]["hooks"]
+        assert hooks[0]["args"] == ["--py311-plus"]
+
+    def test_python_autoflake_hook_id_exact(self) -> None:
+        """Test autoflake hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][10]["hooks"]
+        assert hooks[0]["id"] == "autoflake"
+
+    def test_python_autoflake_args_exact(self) -> None:
+        """Test autoflake args are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][10]["hooks"]
+        expected_args = [
+            "--in-place",
+            "--remove-all-unused-imports",
+            "--remove-unused-variables",
+            "--remove-duplicate-keys",
+            "--ignore-init-module-imports",
+        ]
+        assert hooks[0]["args"] == expected_args
+
+    def test_python_tryceratops_hook_id_exact(self) -> None:
+        """Test tryceratops hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][11]["hooks"]
+        assert hooks[0]["id"] == "tryceratops"
+
+    def test_python_refurb_hook_id_exact(self) -> None:
+        """Test refurb hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][12]["hooks"]
+        assert hooks[0]["id"] == "refurb"
+
+    def test_python_vulture_hook_id_exact(self) -> None:
+        """Test vulture hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][13]["hooks"]
+        assert hooks[0]["id"] == "vulture"
+
+    def test_python_vulture_args_exact(self) -> None:
+        """Test vulture args are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][13]["hooks"]
+        assert hooks[0]["args"] == ["start_green_stay_green/", "--min-confidence", "80"]
+
+    def test_python_interrogate_hook_id_exact(self) -> None:
+        """Test interrogate hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][14]["hooks"]
+        assert hooks[0]["id"] == "interrogate"
+
+    def test_python_interrogate_args_exact(self) -> None:
+        """Test interrogate args are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][14]["hooks"]
+        assert hooks[0]["args"] == ["-vv", "--fail-under=95"]
+
+    def test_python_detect_secrets_hook_id_exact(self) -> None:
+        """Test detect-secrets hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][15]["hooks"]
+        assert hooks[0]["id"] == "detect-secrets"
+
+    def test_python_detect_secrets_args_exact(self) -> None:
+        """Test detect-secrets args are exact."""
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][15]["hooks"]
+        assert hooks[0]["args"] == ["--baseline", ".secrets.baseline"]
+
+    def test_python_default_language_version_key_exact(self) -> None:
+        """Test Python default_language_version key is exact."""
+        config = LANGUAGE_CONFIGS["python"]["default_language_version"]
+        assert "python" in config
+
+    def test_python_default_language_version_value_exact(self) -> None:
+        """Test Python default_language_version value is exact."""
+        config = LANGUAGE_CONFIGS["python"]["default_language_version"]
+        assert config["python"] == "python3.11"
+
+    # TypeScript Configuration - Exact Tests
+    def test_typescript_pre_commit_hooks_repo_url_exact(self) -> None:
+        """Test TypeScript pre-commit-hooks repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["typescript"]["hooks"][0]
+        assert repo["repo"] == "https://github.com/pre-commit/pre-commit-hooks"
+
+    def test_typescript_pre_commit_hooks_rev_exact(self) -> None:
+        """Test TypeScript pre-commit-hooks rev is exact."""
+        repo = LANGUAGE_CONFIGS["typescript"]["hooks"][0]
+        assert repo["rev"] == "v4.5.0"
+
+    def test_typescript_prettier_repo_url_exact(self) -> None:
+        """Test TypeScript prettier repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["typescript"]["hooks"][1]
+        assert repo["repo"] == "https://github.com/pre-commit/mirrors-prettier"
+
+    def test_typescript_prettier_rev_exact(self) -> None:
+        """Test TypeScript prettier rev is exact."""
+        repo = LANGUAGE_CONFIGS["typescript"]["hooks"][1]
+        assert repo["rev"] == "v4.0.0-alpha.8"
+
+    def test_typescript_shellcheck_repo_url_exact(self) -> None:
+        """Test TypeScript shellcheck repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["typescript"]["hooks"][2]
+        assert repo["repo"] == "https://github.com/shellcheck-py/shellcheck-py"
+
+    def test_typescript_shellcheck_rev_exact(self) -> None:
+        """Test TypeScript shellcheck rev is exact."""
+        repo = LANGUAGE_CONFIGS["typescript"]["hooks"][2]
+        assert repo["rev"] == "v0.9.0.6"
+
+    def test_typescript_detect_secrets_repo_url_exact(self) -> None:
+        """Test TypeScript detect-secrets repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["typescript"]["hooks"][3]
+        assert repo["repo"] == "https://github.com/Yelp/detect-secrets"
+
+    def test_typescript_detect_secrets_rev_exact(self) -> None:
+        """Test TypeScript detect-secrets rev is exact."""
+        repo = LANGUAGE_CONFIGS["typescript"]["hooks"][3]
+        assert repo["rev"] == "v1.4.0"
+
+    def test_typescript_prettier_hook_id_exact(self) -> None:
+        """Test TypeScript prettier hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["typescript"]["hooks"][1]["hooks"]
+        assert hooks[0]["id"] == "prettier"
+
+    def test_typescript_prettier_types_or_exact(self) -> None:
+        """Test TypeScript prettier types_or is exact."""
+        hooks = LANGUAGE_CONFIGS["typescript"]["hooks"][1]["hooks"]
+        expected_types = ["typescript", "tsx", "javascript", "json"]
+        assert hooks[0]["types_or"] == expected_types
+
+    def test_typescript_default_language_version_empty(self) -> None:
+        """Test TypeScript default_language_version is empty dict."""
+        config = LANGUAGE_CONFIGS["typescript"]["default_language_version"]
+        assert config == {}
+
+    # Go Configuration - Exact Tests
+    def test_go_pre_commit_hooks_repo_url_exact(self) -> None:
+        """Test Go pre-commit-hooks repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["go"]["hooks"][0]
+        assert repo["repo"] == "https://github.com/pre-commit/pre-commit-hooks"
+
+    def test_go_pre_commit_hooks_rev_exact(self) -> None:
+        """Test Go pre-commit-hooks rev is exact."""
+        repo = LANGUAGE_CONFIGS["go"]["hooks"][0]
+        assert repo["rev"] == "v4.5.0"
+
+    def test_go_golangci_lint_repo_url_exact(self) -> None:
+        """Test Go golangci-lint repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["go"]["hooks"][1]
+        assert repo["repo"] == "https://github.com/golangci/golangci-lint"
+
+    def test_go_golangci_lint_rev_exact(self) -> None:
+        """Test Go golangci-lint rev is exact."""
+        repo = LANGUAGE_CONFIGS["go"]["hooks"][1]
+        assert repo["rev"] == "v1.55.2"
+
+    def test_go_shellcheck_repo_url_exact(self) -> None:
+        """Test Go shellcheck repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["go"]["hooks"][2]
+        assert repo["repo"] == "https://github.com/shellcheck-py/shellcheck-py"
+
+    def test_go_shellcheck_rev_exact(self) -> None:
+        """Test Go shellcheck rev is exact."""
+        repo = LANGUAGE_CONFIGS["go"]["hooks"][2]
+        assert repo["rev"] == "v0.9.0.6"
+
+    def test_go_detect_secrets_repo_url_exact(self) -> None:
+        """Test Go detect-secrets repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["go"]["hooks"][3]
+        assert repo["repo"] == "https://github.com/Yelp/detect-secrets"
+
+    def test_go_detect_secrets_rev_exact(self) -> None:
+        """Test Go detect-secrets rev is exact."""
+        repo = LANGUAGE_CONFIGS["go"]["hooks"][3]
+        assert repo["rev"] == "v1.4.0"
+
+    def test_go_golangci_lint_hook_id_exact(self) -> None:
+        """Test Go golangci-lint hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["go"]["hooks"][1]["hooks"]
+        assert hooks[0]["id"] == "golangci-lint"
+
+    def test_go_default_language_version_empty(self) -> None:
+        """Test Go default_language_version is empty dict."""
+        config = LANGUAGE_CONFIGS["go"]["default_language_version"]
+        assert config == {}
+
+    # Rust Configuration - Exact Tests
+    def test_rust_pre_commit_hooks_repo_url_exact(self) -> None:
+        """Test Rust pre-commit-hooks repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["rust"]["hooks"][0]
+        assert repo["repo"] == "https://github.com/pre-commit/pre-commit-hooks"
+
+    def test_rust_pre_commit_hooks_rev_exact(self) -> None:
+        """Test Rust pre-commit-hooks rev is exact."""
+        repo = LANGUAGE_CONFIGS["rust"]["hooks"][0]
+        assert repo["rev"] == "v4.5.0"
+
+    def test_rust_pre_commit_rust_repo_url_exact(self) -> None:
+        """Test Rust pre-commit-rust repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["rust"]["hooks"][1]
+        assert repo["repo"] == "https://github.com/doublify/pre-commit-rust"
+
+    def test_rust_pre_commit_rust_rev_exact(self) -> None:
+        """Test Rust pre-commit-rust rev is exact."""
+        repo = LANGUAGE_CONFIGS["rust"]["hooks"][1]
+        assert repo["rev"] == "v1.0"
+
+    def test_rust_shellcheck_repo_url_exact(self) -> None:
+        """Test Rust shellcheck repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["rust"]["hooks"][2]
+        assert repo["repo"] == "https://github.com/shellcheck-py/shellcheck-py"
+
+    def test_rust_shellcheck_rev_exact(self) -> None:
+        """Test Rust shellcheck rev is exact."""
+        repo = LANGUAGE_CONFIGS["rust"]["hooks"][2]
+        assert repo["rev"] == "v0.9.0.6"
+
+    def test_rust_detect_secrets_repo_url_exact(self) -> None:
+        """Test Rust detect-secrets repo URL is exact."""
+        repo = LANGUAGE_CONFIGS["rust"]["hooks"][3]
+        assert repo["repo"] == "https://github.com/Yelp/detect-secrets"
+
+    def test_rust_detect_secrets_rev_exact(self) -> None:
+        """Test Rust detect-secrets rev is exact."""
+        repo = LANGUAGE_CONFIGS["rust"]["hooks"][3]
+        assert repo["rev"] == "v1.4.0"
+
+    def test_rust_fmt_hook_id_exact(self) -> None:
+        """Test Rust fmt hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["rust"]["hooks"][1]["hooks"]
+        assert hooks[0]["id"] == "fmt"
+
+    def test_rust_fmt_hook_name_exact(self) -> None:
+        """Test Rust fmt hook name is exact."""
+        hooks = LANGUAGE_CONFIGS["rust"]["hooks"][1]["hooks"]
+        assert hooks[0]["name"] == "Rustfmt"
+
+    def test_rust_fmt_hook_entry_exact(self) -> None:
+        """Test Rust fmt hook entry is exact."""
+        hooks = LANGUAGE_CONFIGS["rust"]["hooks"][1]["hooks"]
+        assert hooks[0]["entry"] == "cargo fmt --"
+
+    def test_rust_fmt_hook_language_exact(self) -> None:
+        """Test Rust fmt hook language is exact."""
+        hooks = LANGUAGE_CONFIGS["rust"]["hooks"][1]["hooks"]
+        assert hooks[0]["language"] == "system"
+
+    def test_rust_fmt_hook_types_exact(self) -> None:
+        """Test Rust fmt hook types are exact."""
+        hooks = LANGUAGE_CONFIGS["rust"]["hooks"][1]["hooks"]
+        assert hooks[0]["types"] == ["rust"]
+
+    def test_rust_fmt_hook_pass_filenames_exact(self) -> None:
+        """Test Rust fmt hook pass_filenames is exact."""
+        hooks = LANGUAGE_CONFIGS["rust"]["hooks"][1]["hooks"]
+        assert hooks[0]["pass_filenames"] is True
+
+    def test_rust_clippy_hook_id_exact(self) -> None:
+        """Test Rust clippy hook ID is exact."""
+        hooks = LANGUAGE_CONFIGS["rust"]["hooks"][1]["hooks"]
+        assert hooks[1]["id"] == "clippy"
+
+    def test_rust_clippy_hook_name_exact(self) -> None:
+        """Test Rust clippy hook name is exact."""
+        hooks = LANGUAGE_CONFIGS["rust"]["hooks"][1]["hooks"]
+        assert hooks[1]["name"] == "Clippy"
+
+    def test_rust_clippy_hook_entry_exact(self) -> None:
+        """Test Rust clippy hook entry is exact."""
+        hooks = LANGUAGE_CONFIGS["rust"]["hooks"][1]["hooks"]
+        assert hooks[1]["entry"] == "cargo clippy -- -D warnings"
+
+    def test_rust_clippy_hook_language_exact(self) -> None:
+        """Test Rust clippy hook language is exact."""
+        hooks = LANGUAGE_CONFIGS["rust"]["hooks"][1]["hooks"]
+        assert hooks[1]["language"] == "system"
+
+    def test_rust_clippy_hook_types_exact(self) -> None:
+        """Test Rust clippy hook types are exact."""
+        hooks = LANGUAGE_CONFIGS["rust"]["hooks"][1]["hooks"]
+        assert hooks[1]["types"] == ["rust"]
+
+    def test_rust_clippy_hook_pass_filenames_exact(self) -> None:
+        """Test Rust clippy hook pass_filenames is exact."""
+        hooks = LANGUAGE_CONFIGS["rust"]["hooks"][1]["hooks"]
+        assert hooks[1]["pass_filenames"] is False
+
+    def test_rust_default_language_version_empty(self) -> None:
+        """Test Rust default_language_version is empty dict."""
+        config = LANGUAGE_CONFIGS["rust"]["default_language_version"]
+        assert config == {}
+
+    # CI Configuration Exact Tests
+    def test_ci_autofix_commit_msg_exact(self, mock_orchestrator: Mock) -> None:
+        """Test CI autofix_commit_msg is exact."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        config_dict = generator._build_config_dict("python")  # noqa: SLF001
+        expected = "style: auto-fix by pre-commit hooks"
+        assert config_dict["ci"]["autofix_commit_msg"] == expected
+
+    def test_ci_autoupdate_commit_msg_exact(self, mock_orchestrator: Mock) -> None:
+        """Test CI autoupdate_commit_msg is exact."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        config_dict = generator._build_config_dict("python")  # noqa: SLF001
+        expected = "chore: update pre-commit hooks"
+        assert config_dict["ci"]["autoupdate_commit_msg"] == expected
+
+    def test_ci_skip_is_empty_list(self, mock_orchestrator: Mock) -> None:
+        """Test CI skip is empty list."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        config_dict = generator._build_config_dict("python")  # noqa: SLF001
+        assert config_dict["ci"]["skip"] == []
+
+    # Header Generation Exact Tests
+    def test_header_first_line_exact(self, mock_orchestrator: Mock) -> None:
+        """Test header first line is exact."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        header = generator._generate_header("my-project")  # noqa: SLF001
+        lines = header.split("\n")
+        assert lines[0] == "# Pre-commit hooks configuration for my-project"
+
+    def test_header_second_line_exact(self, mock_orchestrator: Mock) -> None:
+        """Test header second line is exact."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        header = generator._generate_header("my-project")  # noqa: SLF001
+        lines = header.split("\n")
+        assert lines[1] == "# Install: pre-commit install"
+
+    def test_header_third_line_exact(self) -> None:
+        """Test header third line is exact."""
+        generator = PreCommitGenerator(Mock())
+        header = generator._generate_header("my-project")  # noqa: SLF001
+        lines = header.split("\n")
+        assert lines[2] == "# Run manually: pre-commit run --all-files"
