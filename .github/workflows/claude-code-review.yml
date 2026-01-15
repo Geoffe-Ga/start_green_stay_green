@@ -72,17 +72,14 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
-      - name: Save Claude Review Output
-        if: always()
+      - name: Extract Claude Review from Action Output
+        if: always() && steps.claude-review.outputs.execution_file
         run: |
-          # Save GITHUB_STEP_SUMMARY before it gets cleared
-          cp "$GITHUB_STEP_SUMMARY" /tmp/claude-review-summary.md || echo "No summary to save"
+          EXECUTION_FILE="${{ steps.claude-review.outputs.execution_file }}"
+          echo "Extracting review from execution file: $EXECUTION_FILE"
 
-          # Also try to extract from the action's output JSON if summary is empty
-          if [ ! -s /tmp/claude-review-summary.md ] && [ -f "/home/runner/work/_temp/claude-execution-output.json" ]; then
-            echo "Extracting review from claude-execution-output.json..."
-            # The JSON contains the full conversation - extract the final response
-            python3 -c "
+          # Extract the review text from the execution JSON
+          python3 -c "
           import json
           import sys
 
@@ -115,7 +112,7 @@ jobs:
               return None
 
           try:
-              with open('/home/runner/work/_temp/claude-execution-output.json') as f:
+              with open('$EXECUTION_FILE') as f:
                   data = json.load(f)
 
               # Handle data as list or dict
@@ -145,18 +142,18 @@ jobs:
               import traceback
               traceback.print_exc(file=sys.stderr)
               sys.exit(1)
-          " > /tmp/claude-review-summary.md || echo "Failed to extract from JSON"
-          fi
+          " > /tmp/claude-review-summary.md
 
           # Verify we have content
           if [ -s /tmp/claude-review-summary.md ]; then
-            echo "✅ Claude review saved successfully ($(wc -l < /tmp/claude-review-summary.md) lines)"
+            echo "✅ Claude review extracted successfully ($(wc -l < /tmp/claude-review-summary.md) lines)"
           else
-            echo "⚠️ Claude review is empty - will skip posting comment"
+            echo "⚠️ Failed to extract Claude review"
+            exit 1
           fi
 
       - name: Post Claude Review as PR Comment
-        if: always() && github.event.pull_request.number
+        if: success() && github.event.pull_request.number
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
