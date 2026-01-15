@@ -53,6 +53,13 @@ class TestTokenUsage:
         assert usage.input_tokens != 41
         assert usage.input_tokens != 43
 
+    def test_token_usage_total_tokens_exact_calculation(self) -> None:
+        """Test TokenUsage calculates exact total_tokens value (kills mutants)."""
+        usage = TokenUsage(input_tokens=25, output_tokens=35)
+        assert usage.total_tokens == 60
+        assert usage.total_tokens != 59
+        assert usage.total_tokens != 61
+
 
 class TestGenerationResult:
     """Test GenerationResult data class."""
