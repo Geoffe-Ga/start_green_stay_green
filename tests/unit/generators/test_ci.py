@@ -927,3 +927,269 @@ jobs:
         assert workflow.content == original_content
         # Should have exact whitespace preservation
         assert workflow.content.count("\n") == original_content.count("\n")
+
+    # LANGUAGE_CONFIGS Exact Value Tests - Python
+    def test_python_test_framework_exact(self) -> None:
+        """Test Python test_framework is exactly pytest."""
+        assert LANGUAGE_CONFIGS["python"]["test_framework"] == "pytest"
+
+    def test_python_linters_exact(self) -> None:
+        """Test Python linters list is exact."""
+        assert LANGUAGE_CONFIGS["python"]["linters"] == ["ruff", "pylint", "mypy"]
+
+    def test_python_formatters_exact(self) -> None:
+        """Test Python formatters list is exact."""
+        assert LANGUAGE_CONFIGS["python"]["formatters"] == ["black", "ruff"]
+
+    def test_python_security_tools_exact(self) -> None:
+        """Test Python security_tools list is exact."""
+        assert LANGUAGE_CONFIGS["python"]["security_tools"] == ["bandit", "safety"]
+
+    def test_python_supported_versions_exact(self) -> None:
+        """Test Python supported_versions list is exact."""
+        assert LANGUAGE_CONFIGS["python"]["supported_versions"] == ["3.11", "3.12", "3.13"]
+
+    def test_python_package_manager_exact(self) -> None:
+        """Test Python package_manager is exactly pip."""
+        assert LANGUAGE_CONFIGS["python"]["package_manager"] == "pip"
+
+    # LANGUAGE_CONFIGS Exact Value Tests - TypeScript
+    def test_typescript_test_framework_exact(self) -> None:
+        """Test TypeScript test_framework is exactly jest."""
+        assert LANGUAGE_CONFIGS["typescript"]["test_framework"] == "jest"
+
+    def test_typescript_linters_exact(self) -> None:
+        """Test TypeScript linters list is exact."""
+        assert LANGUAGE_CONFIGS["typescript"]["linters"] == ["eslint", "tsc"]
+
+    def test_typescript_formatters_exact(self) -> None:
+        """Test TypeScript formatters list is exact."""
+        assert LANGUAGE_CONFIGS["typescript"]["formatters"] == ["prettier", "eslint"]
+
+    def test_typescript_security_tools_exact(self) -> None:
+        """Test TypeScript security_tools list is exact."""
+        assert LANGUAGE_CONFIGS["typescript"]["security_tools"] == ["npm_audit", "snyk"]
+
+    def test_typescript_supported_versions_exact(self) -> None:
+        """Test TypeScript supported_versions list is exact."""
+        assert LANGUAGE_CONFIGS["typescript"]["supported_versions"] == ["18", "20"]
+
+    def test_typescript_package_manager_exact(self) -> None:
+        """Test TypeScript package_manager is exactly npm."""
+        assert LANGUAGE_CONFIGS["typescript"]["package_manager"] == "npm"
+
+    # LANGUAGE_CONFIGS Exact Value Tests - Go
+    def test_go_test_framework_exact(self) -> None:
+        """Test Go test_framework is exactly go_test."""
+        assert LANGUAGE_CONFIGS["go"]["test_framework"] == "go_test"
+
+    def test_go_linters_exact(self) -> None:
+        """Test Go linters list is exact."""
+        assert LANGUAGE_CONFIGS["go"]["linters"] == ["golangci-lint"]
+
+    def test_go_formatters_exact(self) -> None:
+        """Test Go formatters list is exact."""
+        assert LANGUAGE_CONFIGS["go"]["formatters"] == ["gofmt"]
+
+    def test_go_security_tools_exact(self) -> None:
+        """Test Go security_tools list is exact."""
+        assert LANGUAGE_CONFIGS["go"]["security_tools"] == ["gosec"]
+
+    def test_go_supported_versions_exact(self) -> None:
+        """Test Go supported_versions list is exact."""
+        assert LANGUAGE_CONFIGS["go"]["supported_versions"] == ["1.21", "1.22"]
+
+    def test_go_package_manager_exact(self) -> None:
+        """Test Go package_manager is exactly go_modules."""
+        assert LANGUAGE_CONFIGS["go"]["package_manager"] == "go_modules"
+
+    # LANGUAGE_CONFIGS Exact Value Tests - Rust
+    def test_rust_test_framework_exact(self) -> None:
+        """Test Rust test_framework is exactly cargo_test."""
+        assert LANGUAGE_CONFIGS["rust"]["test_framework"] == "cargo_test"
+
+    def test_rust_linters_exact(self) -> None:
+        """Test Rust linters list is exact."""
+        assert LANGUAGE_CONFIGS["rust"]["linters"] == ["clippy"]
+
+    def test_rust_formatters_exact(self) -> None:
+        """Test Rust formatters list is exact."""
+        assert LANGUAGE_CONFIGS["rust"]["formatters"] == ["rustfmt"]
+
+    def test_rust_security_tools_exact(self) -> None:
+        """Test Rust security_tools list is exact."""
+        assert LANGUAGE_CONFIGS["rust"]["security_tools"] == ["cargo_audit"]
+
+    def test_rust_supported_versions_exact(self) -> None:
+        """Test Rust supported_versions list is exact."""
+        assert LANGUAGE_CONFIGS["rust"]["supported_versions"] == ["1.70", "1.75"]
+
+    def test_rust_package_manager_exact(self) -> None:
+        """Test Rust package_manager is exactly cargo."""
+        assert LANGUAGE_CONFIGS["rust"]["package_manager"] == "cargo"
+
+    # LANGUAGE_CONFIGS Exact Value Tests - Java
+    def test_java_test_framework_exact(self) -> None:
+        """Test Java test_framework is exactly junit."""
+        assert LANGUAGE_CONFIGS["java"]["test_framework"] == "junit"
+
+    def test_java_linters_exact(self) -> None:
+        """Test Java linters list is exact."""
+        assert LANGUAGE_CONFIGS["java"]["linters"] == ["checkstyle"]
+
+    def test_java_formatters_exact(self) -> None:
+        """Test Java formatters list is exact."""
+        assert LANGUAGE_CONFIGS["java"]["formatters"] == ["google-java-format"]
+
+    def test_java_security_tools_exact(self) -> None:
+        """Test Java security_tools list is exact."""
+        assert LANGUAGE_CONFIGS["java"]["security_tools"] == ["spotbugs"]
+
+    def test_java_supported_versions_exact(self) -> None:
+        """Test Java supported_versions list is exact."""
+        assert LANGUAGE_CONFIGS["java"]["supported_versions"] == ["11", "17", "21"]
+
+    def test_java_package_manager_exact(self) -> None:
+        """Test Java package_manager is exactly maven."""
+        assert LANGUAGE_CONFIGS["java"]["package_manager"] == "maven"
+
+    # LANGUAGE_CONFIGS Exact Value Tests - C#
+    def test_csharp_test_framework_exact(self) -> None:
+        """Test C# test_framework is exactly xunit."""
+        assert LANGUAGE_CONFIGS["csharp"]["test_framework"] == "xunit"
+
+    def test_csharp_linters_exact(self) -> None:
+        """Test C# linters list is exact."""
+        assert LANGUAGE_CONFIGS["csharp"]["linters"] == ["roslyn"]
+
+    def test_csharp_formatters_exact(self) -> None:
+        """Test C# formatters list is exact."""
+        assert LANGUAGE_CONFIGS["csharp"]["formatters"] == ["dotnet_format"]
+
+    def test_csharp_security_tools_exact(self) -> None:
+        """Test C# security_tools list is exact."""
+        assert LANGUAGE_CONFIGS["csharp"]["security_tools"] == ["security_code_scan"]
+
+    def test_csharp_supported_versions_exact(self) -> None:
+        """Test C# supported_versions list is exact."""
+        assert LANGUAGE_CONFIGS["csharp"]["supported_versions"] == ["6.0", "8.0"]
+
+    def test_csharp_package_manager_exact(self) -> None:
+        """Test C# package_manager is exactly nuget."""
+        assert LANGUAGE_CONFIGS["csharp"]["package_manager"] == "nuget"
+
+    # LANGUAGE_CONFIGS Exact Value Tests - Ruby
+    def test_ruby_test_framework_exact(self) -> None:
+        """Test Ruby test_framework is exactly rspec."""
+        assert LANGUAGE_CONFIGS["ruby"]["test_framework"] == "rspec"
+
+    def test_ruby_linters_exact(self) -> None:
+        """Test Ruby linters list is exact."""
+        assert LANGUAGE_CONFIGS["ruby"]["linters"] == ["rubocop"]
+
+    def test_ruby_formatters_exact(self) -> None:
+        """Test Ruby formatters list is exact."""
+        assert LANGUAGE_CONFIGS["ruby"]["formatters"] == ["rubocop"]
+
+    def test_ruby_security_tools_exact(self) -> None:
+        """Test Ruby security_tools list is exact."""
+        assert LANGUAGE_CONFIGS["ruby"]["security_tools"] == ["brakeman"]
+
+    def test_ruby_supported_versions_exact(self) -> None:
+        """Test Ruby supported_versions list is exact."""
+        assert LANGUAGE_CONFIGS["ruby"]["supported_versions"] == ["3.1", "3.2"]
+
+    def test_ruby_package_manager_exact(self) -> None:
+        """Test Ruby package_manager is exactly bundler."""
+        assert LANGUAGE_CONFIGS["ruby"]["package_manager"] == "bundler"
+
+    # Config Keys Exact Tests
+    def test_language_configs_has_exactly_7_languages(self) -> None:
+        """Test LANGUAGE_CONFIGS has exactly 7 supported languages."""
+        assert len(LANGUAGE_CONFIGS) == 7
+
+    def test_language_configs_contains_python(self) -> None:
+        """Test LANGUAGE_CONFIGS contains python key."""
+        assert "python" in LANGUAGE_CONFIGS
+
+    def test_language_configs_contains_typescript(self) -> None:
+        """Test LANGUAGE_CONFIGS contains typescript key."""
+        assert "typescript" in LANGUAGE_CONFIGS
+
+    def test_language_configs_contains_go(self) -> None:
+        """Test LANGUAGE_CONFIGS contains go key."""
+        assert "go" in LANGUAGE_CONFIGS
+
+    def test_language_configs_contains_rust(self) -> None:
+        """Test LANGUAGE_CONFIGS contains rust key."""
+        assert "rust" in LANGUAGE_CONFIGS
+
+    def test_language_configs_contains_java(self) -> None:
+        """Test LANGUAGE_CONFIGS contains java key."""
+        assert "java" in LANGUAGE_CONFIGS
+
+    def test_language_configs_contains_csharp(self) -> None:
+        """Test LANGUAGE_CONFIGS contains csharp key."""
+        assert "csharp" in LANGUAGE_CONFIGS
+
+    def test_language_configs_contains_ruby(self) -> None:
+        """Test LANGUAGE_CONFIGS contains ruby key."""
+        assert "ruby" in LANGUAGE_CONFIGS
+
+    def test_all_configs_have_test_framework_key(self) -> None:
+        """Test all language configs have test_framework key."""
+        for lang, config in LANGUAGE_CONFIGS.items():
+            assert "test_framework" in config, f"{lang} missing test_framework"
+
+    def test_all_configs_have_linters_key(self) -> None:
+        """Test all language configs have linters key."""
+        for lang, config in LANGUAGE_CONFIGS.items():
+            assert "linters" in config, f"{lang} missing linters"
+
+    def test_all_configs_have_formatters_key(self) -> None:
+        """Test all language configs have formatters key."""
+        for lang, config in LANGUAGE_CONFIGS.items():
+            assert "formatters" in config, f"{lang} missing formatters"
+
+    def test_all_configs_have_security_tools_key(self) -> None:
+        """Test all language configs have security_tools key."""
+        for lang, config in LANGUAGE_CONFIGS.items():
+            assert "security_tools" in config, f"{lang} missing security_tools"
+
+    def test_all_configs_have_supported_versions_key(self) -> None:
+        """Test all language configs have supported_versions key."""
+        for lang, config in LANGUAGE_CONFIGS.items():
+            assert "supported_versions" in config, f"{lang} missing supported_versions"
+
+    def test_all_configs_have_package_manager_key(self) -> None:
+        """Test all language configs have package_manager key."""
+        for lang, config in LANGUAGE_CONFIGS.items():
+            assert "package_manager" in config, f"{lang} missing package_manager"
+
+    def test_all_linters_are_non_empty_lists(self) -> None:
+        """Test all linters are non-empty lists."""
+        for lang, config in LANGUAGE_CONFIGS.items():
+            linters = config["linters"]
+            assert isinstance(linters, list), f"{lang} linters not a list"
+            assert len(linters) > 0, f"{lang} linters is empty"
+
+    def test_all_formatters_are_non_empty_lists(self) -> None:
+        """Test all formatters are non-empty lists."""
+        for lang, config in LANGUAGE_CONFIGS.items():
+            formatters = config["formatters"]
+            assert isinstance(formatters, list), f"{lang} formatters not a list"
+            assert len(formatters) > 0, f"{lang} formatters is empty"
+
+    def test_all_security_tools_are_non_empty_lists(self) -> None:
+        """Test all security_tools are non-empty lists."""
+        for lang, config in LANGUAGE_CONFIGS.items():
+            security_tools = config["security_tools"]
+            assert isinstance(security_tools, list), f"{lang} security_tools not a list"
+            assert len(security_tools) > 0, f"{lang} security_tools is empty"
+
+    def test_all_supported_versions_are_non_empty_lists(self) -> None:
+        """Test all supported_versions are non-empty lists."""
+        for lang, config in LANGUAGE_CONFIGS.items():
+            versions = config["supported_versions"]
+            assert isinstance(versions, list), f"{lang} versions not a list"
+            assert len(versions) > 0, f"{lang} versions is empty"
