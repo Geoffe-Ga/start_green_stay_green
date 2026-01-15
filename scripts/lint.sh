@@ -9,7 +9,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 FIX=false
-CHECK=true  # Default to check mode for consistency
 VERBOSE=false
 JSON_OUTPUT=false
 START_TIME=$(date +%s)
@@ -26,7 +25,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --check)
-            CHECK=true
+            # CHECK mode not currently implemented - FIX mode controls behavior
             shift
             ;;
         --verbose)

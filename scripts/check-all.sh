@@ -102,7 +102,9 @@ run_check() {
         echo "Running: $check_name"
     fi
 
-    local check_start=$(date +%s)
+    local check_start
+    local check_end
+    check_start=$(date +%s)
     if "$SCRIPT_DIR/$script" "${args[@]+"${args[@]}"}" $VERBOSE_FLAG; then
         PASSED_CHECKS+=("$check_name")
         if ! $JSON_OUTPUT; then
@@ -114,7 +116,7 @@ run_check() {
             echo "✗ $check_name failed" >&2
         fi
     fi
-    local check_end=$(date +%s)
+    check_end=$(date +%s)
     CHECK_TIMES["$check_name"]=$((check_end - check_start))
 
     if ! $JSON_OUTPUT; then
@@ -215,13 +217,13 @@ TOTAL_TIME=$((END_TIME - START_TIME))
 
 if $JSON_OUTPUT; then
     # Output JSON format
-    local status="pass"
+    status="pass"
     if [ ${#FAILED_CHECKS[@]} -gt 0 ]; then
         status="fail"
     fi
 
     # Build JSON output
-    local json_output='{'
+    json_output='{'
     json_output="$json_output\"status\": \"$status\","
     json_output="$json_output\"duration_seconds\": $TOTAL_TIME,"
     json_output="$json_output\"passed\": ${#PASSED_CHECKS[@]},"

@@ -100,6 +100,11 @@ fi
 END_TIME=$(date +%s)
 TOTAL_TIME=$((END_TIME - START_TIME))
 
+# Output timing if verbose
+if $VERBOSE; then
+    echo "Coverage check completed in ${TOTAL_TIME}s"
+fi
+
 if $HTML; then
     echo "✓ HTML coverage report generated in htmlcov/index.html"
 else

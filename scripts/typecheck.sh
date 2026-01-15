@@ -85,5 +85,6 @@ TOTAL_TIME=$((END_TIME - START_TIME))
 echo "✓ Type checks passed"
 if $VERBOSE; then
     echo "Type check execution time: $TYPE_TIME seconds"
+    echo "Total execution time: $TOTAL_TIME seconds"
 fi
 exit 0

@@ -154,9 +154,10 @@ repos:
 
   # Modern Python suggestions
   - repo: https://github.com/dosisod/refurb
-    rev: v1.26.0
+    rev: v2.2.0
     hooks:
       - id: refurb
+        additional_dependencies: ['pydantic>=2.0.0']
 
   # Dead code detection
   - repo: https://github.com/jendrikseipp/vulture
@@ -167,10 +168,11 @@ repos:
 
   # Docstring coverage
   - repo: https://github.com/econchick/interrogate
-    rev: 1.5.0
+    rev: 1.7.0
     hooks:
       - id: interrogate
         args: ['-vv', '--fail-under=95']
+        additional_dependencies: ['setuptools']  # Required for pkg_resources in Python 3.13+
 
 # CI-specific configuration
 ci:
