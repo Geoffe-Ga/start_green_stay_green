@@ -636,10 +636,10 @@ class TestMutationKillers:
         templates_dir.mkdir()
         manager = PromptManager(template_dir=templates_dir)
 
-        assert isinstance(manager._template_cache, dict)
-        assert len(manager._template_cache) == 0
-        assert manager._template_cache == {}
-        assert manager._template_cache is not None
+        assert isinstance(manager._template_cache, dict)  # noqa: SLF001
+        assert len(manager._template_cache) == 0  # noqa: SLF001
+        assert manager._template_cache == {}  # noqa: SLF001
+        assert manager._template_cache is not None  # noqa: SLF001
 
     def test_cache_hit_avoids_reload(self, tmp_path: Path) -> None:
         """Test cached template is returned without reload.
@@ -657,13 +657,15 @@ class TestMutationKillers:
         assert "Test content" in result1
 
         # Verify it's in cache
-        assert "test.jinja2" in manager._template_cache
+        assert "test.jinja2" in manager._template_cache  # noqa: SLF001
 
         # Second load - should use cache
         result2 = manager.render("test", {})
         assert result2 == result1
 
-    def test_validate_rendered_content_empty_string_raises(self, tmp_path: Path) -> None:
+    def test_validate_rendered_content_empty_string_raises(
+        self, tmp_path: Path
+    ) -> None:
         """Test validation rejects empty string.
 
         Kills mutations: if not rendered → if rendered
@@ -702,7 +704,7 @@ class TestMutationKillers:
         templates_dir.mkdir()
         manager = PromptManager(template_dir=templates_dir)
 
-        filename = manager._build_filename("test", "python")
+        filename = manager._build_filename("test", "python")  # noqa: SLF001
         assert filename == "test.python.jinja2"
         assert filename.endswith(".jinja2")
         assert ".python." in filename
@@ -716,7 +718,7 @@ class TestMutationKillers:
         templates_dir.mkdir()
         manager = PromptManager(template_dir=templates_dir)
 
-        filename = manager._build_filename("test", None)
+        filename = manager._build_filename("test", None)  # noqa: SLF001
         assert filename == "test.jinja2"
         assert filename.endswith(".jinja2")
         assert "." not in filename.replace(".jinja2", "")
@@ -759,7 +761,7 @@ class TestMutationKillers:
         Kills mutations: set contents changed
         """
         expected = {"python", "typescript", "go", "rust", "swift", "java"}
-        assert PromptManager.SUPPORTED_LANGUAGES == expected
+        assert expected == PromptManager.SUPPORTED_LANGUAGES
         assert len(PromptManager.SUPPORTED_LANGUAGES) == 6
 
     def test_supported_languages_contains_python(self) -> None:
@@ -795,7 +797,7 @@ class TestMutationKillers:
             "claude_md",
             "project_scaffolding",
         }
-        assert PromptManager.SUPPORTED_TEMPLATE_TYPES == expected
+        assert expected == PromptManager.SUPPORTED_TEMPLATE_TYPES
         assert len(PromptManager.SUPPORTED_TEMPLATE_TYPES) == 5
 
     def test_supported_template_types_contains_ci_cd(self) -> None:
@@ -846,12 +848,12 @@ class TestMutationKillers:
 
         # Load template to populate cache
         manager.render("test", {})
-        assert len(manager._template_cache) > 0
+        assert len(manager._template_cache) > 0  # noqa: SLF001
 
         # Clear cache
         manager.clear_cache()
-        assert len(manager._template_cache) == 0
-        assert manager._template_cache == {}
+        assert len(manager._template_cache) == 0  # noqa: SLF001
+        assert manager._template_cache == {}  # noqa: SLF001
 
     def test_validate_template_returns_true_when_exists(self, tmp_path: Path) -> None:
         """Test validate_template returns exactly True when template exists.
