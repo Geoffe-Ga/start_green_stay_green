@@ -46,6 +46,13 @@ class TestTokenUsage:
         with pytest.raises(AttributeError):
             usage.input_tokens = 200  # type: ignore[misc]
 
+    def test_token_usage_input_tokens_exact_value(self) -> None:
+        """Test TokenUsage stores exact input_tokens value (kills mutants)."""
+        usage = TokenUsage(input_tokens=42, output_tokens=10)
+        assert usage.input_tokens == 42
+        assert usage.input_tokens != 41
+        assert usage.input_tokens != 43
+
 
 class TestGenerationResult:
     """Test GenerationResult data class."""
