@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # scripts/mutation.sh - Run mutation tests with score validation
 # Usage: ./scripts/mutation.sh [--min-score SCORE] [--verbose] [--help]
+#
+# NOTE: Requires Python 3.11-3.13 due to mutmut/pony ORM compatibility.
+#       Python 3.14+ is not yet supported. CI uses Python 3.11.
 
 set -euo pipefail
 
