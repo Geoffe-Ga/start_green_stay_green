@@ -2,7 +2,7 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
+    types: [opened, synchronize]
     # Optional: Only run on specific file changes
     # paths:
     #   - "src/**/*.ts"
@@ -36,9 +36,44 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
+          prompt:  |
+            Please review this pull request and provide feedback using the following template:
 
+            ## Summary
+            Brief overview (2-3 sentences)
+
+            ## Strengths
+            What's done well?
+
+            ## Security Concerns
+            Vulnerabilities? 🔴 BLOCKING | 🟡 HIGH | 🟢 LOW
+
+            ## Problems
+            Critical issues blocking merge (mark 🔴)
+            Consider priority greater than Minor as "Blocking"
+
+            ## Code Quality
+            Non-blocking improvements for educational purposes or for future GitHub Issues
+
+            ## CLAUDE.md Adherence
+            ✅/❌ Coverage, linting, types, patterns, commits
+
+            ## Testing
+            Test quality evaluation
+            Insufficient testing is Blocking (mark 🔴)
+
+            ## Documentation
+            Docs completeness
+
+
+            ## Verdict
+            ✅ LGTM | 🔄 CHANGES_REQUESTED | 💬 COMMENTS
+            **Reasoning:** Specific references
+
+            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+
+            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://docs.claude.com/en/docs/claude-code/sdk#command-line for available options
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
