@@ -89,7 +89,7 @@ echo ""
 
 # Run mutation tests (allow failure, we'll check score)
 echo "Running mutmut (this may take several minutes)..."
-if mutmut run --paths-to-mutate=start_green_stay_green/ 2>&1; then
+if mutmut run 2>&1; then
     echo "✓ Mutmut run completed"
 else
     # mutmut returns non-zero if there are surviving mutants, which is expected
@@ -109,11 +109,11 @@ RESULTS=$(mutmut results)
 echo "$RESULTS"
 echo ""
 
-# Extract counts from results
-KILLED=$(echo "$RESULTS" | grep -oP 'Killed: \K\d+' || echo "0")
-SURVIVED=$(echo "$RESULTS" | grep -oP 'Survived: \K\d+' || echo "0")
-SUSPICIOUS=$(echo "$RESULTS" | grep -oP 'Suspicious: \K\d+' || echo "0")
-TIMEOUT=$(echo "$RESULTS" | grep -oP 'Timeout: \K\d+' || echo "0")
+# Extract counts from results (macOS compatible grep)
+KILLED=$(echo "$RESULTS" | grep -o 'Killed: [0-9]*' | grep -o '[0-9]*$' || echo "0")
+SURVIVED=$(echo "$RESULTS" | grep -o 'Survived: [0-9]*' | grep -o '[0-9]*$' || echo "0")
+SUSPICIOUS=$(echo "$RESULTS" | grep -o 'Suspicious: [0-9]*' | grep -o '[0-9]*$' || echo "0")
+TIMEOUT=$(echo "$RESULTS" | grep -o 'Timeout: [0-9]*' | grep -o '[0-9]*$' || echo "0")
 
 # Calculate total and score
 TOTAL=$((KILLED + SURVIVED + SUSPICIOUS + TIMEOUT))
