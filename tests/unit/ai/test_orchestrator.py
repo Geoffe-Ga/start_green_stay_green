@@ -205,6 +205,20 @@ class TestAIOrchestrator:
         assert orchestrator.max_retries == 3
         assert orchestrator.retry_delay == 1.0
 
+    def test_orchestrator_stores_exact_max_retries_value(self) -> None:
+        """Test AIOrchestrator stores exact max_retries value (kills mutants).
+
+        This test verifies the exact value is stored, killing mutants that
+        might change == to !=, or >= to >, or subtract/add values.
+        """
+        orchestrator = AIOrchestrator(api_key="test-api-key-123", max_retries=5)
+        # Verify exact value (not just >= or <=)
+        assert orchestrator.max_retries == 5
+        # Boundary check: not greater than
+        assert not orchestrator.max_retries > 5
+        # Boundary check: not less than
+        assert not orchestrator.max_retries < 5
+
     def test_orchestrator_initialization_rejects_negative_max_retries(self) -> None:
         """Test AIOrchestrator rejects negative max_retries."""
         with pytest.raises(ValueError, match="max_retries must be non-negative"):
