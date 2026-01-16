@@ -229,6 +229,22 @@ class TestAIOrchestrator:
         with pytest.raises(ValueError, match="retry_delay must be positive"):
             AIOrchestrator(api_key="test-api-key-123", retry_delay=-0.5)
 
+    def test_orchestrator_stores_exact_retry_delay_value(self) -> None:
+        """Test AIOrchestrator stores exact retry_delay value (kills mutants).
+
+        This test verifies the exact value is stored, killing mutants that
+        might change == to !=, or >= to >, or subtract/add to the value.
+        """
+        orchestrator = AIOrchestrator(api_key="test-api-key-123", retry_delay=3.5)
+        # Verify exact value (not just >= or <=)
+        assert orchestrator.retry_delay == 3.5
+        # Boundary check: not greater than
+        assert not orchestrator.retry_delay > 3.5
+        # Boundary check: not less than
+        assert not orchestrator.retry_delay < 3.5
+        # Verify it's a float, not accidentally converted to int
+        assert isinstance(orchestrator.retry_delay, float)
+
     @patch("start_green_stay_green.ai.orchestrator.Anthropic")
     def test_generate_with_valid_prompt_returns_result(
         self,
