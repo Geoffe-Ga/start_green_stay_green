@@ -81,7 +81,7 @@ class TestGenerateWithPython:
         )
         result = generator.generate(config)
         assert isinstance(result, str)
-        assert len(result) > 0
+        assert result
 
     def test_generate_python_includes_header_comment(
         self, mock_orchestrator: Mock
@@ -262,7 +262,7 @@ class TestGenerateWithTypeScript:
         )
         result = generator.generate(config)
         assert isinstance(result, str)
-        assert len(result) > 0
+        assert result
 
     def test_generate_typescript_includes_project_name(
         self, mock_orchestrator: Mock
@@ -310,7 +310,7 @@ class TestGenerateWithGo:
         )
         result = generator.generate(config)
         assert isinstance(result, str)
-        assert len(result) > 0
+        assert result
 
     def test_generate_go_includes_golangci_lint(self, mock_orchestrator: Mock) -> None:
         """Test generated Go config includes golangci-lint."""
@@ -343,7 +343,7 @@ class TestGenerateWithRust:
         )
         result = generator.generate(config)
         assert isinstance(result, str)
-        assert len(result) > 0
+        assert result
 
     def test_generate_rust_includes_rustfmt(self, mock_orchestrator: Mock) -> None:
         """Test generated Rust config includes rustfmt."""
@@ -409,44 +409,44 @@ class TestValidateLanguage:
     ) -> None:
         """Test validate_language returns True for Python."""
         generator = PreCommitGenerator(mock_orchestrator)
-        assert generator.validate_language("python") is True
+        assert generator.validate_language("python")
 
     def test_validate_language_typescript_returns_true(
         self, mock_orchestrator: Mock
     ) -> None:
         """Test validate_language returns True for TypeScript."""
         generator = PreCommitGenerator(mock_orchestrator)
-        assert generator.validate_language("typescript") is True
+        assert generator.validate_language("typescript")
 
     def test_validate_language_go_returns_true(self, mock_orchestrator: Mock) -> None:
         """Test validate_language returns True for Go."""
         generator = PreCommitGenerator(mock_orchestrator)
-        assert generator.validate_language("go") is True
+        assert generator.validate_language("go")
 
     def test_validate_language_rust_returns_true(self, mock_orchestrator: Mock) -> None:
         """Test validate_language returns True for Rust."""
         generator = PreCommitGenerator(mock_orchestrator)
-        assert generator.validate_language("rust") is True
+        assert generator.validate_language("rust")
 
     def test_validate_language_unsupported_returns_false(
         self, mock_orchestrator: Mock
     ) -> None:
         """Test validate_language returns False for unsupported language."""
         generator = PreCommitGenerator(mock_orchestrator)
-        assert generator.validate_language("cobol") is False
+        assert not generator.validate_language("cobol")
 
     def test_validate_language_empty_string_returns_false(
         self, mock_orchestrator: Mock
     ) -> None:
         """Test validate_language returns False for empty string."""
         generator = PreCommitGenerator(mock_orchestrator)
-        assert generator.validate_language("") is False
+        assert not generator.validate_language("")
 
     def test_validate_language_case_sensitive(self, mock_orchestrator: Mock) -> None:
         """Test validate_language is case sensitive."""
         generator = PreCommitGenerator(mock_orchestrator)
-        assert generator.validate_language("Python") is False
-        assert generator.validate_language("PYTHON") is False
+        assert not generator.validate_language("Python")
+        assert not generator.validate_language("PYTHON")
 
 
 class TestGetSupportedLanguages:
@@ -520,7 +520,7 @@ class TestGetLanguageHooks:
         """Test get_language_hooks returns non-empty list for python."""
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_language_hooks("python")
-        assert len(result) > 0
+        assert result
 
     def test_get_language_hooks_typescript_returns_list(
         self, mock_orchestrator: Mock
@@ -676,7 +676,7 @@ class TestLanguageConfigsStructure:
 
     def test_language_configs_not_empty(self) -> None:
         """Test LANGUAGE_CONFIGS is not empty."""
-        assert len(LANGUAGE_CONFIGS) > 0
+        assert LANGUAGE_CONFIGS
 
     def test_language_configs_has_python(self) -> None:
         """Test LANGUAGE_CONFIGS has python entry."""
@@ -872,7 +872,7 @@ class TestGenerationConfigCreation:
         )
         assert config.project_name == "test"
         assert config.language == "python"
-        assert config.language_config == {}
+        assert not config.language_config
 
     def test_generation_config_with_language_config(self) -> None:
         """Test GenerationConfig with language config dict."""
@@ -894,8 +894,8 @@ class TestMutationKillers:
         Kills mutations: in → not in
         """
         generator = PreCommitGenerator(mock_orchestrator)
-        assert generator.validate_language("python") is True
-        assert generator.validate_language("unknown") is False
+        assert generator.validate_language("python")
+        assert not generator.validate_language("unknown")
 
     def test_count_hooks_increments_correctly(self, mock_orchestrator: Mock) -> None:
         """Test count_hooks_for_language increments by exact count.
@@ -1452,7 +1452,7 @@ class TestMutationKillers:
     def test_typescript_default_language_version_empty(self) -> None:
         """Test TypeScript default_language_version is empty dict."""
         config = LANGUAGE_CONFIGS["typescript"]["default_language_version"]
-        assert config == {}
+        assert not config
 
     # Go Configuration - Exact Tests
     def test_go_pre_commit_hooks_repo_url_exact(self) -> None:
@@ -1503,7 +1503,7 @@ class TestMutationKillers:
     def test_go_default_language_version_empty(self) -> None:
         """Test Go default_language_version is empty dict."""
         config = LANGUAGE_CONFIGS["go"]["default_language_version"]
-        assert config == {}
+        assert not config
 
     # Rust Configuration - Exact Tests
     def test_rust_pre_commit_hooks_repo_url_exact(self) -> None:
@@ -1609,7 +1609,7 @@ class TestMutationKillers:
     def test_rust_default_language_version_empty(self) -> None:
         """Test Rust default_language_version is empty dict."""
         config = LANGUAGE_CONFIGS["rust"]["default_language_version"]
-        assert config == {}
+        assert not config
 
     # CI Configuration Exact Tests
     def test_ci_autofix_commit_msg_exact(self, mock_orchestrator: Mock) -> None:
@@ -1653,3 +1653,192 @@ class TestMutationKillers:
         header = generator._generate_header("my-project")  # noqa: SLF001
         lines = header.split("\n")
         assert lines[2] == "# Run manually: pre-commit run --all-files"
+
+
+class TestLanguageConfigsStructureValidation:
+    """Comprehensive validation tests for LANGUAGE_CONFIGS constant.
+
+    These tests validate every key, value, and structure in LANGUAGE_CONFIGS
+    to catch mutations in the constant data.
+    """
+
+    def test_all_repos_have_required_keys(self) -> None:
+        """Test every repo in every language has required keys."""
+        required_keys = {"repo", "rev", "hooks"}
+        for language, config in LANGUAGE_CONFIGS.items():
+            for idx, repo in enumerate(config["hooks"]):
+                # Skip local hooks (id-only entries)
+                if "id" in repo and "repo" not in repo:
+                    continue
+                actual_keys = set(repo.keys())
+                assert required_keys.issubset(actual_keys), (
+                    f"{language} repo {idx} missing keys: "
+                    f"{required_keys - actual_keys}"
+                )
+
+    def test_all_repos_have_hooks_key_exact_name(self) -> None:
+        """Test 'hooks' key exists with exact spelling in all repos."""
+        for language, config in LANGUAGE_CONFIGS.items():
+            for idx, repo in enumerate(config["hooks"]):
+                # Skip local hooks
+                if "id" in repo and "repo" not in repo:
+                    continue
+                assert "hooks" in repo, f"{language} repo {idx} missing 'hooks' key"
+                # Verify it's not a mutation like "XXhooksXX"
+                keys_list = list(repo.keys())
+                assert (
+                    "hooks" in keys_list
+                ), f"{language} repo {idx} has keys {keys_list} but not 'hooks'"
+
+    def test_all_repos_hooks_are_non_empty_lists(self) -> None:
+        """Test hooks value is a non-empty list in all repos."""
+        for language, config in LANGUAGE_CONFIGS.items():
+            for idx, repo in enumerate(config["hooks"]):
+                # Skip local hooks
+                if "id" in repo and "repo" not in repo:
+                    continue
+                hooks = repo.get("hooks", None)
+                assert hooks is not None, f"{language} repo {idx} hooks is None"
+                assert isinstance(
+                    hooks, list
+                ), f"{language} repo {idx} hooks is not a list: {type(hooks)}"
+                assert hooks, f"{language} repo {idx} hooks is empty"
+
+    def test_python_first_repo_has_16_hooks(self) -> None:
+        """Test Python's pre-commit-hooks repo has exactly 16 hooks."""
+        first_repo = LANGUAGE_CONFIGS["python"]["hooks"][0]
+        assert len(first_repo["hooks"]) == 16
+
+    def test_python_repos_exact_count(self) -> None:
+        """Test Python has exactly 16 repository configurations."""
+        assert len(LANGUAGE_CONFIGS["python"]["hooks"]) == 16
+
+    def test_typescript_repos_exact_count(self) -> None:
+        """Test TypeScript has exactly 4 repository configurations."""
+        assert len(LANGUAGE_CONFIGS["typescript"]["hooks"]) == 4
+
+    def test_go_repos_exact_count(self) -> None:
+        """Test Go has exactly 4 repository configurations."""
+        assert len(LANGUAGE_CONFIGS["go"]["hooks"]) == 4
+
+    def test_rust_repos_exact_count(self) -> None:
+        """Test Rust has exactly 4 repository configurations."""
+        assert len(LANGUAGE_CONFIGS["rust"]["hooks"]) == 4
+
+    def test_every_hook_has_id_key(self) -> None:
+        """Test every individual hook has an 'id' key."""
+        for language, config in LANGUAGE_CONFIGS.items():
+            for repo_idx, repo in enumerate(config["hooks"]):
+                # Get hooks list
+                if "hooks" in repo:
+                    hooks_list = repo["hooks"]
+                elif "id" in repo:
+                    # This is a local hook
+                    continue
+                else:
+                    continue
+
+                for hook_idx, hook in enumerate(hooks_list):
+                    assert "id" in hook, (
+                        f"{language} repo {repo_idx} hook {hook_idx} "
+                        f"missing 'id' key: {hook}"
+                    )
+
+    def test_python_repo_urls_not_mutated(self) -> None:
+        """Test Python repo URLs are exact (not mutated to XXurlXX etc)."""
+        expected_repos = [
+            "https://github.com/pre-commit/pre-commit-hooks",
+            "https://github.com/astral-sh/ruff-pre-commit",
+            "https://github.com/psf/black",
+            "https://github.com/PyCQA/isort",
+            "https://github.com/pre-commit/mirrors-mypy",
+            "https://github.com/PyCQA/bandit",
+            "https://github.com/Lucas-C/pre-commit-hooks-safety",
+            "https://github.com/compilerla/conventional-pre-commit",
+            "https://github.com/shellcheck-py/shellcheck-py",
+            "https://github.com/asottile/pyupgrade",
+            "https://github.com/PyCQA/autoflake",
+            "https://github.com/guilatrova/tryceratops",
+            "https://github.com/dosisod/refurb",
+            "https://github.com/jendrikseipp/vulture",
+            "https://github.com/econchick/interrogate",
+            "https://github.com/Yelp/detect-secrets",
+        ]
+        python_repos = LANGUAGE_CONFIGS["python"]["hooks"]
+        for idx, expected_url in enumerate(expected_repos):
+            actual_url = python_repos[idx].get("repo", "")
+            assert actual_url == expected_url, (
+                f"Python repo {idx} URL mismatch: "
+                f"expected {expected_url}, got {actual_url}"
+            )
+
+    def test_python_first_16_hooks_exact_ids(self) -> None:
+        """Test first repo (pre-commit-hooks) has exact 16 hook IDs."""
+        expected_ids = [
+            "trailing-whitespace",
+            "end-of-file-fixer",
+            "check-yaml",
+            "check-toml",
+            "check-json",
+            "check-added-large-files",
+            "check-case-conflict",
+            "check-merge-conflict",
+            "check-symlinks",
+            "check-ast",
+            "debug-statements",
+            "check-docstring-first",
+            "detect-private-key",
+            "fix-byte-order-marker",
+            "mixed-line-ending",
+            "no-commit-to-branch",
+        ]
+        first_repo = LANGUAGE_CONFIGS["python"]["hooks"][0]
+        actual_ids = [hook["id"] for hook in first_repo["hooks"]]
+        assert actual_ids == expected_ids
+
+    def test_check_added_large_files_has_args_key(self) -> None:
+        """Test check-added-large-files hook has 'args' key."""
+        first_repo = LANGUAGE_CONFIGS["python"]["hooks"][0]
+        large_files_hook = first_repo["hooks"][5]  # 6th hook
+        assert large_files_hook["id"] == "check-added-large-files"
+        assert "args" in large_files_hook
+
+    def test_check_added_large_files_args_exact_value(self) -> None:
+        """Test check-added-large-files args is exact list."""
+        first_repo = LANGUAGE_CONFIGS["python"]["hooks"][0]
+        large_files_hook = first_repo["hooks"][5]
+        assert large_files_hook["args"] == ["--maxkb=500"]
+
+    def test_mixed_line_ending_has_args(self) -> None:
+        """Test mixed-line-ending hook has 'args' key."""
+        first_repo = LANGUAGE_CONFIGS["python"]["hooks"][0]
+        mixed_line_hook = first_repo["hooks"][14]  # 15th hook
+        assert mixed_line_hook["id"] == "mixed-line-ending"
+        assert "args" in mixed_line_hook
+        assert mixed_line_hook["args"] == ["--fix=lf"]
+
+    def test_no_commit_to_branch_has_args(self) -> None:
+        """Test no-commit-to-branch hook has 'args' key."""
+        first_repo = LANGUAGE_CONFIGS["python"]["hooks"][0]
+        no_commit_hook = first_repo["hooks"][15]  # 16th hook
+        assert no_commit_hook["id"] == "no-commit-to-branch"
+        assert "args" in no_commit_hook
+        assert no_commit_hook["args"] == ["--branch", "main"]
+
+    def test_all_repo_revs_are_non_empty_strings(self) -> None:
+        """Test every repo rev is a non-empty string."""
+        for language, config in LANGUAGE_CONFIGS.items():
+            for idx, repo in enumerate(config["hooks"]):
+                if "rev" in repo:
+                    rev = repo["rev"]
+                    assert isinstance(
+                        rev, str
+                    ), f"{language} repo {idx} rev is not string: {type(rev)}"
+                    assert rev, f"{language} repo {idx} rev is empty"
+                    # Verify it's not mutated (e.g., "XXv1.0XX")
+                    assert not rev.startswith(
+                        "XX"
+                    ), f"{language} repo {idx} rev looks mutated: {rev}"
+                    assert not rev.endswith(
+                        "XX"
+                    ), f"{language} repo {idx} rev looks mutated: {rev}"
