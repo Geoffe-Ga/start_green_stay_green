@@ -109,6 +109,7 @@ repos:
     hooks:
       - id: detect-secrets
         args: ['--baseline', '.secrets.baseline']
+        exclude: '^reference/skills/'
 
   # Conventional commits
   - repo: https://github.com/commitizen-tools/commitizen
