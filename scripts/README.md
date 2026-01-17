@@ -199,6 +199,20 @@ Runs in order:
 
 ---
 
+### 10. start-codex-web-mobile.sh - Codex Agent Environment
+
+Configure environment variables and Python venv for the web/mobile Codex agent.
+
+```bash
+./scripts/start-codex-web-mobile.sh --shell
+./scripts/start-codex-web-mobile.sh --env staging -- --help
+./scripts/start-codex-web-mobile.sh --print
+```
+
+**Options**: `--env`, `--config`, `--no-venv`, `--print`, `--shell`, `--verbose`
+
+---
+
 ### 10. fix-all.sh - Auto-fix Everything
 
 Auto-fix all auto-fixable issues.
