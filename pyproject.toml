@@ -71,7 +71,7 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "pytest-mock>=3.12.0",
     "hypothesis>=6.98.0",
-    "mutmut>=2.4.0",
+    "mutmut==2.5.1",  # Pinned: requires Python 3.11-3.13 (pony ORM incompatible with 3.14)
 
     # Pre-commit and git
     "pre-commit>=3.6.0",
@@ -311,6 +311,11 @@ exclude = ["setup.py", "docs", "build", "reference", "templates", "tests"]
 verbose = 2
 color = true
 
+[tool.refurb]
+# Ignore FURB184 (chained assignment with walrus operator) in tests
+# Reason: Reduces test readability
+ignore = ["FURB184"]
+
 # Pydocstyle configuration
 [tool.pydocstyle]
 convention = "google"
@@ -388,7 +393,6 @@ paths_to_mutate = "start_green_stay_green/"
 backup = false
 runner = "pytest -x --assert=plain --tb=short -q"
 tests_dir = "tests/"
-dict_synonyms = "Struct, NamedStruct"
 
 # Pre-commit configuration reference
 [tool.pre-commit]

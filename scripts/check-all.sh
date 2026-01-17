@@ -89,7 +89,8 @@ fi
 
 FAILED_CHECKS=()
 PASSED_CHECKS=()
-declare -A CHECK_TIMES
+# Note: Individual check timing removed for bash 3.2 compatibility
+# (bash 3.2 doesn't support associative arrays)
 
 # Helper function to run a check
 run_check() {
@@ -102,9 +103,6 @@ run_check() {
         echo "Running: $check_name"
     fi
 
-    local check_start
-    local check_end
-    check_start=$(date +%s)
     if "$SCRIPT_DIR/$script" "${args[@]+"${args[@]}"}" $VERBOSE_FLAG; then
         PASSED_CHECKS+=("$check_name")
         if ! $JSON_OUTPUT; then
@@ -116,8 +114,6 @@ run_check() {
             echo "✗ $check_name failed" >&2
         fi
     fi
-    check_end=$(date +%s)
-    CHECK_TIMES["$check_name"]=$((check_end - check_start))
 
     if ! $JSON_OUTPUT; then
         echo ""
@@ -155,7 +151,6 @@ if $PARALLEL; then
         FAILED_CHECKS+=("Linting")
         if ! $JSON_OUTPUT; then echo "✗ Linting failed" >&2; fi
     fi
-    CHECK_TIMES["Linting"]=0
 
     if wait $FORMAT_PID 2>/dev/null; then
         PASSED_CHECKS+=("Formatting")
@@ -164,7 +159,6 @@ if $PARALLEL; then
         FAILED_CHECKS+=("Formatting")
         if ! $JSON_OUTPUT; then echo "✗ Formatting failed" >&2; fi
     fi
-    CHECK_TIMES["Formatting"]=0
 
     if wait $TYPE_PID 2>/dev/null; then
         PASSED_CHECKS+=("Type checking")
@@ -173,7 +167,6 @@ if $PARALLEL; then
         FAILED_CHECKS+=("Type checking")
         if ! $JSON_OUTPUT; then echo "✗ Type checking failed" >&2; fi
     fi
-    CHECK_TIMES["Type checking"]=0
 
     if wait $SEC_PID 2>/dev/null; then
         PASSED_CHECKS+=("Security checks")
@@ -182,7 +175,6 @@ if $PARALLEL; then
         FAILED_CHECKS+=("Security checks")
         if ! $JSON_OUTPUT; then echo "✗ Security checks failed" >&2; fi
     fi
-    CHECK_TIMES["Security checks"]=0
 
     if wait $COMP_PID 2>/dev/null; then
         PASSED_CHECKS+=("Complexity analysis")
@@ -191,7 +183,6 @@ if $PARALLEL; then
         FAILED_CHECKS+=("Complexity analysis")
         if ! $JSON_OUTPUT; then echo "✗ Complexity analysis failed" >&2; fi
     fi
-    CHECK_TIMES["Complexity analysis"]=0
 
     if ! $JSON_OUTPUT; then
         echo ""
@@ -233,13 +224,13 @@ if $JSON_OUTPUT; then
     first=true
     for check in "${PASSED_CHECKS[@]}"; do
         if [ "$first" = false ]; then json_output="$json_output,"; fi
-        json_output="$json_output\"$check\": {\"status\": \"pass\", \"time\": ${CHECK_TIMES[$check]:-0}}"
+        json_output="$json_output\"$check\": {\"status\": \"pass\"}"
         first=false
     done
 
     for check in "${FAILED_CHECKS[@]}"; do
         if [ "$first" = false ]; then json_output="$json_output,"; fi
-        json_output="$json_output\"$check\": {\"status\": \"fail\", \"time\": ${CHECK_TIMES[$check]:-0}}"
+        json_output="$json_output\"$check\": {\"status\": \"fail\"}"
         first=false
     done
 

@@ -189,6 +189,24 @@ class TestAIOrchestrator:
         with pytest.raises(ValueError, match="API key cannot be empty"):
             AIOrchestrator(api_key="   ")
 
+    def test_orchestrator_stores_exact_api_key_value(self) -> None:
+        """Test AIOrchestrator stores exact API key value (kills mutants).
+
+        This test verifies the exact API key is stored, killing mutants that
+        might truncate, modify, or hash the key incorrectly.
+        """
+        test_key = "test-api-key-with-special-chars-123!@#"
+        orchestrator = AIOrchestrator(api_key=test_key)
+        # Verify exact key is stored (not truncated or modified)
+        assert orchestrator.api_key == test_key
+        # Verify it's a string type
+        assert isinstance(orchestrator.api_key, str)
+        # Verify length is preserved
+        assert len(orchestrator.api_key) == len(test_key)
+        # Verify special characters are preserved
+        assert "!" in orchestrator.api_key
+        assert "@" in orchestrator.api_key
+
     def test_orchestrator_initialization_with_retry_parameters(self) -> None:
         """Test AIOrchestrator accepts retry configuration."""
         orchestrator = AIOrchestrator(
@@ -252,8 +270,7 @@ class TestAIOrchestrator:
     ) -> None:
         """Test generate returns GenerationResult with valid prompt."""
         # Setup mock API response
-        mock_client = MagicMock()
-        mock_anthropic.return_value = mock_client
+        mock_client = mock_anthropic.return_value = MagicMock()
         mock_response = MagicMock()
         mock_response.id = "msg_test123"
 
@@ -267,8 +284,7 @@ class TestAIOrchestrator:
         mock_response.model = ModelConfig.SONNET
         mock_client.messages.create.return_value = mock_response
 
-        orchestrator = AIOrchestrator(api_key="test-api-key")
-        result = orchestrator.generate(
+        result = AIOrchestrator(api_key="test-api-key").generate(
             prompt="Generate test config",
             output_format="yaml",
         )
@@ -309,8 +325,7 @@ class TestAIOrchestrator:
     ) -> None:
         """Test generate accepts all supported output formats."""
         # Setup mock API response
-        mock_client = MagicMock()
-        mock_anthropic.return_value = mock_client
+        mock_client = mock_anthropic.return_value = MagicMock()
         mock_response = MagicMock()
         mock_response.id = "msg_test123"
 
@@ -327,10 +342,10 @@ class TestAIOrchestrator:
         orchestrator = AIOrchestrator(api_key="test-api-key")
 
         # All these should succeed
-        for fmt in ["yaml", "toml", "markdown", "bash"]:
+        for fmt in ("yaml", "toml", "markdown", "bash"):
             result = orchestrator.generate(
                 prompt="Generate content",
-                output_format=fmt,  # type: ignore[arg-type]
+                output_format=fmt,
             )
             assert result.format == fmt
 
@@ -358,8 +373,7 @@ class TestAIOrchestrator:
     ) -> None:
         """Test generate initializes Anthropic client with API key."""
         # Setup mock API response
-        mock_client = MagicMock()
-        mock_anthropic.return_value = mock_client
+        mock_client = mock_anthropic.return_value = MagicMock()
         mock_response = MagicMock()
         mock_response.id = "msg_test123"
 
@@ -408,8 +422,9 @@ class TestAIOrchestrator:
             mock_response,
         ]
 
-        orchestrator = AIOrchestrator(api_key="test-key", max_retries=3)
-        result = orchestrator.generate(prompt="Test", output_format="yaml")
+        result = AIOrchestrator(api_key="test-key", max_retries=3).generate(
+            prompt="Test", output_format="yaml"
+        )
 
         # Should succeed after retries
         assert result.content == "Success after retries"
@@ -498,8 +513,9 @@ class TestAIOrchestrator:
         mock_response.model = ModelConfig.SONNET
         mock_client.messages.create.return_value = mock_response
 
-        orchestrator = AIOrchestrator(api_key="test-key", max_retries=3)
-        result = orchestrator.generate(prompt="Test", output_format="yaml")
+        result = AIOrchestrator(api_key="test-key", max_retries=3).generate(
+            prompt="Test", output_format="yaml"
+        )
 
         # Should succeed immediately
         assert result.content == "Immediate success"
@@ -631,12 +647,11 @@ class TestMutationKillers:
             success_response,
         ]
 
-        orchestrator = AIOrchestrator(
+        result = AIOrchestrator(
             api_key="test-key",
             max_retries=3,
             retry_delay=1.0,
-        )
-        result = orchestrator.generate(prompt="Test", output_format="yaml")
+        ).generate(prompt="Test", output_format="yaml")
 
         assert result.content == "Success"
 
@@ -769,11 +784,10 @@ class TestMutationKillers:
         mock_response.model = ModelConfig.OPUS
         mock_client.messages.create.return_value = mock_response
 
-        orchestrator = AIOrchestrator(
+        result = AIOrchestrator(
             api_key="test-key",
             model=ModelConfig.OPUS,
-        )
-        result = orchestrator.generate(prompt="Generate test", output_format="yaml")
+        ).generate(prompt="Generate test", output_format="yaml")
 
         # Verify EXACT field values
         assert result.content == "Test YAML content"
