@@ -21,19 +21,29 @@
 
 These principles are **non-negotiable** and must be followed without exception:
 
-### 1.1 Use Project Scripts, Not Direct Tools
+### 1.1 Run Pre-Commit for All Quality Checks
 
-Always invoke tools through `./scripts/*` instead of directly.
+**For local development, ALWAYS use `pre-commit run --all-files` as the single comprehensive quality gate.**
 
-**Why**: Scripts ensure consistent configuration across local development and CI.
+**Why**: Pre-commit runs ALL quality checks (formatting, linting, tests, coverage, security, etc.) with correct configuration, ensuring consistency between local development and CI.
 
-| Task | ❌ NEVER | ✅ ALWAYS |
-|------|----------|-----------|
-| Format code | `black .` | `./scripts/format.sh` |
-| Run tests | `pytest` | `./scripts/test.sh` |
-| Type check | `mypy .` | `./scripts/lint.sh` (includes mypy) |
-| Lint code | `ruff check .` | `./scripts/lint.sh` |
-| All checks | *(run each tool)* | `./scripts/check-all.sh` |
+**Primary Command**:
+```bash
+# Run ALL quality checks before every commit
+pre-commit run --all-files
+```
+
+**Individual Scripts (CI/Advanced Usage)**:
+
+The `./scripts/*` files are used by pre-commit hooks and CI pipelines. You can run them individually for targeted checks during development, but ALWAYS run `pre-commit run --all-files` before committing.
+
+| Task | Direct Tool (❌ NEVER) | Script (⚙️ CI/Advanced) | Pre-Commit (✅ PRIMARY) |
+|------|----------|-----------|----------------------|
+| Format code | `black .` | `./scripts/format.sh` | `pre-commit run --all-files` |
+| Run tests | `pytest` | `./scripts/test.sh` | `pre-commit run --all-files` |
+| Type check | `mypy .` | `./scripts/lint.sh` | `pre-commit run --all-files` |
+| Lint code | `ruff check .` | `./scripts/lint.sh` | `pre-commit run --all-files` |
+| All checks | *(run each tool)* | `./scripts/check-all.sh` | `pre-commit run --all-files` |
 
 See [9.1 Tool Invocation Patterns](#91-tool-invocation-patterns) for complete list.
 
@@ -84,7 +94,7 @@ Follow the 4-gate workflow rigorously.
 - 🚫 **NEVER** merge without LGTM
 
 **The Process**:
-1. Gate 1: Local checks pass (`./scripts/check-all.sh` → exit 0)
+1. Gate 1: Local checks pass (`pre-commit run --all-files` → all hooks pass)
 2. Gate 2: CI pipeline green (all jobs ✅)
 3. Gate 3: Mutation score ≥80%
 4. Gate 4: Code review LGTM
@@ -128,14 +138,16 @@ Use relative paths from project root. Never `cd` into subdirectories.
 
 ### 1.7 Verify Before Commit
 
-Run `./scripts/check-all.sh` before every commit. Only commit if exit code is 0.
+Run `pre-commit run --all-files` before every commit. Only commit if all hooks pass.
 
 **Pre-Commit Checklist**:
-- [ ] `./scripts/check-all.sh` passes (exit 0)
+- [ ] `pre-commit run --all-files` passes (all hooks pass)
 - [ ] All new functions have tests
 - [ ] Coverage ≥90% maintained
 - [ ] No failing tests
 - [ ] Conventional commit message ready
+
+**Note**: `pre-commit run --all-files` includes unit tests and coverage validation since Issue #90.
 
 See [10. Common Pitfalls & Troubleshooting](#10-common-pitfalls--troubleshooting) for complete list.
 
@@ -221,10 +233,10 @@ The Stay Green workflow enforces iterative quality improvement through **4 seque
 ### 4.1 The Four Gates
 
 1. **Gate 1: Local Pre-Commit** (Iterate Until Green)
-   - Run `./scripts/check-all.sh`
+   - Run `pre-commit run --all-files`
    - Fix all formatting, linting, types, complexity, security issues
    - Fix tests and coverage (90%+ required)
-   - Only push when all local checks pass (exit code 0)
+   - Only push when all hooks pass (no failures)
 
 2. **Gate 2: CI Pipeline** (Iterate Until Green)
    - Push to branch: `git push origin feature-branch`
@@ -248,7 +260,7 @@ The Stay Green workflow enforces iterative quality improvement through **4 seque
 
 Before creating/updating a PR:
 
-- [ ] Gate 1: `./scripts/check-all.sh` passes locally (exit 0)
+- [ ] Gate 1: `pre-commit run --all-files` passes (all hooks pass)
 - [ ] Push changes: `git push origin feature-branch`
 - [ ] Gate 2: All CI jobs show ✅ (green)
 - [ ] Gate 3: Mutation score ≥ 80% (if applicable)
@@ -649,15 +661,22 @@ credentials.json
 
 3. **Run Quality Checks**
    ```bash
-   ./scripts/check-all.sh
+   pre-commit run --all-files
    ```
-   This runs (in order):
-   - Formatting checks (ruff format, black)
-   - Linting (ruff, pylint, mypy)
-   - Security checks (bandit, safety)
-   - Tests with coverage
-   - Docstring coverage (interrogate)
-   - Code quality metrics
+   This runs all quality hooks (in order):
+   - Git checks (large files, merge conflicts, etc.)
+   - Security (bandit, secrets detection)
+   - Formatting (black, isort, ruff format)
+   - Linting (ruff, pylint)
+   - Type checking (mypy)
+   - Complexity analysis (radon, xenon)
+   - Unit tests (pytest)
+   - Coverage validation (90% threshold)
+   - Code modernization (pyupgrade, autoflake, refurb)
+   - Exception handling (tryceratops)
+   - Dead code detection (vulture)
+   - Docstring coverage (interrogate, 95% threshold)
+   - Shell linting (shellcheck)
 
 4. **Commit with Conventional Commits**
    ```bash
@@ -939,28 +958,30 @@ mutmut show <id>
 
 ### 9.1 Tool Invocation Patterns
 
-**CRITICAL:** Always use the provided quality control scripts instead of invoking tools directly. The scripts ensure:
-- Correct configuration is used
-- Tools run in the proper order
-- Results are consistent with CI pipeline
-- Project-specific settings are applied
+**CRITICAL:** Always use `pre-commit run --all-files` for local development. This is the single comprehensive command that runs ALL quality checks with correct configuration.
+
+**Primary Command (Local Development)**:
+```bash
+# Run ALL quality checks - formatting, linting, tests, coverage, security, etc.
+pre-commit run --all-files
+```
+
+The `./scripts/*` files are used by pre-commit hooks and CI pipelines. They can be run individually during development for targeted checks, but **ALWAYS run `pre-commit run --all-files` before committing**.
 
 #### Quick Reference
 
-| Task | ❌ NEVER DO THIS | ✅ ALWAYS DO THIS |
-|------|------------------|-------------------|
-| **Format code** | `black .`<br>`isort .` | `./scripts/format.sh` |
-| **Check formatting** | `black --check .` | `./scripts/check-all.sh` |
-| **Lint code** | `ruff check .`<br>`pylint src/` | `./scripts/lint.sh` |
-| **Type check** | `mypy src/` | `./scripts/lint.sh` |
-| **Run tests** | `pytest` | `./scripts/test.sh` |
-| **Run unit tests** | `pytest tests/unit/` | `./scripts/test.sh --unit` |
-| **Check coverage** | `pytest --cov` | `./scripts/test.sh` |
-| **Security scan** | `bandit -r src/` | `./scripts/security.sh` |
-| **Fix issues** | `ruff check --fix .` | `./scripts/fix-all.sh` |
-| **All checks** | *(running each tool manually)* | `./scripts/check-all.sh` |
+| Task | ❌ Direct Tool | ⚙️ Individual Script (CI/Advanced) | ✅ Pre-Commit (PRIMARY) |
+|------|----------------|----------------------------------|------------------------|
+| **Format code** | `black .`, `isort .` | `./scripts/format.sh` | `pre-commit run --all-files` |
+| **Lint code** | `ruff check .`, `pylint` | `./scripts/lint.sh` | `pre-commit run --all-files` |
+| **Type check** | `mypy src/` | `./scripts/lint.sh` | `pre-commit run --all-files` |
+| **Run tests** | `pytest` | `./scripts/test.sh` | `pre-commit run --all-files` |
+| **Check coverage** | `pytest --cov` | `./scripts/test.sh` | `pre-commit run --all-files` |
+| **Security scan** | `bandit -r src/` | `./scripts/security.sh` | `pre-commit run --all-files` |
+| **Fix issues** | `ruff check --fix` | `./scripts/fix-all.sh` | Auto-fixed by pre-commit |
+| **All checks** | *(manual tools)* | `./scripts/check-all.sh` | `pre-commit run --all-files` |
 
-#### Why Use Scripts?
+#### Why Use Pre-Commit?
 
 **Direct tool invocation bypasses project configuration:**
 
@@ -972,41 +993,42 @@ black tests/unit/ai/test_orchestrator.py
 # Wrong configuration
 ruff check . --fix
 
-# Incomplete coverage reporting
+# Incomplete - doesn't run tests or coverage
 pytest tests/
 ```
 
 **Issues with direct invocation:**
 - May use different settings than CI
-- Might skip important checks (e.g., isort after black)
+- Easy to forget running all checks (tests, linting, coverage, security, etc.)
 - Won't generate proper coverage reports
 - Results differ from CI pipeline
 - Wastes time debugging CI failures locally
 
-✅ **GOOD - Use scripts:**
+✅ **BEST - Use pre-commit (single comprehensive command):**
 ```bash
-# Formats with black + isort + ruff, correct config
-./scripts/format.sh
-
-# Fixes formatting and linting issues automatically
-./scripts/fix-all.sh
-
-# Runs all checks exactly as CI does
-./scripts/check-all.sh
+# Runs ALL 32 quality hooks in correct order with proper configuration
+pre-commit run --all-files
 ```
 
-**Benefits of using scripts:**
+**Benefits of using pre-commit:**
+- ✅ Single command runs everything (formatting, linting, tests, coverage, security)
 - ✅ Same configuration as CI pipeline
 - ✅ Proper tool ordering (e.g., black before isort)
-- ✅ Comprehensive coverage reporting
+- ✅ Comprehensive coverage reporting (90% threshold enforced)
 - ✅ Consistent results across developers
 - ✅ Catches issues before CI runs
+- ✅ Auto-fixes many issues (formatting, trailing whitespace, etc.)
+- ✅ Impossible to forget a check - all 32 hooks run automatically
 
-#### Available Scripts
+#### Available Scripts (CI/Advanced Usage)
 
-**`./scripts/check-all.sh`** - Run all quality checks (use before every commit)
+**For local development, use `pre-commit run --all-files` instead of these scripts.**
 
-Runs in order:
+The scripts below are used by pre-commit hooks and CI pipelines. They can be run individually for targeted checks during development, but running them manually is unnecessary since pre-commit runs them all.
+
+**`./scripts/check-all.sh`** - Run all quality checks (CI usage)
+
+Runs the same checks as pre-commit (minus git hooks):
 1. Formatting checks (ruff, black, isort)
 2. Linting (ruff, pylint, mypy)
 3. Security scanning (bandit, safety)
@@ -1014,14 +1036,12 @@ Runs in order:
 5. Unit tests with coverage
 6. Coverage report validation (90% minimum)
 
-**Note**: Mutation testing is NOT included in check-all.sh due to long runtime. It runs automatically in CI on main branch merges.
-
 ```bash
-# Before committing - REQUIRED
-./scripts/check-all.sh
+# Use pre-commit instead for local development
+pre-commit run --all-files
 
-# Exit code 0 = all checks pass
-# Exit code 1 = some checks failed
+# Or run this script directly (advanced usage)
+./scripts/check-all.sh
 ```
 
 **`./scripts/mutation.sh`** - Run mutation tests with score validation
@@ -1030,26 +1050,19 @@ Runs in order:
 # Run with 80% minimum (MAXIMUM QUALITY standard)
 ./scripts/mutation.sh
 
-# Run with custom threshold
-./scripts/mutation.sh --min-score 70
-
-# Show detailed output
-./scripts/mutation.sh --verbose
-
-# This can take several minutes - be patient!
+# This takes several minutes - runs automatically in CI
 ```
 
-**`./scripts/format.sh`** - Auto-format all code
+**Other Available Scripts** (used by pre-commit hooks):
 
-**`./scripts/lint.sh`** - Run all linters and type checkers
+- **`./scripts/format.sh`** - Auto-format code (use `pre-commit run --all-files` instead)
+- **`./scripts/lint.sh`** - Run linters and type checkers
+- **`./scripts/test.sh`** - Run test suite with coverage
+- **`./scripts/fix-all.sh`** - Auto-fix formatting and linting issues
+- **`./scripts/security.sh`** - Run security scanners
+- **`./scripts/complexity.sh`** - Analyze code complexity
 
-**`./scripts/test.sh`** - Run test suite with coverage
-
-**`./scripts/fix-all.sh`** - Auto-fix formatting and linting issues
-
-**`./scripts/security.sh`** - Run security scanners
-
-**`./scripts/complexity.sh`** - Analyze code complexity
+**All of these are automatically run by `pre-commit run --all-files`.**
 
 #### Complete Workflow Example
 
@@ -1063,38 +1076,35 @@ vim start_green_stay_green/my_module.py
 # 3. Write tests
 vim tests/unit/test_my_module.py
 
-# 4. Format code
-./scripts/format.sh
+# 4. Run ALL quality checks (formatting, linting, tests, coverage, security, etc.)
+pre-commit run --all-files
 
-# 5. Run all checks
-./scripts/check-all.sh
+# 5. If checks fail, fix issues
+# - Many issues are auto-fixed (formatting, trailing whitespace, etc.)
+# - For others, edit files to fix mypy errors, add tests for coverage, etc.
 
-# 6. If checks fail, auto-fix what you can
-./scripts/fix-all.sh
+# 6. Run checks again after fixes
+pre-commit run --all-files
 
-# 7. Run checks again
-./scripts/check-all.sh
-
-# 8. Manually fix remaining issues if needed
-# (edit files to fix mypy errors, add tests for coverage, etc.)
-
-# 9. Final check before commit
-./scripts/check-all.sh
-
-# 10. (Optional) Run mutation tests locally for significant changes
+# 7. (Optional) Run mutation tests locally for significant changes
 # This takes several minutes and is automatically run in CI
 ./scripts/mutation.sh
 
-# 11. Commit (only if all checks pass)
+# 8. Commit (pre-commit hooks will run automatically)
 git add .
 git commit -m "feat(module): add my feature (#123)"
+# Note: Pre-commit hooks run on commit and will block if checks fail
 
-# 12. Push
+# 9. Push
 git push origin feature/my-feature
 
-# 13. Create PR (all CI checks will pass, including mutation testing on main)
+# 10. Create PR (all CI checks will pass, including mutation testing on main)
 gh pr create --fill
 ```
+
+**Key Difference from Old Workflow:**
+- **Old**: Run `./scripts/format.sh`, then `./scripts/check-all.sh`, then `./scripts/fix-all.sh`, then `./scripts/check-all.sh` again
+- **New**: Run `pre-commit run --all-files` once - it does everything in correct order
 
 #### When Direct Tool Invocation Is Acceptable
 
@@ -1105,7 +1115,7 @@ gh pr create --fill
    # Acceptable for quick iteration
    pytest tests/unit/ai/test_orchestrator.py -v
 
-   # But still run ./scripts/test.sh before committing
+   # But still run pre-commit run --all-files before committing
    ```
 
 2. **Checking a specific file's types:**
@@ -1113,7 +1123,7 @@ gh pr create --fill
    # Acceptable for quick feedback
    mypy start_green_stay_green/ai/orchestrator.py
 
-   # But still run ./scripts/lint.sh before committing
+   # But still run pre-commit run --all-files before committing
    ```
 
 3. **Debugging a specific linting rule:**
@@ -1121,10 +1131,10 @@ gh pr create --fill
    # Acceptable to understand a specific error
    ruff check start_green_stay_green/ai/ --select E501
 
-   # But still run ./scripts/lint.sh before committing
+   # But still run pre-commit run --all-files before committing
    ```
 
-**Golden Rule:** Direct tool invocation is ONLY acceptable during active development for quick feedback. **ALWAYS** run the appropriate script before committing.
+**Golden Rule:** Direct tool invocation is ONLY acceptable during active development for quick feedback. **ALWAYS** run `pre-commit run --all-files` before committing.
 
 ### 9.2 Python Code Style
 
@@ -1743,14 +1753,14 @@ git push
 **The Fix**:
 ```bash
 # ALWAYS run checks before committing
-./scripts/check-all.sh
-# Only commit if exit code is 0
+pre-commit run --all-files
+# Only commit if all hooks pass
 git add .
 git commit -m "feat(generators): add CI generator (#46)"
 ```
 
 **Why It Happens**: Impatience, assuming "it's a small change"
-**Prevention**: Add pre-commit hook, build muscle memory
+**Prevention**: Pre-commit hooks run automatically on commit (since Issue #90)
 
 ---
 
@@ -1781,20 +1791,21 @@ def test_edge_case_not_previously_covered():
 
 **The Mistake**:
 ```bash
-# Running tools directly
+# Running tools directly or individually
 ruff check .
 pytest tests/
 mypy start_green_stay_green/
+./scripts/lint.sh  # Only runs linting, not tests/coverage
 ```
 
 **The Fix**:
 ```bash
-# Use project scripts
-./scripts/check-all.sh  # Runs all tools with correct config
+# Use pre-commit for comprehensive quality checks
+pre-commit run --all-files  # Runs ALL 32 hooks with correct config
 ```
 
-**Why It Happens**: Muscle memory from other projects
-**Prevention**: Read Tool Invocation Patterns section
+**Why It Happens**: Muscle memory from other projects, not knowing about pre-commit
+**Prevention**: Use `pre-commit run --all-files` as the single quality gate (Issue #90)
 
 ---
 
