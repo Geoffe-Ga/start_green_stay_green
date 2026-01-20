@@ -54,7 +54,7 @@ class TestPreCommitGeneratorIntegration:
 
             assert parsed is not None
             assert "repos" in parsed
-            assert len(parsed["repos"]) > 0
+            assert parsed["repos"]
         finally:
             temp_path.unlink()
 
@@ -371,5 +371,5 @@ class TestPreCommitGeneratorIntegration:
                 language_config={},
             )
             result = generator.generate(config)
-            assert len(result) > 0
+            assert result
             assert f"perf-test-{i}" in result

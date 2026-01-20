@@ -38,7 +38,7 @@ class TestCIWorkflowDataClass:
         assert workflow.name == "Test CI"
         assert workflow.content == "test: content"
         assert workflow.language == "python"
-        assert workflow.is_valid is True
+        assert workflow.is_valid
         assert workflow.error_message is None
 
     def test_ci_workflow_with_error_message(self) -> None:
@@ -50,7 +50,7 @@ class TestCIWorkflowDataClass:
             is_valid=False,
             error_message="YAML parse error",
         )
-        assert workflow.is_valid is False
+        assert not workflow.is_valid
         assert workflow.error_message == "YAML parse error"
 
     def test_ci_workflow_is_immutable(self) -> None:
@@ -103,7 +103,7 @@ class TestCIGeneratorInitialization:
         """Test CIGenerator accepts case-insensitive language names."""
         mock_orchestrator = Mock(spec=AIOrchestrator)
 
-        for variant in ["PYTHON", "Python", "PyThOn"]:
+        for variant in ("PYTHON", "Python", "PyThOn"):
             generator = CIGenerator(mock_orchestrator, variant)
             assert generator.language == "python"
 
@@ -148,7 +148,7 @@ class TestCIGeneratorStaticMethods:
         """Test get_supported_languages returns all configured languages."""
         languages = CIGenerator.get_supported_languages()
 
-        assert len(languages) > 0
+        assert languages
         assert set(languages) == set(LANGUAGE_CONFIGS.keys())
         # Should be sorted
         assert languages == sorted(languages)
@@ -173,7 +173,7 @@ class TestCIGeneratorStaticMethods:
 
     def test_get_language_config_case_insensitive(self) -> None:
         """Test get_language_config accepts case-insensitive language names."""
-        for variant in ["PYTHON", "Python", "PyThOn"]:
+        for variant in ("PYTHON", "Python", "PyThOn"):
             config = CIGenerator.get_language_config(variant)
             assert config["test_framework"] == "pytest"
 
@@ -309,7 +309,7 @@ jobs:
             self._create_minimal_valid_workflow()
         )
 
-        assert workflow.is_valid is True
+        assert workflow.is_valid
         assert workflow.error_message is None
         assert workflow.name == "Test CI"
         assert workflow.language == "python"
@@ -491,7 +491,7 @@ jobs:
 
         workflow = generator.generate_workflow()
 
-        assert workflow.is_valid is True
+        assert workflow.is_valid
         assert workflow.language == "python"
         assert workflow.name == "Test CI"
         assert mock_orchestrator.generate.called
@@ -642,7 +642,7 @@ jobs:
         generator = CIGenerator(mock_orchestrator, language)
         workflow = generator.generate_workflow()
 
-        assert workflow.is_valid is True
+        assert workflow.is_valid
         assert workflow.language == language
 
 
@@ -679,8 +679,8 @@ jobs:
             language="python",
             is_valid=True,
         )
-        assert workflow.is_valid is True
-        assert workflow.is_valid is not False
+        assert workflow.is_valid
+        assert workflow.is_valid
 
     def test_ci_workflow_error_message_none_when_valid(self) -> None:
         """Test error_message is None when valid.
@@ -788,7 +788,7 @@ jobs:
       - run: test
 """
         workflow = generator._validate_and_parse(valid_yaml)  # noqa: SLF001
-        assert workflow.is_valid is True
+        assert workflow.is_valid
 
         # Should reject workflow with only quality (missing test)
         missing_test = """name: CI
@@ -824,9 +824,9 @@ jobs:
 """
         workflow = generator._validate_and_parse(valid_yaml)  # noqa: SLF001
 
-        assert workflow.is_valid is True
-        assert workflow.is_valid == True  # noqa: E712
-        assert workflow.is_valid is not False
+        assert workflow.is_valid
+        assert workflow.is_valid
+        assert workflow.is_valid
 
     def test_parse_yaml_safe_load_used(self) -> None:
         """Test yaml.safe_load is used (not unsafe load).

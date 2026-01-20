@@ -34,11 +34,11 @@ class TestScriptConfig:
         )
         assert config.language == "typescript"
         assert config.package_name == "my_app"
-        assert config.supports_pytest is False
-        assert config.supports_coverage is False
-        assert config.supports_mutation is False
-        assert config.supports_complexity is False
-        assert config.supports_security is False
+        assert not config.supports_pytest
+        assert not config.supports_coverage
+        assert not config.supports_mutation
+        assert not config.supports_complexity
+        assert not config.supports_security
 
     def test_script_config_default_values(self) -> None:
         """Test ScriptConfig has correct default values."""
@@ -46,11 +46,11 @@ class TestScriptConfig:
             language="go",
             package_name="go_module",
         )
-        assert config.supports_pytest is True
-        assert config.supports_coverage is True
-        assert config.supports_mutation is True
-        assert config.supports_complexity is True
-        assert config.supports_security is True
+        assert config.supports_pytest
+        assert config.supports_coverage
+        assert config.supports_mutation
+        assert config.supports_complexity
+        assert config.supports_security
 
     def test_script_config_is_immutable(self) -> None:
         """Test ScriptConfig is immutable (frozen)."""
@@ -569,7 +569,7 @@ class TestScriptsGeneratorEdgeCases:
                 )
                 generator = ScriptsGenerator(Path(tmpdir), config)
                 scripts = generator.generate()
-                assert len(scripts) > 0
+                assert scripts
 
     def test_script_generation_with_existing_output_dir(self) -> None:
         """Test script generation overwrites existing output directory."""
@@ -585,7 +585,7 @@ class TestScriptsGeneratorEdgeCases:
             scripts = generator.generate()
 
             assert output_dir.exists()
-            assert len(scripts) > 0
+            assert scripts
 
 
 class TestMutationKillers:
@@ -705,8 +705,8 @@ class TestMutationKillers:
             scripts = generator.generate()
 
             assert len(scripts) == 7
-            assert len(scripts) != 6
-            assert len(scripts) != 8
+            assert len(scripts) > 6
+            assert len(scripts) < 8
 
     def test_generated_scripts_exact_count_typescript(self) -> None:
         """Test TypeScript generator creates EXACTLY 5 scripts."""
@@ -719,8 +719,8 @@ class TestMutationKillers:
             scripts = generator.generate()
 
             assert len(scripts) == 5
-            assert len(scripts) != 4
-            assert len(scripts) != 6
+            assert len(scripts) > 4
+            assert len(scripts) < 6
 
     def test_script_file_executable_permission_exact(self) -> None:
         """Test generated scripts have EXACT executable permission (0o755).
