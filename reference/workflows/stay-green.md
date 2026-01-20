@@ -22,26 +22,31 @@ This workflow enforces iterative quality improvement through sequential gates, p
 
 **Actions**:
 ```bash
-./scripts/check-all.sh
+# Run ALL 32 quality hooks
+pre-commit run --all-files
 ```
 
-**Checks**:
+**Checks** (32 hooks total):
+- Git checks (large files, merge conflicts, etc.)
 - Formatting (ruff, black, isort)
 - Linting (ruff, pylint)
 - Type checking (mypy strict mode)
-- Security (bandit, safety)
+- Security (bandit, secrets detection)
 - Complexity (≤10 cyclomatic, grade A)
-- Tests (unit + integration)
+- Unit tests (pytest)
 - Coverage (90% minimum)
 - Docstrings (95% minimum)
+- Code modernization (pyupgrade, autoflake, refurb)
+- Exception handling (tryceratops)
+- Dead code detection (vulture)
+- Shell linting (shellcheck)
 
 **Iteration**:
-- If ANY check fails → Fix locally
-- Run `./scripts/fix-all.sh` for auto-fixable issues
-- Run `./scripts/check-all.sh` again
-- Repeat until ALL checks pass (exit code 0)
+- If ANY hook fails → Fix locally (many issues auto-fixed by pre-commit)
+- Run `pre-commit run --all-files` again
+- Repeat until ALL hooks pass
 
-**Proceed When**: `./scripts/check-all.sh` exits 0
+**Proceed When**: `pre-commit run --all-files` shows all hooks passing
 
 ---
 
@@ -67,7 +72,7 @@ gh pr checks --watch
 - If CI fails:
   1. Pull latest changes: `git pull origin feature/your-branch`
   2. Fix issues locally
-  3. Run Gate 1 (check-all.sh) again
+  3. Run Gate 1 (`pre-commit run --all-files`) again
   4. Push again
   5. Wait for CI
 - Repeat until CI is GREEN
@@ -163,9 +168,9 @@ def stay_green_workflow():
 
     # Gate 1: Local Pre-Commit
     while not local_checks_pass():
-        run("./scripts/fix-all.sh")  # Auto-fix what we can
-        fix_remaining_issues_manually()
-        run("./scripts/check-all.sh")
+        run("pre-commit run --all-files")  # Auto-fixes many issues
+        fix_remaining_issues_manually()  # Fix mypy errors, add tests, etc.
+        run("pre-commit run --all-files")
 
     # Push to remote
     git("push origin feature-branch")
@@ -177,7 +182,7 @@ def stay_green_workflow():
             git("pull origin feature-branch")
             fix_ci_failures_locally()
             # Re-run Gate 1
-            run("./scripts/check-all.sh")
+            run("pre-commit run --all-files")
             git("push origin feature-branch")
 
     # Gate 3: Mutation Testing
@@ -187,7 +192,7 @@ def stay_green_workflow():
             review_surviving_mutants()
             add_tests_to_kill_mutants()
             # Re-run Gate 1
-            run("./scripts/check-all.sh")
+            run("pre-commit run --all-files")
             git("push origin feature-branch")
             # Re-run Gate 2
             wait_for_ci_completion()
@@ -198,7 +203,7 @@ def stay_green_workflow():
         if has_feedback():
             address_all_concerns()
             # Re-run Gate 1
-            run("./scripts/check-all.sh")
+            run("pre-commit run --all-files")
             git("push origin feature-branch")
             # Re-run Gate 2
             wait_for_ci_completion()
@@ -608,7 +613,7 @@ The Stay Green workflow is being followed correctly when:
 
 Before creating/updating a PR:
 
-- [ ] Gate 1: `./scripts/check-all.sh` passes locally (exit 0)
+- [ ] Gate 1: `pre-commit run --all-files` passes (all hooks pass)
 - [ ] Push changes: `git push origin feature-branch`
 - [ ] Gate 2: All CI jobs show ✅ (green)
 - [ ] Gate 3: Mutation score ≥ 80% (if applicable)
