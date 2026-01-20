@@ -10,7 +10,8 @@
 #   - mypy → scripts/typecheck.sh
 #   - bandit → scripts/security.sh
 #   - radon/xenon → scripts/complexity.sh
-#   - pytest → scripts/test.sh --unit (not in pre-commit, only in CI)
+#   - pytest (unit) → scripts/test.sh --unit
+#   - coverage → scripts/coverage.sh
 #
 # Additional hooks from MAXIMUM_QUALITY_ENGINEERING.md:
 #   - Git checks (pre-commit-hooks)
@@ -21,8 +22,10 @@
 #   - Exception handling (tryceratops)
 #   - Dead code detection (vulture)
 #   - Docstring coverage (interrogate) - 95% requirement
+#   - Unit tests (pytest)
+#   - Coverage validation (90% threshold)
 #
-# Total hooks: 30
+# Total hooks: 32
 
 default_language_version:
   python: python3
@@ -102,6 +105,28 @@ repos:
         language: script
         types: [python]
         pass_filenames: false
+
+  # Unit tests - Local script mapping
+  - repo: local
+    hooks:
+      - id: unit-tests
+        name: Unit Tests (Pytest)
+        entry: scripts/test.sh --unit
+        language: script
+        types: [python]
+        pass_filenames: false
+        always_run: true
+
+  # Coverage validation - Local script mapping
+  - repo: local
+    hooks:
+      - id: coverage-check
+        name: Coverage Check (90% threshold)
+        entry: scripts/coverage.sh
+        language: script
+        types: [python]
+        pass_filenames: false
+        always_run: true
 
   # Secrets detection
   - repo: https://github.com/Yelp/detect-secrets
