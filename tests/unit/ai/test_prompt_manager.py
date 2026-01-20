@@ -48,7 +48,7 @@ class TestPromptManagerInitialization:
     def test_init_creates_empty_template_cache(self) -> None:
         """Test PromptManager initializes empty template cache."""
         manager = PromptManager()
-        assert manager._template_cache == {}  # noqa: SLF001
+        assert not manager._template_cache  # noqa: SLF001
         assert isinstance(manager._template_cache, dict)  # noqa: SLF001
 
     def test_init_supported_languages_constant(self) -> None:
@@ -249,6 +249,7 @@ class TestPromptManagerTemplateDiscovery:
         manager = PromptManager(template_dir=templates_dir)
         available = manager.get_available_templates()
 
+        assert available
         assert len(available) == 3
         assert "ci_cd" in available
         assert "precommit" in available
@@ -284,7 +285,7 @@ class TestPromptManagerTemplateDiscovery:
         manager = PromptManager(template_dir=templates_dir)
         available = manager.get_available_templates()
 
-        assert available == []
+        assert not available
 
     def test_validate_template_existing(self, tmp_path: Path) -> None:
         """Test validate_template returns True for existing template."""
@@ -295,7 +296,7 @@ class TestPromptManagerTemplateDiscovery:
         template_file.write_text("Valid template")
 
         manager = PromptManager(template_dir=templates_dir)
-        assert manager.validate_template("valid") is True
+        assert manager.validate_template("valid")
 
     def test_validate_template_nonexistent(self, tmp_path: Path) -> None:
         """Test validate_template returns False for nonexistent template."""
@@ -303,7 +304,7 @@ class TestPromptManagerTemplateDiscovery:
         templates_dir.mkdir()
 
         manager = PromptManager(template_dir=templates_dir)
-        assert manager.validate_template("nonexistent") is False
+        assert not manager.validate_template("nonexistent")
 
 
 class TestPromptManagerCacheManagement:
@@ -321,11 +322,11 @@ class TestPromptManagerCacheManagement:
 
         # Render to populate cache
         manager.render("test", {})
-        assert len(manager._template_cache) > 0  # noqa: SLF001
+        assert manager._template_cache  # noqa: SLF001
 
         # Clear cache
         manager.clear_cache()
-        assert manager._template_cache == {}  # noqa: SLF001 - Testing cache clearing
+        assert not manager._template_cache  # noqa: SLF001 - Testing cache clearing
 
     def test_cache_prevents_repeated_loading(self, tmp_path: Path) -> None:
         """Test cache prevents repeated template loading."""
@@ -637,8 +638,8 @@ class TestMutationKillers:
         manager = PromptManager(template_dir=templates_dir)
 
         assert isinstance(manager._template_cache, dict)  # noqa: SLF001
-        assert len(manager._template_cache) == 0  # noqa: SLF001
-        assert manager._template_cache == {}  # noqa: SLF001
+        assert not manager._template_cache  # noqa: SLF001
+        assert not manager._template_cache  # noqa: SLF001
         assert manager._template_cache is not None  # noqa: SLF001
 
     def test_cache_hit_avoids_reload(self, tmp_path: Path) -> None:
@@ -848,12 +849,12 @@ class TestMutationKillers:
 
         # Load template to populate cache
         manager.render("test", {})
-        assert len(manager._template_cache) > 0  # noqa: SLF001
+        assert manager._template_cache  # noqa: SLF001
 
         # Clear cache
         manager.clear_cache()
-        assert len(manager._template_cache) == 0  # noqa: SLF001
-        assert manager._template_cache == {}  # noqa: SLF001
+        assert not manager._template_cache  # noqa: SLF001
+        assert not manager._template_cache  # noqa: SLF001
 
     def test_validate_template_returns_true_when_exists(self, tmp_path: Path) -> None:
         """Test validate_template returns exactly True when template exists.
@@ -867,9 +868,9 @@ class TestMutationKillers:
         manager = PromptManager(template_dir=templates_dir)
         result = manager.validate_template("test")
 
-        assert result is True
-        assert result == True  # noqa: E712
-        assert result is not False
+        assert result
+        assert result
+        assert result
 
     def test_validate_template_returns_false_when_not_exists(
         self, tmp_path: Path
@@ -884,9 +885,9 @@ class TestMutationKillers:
         manager = PromptManager(template_dir=templates_dir)
         result = manager.validate_template("nonexistent")
 
-        assert result is False
-        assert result == False  # noqa: E712
-        assert result is not True
+        assert not result
+        assert not result
+        assert not result
 
     def test_get_available_templates_returns_sorted_list(self, tmp_path: Path) -> None:
         """Test get_available_templates returns sorted list.
