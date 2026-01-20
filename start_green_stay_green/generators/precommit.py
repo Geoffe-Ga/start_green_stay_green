@@ -324,7 +324,7 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
                         "entry": "cargo fmt --",
                         "language": "system",
                         "types": ["rust"],
-                        "pass_filenames": True,
+                        "pass_filenames": True,  # nosec B105  # Boolean config, not password
                     },
                     {
                         "id": "clippy",
@@ -332,7 +332,7 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
                         "entry": "cargo clippy -- -D warnings",
                         "language": "system",
                         "types": ["rust"],
-                        "pass_filenames": False,
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
                     },
                 ],
             },
