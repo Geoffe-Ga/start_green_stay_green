@@ -22,6 +22,14 @@ if TYPE_CHECKING:
 # Default reference directory (can be overridden)
 REFERENCE_AGENTS_DIR = Path(__file__).parent.parent.parent / ".claude" / "agents"
 
+# Source context for tuning: describes the origin of reference agents
+# Reference agents were designed for a Mojo ML research project with
+# multi-level agent hierarchies and paper implementation workflows
+SOURCE_AGENT_CONTEXT = (
+    "Mojo ML research project (ml-odyssey) with multi-level "
+    "agent hierarchy, paper implementations, and research workflows"
+)
+
 # Mapping from required agent names to source agent files
 REQUIRED_AGENTS = {
     "chief-architect": "chief-architect.md",
@@ -91,7 +99,12 @@ class SubagentsGenerator(BaseGenerator):
         self._validate_reference_dir()
 
     def _check_directory_exists(self) -> None:
-        """Check that reference directory exists and is a directory."""
+        """Check that reference directory exists and is a directory.
+
+        Separated from _check_required_agents to provide clear error messages.
+        Directory existence is validated before checking individual files to
+        fail fast with the most helpful error message.
+        """
         if not self.reference_dir.exists():
             msg = f"Reference directory not found: {self.reference_dir}"
             raise FileNotFoundError(msg)
@@ -101,7 +114,12 @@ class SubagentsGenerator(BaseGenerator):
             raise NotADirectoryError(msg)
 
     def _check_required_agents(self) -> None:
-        """Check that all required agent source files exist."""
+        """Check that all required agent source files exist.
+
+        Separated from _check_directory_exists to provide detailed error
+        messages listing all missing files at once (rather than failing on
+        first missing file).
+        """
         missing_agents = []
         for agent_name, source_file in REQUIRED_AGENTS.items():
             agent_path = self.reference_dir / source_file
@@ -113,7 +131,12 @@ class SubagentsGenerator(BaseGenerator):
             raise FileNotFoundError(msg)
 
     def _validate_reference_dir(self) -> None:
-        """Validate that reference directory exists with required agents."""
+        """Validate that reference directory exists with required agents.
+
+        Runs two-stage validation:
+        1. Directory exists and is a directory (fail fast)
+        2. All required agent files exist (comprehensive check)
+        """
         self._check_directory_exists()
         self._check_required_agents()
 
@@ -146,7 +169,13 @@ class SubagentsGenerator(BaseGenerator):
         Raises:
             ValueError: If frontmatter not found or malformed.
         """
-        # Match frontmatter: ---\n...content...\n---
+        # Match YAML frontmatter pattern:
+        # ^(---\n  - Start with --- and newline (captured group 1)
+        # .*?      - Match any content (non-greedy)
+        # \n---)   - End with newline and --- (end group 1)
+        # \n       - Newline after frontmatter
+        # (.*)$    - Capture remaining content as body (group 2)
+        # re.DOTALL allows . to match newlines
         pattern = r"^(---\n.*?\n---)\n(.*)$"
         match = re.match(pattern, content, re.DOTALL)
 
@@ -172,16 +201,10 @@ class SubagentsGenerator(BaseGenerator):
         Returns:
             Generation result with tuned content.
         """
-        # Source context describes the reference agents
-        source_context = (
-            "Mojo ML research project (ml-odyssey) with multi-level "
-            "agent hierarchy, paper implementations, and research workflows"
-        )
-
-        # Tune the body content
+        # Tune the body content using SOURCE_AGENT_CONTEXT
         tuning_result = await self.tuner.tune(
             source_content=body,
-            source_context=source_context,
+            source_context=SOURCE_AGENT_CONTEXT,
             target_context=target_context,
             preserve_sections=[
                 "## Identity",
@@ -260,13 +283,27 @@ class SubagentsGenerator(BaseGenerator):
         return results
 
     def generate(self) -> dict[str, Any]:
-        """Generate subagents synchronously (placeholder for base class).
+        """Generate subagents synchronously (not supported).
 
-        This method is required by BaseGenerator but subagent generation
-        is async. Use generate_all_agents() instead.
+        This method is required by BaseGenerator abstract interface but
+        SubagentsGenerator requires async operations for ContentTuner integration.
+
+        The synchronous interface cannot support async tuning operations,
+        so this method raises NotImplementedError to maintain type safety
+        while directing users to the correct async interface.
+
+        Use generate_all_agents() for async batch generation or
+        generate_agent() for async single agent generation.
 
         Raises:
-            NotImplementedError: Use generate_all_agents() instead.
+            NotImplementedError: Always. Use generate_all_agents() instead.
+
+        See Also:
+            generate_all_agents: Async method for generating all agents.
+            generate_agent: Async method for generating a single agent.
         """
-        msg = "Use generate_all_agents() for async subagent generation"
+        msg = (
+            "SubagentsGenerator requires async operations. "
+            "Use generate_all_agents() or generate_agent() instead."
+        )
         raise NotImplementedError(msg)
