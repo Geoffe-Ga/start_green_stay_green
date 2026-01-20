@@ -97,8 +97,8 @@ npm-debug.log*
 # Import linter cache
 .import_linter_cache/
 
-# Claude Code agents and subagents
-agents/
+# Claude Code agents and subagents (but allow .claude/agents/ reference directory)
+!.claude/agents/
 agent-*/
 *.agent.md
 .agent-state/
