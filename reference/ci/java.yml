@@ -1,0 +1,72 @@
+name: Java Quality Checks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  quality:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java-version: ["17", "21"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ matrix.java-version }}
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Run Checkstyle
+        run: mvn checkstyle:check
+
+      - name: Run PMD
+        run: mvn pmd:check
+
+      - name: Run SpotBugs
+        run: mvn spotbugs:check
+
+      - name: Run tests with JaCoCo coverage
+        run: mvn clean test jacoco:report
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./target/site/jacoco/jacoco.xml
+          fail_ci_if_error: true
+
+      - name: Check coverage threshold
+        run: mvn jacoco:check
+
+  build:
+    name: Build and Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build with Maven
+        run: mvn clean package -DskipTests
+
+      - name: Verify package
+        run: mvn verify -DskipTests

@@ -1,0 +1,67 @@
+name: Swift Quality Checks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  quality:
+    name: Code Quality Checks
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        xcode-version: ["15.1", "15.2"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode ${{ matrix.xcode-version }}
+        run: sudo xcode-select -s /Applications/Xcode_${{ matrix.xcode-version }}.app
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Run SwiftLint
+        run: swiftlint lint --strict
+
+      - name: Run SwiftFormat check
+        run: |
+          brew install swiftformat
+          swiftformat --lint .
+
+      - name: Build and test with coverage
+        run: |
+          xcodebuild test -scheme YourScheme -destination 'platform=iOS Simulator,name=iPhone 15' -enableCodeCoverage YES
+
+      - name: Generate coverage report
+        run: |
+          xcrun llvm-cov export -format="lcov" \
+            -instr-profile=$(find ~/Library/Developer/Xcode/DerivedData -name "*.profdata") \
+            $(find ~/Library/Developer/Xcode/DerivedData -name "*.xctest") > coverage.lcov
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.lcov
+          fail_ci_if_error: true
+
+  build:
+    name: Build and Archive
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build for release
+        run: swift build -c release
+
+      - name: Run tests
+        run: swift test
