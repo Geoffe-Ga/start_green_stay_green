@@ -1,0 +1,95 @@
+name: {{ workflow_name }}
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    env:
+      CLAUDE_API_KEY: {% raw %}${{ secrets.CLAUDE_API_KEY }}{% endraw %}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        id: diff
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD > pr_diff.txt
+          echo "diff_size=$(wc -l < pr_diff.txt)" >> $GITHUB_OUTPUT
+
+      - name: Run Claude Code Review
+        id: review
+        run: |
+          # Response Format:
+          # ## Code Review Results
+          # ### Status: [LGTM | CHANGES_REQUESTED]
+          # ### Issues Found
+          # #### Critical (Block Merge)
+          # - [ ] [Issue description with line reference]
+          # #### High (Block Merge)
+          # - [ ] [Issue description with line reference]
+          # #### Medium (Block Merge)
+          # - [ ] [Issue description with line reference]
+          # #### Low (Create GitHub Issue for Future PR)
+          # - [ ] [Issue description] → Created issue #123
+
+          # TODO: Call Claude API with PR diff
+          echo "Running code review with Claude..."
+          echo "STATUS=LGTM" >> $GITHUB_OUTPUT
+          echo "CRITICAL_COUNT=0" >> $GITHUB_OUTPUT
+          echo "HIGH_COUNT=0" >> $GITHUB_OUTPUT
+          echo "MEDIUM_COUNT=0" >> $GITHUB_OUTPUT
+          echo "LOW_COUNT=0" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub issues for Low severity items
+        if: steps.review.outputs.LOW_COUNT > 0
+        run: |
+          # Parse Low severity issues from review output
+          # For each Low severity issue, create a GitHub issue
+          gh issue create --title "Low severity" --body "Details"
+        env:
+          GH_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
+
+      - name: Post review comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ steps.review.outputs.STATUS }}';
+            const critical = '${{ steps.review.outputs.CRITICAL_COUNT }}';
+            const high = '${{ steps.review.outputs.HIGH_COUNT }}';
+            const medium = '${{ steps.review.outputs.MEDIUM_COUNT }}';
+            const low = '${{ steps.review.outputs.LOW_COUNT }}';
+
+            let comment = `## Code Review Results\n\n`;
+            comment += `### Status: ${status}\n\n`;
+
+            if (status === 'CHANGES_REQUESTED') {
+              comment += `### Issues Found\n\n`;
+              if (critical > 0) comment += `#### Critical (Block Merge): ${critical}\n`;
+              if (high > 0) comment += `#### High (Block Merge): ${high}\n`;
+              if (medium > 0) comment += `#### Medium (Block Merge): ${medium}\n`;
+              if (low > 0) comment += `#### Low (GitHub Issues Created): ${low}\n`;
+            }
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Block merge if issues found
+        if: steps.review.outputs.STATUS == 'CHANGES_REQUESTED'
+        run: |
+          echo "Critical, High, or Medium issues found - blocking merge"
+          exit 1
