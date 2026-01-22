@@ -8,6 +8,16 @@ from pathlib import Path
 
 import pytest
 
+# Module-level constant: required skills per SPEC.md
+REQUIRED_SKILLS = [
+    "vibe.md",
+    "concurrency.md",
+    "error-handling.md",
+    "testing.md",
+    "documentation.md",
+    "security.md",
+]
+
 
 @pytest.fixture
 def skills_dir() -> Path:
@@ -21,14 +31,7 @@ class TestSkillsStructure:
     @pytest.fixture
     def required_skills(self) -> list[str]:
         """Return list of required skills."""
-        return [
-            "vibe.md",
-            "concurrency.md",
-            "error-handling.md",
-            "testing.md",
-            "documentation.md",
-            "security.md",
-        ]
+        return REQUIRED_SKILLS
 
     def test_all_required_skills_exist(
         self, skills_dir: Path, required_skills: list[str]
@@ -127,16 +130,7 @@ class TestSkillsQuality:
 
     def test_skills_are_not_too_short(self, skills_dir: Path) -> None:
         """Test skills have substantial content (>1000 chars)."""
-        required_skills = [
-            "vibe.md",
-            "concurrency.md",
-            "error-handling.md",
-            "testing.md",
-            "documentation.md",
-            "security.md",
-        ]
-
-        for skill in required_skills:
+        for skill in REQUIRED_SKILLS:
             skill_path = skills_dir / skill
             content = skill_path.read_text()
 
@@ -146,16 +140,7 @@ class TestSkillsQuality:
 
     def test_skills_have_code_examples(self, skills_dir: Path) -> None:
         """Test skills contain code examples (code blocks)."""
-        required_skills = [
-            "vibe.md",
-            "concurrency.md",
-            "error-handling.md",
-            "testing.md",
-            "documentation.md",
-            "security.md",
-        ]
-
-        for skill in required_skills:
+        for skill in REQUIRED_SKILLS:
             skill_path = skills_dir / skill
             content = skill_path.read_text()
 
