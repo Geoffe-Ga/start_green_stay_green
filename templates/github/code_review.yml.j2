@@ -23,8 +23,10 @@ jobs:
 
       - name: Get PR diff
         id: diff
+        env:
+          BASE_REF: {% raw %}${{ github.base_ref }}{% endraw %}
         run: |
-          git diff origin/${{ github.base_ref }}...HEAD > pr_diff.txt
+          git diff "origin/${BASE_REF}...HEAD" > pr_diff.txt
           echo "diff_size=$(wc -l < pr_diff.txt)" >> $GITHUB_OUTPUT
 
       - name: Run Claude Code Review
@@ -43,7 +45,11 @@ jobs:
           # #### Low (Create GitHub Issue for Future PR)
           # - [ ] [Issue description] → Created issue #123
 
-          # TODO: Call Claude API with PR diff
+          # TODO(Issue #102): Implement Claude API integration
+          # Current: Infrastructure-only implementation (Phase 1)
+          # This workflow template generates valid GitHub Actions YAML but requires
+          # Claude API integration to perform actual code reviews.
+          # See Issue #102 for implementation roadmap.
           echo "Running code review with Claude..."
           echo "STATUS=LGTM" >> $GITHUB_OUTPUT
           echo "CRITICAL_COUNT=0" >> $GITHUB_OUTPUT
@@ -64,11 +70,11 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const status = '${{ steps.review.outputs.STATUS }}';
+            {% raw %}const status = '${{ steps.review.outputs.STATUS }}';
             const critical = '${{ steps.review.outputs.CRITICAL_COUNT }}';
             const high = '${{ steps.review.outputs.HIGH_COUNT }}';
             const medium = '${{ steps.review.outputs.MEDIUM_COUNT }}';
-            const low = '${{ steps.review.outputs.LOW_COUNT }}';
+            const low = '${{ steps.review.outputs.LOW_COUNT }}';{% endraw %}
 
             let comment = `## Code Review Results\n\n`;
             comment += `### Status: ${status}\n\n`;
@@ -89,7 +95,7 @@ jobs:
             });
 
       - name: Block merge if issues found
-        if: steps.review.outputs.STATUS == 'CHANGES_REQUESTED'
+        if: {% raw %}steps.review.outputs.STATUS == 'CHANGES_REQUESTED'{% endraw %}
         run: |
           echo "Critical, High, or Medium issues found - blocking merge"
           exit 1

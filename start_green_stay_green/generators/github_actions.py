@@ -58,8 +58,16 @@ class GitHubActionsReviewGenerator:
 
         Args:
             orchestrator: AI orchestrator for Claude API integration.
+                Reserved for future use in Issue #102 (Claude API integration).
+                Currently, the generator only renders workflow templates without
+                AI assistance.
             template_path: Path to Jinja2 template file. If None, uses default
                 template at templates/github/code_review.yml.j2.
+
+        Note:
+            This is Phase 1 infrastructure. The orchestrator parameter is accepted
+            but not yet used. Issue #102 tracks implementation of actual Claude API
+            integration in the generated workflow.
         """
         self.orchestrator = orchestrator
 
@@ -113,11 +121,13 @@ class GitHubActionsReviewGenerator:
         self._validate_template_exists()
 
         # Load Jinja2 template
+        # Note: autoescape=False is safe for YAML templates (no HTML/XSS risk)
+        # GitHub Actions expressions use {{ }} which would conflict with autoescape
         template_dir = self.template_path.parent
         template_name = self.template_path.name
-        env = Environment(
+        env = Environment(  # nosec B701  # CWE-94: Safe for YAML (no HTML rendering)
             loader=FileSystemLoader(str(template_dir)),
-            autoescape=True,
+            autoescape=False,  # noqa: S701
         )
         template = env.get_template(template_name)
 
