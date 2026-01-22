@@ -4,12 +4,13 @@
 
 ---
 
-## Stay Green Workflow
+## 1. Stay Green Workflow
+
+**Policy**: Never request review with failing checks. Never merge without LGTM.
 
 See [/reference/workflows/stay-green.md](../reference/workflows/stay-green.md) for complete documentation.
 
-
-### 4.1 The Four Gates
+### 1.1 The Four Gates
 
 1. **Gate 1: Local Pre-Commit** (Iterate Until Green)
    - Run `pre-commit run --all-files`
@@ -35,7 +36,7 @@ See [/reference/workflows/stay-green.md](../reference/workflows/stay-green.md) f
    - Re-run Gate 1, push, wait for CI and mutation
    - Only merge when Claude gives LGTM with no reservations
 
-### 4.2 Quick Checklist
+### 1.2 Quick Checklist
 
 Before creating/updating a PR:
 
@@ -46,7 +47,7 @@ Before creating/updating a PR:
 - [ ] Gate 4: Claude review shows LGTM
 - [ ] Ready to merge!
 
-### 4.3 Anti-Patterns (DO NOT DO)
+### 1.3 Anti-Patterns (DO NOT DO)
 
 ❌ **Don't** request review with failing CI
 ❌ **Don't** skip local checks (`git commit --no-verify`)
@@ -58,17 +59,9 @@ Before creating/updating a PR:
 
 ---
 
-## 5. Architecture
+## 2. Feature Development Process
 
-### 5.1 Core Philosophy
-
-
----
-
-## Feature Development Process
-
-
-### 7.1 Feature Development Process
+### 2.1 Development Steps
 
 1. **Create Feature Branch**
    ```bash
@@ -79,7 +72,7 @@ Before creating/updating a PR:
    ```
 
 2. **Implement Changes**
-   - Follow the coding standards outlined below
+   - Follow the coding standards in [tools.md](tools.md)
    - Write tests first (TDD approach)
    - Ensure docstrings for all public APIs
    - Update documentation as needed
@@ -121,9 +114,12 @@ Before creating/updating a PR:
    - All CI checks must pass
    - Commit history must be linear
 
-### 7.2 Branch Strategy
+### 2.2 Branch Strategy
 
-
+- `main`: Production-ready code, always deployable
+- `feature/*`: Feature development (created from main)
+- `bugfix/*`: Bug fixes (created from main)
+- `hotfix/*`: Emergency production fixes (created from main)
 
 ---
 

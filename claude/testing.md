@@ -5,7 +5,7 @@
 ---
 
 
-### 8.1 Test Organization
+### 1 Test Organization
 
 ```
 tests/
@@ -24,7 +24,7 @@ tests/
     └── data/
 ```
 
-### 8.2 Test Structure (AAA Pattern)
+### 2 Test Structure (AAA Pattern)
 
 All tests follow **Arrange-Act-Assert** structure for clarity:
 
@@ -54,7 +54,7 @@ def test_generator_creates_valid_ci_workflow():
 - **Act**: Single action makes test focused
 - **Assert**: Explicit checks make failures obvious
 
-### 8.3 Mocking Patterns
+### 3 Mocking Patterns
 
 #### Mock AI Orchestrator
 
@@ -134,7 +134,7 @@ def test_generator_creates_directory_structure(tmp_path, mocker):
         )
 ```
 
-### 8.4 Coverage Targets
+### 4 Coverage Targets
 
 | Component Type | Minimum | Target | Rationale |
 |----------------|---------|--------|-----------|
@@ -149,7 +149,7 @@ def test_generator_creates_directory_structure(tmp_path, mocker):
 
 **Enforcement**: `pytest --cov-fail-under=90` in `scripts/test.sh`
 
-### 8.5 Test Naming Convention
+### 5 Test Naming Convention
 
 ```python
 # Format: test_<unit>_<scenario>_<expected_outcome>
@@ -168,7 +168,7 @@ def test_generator_empty_config_raises_validation_error():
     pass
 ```
 
-### 8.6 Property-Based Testing
+### 6 Property-Based Testing
 
 Use Hypothesis for generators to test invariants:
 
@@ -227,7 +227,7 @@ def test_config_generator_is_idempotent(config, tmp_path):
 - Validating input handling across wide range
 - Finding edge cases you didn't think of
 
-### 8.7 Mutation Testing
+### 7 Mutation Testing
 
 Every test suite must pass mutation testing. This ensures tests are effective at catching bugs:
 

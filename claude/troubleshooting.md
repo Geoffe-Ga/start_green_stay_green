@@ -5,7 +5,7 @@
 ---
 
 
-### 10.1 No Shortcuts Policy
+### 1 No Shortcuts Policy
 
 This project enforces a **ZERO SHORTCUTS** policy. Taking shortcuts undermines code quality, creates technical debt, and defeats the purpose of maximum quality engineering. The following shortcuts are **ABSOLUTELY FORBIDDEN**:
 
@@ -267,11 +267,11 @@ def validate_input(value: str) -> bool:
 
 **Remember:** The goal is **maximum quality**, not **minimum effort**. Every shortcut taken is technical debt accrued.
 
-### 10.2 Forbidden Patterns
+### 2 Forbidden Patterns
 
 See [6.2 Forbidden Patterns](#62-forbidden-patterns) for complete list.
 
-### 10.3 Most Common Mistakes
+### 3 Most Common Mistakes
 
 Based on PR review analysis, these are the top mistakes (with frequency):
 

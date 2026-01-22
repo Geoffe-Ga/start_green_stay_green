@@ -5,7 +5,7 @@
 ---
 
 
-### 6.1 Code Quality Requirements
+### 1. Code Quality Requirements
 
 All code must meet these standards before merging to main:
 
@@ -42,7 +42,7 @@ All code must meet these standards before merging to main:
 - **Architecture Decision Records**: For significant decisions
 - **README Sections**: Updated when adding new components
 
-### 6.2 Forbidden Patterns
+### 2. Forbidden Patterns
 
 The following patterns are NEVER allowed without explicit justification and issue reference:
 
@@ -117,7 +117,7 @@ The following patterns are NEVER allowed without explicit justification and issu
        pass
    ```
 
-### 6.3 Security Guidelines
+### 3. Security Guidelines
 
 #### API Key Handling
 

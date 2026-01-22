@@ -5,7 +5,7 @@
 ---
 
 
-### 9.1 Tool Invocation Patterns
+### 1 Tool Invocation Patterns
 
 **CRITICAL:** Always use `pre-commit run --all-files` for local development. This is the single comprehensive command that runs ALL quality checks with correct configuration.
 
@@ -185,7 +185,7 @@ gh pr create --fill
 
 **Golden Rule:** Direct tool invocation is ONLY acceptable during active development for quick feedback. **ALWAYS** run `pre-commit run --all-files` before committing.
 
-### 9.2 Python Code Style
+### 2 Python Code Style
 
 ```python
 # Use explicit imports
@@ -232,7 +232,7 @@ def validate_config(config: dict[str, str]) -> None:
         raise ValueError(f"Missing fields: {missing_fields}")
 ```
 
-### 9.3 Generator Patterns
+### 3 Generator Patterns
 
 #### Pattern 1: Template-Based Generation
 
@@ -295,7 +295,7 @@ def generate(self, target: Path, config: dict) -> GenerationResult:
     return GenerationResult(success=True, files=files_created)
 ```
 
-### 9.4 AI Integration Patterns
+### 4 AI Integration Patterns
 
 #### Pattern 1: Error Handling with Retry
 
@@ -356,7 +356,7 @@ def generate_yaml_config(self, prompt: str) -> dict:
     return config
 ```
 
-### 9.5 Template Patterns (Jinja2)
+### 5 Template Patterns (Jinja2)
 
 #### Variable Interpolation
 
@@ -470,7 +470,7 @@ Generated with Start Green Stay Green
 {% endblock %}
 ```
 
-### 9.6 Docstring Format
+### 6 Docstring Format
 
 All public functions, classes, and modules must have docstrings:
 
