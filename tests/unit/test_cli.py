@@ -1,5 +1,6 @@
 """Unit tests for CLI framework."""
 
+import re
 from unittest.mock import Mock
 from unittest.mock import patch
 
@@ -7,6 +8,19 @@ from typer.testing import CliRunner
 
 from start_green_stay_green.cli import app
 from start_green_stay_green.cli import get_version
+
+
+def strip_ansi_codes(text: str) -> str:
+    """Strip ANSI escape codes from text.
+
+    Args:
+        text: Text containing ANSI codes.
+
+    Returns:
+        Text with ANSI codes removed.
+    """
+    ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
+    return ansi_escape.sub("", text)
 
 
 class TestCliVersion:
@@ -114,8 +128,9 @@ class TestCliConfiguration:
         result = runner.invoke(app, ["--help"])
 
         assert result.exit_code == 0
-        # Config option should be documented
-        assert "--config" in result.stdout or "--config-file" in result.stdout
+        # Config option should be documented (strip ANSI codes from Rich output)
+        clean_output = strip_ansi_codes(result.stdout)
+        assert "--config" in clean_output or "--config-file" in clean_output
 
     @patch("start_green_stay_green.cli.load_config_file")
     def test_config_file_is_loaded_when_specified(
