@@ -114,9 +114,11 @@ class TestCliVerboseQuiet:
         runner = CliRunner()
         result = runner.invoke(app, ["--verbose", "--quiet", "version"])
 
-        # Should error or use one mode
-        # Implementation may vary, but should handle this case
-        assert result.exit_code in (0, 1, 2)
+        # Should exit with error code 1
+        assert result.exit_code == 1
+        # Should show error message about mutual exclusivity
+        clean_output = strip_ansi_codes(result.stdout)
+        assert "mutually exclusive" in clean_output.lower()
 
 
 class TestCliConfiguration:
@@ -143,9 +145,31 @@ class TestCliConfiguration:
 
         result = runner.invoke(app, ["--config", "test.yaml", "version"])
 
-        # Config loading should be attempted
-        if result.exit_code == 0:
-            mock_load_config.assert_called()
+        # Should succeed
+        assert result.exit_code == 0
+        # Config loading should be attempted with the specified path
+        mock_load_config.assert_called_once()
+        call_args = mock_load_config.call_args
+        assert str(call_args[0][0]) == "test.yaml"
+
+    @patch("start_green_stay_green.cli.load_config_file")
+    def test_config_file_not_found_shows_error(
+        self,
+        mock_load_config: Mock,
+    ) -> None:
+        """Test config file not found shows error and exits."""
+        # Mock FileNotFoundError
+        mock_load_config.side_effect = FileNotFoundError("Config file not found")
+        runner = CliRunner()
+
+        result = runner.invoke(app, ["--config", "missing.yaml", "version"])
+
+        # Should exit with error code 1
+        assert result.exit_code == 1
+        # Should show error message
+        clean_output = strip_ansi_codes(result.stdout)
+        assert "error" in clean_output.lower()
+        assert "not found" in clean_output.lower()
 
 
 class TestCliApp:
