@@ -86,6 +86,7 @@ class TestSkillsGeneratorInit:
         generator = SkillsGenerator(orchestrator, dry_run=True)
 
         assert generator.dry_run
+        assert generator.tuner is not None
         assert generator.tuner.dry_run
 
 

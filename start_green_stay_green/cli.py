@@ -5,6 +5,7 @@ Implements the command-line interface using Typer with rich output formatting.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import re
 import sys
@@ -17,12 +18,15 @@ from rich.progress import SpinnerColumn
 from rich.progress import TextColumn
 import typer
 
+from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import PreCommitGenerator
 from start_green_stay_green.generators.scripts import ScriptConfig
 from start_green_stay_green.generators.scripts import ScriptsGenerator
 from start_green_stay_green.generators.skills import REFERENCE_SKILLS_DIR
 from start_green_stay_green.generators.skills import REQUIRED_SKILLS
+from start_green_stay_green.utils.credentials import get_api_key_from_keyring
+from start_green_stay_green.utils.credentials import store_api_key_in_keyring
 
 # Version information
 __version__ = "2.0.0"
@@ -407,6 +411,92 @@ def _show_dry_run_preview(
     console.print("  - Architecture enforcement")
 
 
+def _prompt_for_api_key() -> str | None:
+    """Interactively prompt user for API key and optionally save to keyring.
+
+    Returns:
+        API key string if provided, None if user declined.
+    """
+    console.print("\n[yellow]No API key found.[/yellow]")
+    console.print("AI-powered features require a Claude API key.")
+    console.print("Get your key at: https://console.anthropic.com/")
+
+    if not typer.confirm("\nWould you like to enter your API key now?"):
+        return None
+
+    api_key: str = typer.prompt("API Key", hide_input=True)
+
+    # Offer to save to keyring
+    if typer.confirm("Save to OS keyring for future use?"):
+        if store_api_key_in_keyring(api_key):
+            console.print("[green]✓[/green] API key saved to keyring")
+        else:
+            console.print(
+                "[yellow]![/yellow] Failed to save to keyring "
+                "(you'll need to provide it again next time)"
+            )
+
+    return api_key
+
+
+def _get_api_key_with_source(
+    api_key_arg: str | None,
+    *,
+    no_interactive: bool,
+) -> tuple[str, str] | tuple[None, None]:
+    """Get API key and its source.
+
+    Returns:
+        (api_key, source) tuple, or (None, None) if not found.
+    """
+    sources = [
+        (api_key_arg, "command line"),
+        (get_api_key_from_keyring(), "keyring"),
+        (os.getenv("ANTHROPIC_API_KEY"), "environment variable"),
+    ]
+
+    for key, source in sources:
+        if key:
+            return key, source
+
+    if not no_interactive:
+        interactive_key = _prompt_for_api_key()
+        if interactive_key:
+            return interactive_key, "interactive prompt"
+
+    return None, None
+
+
+def _initialize_orchestrator(
+    api_key_arg: str | None = None,
+    *,
+    no_interactive: bool = False,
+) -> AIOrchestrator | None:
+    """Initialize AI orchestrator with optional API key.
+
+    Args:
+        api_key_arg: API key from CLI argument.
+        no_interactive: Disable interactive prompts.
+
+    Returns:
+        AIOrchestrator instance if API key found, None otherwise.
+    """
+    api_key, source = _get_api_key_with_source(
+        api_key_arg, no_interactive=no_interactive
+    )
+
+    if not api_key:
+        return None
+
+    try:
+        orchestrator = AIOrchestrator(api_key=api_key)
+        console.print(f"[green]✓[/green] AI features enabled (from {source})")
+        return orchestrator  # noqa: TRY300  # Happy path return is clearer
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] Invalid API key: {e}", style="bold")
+        return None
+
+
 def _copy_reference_skills(target_dir: Path) -> None:
     """Copy reference skills to target directory.
 
@@ -438,6 +528,7 @@ def _generate_project_files(
     project_path: Path,
     project_name: str,
     language: str,
+    orchestrator: AIOrchestrator | None,  # noqa: ARG001  # Will be used in Phase 5
 ) -> None:
     """Generate all project files with progress indicators.
 
@@ -445,6 +536,8 @@ def _generate_project_files(
         project_path: Path where project will be created.
         project_name: Name of the project.
         language: Programming language.
+        orchestrator: Optional AI orchestrator for AI-powered features.
+            None indicates fallback to template mode.
 
     Raises:
         typer.Exit: If generation fails.
@@ -484,7 +577,7 @@ def _generate_project_files(
             # Pass None since it's template-based, not AI-powered
             # Issue #114: BaseGenerator requires orchestrator even for
             # template-based generators
-            precommit_generator = PreCommitGenerator(orchestrator=None)  # type: ignore[arg-type]
+            precommit_generator = PreCommitGenerator(orchestrator=None)
             precommit_content = precommit_generator.generate(precommit_config)
             precommit_file = project_path / ".pre-commit-config.yaml"
             precommit_file.write_text(precommit_content)
@@ -559,6 +652,14 @@ def init(  # noqa: PLR0913
             help="Run in non-interactive mode (requires all options).",
         ),
     ] = False,
+    api_key: Annotated[
+        str | None,
+        typer.Option(
+            "--api-key",
+            help="Claude API key for AI-powered features (optional).",
+            hide_input=True,
+        ),
+    ] = None,
     config: config_file_option = None,
 ) -> None:
     """Initialize a new project with quality controls.
@@ -566,12 +667,16 @@ def init(  # noqa: PLR0913
     Generates a complete project structure with CI/CD, quality checks,
     AI subagents, and documentation pre-configured.
 
+    AI-powered features are optional and require a Claude API key.
+    Without a key, the tool generates reference templates instead.
+
     Args:
         project_name: Name of the project.
         language: Primary programming language.
         output_dir: Output directory (defaults to current directory).
         dry_run: Preview mode without file creation.
         no_interactive: Non-interactive mode.
+        api_key: Optional Claude API key for AI features.
         config: Configuration file path.
 
     Raises:
@@ -606,16 +711,30 @@ def init(  # noqa: PLR0913
         console.print(f"[red]Error:[/red] {e}", style="bold")
         raise typer.Exit(code=1) from e
 
-    # Handle dry-run mode
+    # Handle dry-run mode (skip orchestrator initialization for preview)
     if dry_run:
         _show_dry_run_preview(resolved_project_name, resolved_language, project_path)
         return
+
+    # Initialize optional AI orchestrator (after dry-run check)
+    orchestrator = _initialize_orchestrator(api_key, no_interactive=no_interactive)
+
+    if orchestrator is None:
+        console.print("\n[yellow]![/yellow] AI features disabled")
+        console.print("  - Skills: Using reference templates (no customization)")
+        console.print("  - CI/Subagents/CLAUDE.md: Using default templates")
+        console.print("\n  To enable AI features:")
+        console.print("    1. Get API key: https://console.anthropic.com/")
+        console.print("    2. Run: sgsg init --api-key YOUR_KEY")
+        console.print("    3. Or: Set ANTHROPIC_API_KEY environment variable\n")
 
     # Create project directory
     project_path.mkdir(parents=True, exist_ok=True)
 
     # Generate all project files (handles errors internally)
-    _generate_project_files(project_path, resolved_project_name, resolved_language)
+    _generate_project_files(
+        project_path, resolved_project_name, resolved_language, orchestrator
+    )
 
 
 def cli_main() -> None:

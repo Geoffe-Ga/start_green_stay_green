@@ -125,6 +125,7 @@ include_ci: true
                 str(config_file),
                 "--output-dir",
                 str(tmp_path),
+                "--no-interactive",
             ],
         )
 
