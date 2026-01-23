@@ -255,7 +255,8 @@ class TestFullIntegrationFlow:
         )
 
         assert result.exit_code == 0
-        assert "generated successfully" in result.stdout.lower()
+        # More specific assertion to catch format regressions
+        assert "Project generated successfully at:" in result.stdout
 
     def test_init_dry_run_does_not_create_directory(self, tmp_path: Path) -> None:
         """Test dry-run mode shows preview without creating files."""
@@ -275,7 +276,9 @@ class TestFullIntegrationFlow:
         )
 
         assert result.exit_code == 0
-        assert "dry" in result.stdout.lower() or "preview" in result.stdout.lower()
+        # Verify specific dry-run output structure
+        assert "Dry Run Mode" in result.stdout
+        assert "Preview only" in result.stdout
         assert not (tmp_path / "test-dry-run").exists()
 
     def test_init_respects_output_directory(self, tmp_path: Path) -> None:
