@@ -57,7 +57,7 @@ def get_api_key_from_keyring(
         ...     print("No API key in keyring")
     """
     try:
-        import keyring  # type: ignore[import-not-found]  # noqa: PLC0415  # Optional dependency
+        import keyring  # noqa: PLC0415  # Optional dependency
 
         api_key: str | None = keyring.get_password(service, username)
         if api_key:
