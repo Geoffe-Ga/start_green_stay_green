@@ -431,6 +431,35 @@ class TestGitHubActionsReviewGeneratorClaudeCodeAction:
         assert "LGTM" in result.workflow_content
         assert "CHANGES_REQUESTED" in result.workflow_content
 
+    def test_generated_workflow_restricts_claude_to_read_only_tools(self) -> None:
+        """Test workflow restricts Claude to read-only GitHub CLI commands.
+
+        Addresses security concern: claude_args should only allow
+        read-only operations via GitHub CLI, preventing write operations
+        even with wildcard patterns.
+        """
+        orchestrator = create_autospec(AIOrchestrator)
+        generator = GitHubActionsReviewGenerator(orchestrator)
+
+        result = generator.generate()
+
+        # Verify claude_args restricts to read-only commands
+        assert "--allowed-tools" in result.workflow_content
+        assert "gh pr view" in result.workflow_content  # Read-only PR viewing
+        assert "gh pr diff" in result.workflow_content  # Read-only diff viewing
+        assert "gh issue view" in result.workflow_content  # Read-only issue viewing
+        # Commenting (write operation, but needed for reviews)
+        assert "gh pr comment" in result.workflow_content
+
+        # Verify no write operations are allowed
+        assert "gh pr merge" not in result.workflow_content
+        assert "gh issue create" not in result.workflow_content
+        assert "gh pr edit" not in result.workflow_content
+
+        # Verify security documentation is present
+        assert "Security:" in result.workflow_content
+        assert "read-only" in result.workflow_content.lower()
+
 
 class TestGitHubActionsReviewGeneratorOutputPath:
     """Test workflow output path generation."""
