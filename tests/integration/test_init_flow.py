@@ -1,0 +1,301 @@
+"""Integration tests for full init command flow.
+
+Tests the complete end-to-end initialization workflow including:
+- CLI command execution
+- Generator orchestration
+- File creation
+- Output validation
+"""
+
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from start_green_stay_green.cli import app
+
+
+class TestInitFlowIntegration:
+    """Test complete init flow end-to-end."""
+
+    def test_init_creates_project_directory(self, tmp_path: Path) -> None:
+        """Test init command creates project directory."""
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-integration-project",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0
+        project_path = tmp_path / "test-integration-project"
+        assert project_path.exists()
+        assert project_path.is_dir()
+
+    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
+    def test_init_generates_scripts_directory(self, tmp_path: Path) -> None:
+        """Test init creates scripts directory with quality scripts."""
+        runner = CliRunner()
+        runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-scripts-project",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-interactive",
+            ],
+        )
+
+        project_path = tmp_path / "test-scripts-project"
+        scripts_dir = project_path / "scripts"
+
+        assert scripts_dir.exists()
+        assert scripts_dir.is_dir()
+
+        expected_scripts = [
+            "check-all.sh",
+            "test.sh",
+            "lint.sh",
+            "format.sh",
+            "security.sh",
+            "mutation.sh",
+            "fix-all.sh",
+        ]
+
+        for script_name in expected_scripts:
+            script_path = scripts_dir / script_name
+            assert script_path.exists(), f"Missing script: {script_name}"
+            assert script_path.stat().st_mode & 0o111, f"Not executable: {script_name}"
+
+    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
+    def test_init_generates_github_workflows(self, tmp_path: Path) -> None:
+        """Test init creates GitHub Actions workflows."""
+        runner = CliRunner()
+        runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-workflows-project",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-interactive",
+            ],
+        )
+
+        project_path = tmp_path / "test-workflows-project"
+        workflows_dir = project_path / ".github" / "workflows"
+
+        assert workflows_dir.exists()
+        assert workflows_dir.is_dir()
+
+        expected_workflows = ["ci.yml", "code-review.yml"]
+
+        for workflow_name in expected_workflows:
+            workflow_path = workflows_dir / workflow_name
+            assert workflow_path.exists(), f"Missing workflow: {workflow_name}"
+
+    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
+    def test_init_generates_precommit_config(self, tmp_path: Path) -> None:
+        """Test init creates .pre-commit-config.yaml."""
+        runner = CliRunner()
+        runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-precommit-project",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-interactive",
+            ],
+        )
+
+        project_path = tmp_path / "test-precommit-project"
+        precommit_config = project_path / ".pre-commit-config.yaml"
+
+        assert precommit_config.exists()
+
+    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
+    def test_init_generates_claude_md(self, tmp_path: Path) -> None:
+        """Test init creates CLAUDE.md file."""
+        runner = CliRunner()
+        runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-claude-md-project",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-interactive",
+            ],
+        )
+
+        project_path = tmp_path / "test-claude-md-project"
+        claude_md = project_path / "CLAUDE.md"
+
+        assert claude_md.exists()
+
+        content = claude_md.read_text()
+        assert "# Claude Code Project Context" in content or "# " in content
+        assert len(content) > 100
+
+    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
+    def test_init_generates_skills_directory(self, tmp_path: Path) -> None:
+        """Test init creates .claude/skills directory."""
+        runner = CliRunner()
+        runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-skills-project",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-interactive",
+            ],
+        )
+
+        project_path = tmp_path / "test-skills-project"
+        skills_dir = project_path / ".claude" / "skills"
+
+        assert skills_dir.exists()
+        assert skills_dir.is_dir()
+
+    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
+    def test_init_generates_subagents_directory(self, tmp_path: Path) -> None:
+        """Test init creates .claude/subagents directory."""
+        runner = CliRunner()
+        runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-subagents-project",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-interactive",
+            ],
+        )
+
+        project_path = tmp_path / "test-subagents-project"
+        subagents_dir = project_path / ".claude" / "subagents"
+
+        assert subagents_dir.exists()
+        assert subagents_dir.is_dir()
+
+    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
+    def test_init_generates_architecture_rules(self, tmp_path: Path) -> None:
+        """Test init creates architecture enforcement rules."""
+        runner = CliRunner()
+        runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-architecture-project",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-interactive",
+            ],
+        )
+
+        project_path = tmp_path / "test-architecture-project"
+        arch_dir = project_path / "plans" / "architecture"
+
+        assert arch_dir.exists()
+        assert (arch_dir / ".importlinter").exists()
+        assert (arch_dir / "README.md").exists()
+        assert (arch_dir / "run-check.sh").exists()
+
+
+class TestFullIntegrationFlow:
+    """Test complete integration from CLI to file generation."""
+
+    def test_init_success_message_displayed(self, tmp_path: Path) -> None:
+        """Test init displays success message upon completion."""
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-success-msg",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "generated successfully" in result.stdout.lower()
+
+    def test_init_dry_run_does_not_create_directory(self, tmp_path: Path) -> None:
+        """Test dry-run mode shows preview without creating files."""
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-dry-run",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--dry-run",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "dry" in result.stdout.lower() or "preview" in result.stdout.lower()
+        assert not (tmp_path / "test-dry-run").exists()
+
+    def test_init_respects_output_directory(self, tmp_path: Path) -> None:
+        """Test init creates project in specified output directory."""
+        output_dir = tmp_path / "custom" / "path"
+        runner = CliRunner()
+        runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-custom-dir",
+                "--language",
+                "python",
+                "--output-dir",
+                str(output_dir),
+                "--no-interactive",
+            ],
+        )
+
+        project_path = output_dir / "test-custom-dir"
+        assert project_path.exists()
+        assert project_path.is_dir()
