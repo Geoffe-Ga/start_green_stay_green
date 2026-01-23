@@ -452,6 +452,8 @@ def _generate_project_files(
             )
             # PreCommitGenerator extends BaseGenerator but doesn't use orchestrator
             # Pass None since it's template-based, not AI-powered
+            # Issue #114: BaseGenerator requires orchestrator even for
+            # template-based generators
             precommit_generator = PreCommitGenerator(orchestrator=None)  # type: ignore[arg-type]
             precommit_content = precommit_generator.generate(precommit_config)
             precommit_file = project_path / ".pre-commit-config.yaml"
