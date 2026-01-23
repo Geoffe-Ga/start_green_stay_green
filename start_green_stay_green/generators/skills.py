@@ -58,16 +58,21 @@ class SkillsGenerator(BaseGenerator):
     Copies skills from reference directory and optionally tunes them
     using ContentTuner to adapt content to target repository context.
 
+    When orchestrator is None, falls back to direct copy mode (no AI tuning).
+
     Attributes:
-        orchestrator: AI orchestrator for content generation.
-        tuner: Content tuner for adapting skills.
+        orchestrator: Optional AI orchestrator for content generation.
+        tuner: Optional content tuner for adapting skills.
+            None when orchestrator not available.
         reference_dir: Path to reference skills directory.
         dry_run: Whether to run in dry-run mode (no actual tuning).
     """
 
+    tuner: ContentTuner | None
+
     def __init__(
         self,
-        orchestrator: AIOrchestrator,
+        orchestrator: AIOrchestrator | None,
         *,
         reference_dir: Path | None = None,
         dry_run: bool = False,
@@ -75,15 +80,22 @@ class SkillsGenerator(BaseGenerator):
         """Initialize SkillsGenerator.
 
         Args:
-            orchestrator: AI orchestrator for generation.
+            orchestrator: Optional AI orchestrator for generation.
+                If None, operates in direct copy mode.
             reference_dir: Custom reference skills directory. Defaults to
                 built-in reference/skills/.
             dry_run: Run in dry-run mode (copy without tuning).
         """
         super().__init__(orchestrator)
-        self.tuner = ContentTuner(orchestrator, dry_run=dry_run)
         self.reference_dir = reference_dir or REFERENCE_SKILLS_DIR
         self.dry_run = dry_run
+
+        # Only create tuner if orchestrator available
+        if self.orchestrator:
+            self.tuner = ContentTuner(self.orchestrator, dry_run=dry_run)
+        else:
+            self.tuner = None
+            logger.info("Skills generator initialized without AI (direct copy mode)")
 
     def _check_directory_exists(self) -> None:
         """Check if reference directory exists.
@@ -152,7 +164,7 @@ class SkillsGenerator(BaseGenerator):
         skill_content: str,
         target_context: str,
     ) -> SkillGenerationResult:
-        """Tune skill content for target repository.
+        """Tune skill content for target repository (or direct copy if no AI).
 
         Args:
             skill_name: Name of skill file.
@@ -160,13 +172,22 @@ class SkillsGenerator(BaseGenerator):
             target_context: Description of target repository.
 
         Returns:
-            SkillGenerationResult with tuned content.
+            SkillGenerationResult with tuned content (or original if no AI).
         """
-        source_context = "Start Green Stay Green reference repository"
+        # Direct copy if no tuner available
+        if self.tuner is None:
+            logger.info("Copying skill %s (no AI tuning)", skill_name)
+            return SkillGenerationResult(
+                skill_name=skill_name,
+                content=skill_content,  # Original content
+                tuned=False,
+                changes=[],
+            )
 
+        # AI tuning if tuner available
+        source_context = "Start Green Stay Green reference repository"
         logger.info("Tuning skill %s for target context", skill_name)
 
-        # Tune content using ContentTuner
         result = await self.tuner.tune(
             source_content=skill_content,
             source_context=source_context,

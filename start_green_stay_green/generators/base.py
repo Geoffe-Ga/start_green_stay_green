@@ -21,23 +21,31 @@ class BaseGenerator(ABC):
     All generators must extend this class and implement the generate()
     method to produce quality control artifacts using AI orchestration.
 
+    Generators can work with or without an orchestrator:
+    - With orchestrator: AI-powered customization and tuning
+    - Without orchestrator: Template-based or direct copy mode
+
     Attributes:
-        orchestrator: AI orchestrator for generation tasks.
+        orchestrator: Optional AI orchestrator for generation tasks.
+            None indicates graceful degradation to template mode.
 
     Example:
         >>> class MyGenerator(BaseGenerator):
-        ...     def __init__(self, orchestrator: AIOrchestrator) -> None:
+        ...     def __init__(self, orchestrator: AIOrchestrator | None) -> None:
         ...         super().__init__(orchestrator)
         ...
         ...     def generate(self) -> dict[str, Any]:
-        ...         return {"generated": "content"}
+        ...         if self.orchestrator:
+        ...             return self._generate_with_ai()
+        ...         return self._generate_template()
     """
 
-    def __init__(self, orchestrator: AIOrchestrator) -> None:
-        """Initialize generator with AI orchestrator.
+    def __init__(self, orchestrator: AIOrchestrator | None) -> None:
+        """Initialize generator with optional AI orchestrator.
 
         Args:
-            orchestrator: AIOrchestrator instance for AI-powered generation.
+            orchestrator: Optional AIOrchestrator instance for AI-powered
+                generation. If None, generator falls back to template mode.
         """
         self.orchestrator = orchestrator
 

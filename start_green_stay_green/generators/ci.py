@@ -228,7 +228,12 @@ The CI workflow MUST:
 
         Raises:
             GenerationError: If generation fails.
+            ValueError: If orchestrator is None.
         """
+        if self.orchestrator is None:
+            msg = "AI orchestrator required for generate_with_ai()"
+            raise ValueError(msg)
+
         prompt = f"""You are a GitHub Actions CI/CD expert. Generate a production-grade
 GitHub Actions workflow file for a {self.language.upper()} project.
 
