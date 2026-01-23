@@ -226,9 +226,11 @@ class TestInitFlowIntegration:
         assert "# Claude Code Project Context" in content
         assert len(content) > 100
 
-    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
     def test_init_generates_skills_directory(self, tmp_path: Path) -> None:
-        """Test init creates .claude/skills directory."""
+        """Test init creates .claude/skills directory with skill files.
+
+        Addresses Issue #106: SkillsGenerator integration (Part 3/8).
+        """
         runner = CliRunner()
         runner.invoke(
             app,
@@ -249,6 +251,23 @@ class TestInitFlowIntegration:
 
         assert skills_dir.exists()
         assert skills_dir.is_dir()
+
+        # Verify required skills are present
+        required_skills = [
+            "vibe.md",
+            "concurrency.md",
+            "error-handling.md",
+            "testing.md",
+            "documentation.md",
+            "security.md",
+        ]
+
+        for skill in required_skills:
+            skill_file = skills_dir / skill
+            assert skill_file.exists(), f"Missing skill: {skill}"
+            # Verify skill has content
+            content = skill_file.read_text()
+            assert len(content) > 100, f"Skill {skill} has insufficient content"
 
     @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
     def test_init_generates_subagents_directory(self, tmp_path: Path) -> None:

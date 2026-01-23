@@ -21,6 +21,8 @@ from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import PreCommitGenerator
 from start_green_stay_green.generators.scripts import ScriptConfig
 from start_green_stay_green.generators.scripts import ScriptsGenerator
+from start_green_stay_green.generators.skills import REFERENCE_SKILLS_DIR
+from start_green_stay_green.generators.skills import REQUIRED_SKILLS
 
 # Version information
 __version__ = "2.0.0"
@@ -405,6 +407,33 @@ def _show_dry_run_preview(
     console.print("  - Architecture enforcement")
 
 
+def _copy_reference_skills(target_dir: Path) -> None:
+    """Copy reference skills to target directory.
+
+    This is a temporary implementation that directly copies reference skills
+    without AI-powered tuning. Full AI integration (async + AIOrchestrator)
+    will be added in Issue #115.
+
+    Args:
+        target_dir: Target directory for skills (.claude/skills/).
+
+    Raises:
+        FileNotFoundError: If reference skills directory not found.
+    """
+    # Create target directory
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy each required skill
+    for skill_name in REQUIRED_SKILLS:
+        source_file = REFERENCE_SKILLS_DIR / skill_name
+        if not source_file.exists():
+            msg = f"Reference skill not found: {skill_name}"
+            raise FileNotFoundError(msg)
+
+        target_file = target_dir / skill_name
+        target_file.write_text(source_file.read_text())
+
+
 def _generate_project_files(
     project_path: Path,
     project_name: str,
@@ -421,8 +450,9 @@ def _generate_project_files(
         typer.Exit: If generation fails.
     """
     # TODO(Issue #106): Implement remaining generator integrations  # noqa: FIX002
-    # Currently integrated: ScriptsGenerator, PreCommitGenerator (2/8)
-    # Remaining: CI, Skills, Subagents, ClaudeMd, GitHubActions, Architecture
+    # Currently integrated: ScriptsGenerator, PreCommitGenerator, Skills (3/8)
+    # Skills: Direct copy only, AI tuning pending (Issue #115)
+    # Remaining: CI, Subagents, ClaudeMd, GitHubActions, Architecture
 
     try:
         with Progress(
@@ -460,10 +490,15 @@ def _generate_project_files(
             precommit_file.write_text(precommit_content)
             progress.update(task, completed=True)
 
+            # Generate Claude skills
+            task = progress.add_task("Generating skills...", total=None)
+            skills_dir = project_path / ".claude" / "skills"
+            _copy_reference_skills(skills_dir)
+            progress.update(task, completed=True)
+
             # Placeholders for remaining generators (Issue #106)
             placeholders = [
                 "Generating CI pipeline...",
-                "Generating skills...",
                 "Generating subagents...",
                 "Generating CLAUDE.md...",
                 "Generating GitHub Actions (AI review)...",
