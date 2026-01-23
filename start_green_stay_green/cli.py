@@ -17,6 +17,9 @@ from rich.progress import SpinnerColumn
 from rich.progress import TextColumn
 import typer
 
+from start_green_stay_green.generators.scripts import ScriptConfig
+from start_green_stay_green.generators.scripts import ScriptsGenerator
+
 # Version information
 __version__ = "2.0.0"
 
@@ -402,8 +405,8 @@ def _show_dry_run_preview(
 
 def _generate_project_files(
     project_path: Path,
-    project_name: str,  # noqa: ARG001
-    language: str,  # noqa: ARG001
+    project_name: str,
+    language: str,
 ) -> None:
     """Generate all project files with progress indicators.
 
@@ -415,10 +418,9 @@ def _generate_project_files(
     Raises:
         typer.Exit: If generation fails.
     """
-    # TODO(Issue #106): Implement full generator orchestration  # noqa: FIX002
-    # Each generator has its own API and requirements that need to be
-    # properly integrated. This placeholder shows progress indicators
-    # for the init command tests.
+    # TODO(Issue #106): Implement remaining generator integrations  # noqa: FIX002
+    # Currently only ScriptsGenerator is integrated. Remaining generators:
+    # CI, PreCommit, Skills, Subagents, ClaudeMd, GitHubActions, Architecture
 
     try:
         with Progress(
@@ -426,10 +428,23 @@ def _generate_project_files(
             TextColumn("[progress.description]{task.description}"),
             console=console,
         ) as progress:
-            generators = [
+            # Generate quality scripts
+            task = progress.add_task("Generating scripts...", total=None)
+            scripts_config = ScriptConfig(
+                language=language,
+                package_name=project_name.replace("-", "_"),
+            )
+            scripts_generator = ScriptsGenerator(
+                output_dir=project_path / "scripts",
+                config=scripts_config,
+            )
+            scripts_generator.generate()
+            progress.update(task, completed=True)
+
+            # Placeholders for remaining generators (Issue #106)
+            placeholders = [
                 "Generating CI pipeline...",
                 "Generating pre-commit config...",
-                "Generating scripts...",
                 "Generating skills...",
                 "Generating subagents...",
                 "Generating CLAUDE.md...",
@@ -437,10 +452,9 @@ def _generate_project_files(
                 "Generating architecture rules...",
             ]
 
-            for description in generators:
+            for description in placeholders:
                 task = progress.add_task(description, total=None)
                 # Placeholder: actual generator calls will be added
-                # when integrating each generator's specific API
                 progress.update(task, completed=True)
 
         console.print(

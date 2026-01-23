@@ -40,7 +40,6 @@ class TestInitFlowIntegration:
         assert project_path.exists()
         assert project_path.is_dir()
 
-    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
     def test_init_generates_scripts_directory(self, tmp_path: Path) -> None:
         """Test init creates scripts directory with quality scripts."""
         runner = CliRunner()

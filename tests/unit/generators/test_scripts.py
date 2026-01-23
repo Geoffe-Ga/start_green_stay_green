@@ -692,9 +692,10 @@ class TestMutationKillers:
             assert "clippy" in content
 
     def test_generated_scripts_exact_count_python(self) -> None:
-        """Test Python generator creates EXACTLY 7 scripts.
+        """Test Python generator creates EXACTLY 8 scripts.
 
         Kills mutations in script count logic.
+        Scripts: check-all, format, lint, test, fix-all, security, complexity, mutation
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
@@ -704,9 +705,9 @@ class TestMutationKillers:
             generator = ScriptsGenerator(Path(tmpdir), config)
             scripts = generator.generate()
 
-            assert len(scripts) == 7
-            assert len(scripts) > 6
-            assert len(scripts) < 8
+            assert len(scripts) == 8
+            assert len(scripts) > 7
+            assert len(scripts) < 9
 
     def test_generated_scripts_exact_count_typescript(self) -> None:
         """Test TypeScript generator creates EXACTLY 5 scripts."""
