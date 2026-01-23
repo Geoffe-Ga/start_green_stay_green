@@ -216,6 +216,62 @@ def _validate_project_name(name: str) -> None:
         msg = f"Project name cannot start with '{name[0]}'"
         raise typer.BadParameter(msg)
 
+    # Check Windows reserved names
+    reserved_names = {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        "com1",
+        "com2",
+        "com3",
+        "com4",
+        "com5",
+        "com6",
+        "com7",
+        "com8",
+        "com9",
+        "lpt1",
+        "lpt2",
+        "lpt3",
+        "lpt4",
+        "lpt5",
+        "lpt6",
+        "lpt7",
+        "lpt8",
+        "lpt9",
+    }
+
+    if name.lower() in reserved_names:
+        msg = f"Invalid project name: '{name}'. This is a reserved system name."
+        raise typer.BadParameter(msg)
+
+
+def _validate_output_dir(output_dir: Path | None) -> Path:
+    """Validate output directory is safe from path traversal.
+
+    Args:
+        output_dir: User-provided output directory (or None for CWD).
+
+    Returns:
+        Validated and resolved Path.
+
+    Raises:
+        typer.BadParameter: If path traversal detected.
+    """
+    if output_dir is None:
+        return Path.cwd()
+
+    # Resolve to absolute path to eliminate any .. sequences
+    resolved = output_dir.resolve()
+
+    # Double-check no traversal remains after resolution
+    if ".." in resolved.parts:
+        msg = "Output directory cannot contain '..' components"
+        raise typer.BadParameter(msg)
+
+    return resolved
+
 
 def _load_config_data(config: Path | None) -> dict[str, str]:
     """Load configuration data from file if specified.
@@ -240,6 +296,37 @@ def _load_config_data(config: Path | None) -> dict[str, str]:
     else:
         console.print(f"[dim]Loaded configuration from {config}[/dim]")
         return config_data
+
+
+def _validate_and_prepare_paths(
+    project_name: str,
+    output_dir: Path | None,
+) -> tuple[Path, Path]:
+    """Validate project name and output directory, return validated paths.
+
+    Args:
+        project_name: Name of the project to validate.
+        output_dir: User-provided output directory (or None for CWD).
+
+    Returns:
+        Tuple of (target_output_dir, project_path).
+
+    Raises:
+        typer.Exit: If validation fails.
+    """
+    # Validate both project name and output directory
+    _validate_project_name(project_name)
+    target_output_dir = _validate_output_dir(output_dir)
+
+    # Determine project path
+    project_path = target_output_dir / project_name
+
+    # Verify no escape after joining paths
+    if not str(project_path.resolve()).startswith(str(target_output_dir.resolve())):
+        msg = "Project path escapes output directory"
+        raise typer.BadParameter(msg)
+
+    return target_output_dir, project_path
 
 
 def _resolve_parameter(
@@ -442,16 +529,15 @@ def init(  # noqa: PLR0913
         no_interactive=no_interactive,
     )
 
-    # Validate project name
+    # Validate project name and paths
     try:
-        _validate_project_name(resolved_project_name)
+        _target_output_dir, project_path = _validate_and_prepare_paths(
+            resolved_project_name,
+            output_dir,
+        )
     except typer.BadParameter as e:
         console.print(f"[red]Error:[/red] {e}", style="bold")
         raise typer.Exit(code=1) from e
-
-    # Determine output directory and project path
-    target_output_dir = output_dir or Path.cwd()
-    project_path = target_output_dir / resolved_project_name
 
     # Handle dry-run mode
     if dry_run:
