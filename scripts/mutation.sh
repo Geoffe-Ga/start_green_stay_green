@@ -112,11 +112,23 @@ RESULTS=$(mutmut results)
 echo "$RESULTS"
 echo ""
 
-# Extract counts from results (macOS compatible grep)
-KILLED=$(echo "$RESULTS" | grep -o 'Killed: [0-9]*' | grep -o '[0-9]*$' || echo "0")
-SURVIVED=$(echo "$RESULTS" | grep -o 'Survived: [0-9]*' | grep -o '[0-9]*$' || echo "0")
-SUSPICIOUS=$(echo "$RESULTS" | grep -o 'Suspicious: [0-9]*' | grep -o '[0-9]*$' || echo "0")
-TIMEOUT=$(echo "$RESULTS" | grep -o 'Timeout: [0-9]*' | grep -o '[0-9]*$' || echo "0")
+# Extract counts from results (supports both old and new mutmut formats)
+# Old format: "Killed: 123"
+# New format: "Killed 🎉 (123)" or "Survived 🙁 (420)"
+
+# Try new format first (with emoji and parentheses), then fall back to old format
+KILLED=$(echo "$RESULTS" | grep -oE '(Killed|killed).*\([0-9]+\)' | grep -oE '[0-9]+' || \
+         echo "$RESULTS" | grep -oE '(Killed|killed): [0-9]+' | grep -oE '[0-9]+' || echo "0")
+
+SURVIVED=$(echo "$RESULTS" | grep -oE '(Survived|survived).*\([0-9]+\)' | grep -oE '[0-9]+' || \
+           echo "$RESULTS" | grep -oE '(Survived|survived): [0-9]+' | grep -oE '[0-9]+' || echo "0")
+
+SUSPICIOUS=$(echo "$RESULTS" | grep -oE '(Suspicious|suspicious).*\([0-9]+\)' | grep -oE '[0-9]+' || \
+             echo "$RESULTS" | grep -oE '(Suspicious|suspicious): [0-9]+' | grep -oE '[0-9]+' || echo "0")
+
+# Timeout has two possible names in new format
+TIMEOUT=$(echo "$RESULTS" | grep -oE '(Timeout|timeout|Timed out|timed out).*\([0-9]+\)' | grep -oE '[0-9]+' || \
+          echo "$RESULTS" | grep -oE '(Timeout|timeout): [0-9]+' | grep -oE '[0-9]+' || echo "0")
 
 # Calculate total and score
 TOTAL=$((KILLED + SURVIVED + SUSPICIOUS + TIMEOUT))
