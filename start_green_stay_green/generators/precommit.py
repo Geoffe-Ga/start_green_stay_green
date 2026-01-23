@@ -433,6 +433,7 @@ class PreCommitGenerator(BaseGenerator):
             "# Run manually: pre-commit run --all-files\n\n"
         )
 
+    # Issue #114: BaseGenerator.generate() signature doesn't fit template generators
     def generate(self, config: GenerationConfig) -> str:  # type: ignore[override]
         """Generate .pre-commit-config.yaml content.
 

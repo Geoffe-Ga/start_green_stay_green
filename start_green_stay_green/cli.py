@@ -17,6 +17,8 @@ from rich.progress import SpinnerColumn
 from rich.progress import TextColumn
 import typer
 
+from start_green_stay_green.generators.precommit import GenerationConfig
+from start_green_stay_green.generators.precommit import PreCommitGenerator
 from start_green_stay_green.generators.scripts import ScriptConfig
 from start_green_stay_green.generators.scripts import ScriptsGenerator
 
@@ -419,8 +421,8 @@ def _generate_project_files(
         typer.Exit: If generation fails.
     """
     # TODO(Issue #106): Implement remaining generator integrations  # noqa: FIX002
-    # Currently only ScriptsGenerator is integrated. Remaining generators:
-    # CI, PreCommit, Skills, Subagents, ClaudeMd, GitHubActions, Architecture
+    # Currently integrated: ScriptsGenerator, PreCommitGenerator (2/8)
+    # Remaining: CI, Skills, Subagents, ClaudeMd, GitHubActions, Architecture
 
     try:
         with Progress(
@@ -441,10 +443,26 @@ def _generate_project_files(
             scripts_generator.generate()
             progress.update(task, completed=True)
 
+            # Generate pre-commit configuration
+            task = progress.add_task("Generating pre-commit config...", total=None)
+            precommit_config = GenerationConfig(
+                project_name=project_name,
+                language=language,
+                language_config={},
+            )
+            # PreCommitGenerator extends BaseGenerator but doesn't use orchestrator
+            # Pass None since it's template-based, not AI-powered
+            # Issue #114: BaseGenerator requires orchestrator even for
+            # template-based generators
+            precommit_generator = PreCommitGenerator(orchestrator=None)  # type: ignore[arg-type]
+            precommit_content = precommit_generator.generate(precommit_config)
+            precommit_file = project_path / ".pre-commit-config.yaml"
+            precommit_file.write_text(precommit_content)
+            progress.update(task, completed=True)
+
             # Placeholders for remaining generators (Issue #106)
             placeholders = [
                 "Generating CI pipeline...",
-                "Generating pre-commit config...",
                 "Generating skills...",
                 "Generating subagents...",
                 "Generating CLAUDE.md...",

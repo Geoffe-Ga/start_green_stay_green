@@ -130,6 +130,44 @@ class TestInitFlowIntegration:
         assert "Usage:" in content
         assert "EXIT CODES:" in content
 
+    def test_init_generates_precommit_config(self, tmp_path: Path) -> None:
+        """Test init creates .pre-commit-config.yaml with proper content.
+
+        Addresses Issue #106: PreCommitGenerator integration (Part 2/8).
+        """
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-precommit-project",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0
+
+        project_path = tmp_path / "test-precommit-project"
+        precommit_config = project_path / ".pre-commit-config.yaml"
+
+        assert precommit_config.exists()
+        content = precommit_config.read_text()
+
+        # Verify header comment
+        assert "Pre-commit hooks configuration" in content
+        assert "test-precommit-project" in content
+
+        # Verify critical hooks are present
+        assert "pre-commit-hooks" in content
+        assert "ruff" in content or "eslint" in content  # Language-specific linter
+        assert "repos:" in content
+        assert "hooks:" in content
+
     @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
     def test_init_generates_github_workflows(self, tmp_path: Path) -> None:
         """Test init creates GitHub Actions workflows."""
@@ -159,29 +197,6 @@ class TestInitFlowIntegration:
         for workflow_name in expected_workflows:
             workflow_path = workflows_dir / workflow_name
             assert workflow_path.exists(), f"Missing workflow: {workflow_name}"
-
-    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
-    def test_init_generates_precommit_config(self, tmp_path: Path) -> None:
-        """Test init creates .pre-commit-config.yaml."""
-        runner = CliRunner()
-        runner.invoke(
-            app,
-            [
-                "init",
-                "--project-name",
-                "test-precommit-project",
-                "--language",
-                "python",
-                "--output-dir",
-                str(tmp_path),
-                "--no-interactive",
-            ],
-        )
-
-        project_path = tmp_path / "test-precommit-project"
-        precommit_config = project_path / ".pre-commit-config.yaml"
-
-        assert precommit_config.exists()
 
     @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
     def test_init_generates_claude_md(self, tmp_path: Path) -> None:
