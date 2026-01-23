@@ -381,6 +381,57 @@ jobs:
         assert "gh issue create" in result.workflow_content
 
 
+class TestGitHubActionsReviewGeneratorClaudeCodeAction:
+    """Test Claude Code Action integration (Issue #102)."""
+
+    def test_generated_workflow_uses_claude_code_action(self) -> None:
+        """Test workflow uses anthropics/claude-code-action instead of TODO.
+
+        Issue #102: Replace TODO placeholder with actual Claude Code Action.
+        The generated workflow should use the anthropics/claude-code-action@v1
+        GitHub Action for robust Claude API integration.
+        """
+        orchestrator = create_autospec(AIOrchestrator)
+        generator = GitHubActionsReviewGenerator(orchestrator)
+
+        result = generator.generate()
+
+        # Verify uses Claude Code Action
+        assert "anthropics/claude-code-action@v1" in result.workflow_content
+
+        # Verify no TODO placeholder (Issue #102)
+        assert "TODO(Issue #102)" not in result.workflow_content
+        assert "TODO: Implement Claude API" not in result.workflow_content
+
+    def test_generated_workflow_has_claude_code_oauth_token(self) -> None:
+        """Test workflow includes CLAUDE_CODE_OAUTH_TOKEN secret."""
+        orchestrator = create_autospec(AIOrchestrator)
+        generator = GitHubActionsReviewGenerator(orchestrator)
+
+        result = generator.generate()
+
+        # Verify uses OAuth token (not deprecated API key)
+        assert "CLAUDE_CODE_OAUTH_TOKEN" in result.workflow_content
+        assert "secrets.CLAUDE_CODE_OAUTH_TOKEN" in result.workflow_content
+
+    def test_generated_workflow_includes_review_prompt(self) -> None:
+        """Test workflow includes comprehensive review prompt template."""
+        orchestrator = create_autospec(AIOrchestrator)
+        generator = GitHubActionsReviewGenerator(orchestrator)
+
+        result = generator.generate()
+
+        # Verify prompt includes key sections
+        assert "## Summary" in result.workflow_content
+        assert "## Strengths" in result.workflow_content
+        assert "## Security Concerns" in result.workflow_content
+        assert "## Problems" in result.workflow_content
+        assert "## Verdict" in result.workflow_content
+        # Check for verdict options (with emojis)
+        assert "LGTM" in result.workflow_content
+        assert "CHANGES_REQUESTED" in result.workflow_content
+
+
 class TestGitHubActionsReviewGeneratorOutputPath:
     """Test workflow output path generation."""
 
