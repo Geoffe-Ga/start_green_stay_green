@@ -136,7 +136,7 @@ class TestInitFlowIntegration:
         Addresses Issue #106: PreCommitGenerator integration (Part 2/8).
         """
         runner = CliRunner()
-        runner.invoke(
+        result = runner.invoke(
             app,
             [
                 "init",
@@ -149,6 +149,8 @@ class TestInitFlowIntegration:
                 "--no-interactive",
             ],
         )
+
+        assert result.exit_code == 0
 
         project_path = tmp_path / "test-precommit-project"
         precommit_config = project_path / ".pre-commit-config.yaml"
