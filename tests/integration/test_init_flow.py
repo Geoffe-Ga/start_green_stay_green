@@ -77,7 +77,11 @@ class TestInitFlowIntegration:
         for script_name in expected_scripts:
             script_path = scripts_dir / script_name
             assert script_path.exists(), f"Missing script: {script_name}"
-            assert script_path.stat().st_mode & 0o111, f"Not executable: {script_name}"
+            # Check executable permissions (owner, group, or other can execute)
+            mode = script_path.stat().st_mode
+            assert (
+                mode & 0o111
+            ), f"Script {script_name} not executable: permissions={mode:#o}"
 
     @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
     def test_init_generates_github_workflows(self, tmp_path: Path) -> None:
@@ -156,7 +160,8 @@ class TestInitFlowIntegration:
         assert claude_md.exists()
 
         content = claude_md.read_text()
-        assert "# Claude Code Project Context" in content or "# " in content
+        # Verify exact expected header format (not just any markdown header)
+        assert "# Claude Code Project Context" in content
         assert len(content) > 100
 
     @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
