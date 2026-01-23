@@ -67,6 +67,11 @@ jobs:
           # Wildcard patterns (e.g., "gh pr view:*") allow any arguments to the specified command
           # but the action enforces read-only permissions (pull-requests: read, issues: read)
           # preventing write operations even if attempted.
+          #
+          # Note: gh pr comment is the ONLY write operation allowed and is required for
+          # Claude to post automated review results as PR comments. All other commands
+          # are read-only (view, list, diff, search).
+          #
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # for allowed-tools syntax and security model.
           claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
