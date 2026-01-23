@@ -692,9 +692,10 @@ class TestMutationKillers:
             assert "clippy" in content
 
     def test_generated_scripts_exact_count_python(self) -> None:
-        """Test Python generator creates EXACTLY 7 scripts.
+        """Test Python generator creates EXACTLY 8 scripts.
 
         Kills mutations in script count logic.
+        Scripts: check-all, format, lint, test, fix-all, security, complexity, mutation
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
@@ -704,9 +705,9 @@ class TestMutationKillers:
             generator = ScriptsGenerator(Path(tmpdir), config)
             scripts = generator.generate()
 
-            assert len(scripts) == 7
-            assert len(scripts) > 6
-            assert len(scripts) < 8
+            assert len(scripts) == 8
+            assert len(scripts) > 7
+            assert len(scripts) < 9
 
     def test_generated_scripts_exact_count_typescript(self) -> None:
         """Test TypeScript generator creates EXACTLY 5 scripts."""
@@ -810,3 +811,192 @@ class TestMutationKillers:
             )
             with pytest.raises(ValueError, match="Package name cannot be empty"):
                 ScriptsGenerator(Path(tmpdir), config)
+
+
+class TestPythonMutationScript:
+    """Test Python mutation.sh script generation.
+
+    Addresses Claude Code Review blocking issue: Missing unit tests
+    for _python_mutation_script() method (175 lines of code).
+    """
+
+    def test_mutation_script_contains_mutmut_commands(self) -> None:
+        """Test mutation.sh contains mutmut run and results commands.
+
+        Verifies the script calls mutmut for mutation testing.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["mutation.sh"].read_text()
+            assert "mutmut run" in content
+            assert "mutmut results" in content
+            assert "mutmut junitxml" in content
+
+    def test_mutation_script_has_80_percent_threshold(self) -> None:
+        """Test mutation.sh has MIN_SCORE=80 (MAXIMUM QUALITY standard).
+
+        Verifies the script enforces 80% mutation score threshold.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["mutation.sh"].read_text()
+            assert "MIN_SCORE=80" in content
+            assert "80% minimum mutation score" in content
+            assert "MAXIMUM QUALITY" in content
+
+    def test_mutation_script_interpolates_package_name(self) -> None:
+        """Test mutation.sh interpolates package_name into script content.
+
+        Verifies the script references the correct package for mutation testing.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="test_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["mutation.sh"].read_text()
+            # Package name should appear in path context
+            assert "test_package" in content
+
+    def test_mutation_script_has_comprehensive_help_text(self) -> None:
+        """Test mutation.sh has --help option with comprehensive documentation.
+
+        Verifies the script provides usage instructions and examples.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["mutation.sh"].read_text()
+            assert "--help" in content
+            assert "Usage:" in content
+            assert "OPTIONS:" in content
+            assert "EXIT CODES:" in content
+            assert "QUALITY STANDARDS:" in content
+            assert "EXAMPLES:" in content
+
+    def test_mutation_script_has_bash_safety(self) -> None:
+        """Test mutation.sh has set -euo pipefail for error handling.
+
+        Verifies the script follows bash best practices for safety.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["mutation.sh"].read_text()
+            assert "set -euo pipefail" in content
+
+    def test_mutation_script_has_score_validation_logic(self) -> None:
+        """Test mutation.sh has score calculation and validation logic.
+
+        Verifies the script calculates mutation score and compares to threshold.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["mutation.sh"].read_text()
+            # Score calculation
+            assert "KILLED" in content
+            assert "SURVIVED" in content
+            assert "SUSPICIOUS" in content
+            assert "TIMEOUT" in content
+            # Validation
+            assert "Mutation Score:" in content
+            assert "Required:" in content
+
+    def test_mutation_script_has_verbose_mode(self) -> None:
+        """Test mutation.sh supports --verbose flag.
+
+        Verifies the script provides detailed output option.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["mutation.sh"].read_text()
+            assert "--verbose" in content
+            assert "VERBOSE=false" in content
+
+    def test_mutation_script_has_min_score_option(self) -> None:
+        """Test mutation.sh supports --min-score option.
+
+        Verifies the script allows custom threshold configuration.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["mutation.sh"].read_text()
+            assert "--min-score" in content
+
+    def test_mutation_script_checks_mutmut_installation(self) -> None:
+        """Test mutation.sh checks if mutmut is installed.
+
+        Verifies the script fails gracefully if mutmut is not available.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["mutation.sh"].read_text()
+            assert "command -v mutmut" in content
+            assert "mutmut is not installed" in content
+
+    def test_mutation_script_has_proper_exit_codes(self) -> None:
+        """Test mutation.sh documents and uses proper exit codes.
+
+        Verifies the script returns appropriate exit codes for different outcomes.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["mutation.sh"].read_text()
+            assert "exit 0" in content
+            assert "exit 1" in content
+            assert "exit 2" in content

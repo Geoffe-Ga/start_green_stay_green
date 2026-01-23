@@ -40,7 +40,6 @@ class TestInitFlowIntegration:
         assert project_path.exists()
         assert project_path.is_dir()
 
-    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
     def test_init_generates_scripts_directory(self, tmp_path: Path) -> None:
         """Test init creates scripts directory with quality scripts."""
         runner = CliRunner()
@@ -82,6 +81,54 @@ class TestInitFlowIntegration:
             assert (
                 mode & 0o111
             ), f"Script {script_name} not executable: permissions={mode:#o}"
+
+    def test_init_generates_mutation_script_with_correct_content(
+        self, tmp_path: Path
+    ) -> None:
+        """Test init creates mutation.sh with proper content.
+
+        Addresses Claude Code Review HIGH issue: Integration test should verify
+        mutation.sh content specifically, not just existence.
+        """
+        runner = CliRunner()
+        runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-mutation-content",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-interactive",
+            ],
+        )
+
+        project_path = tmp_path / "test-mutation-content"
+        mutation_script = project_path / "scripts" / "mutation.sh"
+
+        assert mutation_script.exists()
+        content = mutation_script.read_text()
+
+        # Verify critical mutation testing content
+        assert "mutmut run" in content
+        assert "mutmut results" in content
+        assert "MIN_SCORE=80" in content
+        assert "80% minimum mutation score" in content
+        assert "MAXIMUM QUALITY" in content
+
+        # Verify bash safety
+        assert "set -euo pipefail" in content
+
+        # Verify package name interpolation
+        # (test-mutation-content → test_mutation_content)
+        assert "test_mutation_content" in content
+
+        # Verify help documentation
+        assert "--help" in content
+        assert "Usage:" in content
+        assert "EXIT CODES:" in content
 
     @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
     def test_init_generates_github_workflows(self, tmp_path: Path) -> None:
