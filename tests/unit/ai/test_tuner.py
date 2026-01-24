@@ -1,10 +1,16 @@
 """Unit tests for ContentTuner and TuningResult."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 from unittest.mock import create_autospec
 
 import pytest
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
+
+if TYPE_CHECKING:
+    from pytest_mock import MockerFixture
 from start_green_stay_green.ai.orchestrator import GenerationError
 from start_green_stay_green.ai.orchestrator import GenerationResult
 from start_green_stay_green.ai.orchestrator import ModelConfig
@@ -456,3 +462,164 @@ CHANGES:
 
         assert result.content == "Result"
         assert "Done" in result.changes
+
+
+class TestContentTunerLoggerBehavior:
+    """Test logger behavior in ContentTuner to kill mutants."""
+
+    @pytest.mark.asyncio
+    async def test_tune_logs_dry_run_mode(self, mocker: MockerFixture) -> None:
+        """Test logger.info called for dry-run mode."""
+        orchestrator = create_autospec(AIOrchestrator)
+        tuner = ContentTuner(orchestrator, dry_run=True)
+
+        mock_logger = mocker.patch("start_green_stay_green.ai.tuner.logger")
+
+        result = await tuner.tune(
+            source_content="Content",
+            source_context="Source",
+            target_context="Target",
+        )
+
+        assert result.dry_run
+        mock_logger.info.assert_any_call(
+            "Dry-run mode: returning original content unchanged"
+        )
+
+    @pytest.mark.asyncio
+    async def test_tune_logs_tuning_start(self, mocker: MockerFixture) -> None:
+        """Test logger.info called when tuning starts."""
+        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator.generate.return_value = GenerationResult(
+            content="Result\n\nCHANGES:\n- Done",
+            format="markdown",
+            token_usage=TokenUsage(input_tokens=10, output_tokens=5),
+            model=ModelConfig.SONNET,
+            message_id="msg_123",
+        )
+        tuner = ContentTuner(orchestrator)
+
+        mock_logger = mocker.patch("start_green_stay_green.ai.tuner.logger")
+
+        await tuner.tune(
+            source_content="Content",
+            source_context="Source Context",
+            target_context="Target Context",
+        )
+
+        mock_logger.info.assert_any_call(
+            "Tuning content (source: %s, target: %s)",
+            "Source Context",
+            "Target Context",
+        )
+
+    @pytest.mark.asyncio
+    async def test_tune_logs_exception_on_error(self, mocker: MockerFixture) -> None:
+        """Test logger.exception called when tuning fails."""
+        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator.generate.side_effect = GenerationError("API error")
+        tuner = ContentTuner(orchestrator)
+
+        mock_logger = mocker.patch("start_green_stay_green.ai.tuner.logger")
+
+        with pytest.raises(GenerationError):
+            await tuner.tune(
+                source_content="Content",
+                source_context="Source",
+                target_context="Target",
+            )
+
+        mock_logger.exception.assert_called_once_with("Tuning failed")
+
+    @pytest.mark.asyncio
+    async def test_tune_logs_completion_with_changes(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test logger.info called with change count on success."""
+        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator.generate.return_value = GenerationResult(
+            content="Result\n\nCHANGES:\n- Change 1\n- Change 2\n- Change 3",
+            format="markdown",
+            token_usage=TokenUsage(input_tokens=10, output_tokens=5),
+            model=ModelConfig.SONNET,
+            message_id="msg_123",
+        )
+        tuner = ContentTuner(orchestrator)
+
+        mock_logger = mocker.patch("start_green_stay_green.ai.tuner.logger")
+
+        result = await tuner.tune(
+            source_content="Content",
+            source_context="Source",
+            target_context="Target",
+        )
+
+        assert len(result.changes) == 3
+        mock_logger.info.assert_any_call(
+            "Tuning complete, %d changes made",
+            3,
+        )
+
+    @pytest.mark.asyncio
+    async def test_tune_logs_each_change_at_debug_level(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test logger.debug called for each change."""
+        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator.generate.return_value = GenerationResult(
+            content="Result\n\nCHANGES:\n- First change\n- Second change",
+            format="markdown",
+            token_usage=TokenUsage(input_tokens=10, output_tokens=5),
+            model=ModelConfig.SONNET,
+            message_id="msg_123",
+        )
+        tuner = ContentTuner(orchestrator)
+
+        mock_logger = mocker.patch("start_green_stay_green.ai.tuner.logger")
+
+        await tuner.tune(
+            source_content="Content",
+            source_context="Source",
+            target_context="Target",
+        )
+
+        # Verify debug called for each change
+        assert mock_logger.debug.call_count == 2
+        debug_calls = [call[0] for call in mock_logger.debug.call_args_list]
+        assert any("Change: %s" in str(call) for call in debug_calls)
+
+    @pytest.mark.asyncio
+    async def test_tune_dry_run_does_not_call_orchestrator(self) -> None:
+        """Test dry-run mode skips orchestrator.generate call."""
+        orchestrator = create_autospec(AIOrchestrator)
+        tuner = ContentTuner(orchestrator, dry_run=True)
+
+        result = await tuner.tune(
+            source_content="Original Content",
+            source_context="Source",
+            target_context="Target",
+        )
+
+        # Verify orchestrator.generate was NOT called in dry-run
+        orchestrator.generate.assert_not_called()
+        assert result.content == "Original Content"
+        assert result.dry_run
+
+    @pytest.mark.asyncio
+    async def test_tune_dry_run_returns_original_content_exactly(self) -> None:
+        """Test dry-run returns exact original content unchanged."""
+        orchestrator = create_autospec(AIOrchestrator)
+        tuner = ContentTuner(orchestrator, dry_run=True)
+
+        original = "# Title\n\nContent with special chars: !@#$%"
+        result = await tuner.tune(
+            source_content=original,
+            source_context="Source",
+            target_context="Target",
+        )
+
+        # Verify content is EXACTLY the same (not modified)
+        assert result.content is original  # Same object reference
+        assert result.content == original  # Same value
+        assert result.dry_run
+        assert result.changes == ["[DRY RUN] No changes made"]

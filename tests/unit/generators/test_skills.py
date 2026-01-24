@@ -374,3 +374,214 @@ Example code here
             assert "# " in result.content  # Has title
             assert "## Purpose" in result.content
             assert "[DRY RUN]" in result.changes[0]
+
+
+class TestSkillsGeneratorLoggerBehavior:
+    """Test logger behavior in SkillsGenerator to kill mutants."""
+
+    def test_init_without_orchestrator_logs_direct_copy_mode(
+        self, mocker: MockerFixture, tmp_path: Path
+    ) -> None:
+        """Test logger.info called when initialized without AI."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        for skill in REQUIRED_SKILLS:
+            (skills_dir / skill).write_text("# Skill")
+
+        mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
+
+        generator = SkillsGenerator(
+            orchestrator=None,  # No AI
+            reference_dir=skills_dir,
+        )
+
+        assert generator.tuner is None
+        mock_logger.info.assert_called_once_with(
+            "Skills generator initialized without AI (direct copy mode)"
+        )
+
+    def test_init_with_orchestrator_does_not_log_direct_copy(
+        self, mocker: MockerFixture, tmp_path: Path
+    ) -> None:
+        """Test logger.info NOT called when initialized with AI."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        for skill in REQUIRED_SKILLS:
+            (skills_dir / skill).write_text("# Skill")
+
+        orchestrator = mocker.Mock()
+        mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
+
+        generator = SkillsGenerator(
+            orchestrator=orchestrator,  # Has AI
+            reference_dir=skills_dir,
+        )
+
+        assert generator.tuner is not None
+        # Should NOT log direct copy mode message
+        for call in mock_logger.info.call_args_list:
+            assert "direct copy mode" not in str(call)
+
+    def test_load_skill_logs_skill_name(
+        self, mocker: MockerFixture, tmp_path: Path
+    ) -> None:
+        """Test logger.info called with skill name when loading."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "vibe.md").write_text("# Vibe Skill")
+
+        orchestrator = mocker.Mock()
+        mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
+
+        generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
+        content = generator._load_skill("vibe.md")  # noqa: SLF001
+
+        assert content == "# Vibe Skill"
+        mock_logger.info.assert_any_call("Loading skill: %s", "vibe.md")
+
+    @pytest.mark.asyncio
+    async def test_tune_skill_without_tuner_logs_copy_message(
+        self, mocker: MockerFixture, tmp_path: Path
+    ) -> None:
+        """Test logger.info called when copying without AI tuning."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        for skill in REQUIRED_SKILLS:
+            (skills_dir / skill).write_text("# Skill")
+
+        mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
+
+        generator = SkillsGenerator(
+            orchestrator=None,  # No AI
+            reference_dir=skills_dir,
+        )
+
+        result = await generator.tune_skill(
+            skill_name="vibe.md",
+            skill_content="# Original",
+            target_context="Target",
+        )
+
+        assert not result.tuned
+        mock_logger.info.assert_any_call("Copying skill %s (no AI tuning)", "vibe.md")
+
+    @pytest.mark.asyncio
+    async def test_tune_skill_with_tuner_logs_tuning_message(
+        self, mocker: MockerFixture, tmp_path: Path
+    ) -> None:
+        """Test logger.info called when tuning with AI."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        for skill in REQUIRED_SKILLS:
+            (skills_dir / skill).write_text("# Skill")
+
+        orchestrator = mocker.Mock()
+        mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
+
+        # Mock the tuner's tune method
+        mock_tune_result = mocker.Mock()
+        mock_tune_result.content = "# Tuned"
+        mock_tune_result.changes = ["Change 1"]
+
+        generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
+        generator.tuner = mocker.Mock()
+        generator.tuner.tune = mocker.AsyncMock(return_value=mock_tune_result)  # type: ignore[method-assign]
+
+        await generator.tune_skill(
+            skill_name="vibe.md",
+            skill_content="# Original",
+            target_context="Target Context",
+        )
+
+        mock_logger.info.assert_any_call(
+            "Tuning skill %s for target context", "vibe.md"
+        )
+
+    @pytest.mark.asyncio
+    async def test_generate_all_skills_logs_completion(
+        self, mocker: MockerFixture, tmp_path: Path
+    ) -> None:
+        """Test logger.info called with skill name and change count."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        # Create all required skills
+        for skill in REQUIRED_SKILLS:
+            (skills_dir / skill).write_text(f"# {skill}")
+
+        orchestrator = mocker.Mock()
+        mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
+
+        # Mock tuner to return results with changes
+        mock_tune_result = mocker.Mock()
+        mock_tune_result.content = "# Tuned"
+        mock_tune_result.changes = ["Change 1", "Change 2", "Change 3"]
+
+        generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
+        generator.tuner = mocker.Mock()
+        generator.tuner.tune = mocker.AsyncMock(return_value=mock_tune_result)  # type: ignore[method-assign]
+
+        await generator.generate_all_skills(target_context="Target")
+
+        # Verify logger called for each skill with change count
+        log_calls = [str(call) for call in mock_logger.info.call_args_list]
+        vibe_log = [
+            call for call in log_calls if "vibe.md" in call and "changes" in call
+        ]
+        assert vibe_log
+
+    @pytest.mark.asyncio
+    async def test_tune_skill_without_orchestrator_returns_exact_content(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that no-AI mode returns exact original content."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        for skill in REQUIRED_SKILLS:
+            (skills_dir / skill).write_text("# Skill")
+
+        generator = SkillsGenerator(
+            orchestrator=None,  # No AI
+            reference_dir=skills_dir,
+        )
+
+        original = "# Original\n\nWith special chars: !@#$%"
+        result = await generator.tune_skill(
+            skill_name="vibe.md",
+            skill_content=original,
+            target_context="Target",
+        )
+
+        # Verify content is EXACTLY the same
+        assert result.content == original
+        assert not result.tuned
+        assert not result.changes
+
+    @pytest.mark.asyncio
+    async def test_tune_skill_none_tuner_branch_vs_has_tuner(
+        self, mocker: MockerFixture, tmp_path: Path
+    ) -> None:
+        """Test different code paths for tuner is None vs tuner exists."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        for skill in REQUIRED_SKILLS:
+            (skills_dir / skill).write_text("# Skill")
+
+        # Case 1: No tuner (None)
+        gen_no_ai = SkillsGenerator(orchestrator=None, reference_dir=skills_dir)
+        result_no_ai = await gen_no_ai.tune_skill("vibe.md", "# Content", "Target")
+        assert gen_no_ai.tuner is None
+        assert not result_no_ai.tuned
+
+        # Case 2: Has tuner
+        orchestrator = mocker.Mock()
+        gen_with_ai = SkillsGenerator(orchestrator, reference_dir=skills_dir)
+
+        mock_tune_result = mocker.Mock()
+        mock_tune_result.content = "# Tuned"
+        mock_tune_result.changes = ["Change"]
+        gen_with_ai.tuner = mocker.Mock()
+        gen_with_ai.tuner.tune = mocker.AsyncMock(return_value=mock_tune_result)  # type: ignore[method-assign]
+
+        result_with_ai = await gen_with_ai.tune_skill("vibe.md", "# Content", "Target")
+        assert gen_with_ai.tuner is not None
+        assert result_with_ai.content == "# Tuned"  # Tuned version
