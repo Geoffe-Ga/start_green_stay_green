@@ -90,9 +90,10 @@ echo "=== Running Mutation Tests ==="
 echo "Minimum required score: ${MIN_SCORE}%"
 echo ""
 
-# Run mutation tests (allow failure, we'll check score)
+# Run mutation tests and capture output
 echo "Running mutmut (this may take several minutes)..."
-if mutmut run 2>&1; then
+MUTMUT_OUTPUT=$(mktemp)
+if mutmut run 2>&1 | tee "$MUTMUT_OUTPUT"; then
     echo "✓ Mutmut run completed"
 else
     # mutmut returns non-zero if there are surviving mutants, which is expected
@@ -107,28 +108,36 @@ if ! mutmut junitxml > /dev/null 2>&1; then
     echo "Warning: Could not generate JUnit XML (may be empty results)" >&2
 fi
 
-# Parse mutmut results
+# Parse mutmut results summary
 RESULTS=$(mutmut results)
 echo "$RESULTS"
 echo ""
 
-# Extract counts from results (supports both old and new mutmut formats)
-# Old format: "Killed: 123"
-# New format: "Killed 🎉 (123)" or "Survived 🙁 (420)"
+# Extract counts from mutmut run progress line
+# Progress line format: "⠧ 1514/1514  🎉 1094  ⏰ 0  🤔 0  🙁 420  🔇 0"
+# This contains the accurate counts, unlike `mutmut results` which omits killed mutants
 
-# Try new format first (with emoji and parentheses), then fall back to old format
-KILLED=$(echo "$RESULTS" | grep -oE '(Killed|killed).*\([0-9]+\)' | grep -oE '[0-9]+' || \
-         echo "$RESULTS" | grep -oE '(Killed|killed): [0-9]+' | grep -oE '[0-9]+' || echo "0")
+# Find the final progress line (where current == total)
+PROGRESS_LINE=$(grep -oE '[0-9]+/[0-9]+[[:space:]]+🎉[[:space:]]+[0-9]+[[:space:]]+⏰[[:space:]]+[0-9]+[[:space:]]+🤔[[:space:]]+[0-9]+[[:space:]]+🙁[[:space:]]+[0-9]+[[:space:]]+🔇[[:space:]]+[0-9]+' "$MUTMUT_OUTPUT" | tail -1)
 
-SURVIVED=$(echo "$RESULTS" | grep -oE '(Survived|survived).*\([0-9]+\)' | grep -oE '[0-9]+' || \
-           echo "$RESULTS" | grep -oE '(Survived|survived): [0-9]+' | grep -oE '[0-9]+' || echo "0")
+if [ -n "$PROGRESS_LINE" ]; then
+    # Parse counts from progress line (most accurate source)
+    # Extract numbers after each emoji
+    KILLED=$(echo "$PROGRESS_LINE" | grep -oE '🎉[[:space:]]+[0-9]+' | grep -oE '[0-9]+')
+    TIMEOUT=$(echo "$PROGRESS_LINE" | grep -oE '⏰[[:space:]]+[0-9]+' | grep -oE '[0-9]+')
+    SUSPICIOUS=$(echo "$PROGRESS_LINE" | grep -oE '🤔[[:space:]]+[0-9]+' | grep -oE '[0-9]+')
+    SURVIVED=$(echo "$PROGRESS_LINE" | grep -oE '🙁[[:space:]]+[0-9]+' | grep -oE '[0-9]+')
+else
+    # Fallback: Try to parse from `mutmut results` output
+    # (This only works if categories have non-zero values)
+    KILLED=$(echo "$RESULTS" | grep -oE '(Killed|killed).*\([0-9]+\)' | grep -oE '[0-9]+' || echo "0")
+    SURVIVED=$(echo "$RESULTS" | grep -oE '(Survived|survived).*\([0-9]+\)' | grep -oE '[0-9]+' || echo "0")
+    SUSPICIOUS=$(echo "$RESULTS" | grep -oE '(Suspicious|suspicious).*\([0-9]+\)' | grep -oE '[0-9]+' || echo "0")
+    TIMEOUT=$(echo "$RESULTS" | grep -oE '(Timeout|timeout|Timed out|timed out).*\([0-9]+\)' | grep -oE '[0-9]+' || echo "0")
+fi
 
-SUSPICIOUS=$(echo "$RESULTS" | grep -oE '(Suspicious|suspicious).*\([0-9]+\)' | grep -oE '[0-9]+' || \
-             echo "$RESULTS" | grep -oE '(Suspicious|suspicious): [0-9]+' | grep -oE '[0-9]+' || echo "0")
-
-# Timeout has two possible names in new format
-TIMEOUT=$(echo "$RESULTS" | grep -oE '(Timeout|timeout|Timed out|timed out).*\([0-9]+\)' | grep -oE '[0-9]+' || \
-          echo "$RESULTS" | grep -oE '(Timeout|timeout): [0-9]+' | grep -oE '[0-9]+' || echo "0")
+# Clean up temp file
+rm -f "$MUTMUT_OUTPUT"
 
 # Calculate total and score
 TOTAL=$((KILLED + SURVIVED + SUSPICIOUS + TIMEOUT))
