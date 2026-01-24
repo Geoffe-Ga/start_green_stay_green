@@ -202,6 +202,186 @@ class TestStoreApiKeyInKeyring:
         mock_keyring.set_password.assert_called_once_with("sgsg", "claude_api_key", "")
 
 
+class TestGetApiKeyLoggerBehavior:
+    """Test logger behavior in get_api_key_from_keyring."""
+
+    def test_get_api_key_logs_debug_on_success(self, mocker: MockerFixture) -> None:
+        """Test debug log when API key retrieved successfully."""
+        mock_keyring = MagicMock()
+        mock_keyring.get_password.return_value = "sk-ant-test-key"
+        mocker.patch.dict("sys.modules", {"keyring": mock_keyring})
+
+        # Spy on logger
+        mock_logger = mocker.patch("start_green_stay_green.utils.credentials.logger")
+
+        get_api_key_from_keyring()
+
+        mock_logger.debug.assert_called_once_with("API key retrieved from keyring")
+
+    def test_get_api_key_logs_debug_on_not_found(self, mocker: MockerFixture) -> None:
+        """Test debug log when API key not found."""
+        mock_keyring = MagicMock()
+        mock_keyring.get_password.return_value = None
+        mocker.patch.dict("sys.modules", {"keyring": mock_keyring})
+
+        # Spy on logger
+        mock_logger = mocker.patch("start_green_stay_green.utils.credentials.logger")
+
+        get_api_key_from_keyring()
+
+        mock_logger.debug.assert_called_once_with("No API key found in keyring")
+
+    def test_get_api_key_logs_warning_on_import_error(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test warning log when keyring not available."""
+        mocker.patch.dict("sys.modules", {"keyring": None})
+
+        # Spy on logger
+        mock_logger = mocker.patch("start_green_stay_green.utils.credentials.logger")
+
+        get_api_key_from_keyring()
+
+        mock_logger.warning.assert_called_once_with(
+            "keyring package not available, skipping keyring check"
+        )
+
+    def test_get_api_key_logs_warning_on_exception(self, mocker: MockerFixture) -> None:
+        """Test warning log when keyring raises exception."""
+        mock_keyring = MagicMock()
+        error = RuntimeError("Backend error")
+        mock_keyring.get_password.side_effect = error
+        mocker.patch.dict("sys.modules", {"keyring": mock_keyring})
+
+        # Spy on logger
+        mock_logger = mocker.patch("start_green_stay_green.utils.credentials.logger")
+
+        get_api_key_from_keyring()
+
+        mock_logger.warning.assert_called_once_with(
+            "Failed to retrieve from keyring: %s", error
+        )
+
+
+class TestStoreApiKeyLoggerBehavior:
+    """Test logger behavior in store_api_key_in_keyring."""
+
+    def test_store_api_key_logs_info_on_success(self, mocker: MockerFixture) -> None:
+        """Test info log when API key stored successfully."""
+        mock_keyring = MagicMock()
+        mocker.patch.dict("sys.modules", {"keyring": mock_keyring})
+
+        # Spy on logger
+        mock_logger = mocker.patch("start_green_stay_green.utils.credentials.logger")
+
+        store_api_key_in_keyring("sk-ant-test")
+
+        mock_logger.info.assert_called_once_with(
+            "API key stored in keyring successfully"
+        )
+
+    def test_store_api_key_logs_exception_on_import_error(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test exception log when keyring not available."""
+        mocker.patch.dict("sys.modules", {"keyring": None})
+
+        # Spy on logger
+        mock_logger = mocker.patch("start_green_stay_green.utils.credentials.logger")
+
+        store_api_key_in_keyring("sk-ant-test")
+
+        mock_logger.exception.assert_called_once_with("keyring package not available")
+
+    def test_store_api_key_logs_exception_on_error(self, mocker: MockerFixture) -> None:
+        """Test exception log when keyring raises error."""
+        mock_keyring = MagicMock()
+        mock_keyring.set_password.side_effect = RuntimeError("Backend error")
+        mocker.patch.dict("sys.modules", {"keyring": mock_keyring})
+
+        # Spy on logger
+        mock_logger = mocker.patch("start_green_stay_green.utils.credentials.logger")
+
+        store_api_key_in_keyring("sk-ant-test")
+
+        mock_logger.exception.assert_called_once_with("Failed to store in keyring")
+
+
+class TestCredentialsBoundaryConditions:
+    """Test boundary conditions and edge cases."""
+
+    def test_get_api_key_with_empty_string_returns_none(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test that empty string from keyring is treated as None."""
+        mock_keyring = MagicMock()
+        mock_keyring.get_password.return_value = ""
+        mocker.patch.dict("sys.modules", {"keyring": mock_keyring})
+
+        api_key = get_api_key_from_keyring()
+
+        # Empty string is falsy, should return None
+        assert api_key is None
+
+    def test_get_api_key_with_whitespace_only(self, mocker: MockerFixture) -> None:
+        """Test that whitespace-only string is returned as-is."""
+        mock_keyring = MagicMock()
+        mock_keyring.get_password.return_value = "   "
+        mocker.patch.dict("sys.modules", {"keyring": mock_keyring})
+
+        api_key = get_api_key_from_keyring()
+
+        # Whitespace is truthy, should be returned
+        assert api_key == "   "
+
+    def test_store_api_key_with_special_characters(self, mocker: MockerFixture) -> None:
+        """Test storing API key with special characters."""
+        mock_keyring = MagicMock()
+        mocker.patch.dict("sys.modules", {"keyring": mock_keyring})
+
+        special_key = "sk-ant-!@#$%^&*()_+-=[]{}|;:',.<>?/`~"
+        success = store_api_key_in_keyring(special_key)
+
+        assert success
+        mock_keyring.set_password.assert_called_once_with(
+            "sgsg", "claude_api_key", special_key
+        )
+
+    def test_get_api_key_boolean_logic_with_truthy_value(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test that truthy API key value triggers correct branch."""
+        mock_keyring = MagicMock()
+        mock_keyring.get_password.return_value = "valid-key"
+        mocker.patch.dict("sys.modules", {"keyring": mock_keyring})
+
+        mock_logger = mocker.patch("start_green_stay_green.utils.credentials.logger")
+
+        api_key = get_api_key_from_keyring()
+
+        # Should return the key (not None)
+        assert api_key == "valid-key"  # pragma: allowlist secret
+        # Should log debug message for found key (not not-found message)
+        assert mock_logger.debug.call_args[0][0] == "API key retrieved from keyring"
+
+    def test_get_api_key_boolean_logic_with_falsy_value(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test that falsy API key value triggers correct branch."""
+        mock_keyring = MagicMock()
+        mock_keyring.get_password.return_value = None
+        mocker.patch.dict("sys.modules", {"keyring": mock_keyring})
+
+        mock_logger = mocker.patch("start_green_stay_green.utils.credentials.logger")
+
+        api_key = get_api_key_from_keyring()
+
+        # Should return None (not the key)
+        assert api_key is None
+        # Should log debug message for not-found (not found message)
+        assert mock_logger.debug.call_args[0][0] == "No API key found in keyring"
+
+
 class TestCredentialsIntegration:
     """Integration tests for store and retrieve workflow."""
 
@@ -211,9 +391,11 @@ class TestCredentialsIntegration:
         stored_keys: dict[tuple[str, str], str] = {}
 
         def mock_set_password(service: str, username: str, password: str) -> None:
+            """Mock keyring.set_password to store in dictionary."""
             stored_keys[(service, username)] = password
 
         def mock_get_password(service: str, username: str) -> str | None:
+            """Mock keyring.get_password to retrieve from dictionary."""
             return stored_keys.get((service, username))
 
         mock_keyring = MagicMock()
