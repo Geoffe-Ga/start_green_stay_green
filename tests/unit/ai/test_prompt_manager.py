@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from jinja2 import TemplateNotFound
 import pytest
 
 from start_green_stay_green.ai.prompts.manager import PromptManager
@@ -935,3 +936,243 @@ class TestMutationKillers:
         expected_msg = "Supported:.*python"
         with pytest.raises(ValueError, match=expected_msg):
             manager.render("test", {}, language="invalid")
+
+
+class TestPromptManagerExceptionChaining:
+    """Test exception chaining and error handling details.
+
+    These tests verify proper exception chaining, exact error messages,
+    and edge cases in error handling to kill remaining mutants.
+    """
+
+    def test_template_not_found_has_proper_cause(self, tmp_path: Path) -> None:
+        """Test TemplateNotFound exception is properly chained.
+
+        Kills mutations: exception chaining (from e vs from None)
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        with pytest.raises(PromptTemplateError) as exc_info:
+            manager.render("nonexistent", {})
+
+        # Verify exception has a cause
+        assert exc_info.value.__cause__ is not None
+        # Cause should be TemplateNotFound
+        assert isinstance(exc_info.value.__cause__, TemplateNotFound)
+
+    def test_render_exception_has_proper_cause(self, tmp_path: Path) -> None:
+        """Test generic render exception is properly chained.
+
+        Kills mutations: exception chaining in generic exception handler
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        # Create template with undefined variable (strict undefined)
+        (templates_dir / "undefined.jinja2").write_text("{{ undefined_var }}")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        with pytest.raises(PromptTemplateError) as exc_info:
+            manager.render("undefined", {})
+
+        # Verify exception message includes template name
+        assert "undefined.jinja2" in str(exc_info.value)
+        # Verify exception has a cause
+        assert exc_info.value.__cause__ is not None
+
+    def test_template_not_found_error_message_exact(self, tmp_path: Path) -> None:
+        """Test exact error message format for template not found.
+
+        Kills mutations: string format in error message
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        with pytest.raises(
+            PromptTemplateError,
+            match=r"^Prompt template not found: missing\.jinja2$",
+        ):
+            manager.render("missing", {})
+
+    def test_render_error_message_includes_filename_and_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Test error message includes both filename and error details.
+
+        Kills mutations: error message string construction
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "error.jinja2").write_text("{{ bad_var }}")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        with pytest.raises(PromptTemplateError) as exc_info:
+            manager.render("error", {})
+
+        error_msg = str(exc_info.value)
+        # Message should contain "Failed to render template"
+        assert "Failed to render" in error_msg
+        # Message should contain the template name
+        assert "error.jinja2" in error_msg
+
+    def test_empty_content_error_message_exact(self, tmp_path: Path) -> None:
+        """Test exact error message for empty content.
+
+        Kills mutations: error message string in _validate_rendered_content
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "empty.jinja2").write_text("{% if false %}x{% endif %}")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        expected_msg = (
+            r"Failed to render template empty\.jinja2: "
+            r"Template empty\.jinja2 rendered to empty content"
+        )
+        with pytest.raises(PromptTemplateError, match=expected_msg):
+            manager.render("empty", {})
+
+    def test_directory_not_found_error_message_exact(self, tmp_path: Path) -> None:
+        """Test exact error message for nonexistent directory.
+
+        Kills mutations: error message string in __init__
+        """
+        nonexistent = tmp_path / "nonexistent_dir"
+
+        with pytest.raises(
+            PromptTemplateError,
+            match=r"^Prompt template directory not found: .*nonexistent_dir$",
+        ):
+            PromptManager(template_dir=nonexistent)
+
+    def test_unsupported_language_error_message_format(self, tmp_path: Path) -> None:
+        """Test unsupported language error message exact format.
+
+        Kills mutations: error message construction in _validate_language
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "test.jinja2").write_text("Test")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        with pytest.raises(
+            ValueError, match="Unsupported language: fortran"
+        ) as exc_info:
+            manager.render("test", {}, language="fortran")
+
+        error_msg = str(exc_info.value)
+        # Should contain "Unsupported language: fortran"
+        assert "Unsupported language: fortran" in error_msg
+        # Should contain "Supported:" followed by languages
+        assert "Supported:" in error_msg
+        # Should list python in supported languages
+        assert "python" in error_msg
+
+    def test_language_validation_uses_exact_supported_set(self, tmp_path: Path) -> None:
+        """Test language validation uses the exact SUPPORTED_LANGUAGES set.
+
+        Kills mutations: set membership check
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "test.python.jinja2").write_text("Python")
+        (templates_dir / "test.typescript.jinja2").write_text("TypeScript")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        # All supported languages should work
+        for lang in PromptManager.SUPPORTED_LANGUAGES:
+            lang_file = templates_dir / f"test.{lang}.jinja2"
+            lang_file.write_text(f"{lang} content")
+            result = manager.render("test", {}, language=lang)
+            assert lang in result
+
+        # Unsupported language should raise
+        with pytest.raises(ValueError, match="Unsupported language"):
+            manager.render("test", {}, language="unsupported")
+
+    def test_cache_key_uses_exact_filename(self, tmp_path: Path) -> None:
+        """Test cache uses exact filename as key.
+
+        Kills mutations: cache key construction
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "test.jinja2").write_text("Content")
+        (templates_dir / "test.python.jinja2").write_text("Python content")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        # Render base template
+        manager.render("test", {})
+        assert "test.jinja2" in manager._template_cache  # noqa: SLF001
+
+        # Render language variant
+        manager.render("test", {}, language="python")
+        assert "test.python.jinja2" in manager._template_cache  # noqa: SLF001
+
+        # Both should be cached separately
+        assert len(manager._template_cache) == 2  # noqa: SLF001
+
+    def test_validate_template_constructs_exact_filename(self, tmp_path: Path) -> None:
+        """Test validate_template constructs filename correctly.
+
+        Kills mutations: filename construction in validate_template
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "mytemplate.jinja2").write_text("Content")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        # Should find template with exact name
+        assert manager.validate_template("mytemplate")
+
+        # Should not find with wrong name
+        assert not manager.validate_template("mytemplate.jinja2")
+        assert not manager.validate_template("other")
+
+    def test_get_available_templates_splits_on_first_dot(self, tmp_path: Path) -> None:
+        """Test get_available_templates splits filename correctly.
+
+        Kills mutations: parts[0] vs other split logic
+        """
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        # Template with dots in name
+        (templates_dir / "my.complex.name.jinja2").write_text("Content")
+        (templates_dir / "my.complex.name.python.jinja2").write_text("Python")
+
+        manager = PromptManager(template_dir=templates_dir)
+        available = manager.get_available_templates()
+
+        # Should extract "my" as base name (first part before dot)
+        assert "my" in available
+        # Should not include full name with dots
+        assert "my.complex.name" not in available
+
+    def test_directory_exists_check_exact_condition(self, tmp_path: Path) -> None:
+        """Test directory existence check uses exact condition.
+
+        Kills mutations: if not exists() → if exists()
+        """
+        existing_dir = tmp_path / "existing"
+        existing_dir.mkdir()
+
+        nonexistent_dir = tmp_path / "nonexistent"
+
+        # Existing directory should succeed
+        manager = PromptManager(template_dir=existing_dir)
+        assert manager.template_dir == existing_dir
+
+        # Nonexistent should raise
+        with pytest.raises(PromptTemplateError):
+            PromptManager(template_dir=nonexistent_dir)
