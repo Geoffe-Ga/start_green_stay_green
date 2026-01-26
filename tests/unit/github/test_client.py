@@ -9,18 +9,18 @@ Tests the complete GitHub API integration including:
 - Error handling and retry logic
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock
+from unittest.mock import Mock
+from unittest.mock import patch
 
 import httpx
 import pytest
 
-from start_green_stay_green.github import (
-    BranchProtectionRule,
-    GitHubAuthError,
-    GitHubClient,
-    GitHubError,
-    IssueData,
-)
+from start_green_stay_green.github import BranchProtectionRule
+from start_green_stay_green.github import GitHubAuthError
+from start_green_stay_green.github import GitHubClient
+from start_green_stay_green.github import GitHubError
+from start_green_stay_green.github import IssueData
 
 
 class TestGitHubErrorInitialization:
@@ -73,7 +73,7 @@ class TestGitHubClientInitialization:
         with patch("httpx.Client"):
             client = GitHubClient("token123", "owner", "repo")
 
-            assert client.token == "token123"
+            assert client.token == "token123"  # noqa: S105 # Test token
             assert client.owner == "owner"
             assert client.repo == "repo"
 
@@ -91,7 +91,7 @@ class TestGitHubClientInitialization:
         Kills mutations: token type validation
         """
         with pytest.raises(GitHubError, match="token is required"):
-            GitHubClient(None, "owner", "repo")  # type: ignore
+            GitHubClient(None, "owner", "repo")  # type: ignore[arg-type]
 
     def test_init_missing_owner_raises_error(self) -> None:
         """Test initialization with empty owner raises error.
@@ -276,7 +276,7 @@ class TestGitHubClientResponseHandling:
 
             result = client._handle_response(response)
 
-            assert result == {}
+            assert not result
 
 
 class TestGitHubClientRepositoryOperations:
@@ -731,7 +731,7 @@ This is a test issue.
             client = GitHubClient("token", "owner", "test-repo")
             issues = client.parse_spec_issues(spec_content)
 
-            assert len(issues) > 0
+            assert issues
             assert "bug" in issues[0].labels
             assert "p2" in issues[0].labels
 
@@ -755,7 +755,7 @@ Test description
             client = GitHubClient("token", "owner", "test-repo")
             issues = client.parse_spec_issues(spec_content)
 
-            assert len(issues) > 0
+            assert issues
             assert "Test description" in issues[0].body
             assert "Criterion 1" in issues[0].body
 
@@ -770,12 +770,12 @@ class TestBranchProtectionRule:
         """
         rule = BranchProtectionRule()
 
-        assert rule.dismiss_stale_reviews is True
-        assert rule.require_code_review is True
-        assert rule.require_status_checks is True
-        assert rule.allow_force_pushes is False
-        assert rule.allow_deletions is False
-        assert rule.status_check_contexts == []
+        assert rule.dismiss_stale_reviews
+        assert rule.require_code_review
+        assert rule.require_status_checks
+        assert not rule.allow_force_pushes
+        assert not rule.allow_deletions
+        assert not rule.status_check_contexts
 
     def test_custom_values(self) -> None:
         """Test setting custom branch protection values.
@@ -789,9 +789,9 @@ class TestBranchProtectionRule:
             status_check_contexts=["ci", "test"],
         )
 
-        assert rule.dismiss_stale_reviews is False
-        assert rule.require_code_review is False
-        assert rule.allow_force_pushes is True
+        assert not rule.dismiss_stale_reviews
+        assert not rule.require_code_review
+        assert rule.allow_force_pushes
         assert rule.status_check_contexts == ["ci", "test"]
 
 
@@ -807,7 +807,7 @@ class TestIssueDataModel:
 
         assert issue.title == "Test"
         assert issue.body == "Body"
-        assert issue.labels == []
+        assert not issue.labels
         assert issue.milestone is None
 
     def test_issue_data_all_fields(self) -> None:

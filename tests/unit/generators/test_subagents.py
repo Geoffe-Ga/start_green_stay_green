@@ -187,7 +187,7 @@ def test_check_directory_exists_missing_directory(
         FileNotFoundError,
         match="Reference directory not found",
     ):
-        generator._check_directory_exists()  # noqa: SLF001  # noqa: SLF001
+        generator._check_directory_exists()
 
 
 def test_check_directory_exists_not_directory(
@@ -214,7 +214,7 @@ def test_check_directory_exists_not_directory(
         NotADirectoryError,
         match="Reference path is not a directory",
     ):
-        generator._check_directory_exists()  # noqa: SLF001
+        generator._check_directory_exists()
 
 
 def test_check_required_agents_missing_agents(
@@ -241,7 +241,7 @@ def test_check_required_agents_missing_agents(
         FileNotFoundError,
         match="Missing required agent files",
     ):
-        generator._check_required_agents()  # noqa: SLF001
+        generator._check_required_agents()
 
 
 def test_check_required_agents_all_present(
@@ -267,7 +267,7 @@ def test_check_required_agents_all_present(
     )
 
     # Should not raise
-    generator._check_required_agents()  # noqa: SLF001
+    generator._check_required_agents()
 
 
 # Test Loading and Parsing
@@ -293,7 +293,7 @@ def test_load_agent_content(
         reference_dir=agents_dir,
     )
 
-    content = generator._load_agent_content("chief-architect")  # noqa: SLF001
+    content = generator._load_agent_content("chief-architect")
     assert content == SAMPLE_AGENT_CONTENT
 
 
@@ -309,7 +309,7 @@ def test_parse_frontmatter_valid(
     mock_orchestrator = mocker.Mock()
     generator = SubagentsGenerator(mock_orchestrator)
 
-    frontmatter, body = generator._parse_frontmatter(  # noqa: SLF001
+    frontmatter, body = generator._parse_frontmatter(
         SAMPLE_AGENT_CONTENT,
     )
 
@@ -343,7 +343,7 @@ No frontmatter here."""
         ValueError,
         match="Agent content missing YAML frontmatter",
     ):
-        generator._parse_frontmatter(  # noqa: SLF001
+        generator._parse_frontmatter(
             content_without_frontmatter,
         )
 
@@ -378,7 +378,7 @@ async def test_tune_agent_body(
     generator.tuner = mock_tuner
 
     body = "# Agent Body\n\n## Identity\nOriginal content"
-    result = await generator._tune_agent_body(  # noqa: SLF001
+    result = await generator._tune_agent_body(
         "chief-architect",
         body,
         "Python web application",

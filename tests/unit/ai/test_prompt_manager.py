@@ -43,14 +43,14 @@ class TestPromptManagerInitialization:
     def test_init_creates_jinja2_environment(self) -> None:
         """Test PromptManager initializes Jinja2 environment."""
         manager = PromptManager()
-        assert manager._env is not None  # noqa: SLF001 - Testing internal Jinja2 setup
-        assert manager._env.loader is not None  # noqa: SLF001
+        assert manager._env is not None
+        assert manager._env.loader is not None
 
     def test_init_creates_empty_template_cache(self) -> None:
         """Test PromptManager initializes empty template cache."""
         manager = PromptManager()
-        assert not manager._template_cache  # noqa: SLF001
-        assert isinstance(manager._template_cache, dict)  # noqa: SLF001
+        assert not manager._template_cache
+        assert isinstance(manager._template_cache, dict)
 
     def test_init_supported_languages_constant(self) -> None:
         """Test SUPPORTED_LANGUAGES constant is properly defined."""
@@ -189,7 +189,7 @@ class TestPromptManagerRender:
 
         # First render
         manager.render("cached", {"value": "first"})
-        assert "cached.jinja2" in manager._template_cache  # noqa: SLF001
+        assert "cached.jinja2" in manager._template_cache
 
         # Modify template file (shouldn't affect next render due to cache)
         template_file.write_text("Modified: {{ value }}")
@@ -323,11 +323,11 @@ class TestPromptManagerCacheManagement:
 
         # Render to populate cache
         manager.render("test", {})
-        assert manager._template_cache  # noqa: SLF001
+        assert manager._template_cache
 
         # Clear cache
         manager.clear_cache()
-        assert not manager._template_cache  # noqa: SLF001 - Testing cache clearing
+        assert not manager._template_cache
 
     def test_cache_prevents_repeated_loading(self, tmp_path: Path) -> None:
         """Test cache prevents repeated template loading."""
@@ -344,9 +344,7 @@ class TestPromptManagerCacheManagement:
         manager.render("cached", {"value": "v2"})
 
         # Cache should have only one entry
-        cache_entries = [
-            k for k in manager._template_cache if "cached" in k  # noqa: SLF001
-        ]
+        cache_entries = [k for k in manager._template_cache if "cached" in k]
         assert len(cache_entries) == 1
 
 
@@ -638,10 +636,10 @@ class TestMutationKillers:
         templates_dir.mkdir()
         manager = PromptManager(template_dir=templates_dir)
 
-        assert isinstance(manager._template_cache, dict)  # noqa: SLF001
-        assert not manager._template_cache  # noqa: SLF001
-        assert not manager._template_cache  # noqa: SLF001
-        assert manager._template_cache is not None  # noqa: SLF001
+        assert isinstance(manager._template_cache, dict)
+        assert not manager._template_cache
+        assert not manager._template_cache
+        assert manager._template_cache is not None
 
     def test_cache_hit_avoids_reload(self, tmp_path: Path) -> None:
         """Test cached template is returned without reload.
@@ -659,7 +657,7 @@ class TestMutationKillers:
         assert "Test content" in result1
 
         # Verify it's in cache
-        assert "test.jinja2" in manager._template_cache  # noqa: SLF001
+        assert "test.jinja2" in manager._template_cache
 
         # Second load - should use cache
         result2 = manager.render("test", {})
@@ -706,7 +704,7 @@ class TestMutationKillers:
         templates_dir.mkdir()
         manager = PromptManager(template_dir=templates_dir)
 
-        filename = manager._build_filename("test", "python")  # noqa: SLF001
+        filename = manager._build_filename("test", "python")
         assert filename == "test.python.jinja2"
         assert filename.endswith(".jinja2")
         assert ".python." in filename
@@ -720,7 +718,7 @@ class TestMutationKillers:
         templates_dir.mkdir()
         manager = PromptManager(template_dir=templates_dir)
 
-        filename = manager._build_filename("test", None)  # noqa: SLF001
+        filename = manager._build_filename("test", None)
         assert filename == "test.jinja2"
         assert filename.endswith(".jinja2")
         assert "." not in filename.replace(".jinja2", "")
@@ -850,12 +848,12 @@ class TestMutationKillers:
 
         # Load template to populate cache
         manager.render("test", {})
-        assert manager._template_cache  # noqa: SLF001
+        assert manager._template_cache
 
         # Clear cache
         manager.clear_cache()
-        assert not manager._template_cache  # noqa: SLF001
-        assert not manager._template_cache  # noqa: SLF001
+        assert not manager._template_cache
+        assert not manager._template_cache
 
     def test_validate_template_returns_true_when_exists(self, tmp_path: Path) -> None:
         """Test validate_template returns exactly True when template exists.
@@ -1113,14 +1111,14 @@ class TestPromptManagerExceptionChaining:
 
         # Render base template
         manager.render("test", {})
-        assert "test.jinja2" in manager._template_cache  # noqa: SLF001
+        assert "test.jinja2" in manager._template_cache
 
         # Render language variant
         manager.render("test", {}, language="python")
-        assert "test.python.jinja2" in manager._template_cache  # noqa: SLF001
+        assert "test.python.jinja2" in manager._template_cache
 
         # Both should be cached separately
-        assert len(manager._template_cache) == 2  # noqa: SLF001
+        assert len(manager._template_cache) == 2
 
     def test_validate_template_constructs_exact_filename(self, tmp_path: Path) -> None:
         """Test validate_template constructs filename correctly.

@@ -8,18 +8,16 @@ Exports:
 - IssueData: Parsed issue data structure
 """
 
-from start_green_stay_green.github.client import (
-    BranchProtectionRule,
-    GitHubAuthError,
-    GitHubClient,
-    GitHubError,
-    IssueData,
-)
+from start_green_stay_green.github.client import BranchProtectionRule
+from start_green_stay_green.github.client import GitHubAuthError
+from start_green_stay_green.github.client import GitHubClient
+from start_green_stay_green.github.client import GitHubError
+from start_green_stay_green.github.client import IssueData
 
 __all__ = [
+    "BranchProtectionRule",
+    "GitHubAuthError",
     "GitHubClient",
     "GitHubError",
-    "GitHubAuthError",
-    "BranchProtectionRule",
     "IssueData",
 ]

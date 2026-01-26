@@ -113,30 +113,30 @@ class TestContentTunerValidation:
     def test_validate_content_with_empty_string_raises_error(self) -> None:
         """Test _validate_content raises ValueError for empty string."""
         with pytest.raises(ValueError, match="Content cannot be empty"):
-            ContentTuner._validate_content("")  # noqa: SLF001
+            ContentTuner._validate_content("")
 
     def test_validate_content_with_whitespace_only_raises_error(self) -> None:
         """Test _validate_content raises ValueError for whitespace."""
         with pytest.raises(ValueError, match="Content cannot be empty"):
-            ContentTuner._validate_content("   \n\t  ")  # noqa: SLF001
+            ContentTuner._validate_content("   \n\t  ")
 
     def test_validate_content_with_valid_content_passes(self) -> None:
         """Test _validate_content passes for valid content."""
-        ContentTuner._validate_content("Valid content")  # noqa: SLF001
+        ContentTuner._validate_content("Valid content")
 
     def test_validate_context_with_empty_string_raises_error(self) -> None:
         """Test _validate_context raises ValueError for empty string."""
         with pytest.raises(ValueError, match="Source context cannot be empty"):
-            ContentTuner._validate_context("", "Source context")  # noqa: SLF001
+            ContentTuner._validate_context("", "Source context")
 
     def test_validate_context_with_whitespace_only_raises_error(self) -> None:
         """Test _validate_context raises ValueError for whitespace."""
         with pytest.raises(ValueError, match="Target context cannot be empty"):
-            ContentTuner._validate_context("  \n  ", "Target context")  # noqa: SLF001
+            ContentTuner._validate_context("  \n  ", "Target context")
 
     def test_validate_context_with_valid_context_passes(self) -> None:
         """Test _validate_context passes for valid context."""
-        ContentTuner._validate_context("Valid context", "Test")  # noqa: SLF001
+        ContentTuner._validate_context("Valid context", "Test")
 
 
 class TestContentTunerPromptBuilding:
@@ -147,7 +147,7 @@ class TestContentTunerPromptBuilding:
         orchestrator = create_autospec(AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
-        prompt = tuner._build_tuning_prompt(  # noqa: SLF001
+        prompt = tuner._build_tuning_prompt(
             source_content="# Original\n\nContent here",
             source_context="FastAPI project",
             target_context="Django project",
@@ -164,7 +164,7 @@ class TestContentTunerPromptBuilding:
         orchestrator = create_autospec(AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
-        prompt = tuner._build_tuning_prompt(  # noqa: SLF001
+        prompt = tuner._build_tuning_prompt(
             source_content="Content",
             source_context="Source",
             target_context="Target",
@@ -178,7 +178,7 @@ class TestContentTunerPromptBuilding:
         orchestrator = create_autospec(AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
-        prompt = tuner._build_tuning_prompt(  # noqa: SLF001
+        prompt = tuner._build_tuning_prompt(
             source_content="Content",
             source_context="Source",
             target_context="Target",
@@ -209,7 +209,7 @@ CHANGES:
 - Modified paths
 """
 
-        content, changes = tuner._parse_tuning_response(response)  # noqa: SLF001
+        content, changes = tuner._parse_tuning_response(response)
 
         assert content == "# Adapted Content\n\nThis is the adapted content."
         assert len(changes) == 3
@@ -229,7 +229,7 @@ CHANGES:
 * Change two
 """
 
-        _content, changes = tuner._parse_tuning_response(response)  # noqa: SLF001
+        _content, changes = tuner._parse_tuning_response(response)
 
         assert len(changes) == 2
         assert "Change one" in changes
@@ -242,7 +242,7 @@ CHANGES:
 
         response = "Just content without changes section"
 
-        content, changes = tuner._parse_tuning_response(response)  # noqa: SLF001
+        content, changes = tuner._parse_tuning_response(response)
 
         assert content == "Just content without changes section"
         assert not changes
@@ -257,7 +257,7 @@ CHANGES:
 CHANGES:
 """
 
-        content, changes = tuner._parse_tuning_response(response)  # noqa: SLF001
+        content, changes = tuner._parse_tuning_response(response)
 
         assert content == "Content"
         assert not changes
@@ -275,7 +275,7 @@ CHANGES:
    - Change with spaces
 """
 
-        content, changes = tuner._parse_tuning_response(response)  # noqa: SLF001
+        content, changes = tuner._parse_tuning_response(response)
 
         assert content == "Content with spaces"
         assert "Change with spaces" in changes

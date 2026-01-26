@@ -103,7 +103,7 @@ class TestSkillsGeneratorValidation:
             FileNotFoundError,
             match="Reference skills directory not found",
         ):
-            generator._validate_reference_dir()  # noqa: SLF001
+            generator._validate_reference_dir()
 
     def test_validate_reference_dir_not_a_directory(self, tmp_path: Path) -> None:
         """Test validation raises error when path is a file."""
@@ -113,7 +113,7 @@ class TestSkillsGeneratorValidation:
         generator = SkillsGenerator(orchestrator, reference_dir=file_path)
 
         with pytest.raises(ValueError, match="not a directory"):
-            generator._validate_reference_dir()  # noqa: SLF001
+            generator._validate_reference_dir()
 
     def test_validate_reference_dir_missing_required_skills(
         self,
@@ -130,7 +130,7 @@ class TestSkillsGeneratorValidation:
         generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
 
         with pytest.raises(ValueError, match="Missing required skills"):
-            generator._validate_reference_dir()  # noqa: SLF001
+            generator._validate_reference_dir()
 
     def test_validate_reference_dir_success(self, tmp_path: Path) -> None:
         """Test validation passes when all required skills present."""
@@ -145,7 +145,7 @@ class TestSkillsGeneratorValidation:
         generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
 
         # Should not raise
-        generator._validate_reference_dir()  # noqa: SLF001
+        generator._validate_reference_dir()
 
 
 class TestSkillsGeneratorLoadSkill:
@@ -161,7 +161,7 @@ class TestSkillsGeneratorLoadSkill:
         (skills_dir / "vibe.md").write_text(skill_content)
 
         generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
-        loaded_content = generator._load_skill("vibe.md")  # noqa: SLF001
+        loaded_content = generator._load_skill("vibe.md")
 
         assert loaded_content == skill_content
 
@@ -174,7 +174,7 @@ class TestSkillsGeneratorLoadSkill:
         generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
 
         with pytest.raises(FileNotFoundError, match="Skill file not found"):
-            generator._load_skill("nonexistent.md")  # noqa: SLF001
+            generator._load_skill("nonexistent.md")
 
 
 class TestSkillsGeneratorTuneSkill:
@@ -434,7 +434,7 @@ class TestSkillsGeneratorLoggerBehavior:
         mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
 
         generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
-        content = generator._load_skill("vibe.md")  # noqa: SLF001
+        content = generator._load_skill("vibe.md")
 
         assert content == "# Vibe Skill"
         mock_logger.info.assert_any_call("Loading skill: %s", "vibe.md")
