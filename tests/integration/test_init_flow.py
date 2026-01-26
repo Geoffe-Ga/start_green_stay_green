@@ -172,7 +172,9 @@ class TestInitFlowIntegration:
         assert "repos:" in content
         assert "hooks:" in content
 
-    @pytest.mark.skipif(not HAS_API_KEY, reason="Requires API key for AI-powered generators")
+    @pytest.mark.skipif(
+        not HAS_API_KEY, reason="Requires API key for AI-powered generators"
+    )
     def test_init_generates_github_workflows(self, tmp_path: Path) -> None:
         """Test init creates GitHub Actions workflows."""
         runner = CliRunner()
@@ -202,7 +204,9 @@ class TestInitFlowIntegration:
             workflow_path = workflows_dir / workflow_name
             assert workflow_path.exists(), f"Missing workflow: {workflow_name}"
 
-    @pytest.mark.skipif(not HAS_API_KEY, reason="Requires API key for AI-powered generators")
+    @pytest.mark.skipif(
+        not HAS_API_KEY, reason="Requires API key for AI-powered generators"
+    )
     def test_init_generates_claude_md(self, tmp_path: Path) -> None:
         """Test init creates CLAUDE.md file."""
         runner = CliRunner()
@@ -273,7 +277,9 @@ class TestInitFlowIntegration:
             content = skill_file.read_text()
             assert len(content) > 100, f"Skill {skill} has insufficient content"
 
-    @pytest.mark.skipif(not HAS_API_KEY, reason="Requires API key for AI-powered generators")
+    @pytest.mark.skipif(
+        not HAS_API_KEY, reason="Requires API key for AI-powered generators"
+    )
     def test_init_generates_subagents_directory(self, tmp_path: Path) -> None:
         """Test init creates .claude/subagents directory."""
         runner = CliRunner()
@@ -297,7 +303,9 @@ class TestInitFlowIntegration:
         assert subagents_dir.exists()
         assert subagents_dir.is_dir()
 
-    @pytest.mark.skipif(not HAS_API_KEY, reason="Requires API key for AI-powered generators")
+    @pytest.mark.skipif(
+        not HAS_API_KEY, reason="Requires API key for AI-powered generators"
+    )
     def test_init_generates_architecture_rules(self, tmp_path: Path) -> None:
         """Test init creates architecture enforcement rules."""
         runner = CliRunner()

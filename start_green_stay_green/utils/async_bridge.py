@@ -34,8 +34,10 @@ def run_async(coro: Coroutine[Any, Any, T]) -> T:
     try:
         # Check if event loop is already running
         asyncio.get_running_loop()
-        msg = "run_async() cannot be called from an event loop"
-        raise RuntimeError(msg)
     except RuntimeError:
         # No event loop running - safe to use asyncio.run()
         return asyncio.run(coro)
+    else:
+        # Event loop is running - cannot use asyncio.run()
+        msg = "run_async() cannot be called from an event loop"
+        raise RuntimeError(msg)
