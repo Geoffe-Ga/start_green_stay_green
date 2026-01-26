@@ -9,7 +9,6 @@ Tests the complete GitHub API integration including:
 - Error handling and retry logic
 """
 
-from typing import Any
 from unittest.mock import MagicMock, Mock, patch
 
 import httpx

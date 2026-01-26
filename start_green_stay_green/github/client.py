@@ -13,7 +13,7 @@ Secure token handling and comprehensive error handling with retry logic.
 import base64
 import json
 import re
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, Field
@@ -31,8 +31,8 @@ class GitHubError(Exception):
     def __init__(
         self,
         message: str,
-        status_code: Optional[int] = None,
-        response_body: Optional[dict[str, Any]] = None,
+        status_code: int | None = None,
+        response_body: dict[str, Any] | None = None,
     ) -> None:
         """Initialize GitHubError.
 
@@ -53,7 +53,6 @@ class GitHubAuthError(GitHubError):
     Raised when token is invalid (401) or lacks permissions (403).
     """
 
-    pass
 
 
 class BranchProtectionRule(BaseModel):
@@ -93,11 +92,11 @@ class IssueData(BaseModel):
     title: str
     body: str
     labels: list[str] = Field(default_factory=list)
-    milestone: Optional[str] = None
-    epic: Optional[str] = None
-    type: Optional[str] = None
-    priority: Optional[str] = None
-    estimate: Optional[str] = None
+    milestone: str | None = None
+    epic: str | None = None
+    type: str | None = None
+    priority: str | None = None
+    estimate: str | None = None
 
 
 class GitHubClient:
@@ -187,7 +186,8 @@ class GitHubClient:
         """
         try:
             response_body = response.json() if response.content else {}
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, Exception):
+            # Handle both JSONDecodeError and other exceptions during parsing
             response_body = {"raw_body": response.text}
 
         if response.status_code == 401:
@@ -247,6 +247,10 @@ class GitHubClient:
                 # Retry on transient errors
                 continue
 
+        # Should never reach here due to retry logic, but satisfies mypy
+        msg = "All retry attempts exhausted"
+        raise GitHubError(msg)
+
     def create_repository(
         self,
         description: str = "",
@@ -289,7 +293,7 @@ class GitHubClient:
     def configure_branch_protection(
         self,
         branch: str = "main",
-        rule: Optional[BranchProtectionRule] = None,
+        rule: BranchProtectionRule | None = None,
     ) -> dict[str, Any]:
         """Configure branch protection rules.
 
@@ -337,8 +341,8 @@ class GitHubClient:
         self,
         title: str,
         body: str = "",
-        labels: Optional[list[str]] = None,
-        milestone: Optional[int] = None,
+        labels: list[str] | None = None,
+        milestone: int | None = None,
     ) -> dict[str, Any]:
         """Create a GitHub issue.
 
@@ -637,13 +641,13 @@ class GitHubClient:
 
     def update_repository(
         self,
-        description: Optional[str] = None,
-        homepage: Optional[str] = None,
-        private: Optional[bool] = None,
-        has_issues: Optional[bool] = None,
-        has_projects: Optional[bool] = None,
-        has_downloads: Optional[bool] = None,
-        has_wiki: Optional[bool] = None,
+        description: str | None = None,
+        homepage: str | None = None,
+        private: bool | None = None,
+        has_issues: bool | None = None,
+        has_projects: bool | None = None,
+        has_downloads: bool | None = None,
+        has_wiki: bool | None = None,
     ) -> dict[str, Any]:
         """Update repository settings.
 
@@ -662,7 +666,7 @@ class GitHubClient:
         Raises:
             GitHubError: If update fails
         """
-        payload = {}
+        payload: dict[str, Any] = {}
 
         if description is not None:
             payload["description"] = description
@@ -772,8 +776,8 @@ class GitHubClient:
     def list_issues(
         self,
         state: Literal["open", "closed", "all"] = "open",
-        labels: Optional[list[str]] = None,
-        milestone: Optional[int] = None,
+        labels: list[str] | None = None,
+        milestone: int | None = None,
     ) -> list[dict[str, Any]]:
         """List issues in the repository.
 
