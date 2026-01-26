@@ -7,12 +7,16 @@ Tests the complete end-to-end initialization workflow including:
 - Output validation
 """
 
+import os
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from start_green_stay_green.cli import app
+
+# Check if API key is available for AI-powered generator tests
+HAS_API_KEY = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"))
 
 
 class TestInitFlowIntegration:
@@ -168,7 +172,7 @@ class TestInitFlowIntegration:
         assert "repos:" in content
         assert "hooks:" in content
 
-    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
+    @pytest.mark.skipif(not HAS_API_KEY, reason="Requires API key for AI-powered generators")
     def test_init_generates_github_workflows(self, tmp_path: Path) -> None:
         """Test init creates GitHub Actions workflows."""
         runner = CliRunner()
@@ -198,7 +202,7 @@ class TestInitFlowIntegration:
             workflow_path = workflows_dir / workflow_name
             assert workflow_path.exists(), f"Missing workflow: {workflow_name}"
 
-    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
+    @pytest.mark.skipif(not HAS_API_KEY, reason="Requires API key for AI-powered generators")
     def test_init_generates_claude_md(self, tmp_path: Path) -> None:
         """Test init creates CLAUDE.md file."""
         runner = CliRunner()
@@ -269,7 +273,7 @@ class TestInitFlowIntegration:
             content = skill_file.read_text()
             assert len(content) > 100, f"Skill {skill} has insufficient content"
 
-    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
+    @pytest.mark.skipif(not HAS_API_KEY, reason="Requires API key for AI-powered generators")
     def test_init_generates_subagents_directory(self, tmp_path: Path) -> None:
         """Test init creates .claude/subagents directory."""
         runner = CliRunner()
@@ -293,7 +297,7 @@ class TestInitFlowIntegration:
         assert subagents_dir.exists()
         assert subagents_dir.is_dir()
 
-    @pytest.mark.skip(reason="Issue #106: Generator integration not yet complete")
+    @pytest.mark.skipif(not HAS_API_KEY, reason="Requires API key for AI-powered generators")
     def test_init_generates_architecture_rules(self, tmp_path: Path) -> None:
         """Test init creates architecture enforcement rules."""
         runner = CliRunner()
