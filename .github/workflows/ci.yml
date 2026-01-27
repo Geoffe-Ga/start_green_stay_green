@@ -93,10 +93,10 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run unit tests with coverage
-        run: ./scripts/test.sh --unit --coverage
+        run: ./scripts/test.sh --unit --coverage --ci
 
       - name: Run integration tests
-        run: ./scripts/test.sh --integration
+        run: ./scripts/test.sh --integration --ci
 
       - name: Extract coverage percentage
         if: matrix.python-version == '3.11'
