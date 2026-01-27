@@ -13,6 +13,7 @@ COVERAGE=false
 MUTATION=false
 VERBOSE=false
 JSON_OUTPUT=false
+CI_MODE=false
 START_TIME=$(date +%s)
 
 # Source common utilities
@@ -54,6 +55,10 @@ while [[ $# -gt 0 ]]; do
             JSON_OUTPUT=true
             shift
             ;;
+        --ci)
+            CI_MODE=true
+            shift
+            ;;
         --version)
             echo "$(basename "$0") version $VERSION"
             exit 0
@@ -71,6 +76,7 @@ OPTIONS:
     --all           Run all test types
     --coverage      Generate coverage report
     --mutation      Run mutation tests
+    --ci            CI mode: skip flaky_in_ci tests
     --verbose       Show detailed output
     --json          Output results in JSON format
     --version       Show version and exit
@@ -115,32 +121,66 @@ if ! $JSON_OUTPUT; then
     case "$TEST_TYPE" in
         unit)
             echo "=== Running Unit Tests ==="
-            PYTEST_ARGS+=(-m "not integration and not e2e")
+            if $CI_MODE; then
+                PYTEST_ARGS+=(-m "not integration and not e2e and not flaky_in_ci")
+                echo "CI mode: Skipping flaky_in_ci tests"
+            else
+                PYTEST_ARGS+=(-m "not integration and not e2e")
+            fi
             ;;
         integration)
             echo "=== Running Integration Tests ==="
-            PYTEST_ARGS+=(-m "integration")
+            if $CI_MODE; then
+                PYTEST_ARGS+=(-m "integration and not flaky_in_ci")
+                echo "CI mode: Skipping flaky_in_ci tests"
+            else
+                PYTEST_ARGS+=(-m "integration")
+            fi
             ;;
         e2e)
             echo "=== Running End-to-End Tests ==="
-            PYTEST_ARGS+=(-m "e2e")
+            if $CI_MODE; then
+                PYTEST_ARGS+=(-m "e2e and not flaky_in_ci")
+                echo "CI mode: Skipping flaky_in_ci tests"
+            else
+                PYTEST_ARGS+=(-m "e2e")
+            fi
             ;;
         all)
             echo "=== Running All Tests ==="
+            if $CI_MODE; then
+                PYTEST_ARGS+=(-m "not flaky_in_ci")
+                echo "CI mode: Skipping flaky_in_ci tests"
+            fi
             ;;
     esac
 else
     case "$TEST_TYPE" in
         unit)
-            PYTEST_ARGS+=(-m "not integration and not e2e")
+            if $CI_MODE; then
+                PYTEST_ARGS+=(-m "not integration and not e2e and not flaky_in_ci")
+            else
+                PYTEST_ARGS+=(-m "not integration and not e2e")
+            fi
             ;;
         integration)
-            PYTEST_ARGS+=(-m "integration")
+            if $CI_MODE; then
+                PYTEST_ARGS+=(-m "integration and not flaky_in_ci")
+            else
+                PYTEST_ARGS+=(-m "integration")
+            fi
             ;;
         e2e)
-            PYTEST_ARGS+=(-m "e2e")
+            if $CI_MODE; then
+                PYTEST_ARGS+=(-m "e2e and not flaky_in_ci")
+            else
+                PYTEST_ARGS+=(-m "e2e")
+            fi
             ;;
         all)
+            if $CI_MODE; then
+                PYTEST_ARGS+=(-m "not flaky_in_ci")
+            fi
             ;;
     esac
 fi

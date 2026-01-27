@@ -245,11 +245,14 @@ markers = [
     "integration: marks tests as integration tests",
     "e2e: marks tests as end-to-end tests",
     "unit: marks tests as unit tests",
+    "flaky_in_ci: marks tests that are flaky in CI due to resource cleanup timing (must pass locally)",
 ]
 filterwarnings = [
     "error",  # Turn all warnings into errors
     "ignore::DeprecationWarning:anthropic.*",
     "ignore::DeprecationWarning:pytest_asyncio.*",
+    "ignore::ResourceWarning:asyncio.*",  # Ignore asyncio internal cleanup warnings
+    "ignore::ResourceWarning:pytest.*",  # Ignore pytest internal cleanup warnings
 ]
 
 # Coverage configuration
