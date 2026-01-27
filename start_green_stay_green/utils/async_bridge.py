@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, TypeVar
-from collections.abc import Coroutine
+from typing import Any
+from typing import TYPE_CHECKING
+from typing import TypeVar
+
+if TYPE_CHECKING:
+    from collections.abc import Coroutine
 
 T = TypeVar("T")
 

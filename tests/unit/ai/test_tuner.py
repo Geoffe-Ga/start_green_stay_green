@@ -8,15 +8,15 @@ from unittest.mock import create_autospec
 import pytest
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
-
-if TYPE_CHECKING:
-    from pytest_mock import MockerFixture
 from start_green_stay_green.ai.orchestrator import GenerationError
 from start_green_stay_green.ai.orchestrator import GenerationResult
 from start_green_stay_green.ai.orchestrator import ModelConfig
 from start_green_stay_green.ai.orchestrator import TokenUsage
 from start_green_stay_green.ai.tuner import ContentTuner
 from start_green_stay_green.ai.tuner import TuningResult
+
+if TYPE_CHECKING:
+    from pytest_mock import MockerFixture
 
 
 class TestTuningResult:

@@ -19,14 +19,14 @@ from rich.progress import TextColumn
 import typer
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
-from start_green_stay_green.generators.precommit import GenerationConfig
-from start_green_stay_green.generators.precommit import PreCommitGenerator
-from start_green_stay_green.generators.scripts import ScriptConfig
-from start_green_stay_green.generators.scripts import ScriptsGenerator
-from start_green_stay_green.generators.architecture import ArchitectureEnforcementGenerator
+from start_green_stay_green.generators.architecture import (
+    ArchitectureEnforcementGenerator,
+)
 from start_green_stay_green.generators.ci import CIGenerator
 from start_green_stay_green.generators.claude_md import ClaudeMdGenerator
-from start_green_stay_green.generators.github_actions import GitHubActionsReviewGenerator
+from start_green_stay_green.generators.github_actions import (
+    GitHubActionsReviewGenerator,
+)
 from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import PreCommitGenerator
 from start_green_stay_green.generators.scripts import ScriptConfig
@@ -534,11 +534,197 @@ def _copy_reference_skills(target_dir: Path) -> None:
         target_file.write_text(source_file.read_text())
 
 
+def _generate_scripts_step(
+    project_path: Path, project_name: str, language: str, progress: Progress
+) -> None:
+    """Generate quality scripts with progress indicator."""
+    task = progress.add_task("Generating scripts...", total=None)
+    scripts_config = ScriptConfig(
+        language=language,
+        package_name=project_name.replace("-", "_"),
+    )
+    scripts_generator = ScriptsGenerator(
+        output_dir=project_path / "scripts",
+        config=scripts_config,
+    )
+    scripts_generator.generate()
+    progress.update(task, completed=True)
+
+
+def _generate_precommit_step(
+    project_path: Path, project_name: str, language: str, progress: Progress
+) -> None:
+    """Generate pre-commit configuration with progress indicator."""
+    task = progress.add_task("Generating pre-commit config...", total=None)
+    precommit_config = GenerationConfig(
+        project_name=project_name,
+        language=language,
+        language_config={},
+    )
+    precommit_generator = PreCommitGenerator(orchestrator=None)
+    precommit_content = precommit_generator.generate(precommit_config)
+    precommit_file = project_path / ".pre-commit-config.yaml"
+    precommit_file.write_text(precommit_content)
+    progress.update(task, completed=True)
+
+
+def _generate_skills_step(project_path: Path, progress: Progress) -> None:
+    """Generate Claude skills with progress indicator."""
+    task = progress.add_task("Generating skills...", total=None)
+    skills_dir = project_path / ".claude" / "skills"
+    _copy_reference_skills(skills_dir)
+    progress.update(task, completed=True)
+
+
+def _generate_ci_step(
+    project_path: Path,
+    language: str,
+    orchestrator: AIOrchestrator | None,
+    progress: Progress,
+) -> None:
+    """Generate CI pipeline or skip if no orchestrator."""
+    if orchestrator:
+        task = progress.add_task("Generating CI pipeline...", total=None)
+        ci_generator = CIGenerator(orchestrator, language)
+        workflow = ci_generator.generate_workflow()
+        workflows_dir = project_path / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True, exist_ok=True)
+        (workflows_dir / "ci.yml").write_text(workflow.content)
+        progress.update(task, completed=True)
+    else:
+        task = progress.add_task("Skipping CI (no API key)...", total=None)
+        progress.update(task, completed=True)
+
+
+def _generate_review_step(
+    project_path: Path, orchestrator: AIOrchestrator | None, progress: Progress
+) -> None:
+    """Generate GitHub Actions code review or skip if no orchestrator."""
+    if orchestrator:
+        task = progress.add_task("Generating GitHub Actions review...", total=None)
+        review_generator = GitHubActionsReviewGenerator(orchestrator)
+        review_result = review_generator.generate()
+        workflows_dir = project_path / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True, exist_ok=True)
+        (workflows_dir / "code-review.yml").write_text(review_result.workflow_content)
+        progress.update(task, completed=True)
+    else:
+        task = progress.add_task("Skipping code review (no API key)...", total=None)
+        progress.update(task, completed=True)
+
+
+def _generate_claude_md_step(
+    project_path: Path,
+    project_name: str,
+    language: str,
+    orchestrator: AIOrchestrator | None,
+    progress: Progress,
+) -> None:
+    """Generate CLAUDE.md or skip if no orchestrator."""
+    if orchestrator:
+        task = progress.add_task("Generating CLAUDE.md...", total=None)
+        claude_md_generator = ClaudeMdGenerator(orchestrator)
+        project_config = {
+            "project_name": project_name,
+            "language": language,
+            "scripts": [
+                "check-all.sh",
+                "test.sh",
+                "lint.sh",
+                "format.sh",
+                "security.sh",
+                "mutation.sh",
+            ],
+            "skills": REQUIRED_SKILLS.copy(),
+        }
+        claude_md_result = claude_md_generator.generate(project_config)
+        (project_path / "CLAUDE.md").write_text(claude_md_result.content)
+        progress.update(task, completed=True)
+    else:
+        task = progress.add_task("Skipping CLAUDE.md (no API key)...", total=None)
+        progress.update(task, completed=True)
+
+
+def _generate_architecture_step(
+    project_path: Path,
+    project_name: str,
+    language: str,
+    orchestrator: AIOrchestrator | None,
+    progress: Progress,
+) -> None:
+    """Generate architecture rules or skip if no orchestrator."""
+    if orchestrator:
+        task = progress.add_task("Generating architecture rules...", total=None)
+        arch_generator = ArchitectureEnforcementGenerator(
+            orchestrator,
+            output_dir=project_path / "plans" / "architecture",
+        )
+        arch_generator.generate(language=language, project_name=project_name)
+        progress.update(task, completed=True)
+    else:
+        task = progress.add_task(
+            "Skipping architecture rules (no API key)...", total=None
+        )
+        progress.update(task, completed=True)
+
+
+def _generate_subagents_step(
+    project_path: Path,
+    project_name: str,
+    language: str,
+    orchestrator: AIOrchestrator | None,
+    progress: Progress,
+) -> None:
+    """Generate subagents or skip if no orchestrator."""
+    if orchestrator:
+        task = progress.add_task("Generating subagents...", total=None)
+        subagents_dir = project_path / ".claude" / "agents"
+        subagents_generator = SubagentsGenerator(
+            orchestrator, reference_dir=subagents_dir
+        )
+        project_config_for_agents = (
+            f"Project: {project_name}, "
+            f"Language: {language}, "
+            f"Type: quality-control-tool"
+        )
+        results = run_async(
+            subagents_generator.generate_all_agents(project_config_for_agents)
+        )
+        subagents_dir.mkdir(parents=True, exist_ok=True)
+        for agent_name, result in results.items():
+            (subagents_dir / f"{agent_name}.md").write_text(result.content)
+        progress.update(task, completed=True)
+    else:
+        task = progress.add_task("Skipping subagents (no API key)...", total=None)
+        progress.update(task, completed=True)
+
+
+def _generate_with_orchestrator(
+    project_path: Path,
+    project_name: str,
+    language: str,
+    orchestrator: AIOrchestrator | None,
+    progress: Progress,
+) -> None:
+    """Generate AI-powered artifacts (CI, CLAUDE.md, etc.) with progress indicators."""
+    _generate_ci_step(project_path, language, orchestrator, progress)
+    _generate_review_step(project_path, orchestrator, progress)
+    _generate_claude_md_step(
+        project_path, project_name, language, orchestrator, progress
+    )
+    _generate_architecture_step(
+        project_path, project_name, language, orchestrator, progress
+    )
+    _generate_subagents_step(
+        project_path, project_name, language, orchestrator, progress
+    )
+
+
 def _generate_project_files(
     project_path: Path,
     project_name: str,
     language: str,
-    orchestrator: AIOrchestrator | None,  # noqa: ARG001  # Will be used in Phase 5
+    orchestrator: AIOrchestrator | None,
 ) -> None:
     """Generate all project files with progress indicators.
 
@@ -558,142 +744,12 @@ def _generate_project_files(
             TextColumn("[progress.description]{task.description}"),
             console=console,
         ) as progress:
-            # Generate quality scripts
-            task = progress.add_task("Generating scripts...", total=None)
-            scripts_config = ScriptConfig(
-                language=language,
-                package_name=project_name.replace("-", "_"),
+            _generate_scripts_step(project_path, project_name, language, progress)
+            _generate_precommit_step(project_path, project_name, language, progress)
+            _generate_skills_step(project_path, progress)
+            _generate_with_orchestrator(
+                project_path, project_name, language, orchestrator, progress
             )
-            scripts_generator = ScriptsGenerator(
-                output_dir=project_path / "scripts",
-                config=scripts_config,
-            )
-            scripts_generator.generate()
-            progress.update(task, completed=True)
-
-            # Generate pre-commit configuration
-            task = progress.add_task("Generating pre-commit config...", total=None)
-            precommit_config = GenerationConfig(
-                project_name=project_name,
-                language=language,
-                language_config={},
-            )
-            precommit_generator = PreCommitGenerator(orchestrator=None)
-            precommit_content = precommit_generator.generate(precommit_config)
-            precommit_file = project_path / ".pre-commit-config.yaml"
-            precommit_file.write_text(precommit_content)
-            progress.update(task, completed=True)
-
-            # Generate Claude skills
-            task = progress.add_task("Generating skills...", total=None)
-            skills_dir = project_path / ".claude" / "skills"
-            _copy_reference_skills(skills_dir)
-            progress.update(task, completed=True)
-
-            # Generate CI pipeline
-            if orchestrator:
-                task = progress.add_task("Generating CI pipeline...", total=None)
-                ci_generator = CIGenerator(orchestrator, language)
-                workflow = ci_generator.generate_workflow()
-                workflows_dir = project_path / ".github" / "workflows"
-                workflows_dir.mkdir(parents=True, exist_ok=True)
-                ci_file = workflows_dir / "ci.yml"
-                ci_file.write_text(workflow.content)
-                progress.update(task, completed=True)
-            else:
-                task = progress.add_task("Skipping CI (no API key)...", total=None)
-                progress.update(task, completed=True)
-
-            # Generate GitHub Actions code review workflow
-            if orchestrator:
-                task = progress.add_task(
-                    "Generating GitHub Actions review...", total=None
-                )
-                review_generator = GitHubActionsReviewGenerator(orchestrator)
-                review_result = review_generator.generate()
-                workflows_dir = project_path / ".github" / "workflows"
-                workflows_dir.mkdir(parents=True, exist_ok=True)
-                review_file = workflows_dir / "code-review.yml"
-                review_file.write_text(review_result.workflow_content)
-                progress.update(task, completed=True)
-            else:
-                task = progress.add_task(
-                    "Skipping code review (no API key)...", total=None
-                )
-                progress.update(task, completed=True)
-
-            # Generate CLAUDE.md
-            if orchestrator:
-                task = progress.add_task("Generating CLAUDE.md...", total=None)
-                claude_md_generator = ClaudeMdGenerator(orchestrator)
-                project_config = {
-                    "project_name": project_name,
-                    "language": language,
-                    "scripts": [
-                        "check-all.sh",
-                        "test.sh",
-                        "lint.sh",
-                        "format.sh",
-                        "security.sh",
-                        "mutation.sh",
-                    ],
-                    "skills": REQUIRED_SKILLS.copy(),
-                }
-                claude_md_result = claude_md_generator.generate(project_config)
-                claude_md_file = project_path / "CLAUDE.md"
-                claude_md_file.write_text(claude_md_result.content)
-                progress.update(task, completed=True)
-            else:
-                task = progress.add_task("Skipping CLAUDE.md (no API key)...", total=None)
-                progress.update(task, completed=True)
-
-            # Generate architecture enforcement rules
-            if orchestrator:
-                task = progress.add_task(
-                    "Generating architecture rules...", total=None
-                )
-                arch_generator = ArchitectureEnforcementGenerator(
-                    orchestrator,
-                    output_dir=project_path / "plans" / "architecture",
-                )
-                arch_generator.generate(language=language, project_name=project_name)
-                progress.update(task, completed=True)
-            else:
-                task = progress.add_task(
-                    "Skipping architecture rules (no API key)...", total=None
-                )
-                progress.update(task, completed=True)
-
-            # Generate subagents (async via bridge)
-            if orchestrator:
-                task = progress.add_task("Generating subagents...", total=None)
-                subagents_dir = project_path / ".claude" / "agents"
-                subagents_generator = SubagentsGenerator(
-                    orchestrator, reference_dir=subagents_dir
-                )
-
-                # Build project configuration for agent context
-                project_config_for_agents = (
-                    f"Project: {project_name}, "
-                    f"Language: {language}, "
-                    f"Type: quality-control-tool"
-                )
-
-                # Use async bridge to run async code
-                results = run_async(
-                    subagents_generator.generate_all_agents(project_config_for_agents)
-                )
-
-                # Write generated agents to files
-                subagents_dir.mkdir(parents=True, exist_ok=True)
-                for agent_name, result in results.items():
-                    agent_file = subagents_dir / f"{agent_name}.md"
-                    agent_file.write_text(result.content)
-
-                progress.update(task, completed=True)
-            else:
-                task = progress.add_task("Skipping subagents (no API key)...", total=None)
-                progress.update(task, completed=True)
 
         console.print(
             f"\n[green]✓[/green] Project generated successfully at: {project_path}"
