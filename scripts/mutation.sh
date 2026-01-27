@@ -95,8 +95,9 @@ cleanup_mutation_cache() {
     fi
 }
 
-# Set up cleanup trap for interrupts
-trap cleanup_mutation_cache INT TERM EXIT
+# Set up cleanup trap for interrupts only (not normal exit)
+# Cache is preserved on successful completion for analysis
+trap cleanup_mutation_cache INT TERM
 
 # Ensure venv is available
 ensure_venv || exit 2
