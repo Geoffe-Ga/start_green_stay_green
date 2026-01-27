@@ -27,6 +27,7 @@ class TestOrchestratorEndToEndWorkflows:
         # Setup complete mock response
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
 
         text_block = create_autospec(TextBlock, instance=True)
         text_block.text = "name: test-project\nversion: 1.0.0"
@@ -79,6 +80,7 @@ class TestOrchestratorEndToEndWorkflows:
         """Test resilience: failure → retry → recovery → success."""
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
 
         # Create successful response
         text_block = create_autospec(TextBlock, instance=True)
@@ -124,6 +126,7 @@ class TestOrchestratorEndToEndWorkflows:
         """Test failure handling: persistent errors → max retries → error."""
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
 
         # Simulate persistent failure
         persistent_error = Exception("Persistent API unavailability")
@@ -157,6 +160,7 @@ class TestOrchestratorEndToEndWorkflows:
         """Test generating multiple formats with same orchestrator."""
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
 
         # Setup responses for different formats
         def create_mock_response(
@@ -209,6 +213,7 @@ class TestOrchestratorEndToEndWorkflows:
         """Test custom configuration: non-default model, retries, delay."""
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
 
         text_block = create_autospec(TextBlock, instance=True)
         text_block.text = "Custom config response"

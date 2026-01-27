@@ -271,6 +271,7 @@ class TestAIOrchestrator:
         """Test generate returns GenerationResult with valid prompt."""
         # Setup mock API response
         mock_client = mock_anthropic.return_value = MagicMock()
+        mock_client.__enter__.return_value = mock_client
         mock_response = MagicMock()
         mock_response.id = "msg_test123"
 
@@ -326,6 +327,7 @@ class TestAIOrchestrator:
         """Test generate accepts all supported output formats."""
         # Setup mock API response
         mock_client = mock_anthropic.return_value = MagicMock()
+        mock_client.__enter__.return_value = mock_client
         mock_response = MagicMock()
         mock_response.id = "msg_test123"
 
@@ -358,6 +360,7 @@ class TestAIOrchestrator:
         # Setup mock to raise an exception
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
         api_error = Exception("API connection failed")
         mock_client.messages.create.side_effect = api_error
 
@@ -374,6 +377,7 @@ class TestAIOrchestrator:
         """Test generate initializes Anthropic client with API key."""
         # Setup mock API response
         mock_client = mock_anthropic.return_value = MagicMock()
+        mock_client.__enter__.return_value = mock_client
         mock_response = MagicMock()
         mock_response.id = "msg_test123"
 
@@ -404,6 +408,7 @@ class TestAIOrchestrator:
         # Setup mock to fail twice, then succeed
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
 
         # Create successful response
         mock_response = MagicMock()
@@ -444,6 +449,7 @@ class TestAIOrchestrator:
         # Setup mock to fail twice, then succeed
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
 
         mock_response = MagicMock()
         mock_response.id = "msg_success"
@@ -481,6 +487,7 @@ class TestAIOrchestrator:
         # Setup mock to always fail
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
         mock_client.messages.create.side_effect = Exception("Persistent API error")
 
         orchestrator = AIOrchestrator(api_key="test-key", max_retries=2)
@@ -502,6 +509,7 @@ class TestAIOrchestrator:
         # Setup mock to succeed immediately
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
 
         mock_response = MagicMock()
         mock_response.id = "msg_success"
@@ -629,6 +637,7 @@ class TestMutationKillers:
         """
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
 
         # Setup to fail 3 times then succeed
         text_block = create_autospec(TextBlock, instance=True)
@@ -684,6 +693,7 @@ class TestMutationKillers:
         """
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
 
         # Always fail to exhaust retries
         mock_client.messages.create.side_effect = Exception("Persistent error")
@@ -716,6 +726,7 @@ class TestMutationKillers:
         """
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
         mock_client.messages.create.side_effect = Exception("Immediate failure")
 
         orchestrator = AIOrchestrator(
@@ -743,6 +754,7 @@ class TestMutationKillers:
         """
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
 
         # Create response with non-TextBlock content (e.g., ImageBlock)
         mock_response = MagicMock()
@@ -772,6 +784,7 @@ class TestMutationKillers:
         """
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
 
         text_block = create_autospec(TextBlock, instance=True)
         text_block.text = "Test YAML content"
@@ -845,6 +858,7 @@ class TestMutationKillers:
         """
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
 
         text_block = create_autospec(TextBlock, instance=True)
         text_block.text = "Response"
@@ -939,6 +953,7 @@ class TestMutationKillers:
         ) as mock_anthropic:
             mock_client = MagicMock()
             mock_anthropic.return_value = mock_client
+            mock_client.__enter__.return_value = mock_client
 
             # Create response with non-TextBlock content
             mock_response = MagicMock()
@@ -974,6 +989,7 @@ class TestMutationKillers:
         # Setup mock to fail all attempts
         mock_client = MagicMock()
         mock_anthropic.return_value = mock_client
+        mock_client.__enter__.return_value = mock_client
         test_exception = ValueError("Test error")
         mock_client.messages.create.side_effect = test_exception
 
