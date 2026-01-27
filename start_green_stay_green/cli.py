@@ -857,7 +857,7 @@ def init(  # noqa: PLR0913
         )
     except typer.BadParameter as e:
         console.print(f"[red]Error:[/red] {e}", style="bold")
-        raise typer.Exit(code=1) from e
+        sys.exit(1)
 
     # Handle dry-run mode (skip orchestrator initialization for preview)
     if dry_run:
