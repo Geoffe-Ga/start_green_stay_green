@@ -134,8 +134,7 @@ jobs:
           path: test-py${{ matrix.python-version }}-job-timing.txt
           retention-days: 7
 
-  # Job 3: Mutation Testing (main branch only)
-  # Job 4: Security Scanning
+  # Job 3: Security Scanning
   security:
     name: Security Scanning
     runs-on: ubuntu-latest
