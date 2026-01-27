@@ -251,6 +251,8 @@ filterwarnings = [
     "error",  # Turn all warnings into errors
     "ignore::DeprecationWarning:anthropic.*",
     "ignore::DeprecationWarning:pytest_asyncio.*",
+    "ignore::ResourceWarning:asyncio.*",  # Ignore asyncio internal cleanup warnings
+    "ignore::ResourceWarning:pytest.*",  # Ignore pytest internal cleanup warnings
 ]
 
 # Coverage configuration
