@@ -519,7 +519,7 @@ class TestScriptsGeneratorErrorHandling:
     """Test error handling in scripts."""
 
     def test_python_scripts_have_error_handling(self) -> None:
-        """Test Python scripts have set -euo pipefail."""
+        """Test bash scripts have set -euo pipefail."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
                 language="python",
@@ -528,9 +528,11 @@ class TestScriptsGeneratorErrorHandling:
             generator = ScriptsGenerator(Path(tmpdir), config)
             scripts = generator.generate()
 
+            # Only check bash scripts (.sh files) for bash error handling
             for script_path in scripts.values():
-                content = script_path.read_text()
-                assert "set -euo pipefail" in content
+                if script_path.suffix == ".sh":
+                    content = script_path.read_text()
+                    assert "set -euo pipefail" in content
 
     def test_python_scripts_have_exit_codes(self) -> None:
         """Test Python scripts document exit codes."""
@@ -692,10 +694,11 @@ class TestMutationKillers:
             assert "clippy" in content
 
     def test_generated_scripts_exact_count_python(self) -> None:
-        """Test Python generator creates EXACTLY 8 scripts.
+        """Test Python generator creates EXACTLY 9 scripts.
 
         Kills mutations in script count logic.
-        Scripts: check-all, format, lint, test, fix-all, security, complexity, mutation
+        Scripts: check-all, format, lint, test, fix-all, security, complexity,
+        mutation, analyze_mutations.py
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
@@ -705,9 +708,9 @@ class TestMutationKillers:
             generator = ScriptsGenerator(Path(tmpdir), config)
             scripts = generator.generate()
 
-            assert len(scripts) == 8
-            assert len(scripts) > 7
-            assert len(scripts) < 9
+            assert len(scripts) == 9
+            assert len(scripts) > 8
+            assert len(scripts) < 10
 
     def test_generated_scripts_exact_count_typescript(self) -> None:
         """Test TypeScript generator creates EXACTLY 5 scripts."""
@@ -1000,3 +1003,264 @@ class TestPythonMutationScript:
             assert "exit 0" in content
             assert "exit 1" in content
             assert "exit 2" in content
+
+
+class TestPythonAnalyzeMutationsScript:
+    """Test Python analyze_mutations.py script generation.
+
+    Verifies the token-efficient mutation analysis script is generated correctly.
+    """
+
+    def test_analyze_mutations_script_is_generated(self) -> None:
+        """Test analyze_mutations.py is included in generated scripts."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            assert "analyze_mutations.py" in scripts
+            assert scripts["analyze_mutations.py"].exists()
+
+    def test_analyze_mutations_script_is_executable(self) -> None:
+        """Test analyze_mutations.py is executable."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            script_path = scripts["analyze_mutations.py"]
+            assert script_path.stat().st_mode & 0o111
+
+    def test_analyze_mutations_script_has_shebang(self) -> None:
+        """Test analyze_mutations.py has Python shebang."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert content.startswith("#!/usr/bin/env python3")
+
+    def test_analyze_mutations_script_has_docstring(self) -> None:
+        """Test analyze_mutations.py has module docstring."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert '"""Analyze mutmut cache database' in content
+            assert "mutation testing insights" in content
+
+    def test_analyze_mutations_script_has_sqlite3_import(self) -> None:
+        """Test analyze_mutations.py imports sqlite3 for cache analysis."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "import sqlite3" in content
+
+    def test_analyze_mutations_script_has_argparse(self) -> None:
+        """Test analyze_mutations.py uses argparse for CLI."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "import argparse" in content
+            assert "ArgumentParser" in content
+
+    def test_analyze_mutations_script_has_mutation_score_threshold(self) -> None:
+        """Test analyze_mutations.py has 80% threshold constant."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "MINIMUM_MUTATION_SCORE = 80" in content
+
+    def test_analyze_mutations_script_has_analyze_cache_function(self) -> None:
+        """Test analyze_mutations.py has analyze_cache function."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "def analyze_cache(" in content
+            assert "cache_path: Path" in content
+            assert "top_files: int" in content
+            assert "filter_file: str | None" in content
+
+    def test_analyze_mutations_script_has_main_function(self) -> None:
+        """Test analyze_mutations.py has main() entry point."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "def main() -> None:" in content
+            assert 'if __name__ == "__main__":' in content
+
+    def test_analyze_mutations_script_has_cli_arguments(self) -> None:
+        """Test analyze_mutations.py supports --cache, --top, and filename args."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "--cache" in content
+            assert "--top" in content
+            assert '"filename"' in content
+
+    def test_analyze_mutations_script_queries_mutant_status(self) -> None:
+        """Test analyze_mutations.py queries mutant status from cache."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "ok_killed" in content
+            assert "bad_survived" in content
+            assert "ok_suspicious" in content
+            assert "bad_timeout" in content
+
+    def test_analyze_mutations_script_calculates_mutation_score(self) -> None:
+        """Test analyze_mutations.py calculates mutation score percentage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "Mutation Score:" in content
+            assert "score = (killed / tested_total) * 100" in content
+
+    def test_analyze_mutations_script_shows_top_files(self) -> None:
+        """Test analyze_mutations.py shows files with most survived mutants."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "Files with Most Survived Mutants" in content
+            assert "ORDER BY count DESC" in content
+
+    def test_analyze_mutations_script_shows_sample_mutants(self) -> None:
+        """Test analyze_mutations.py shows sample of survived mutants."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "Sample of survived mutants" in content
+            assert "mutmut show <id>" in content
+            assert "mutmut html" in content
+
+    def test_analyze_mutations_script_has_ruff_noqa_annotations(self) -> None:
+        """Test analyze_mutations.py has appropriate ruff noqa annotations."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "# ruff: noqa: T201" in content  # print() allowed
+            assert "# ruff: noqa: PLR0915" in content  # Many statements allowed
+            assert "# noqa: S608" in content  # SQL string formatting allowed
+
+    def test_analyze_mutations_script_handles_file_filter(self) -> None:
+        """Test analyze_mutations.py supports filtering by filename."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "filter_file" in content
+            assert "AND sf.filename LIKE ?" in content
+
+    def test_analyze_mutations_script_exits_on_missing_cache(self) -> None:
+        """Test analyze_mutations.py exits with error if cache missing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "Cache file not found" in content
+            assert "sys.exit(1)" in content
+
+    def test_analyze_mutations_script_has_helpful_usage_examples(self) -> None:
+        """Test analyze_mutations.py includes usage examples in help."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["analyze_mutations.py"].read_text()
+            assert "Examples:" in content
+            assert "%(prog)s" in content  # argparse example format

@@ -209,24 +209,29 @@ include_ci: true
         assert result.exit_code == 0
         assert output_dir.exists()
 
-    def test_init_defaults_to_current_directory(self) -> None:
+    def test_init_defaults_to_current_directory(self, tmp_path: Path) -> None:
         """Test init command defaults to current directory if no output specified."""
         runner = CliRunner()
-        result = runner.invoke(
-            app,
-            [
-                "init",
-                "--project-name",
-                "test-project",
-                "--language",
-                "python",
-                "--no-interactive",
-            ],
-        )
+        # Use CliRunner's isolated filesystem to prevent polluting working directory
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(
+                app,
+                [
+                    "init",
+                    "--project-name",
+                    "test-project",
+                    "--language",
+                    "python",
+                    "--no-interactive",
+                ],
+            )
 
-        # Should use current directory (may succeed or show directory exists error)
-        # This test verifies the option is optional, not the result
-        assert "--output-dir" not in result.stdout or result.exit_code in (0, 1)
+            # Should use current directory (which is now isolated in tmp_path)
+            # Verify project was created in the isolated current directory
+            assert result.exit_code == 0
+            assert Path("test-project").exists()
+            # Verify we're in the isolated filesystem
+            assert str(Path.cwd()).startswith(str(tmp_path))
 
     def test_init_rejects_path_traversal_in_output_dir(self) -> None:
         """Test init prevents directory traversal attacks."""
