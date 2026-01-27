@@ -23,12 +23,15 @@ import sys
 MINIMUM_MUTATION_SCORE = 80
 
 
-def analyze_cache(cache_path: Path, top_files: int = 20) -> None:
+def analyze_cache(
+    cache_path: Path, top_files: int = 20, filter_file: str | None = None
+) -> None:
     """Analyze mutmut cache and print detailed statistics.
 
     Args:
         cache_path: Path to .mutmut-cache file.
         top_files: Number of top files to show (default: 20).
+        filter_file: Optional filename to filter results (e.g., "cli.py").
     """
     if not cache_path.exists():
         print(f"Error: Cache file not found: {cache_path}", file=sys.stderr)
@@ -38,16 +41,42 @@ def analyze_cache(cache_path: Path, top_files: int = 20) -> None:
     conn = sqlite3.connect(cache_path)
     cursor = conn.cursor()
 
-    print("=== Mutmut Cache Analysis ===\n")
+    # Build file filter condition
+    file_filter_sql = ""
+    file_filter_params: tuple[str, ...] = ()
+    if filter_file:
+        # Match any path ending with the specified file
+        file_filter_sql = """
+            AND sf.filename LIKE ?
+        """
+        file_filter_params = (f"%{filter_file}",)
+        print(f"=== Mutmut Cache Analysis (filtered: {filter_file}) ===\n")
+    else:
+        print("=== Mutmut Cache Analysis ===\n")
 
-    # Get total mutants
-    cursor.execute("SELECT COUNT(*) FROM Mutant")
+    # Get total mutants (with optional filter)
+    query = f"""  # noqa: S608
+        SELECT COUNT(*)
+        FROM Mutant m, Line l, SourceFile sf
+        WHERE m.line = l.id
+          AND l.sourcefile = sf.id
+          {file_filter_sql}
+    """
+    cursor.execute(query, file_filter_params)
     total = cursor.fetchone()[0]
     print(f"Total mutants: {total}")
     print()
 
-    # Get status counts
-    cursor.execute("SELECT status, COUNT(*) FROM Mutant GROUP BY status")
+    # Get status counts (with optional filter)
+    query = f"""  # noqa: S608
+        SELECT m.status, COUNT(*)
+        FROM Mutant m, Line l, SourceFile sf
+        WHERE m.line = l.id
+          AND l.sourcefile = sf.id
+          {file_filter_sql}
+        GROUP BY m.status
+    """
+    cursor.execute(query, file_filter_params)
     status_counts = dict(cursor.fetchall())
     killed = status_counts.get("ok_killed", 0)
     survived = status_counts.get("bad_survived", 0)
@@ -87,40 +116,39 @@ def analyze_cache(cache_path: Path, top_files: int = 20) -> None:
                 print(msg)
                 print()
 
-    # Show files with most survived mutants
+    # Show files with most survived mutants (with optional filter)
     if survived > 0:
         print(f"=== Files with Most Survived Mutants (Top {top_files}) ===")
-        cursor.execute(
-            """
+        query = f"""  # noqa: S608
             SELECT sf.filename, COUNT(*) as count
             FROM Mutant m, Line l, SourceFile sf
             WHERE m.line = l.id
               AND l.sourcefile = sf.id
               AND m.status = "bad_survived"
+              {file_filter_sql}
             GROUP BY sf.filename
             ORDER BY count DESC
             LIMIT ?
-        """,
-            (top_files,),
-        )
+        """
+        cursor.execute(query, (*file_filter_params, top_files))
         for filename, count in cursor.fetchall():
             percentage = (count / survived) * 100
             print(f"  {count:3d} ({percentage:5.1f}%): {filename}")
         print()
 
-        # Show sample of survived mutants
+        # Show sample of survived mutants (with optional filter)
         print("Sample of survived mutants (first 10):")
-        cursor.execute(
-            """
+        query = f"""  # noqa: S608
             SELECT m.id, sf.filename, l.line_number
             FROM Mutant m, Line l, SourceFile sf
             WHERE m.line = l.id
               AND l.sourcefile = sf.id
               AND m.status = "bad_survived"
+              {file_filter_sql}
             ORDER BY sf.filename, l.line_number
             LIMIT 10
         """
-        )
+        cursor.execute(query, file_filter_params)
         for mutant_id, filename, line_number in cursor.fetchall():
             print(f"  Mutant {mutant_id}: {filename}:{line_number}")
         print()
@@ -133,7 +161,17 @@ def analyze_cache(cache_path: Path, top_files: int = 20) -> None:
 def main() -> None:
     """Parse arguments and run cache analysis."""
     parser = argparse.ArgumentParser(
-        description="Analyze mutation testing results from .mutmut-cache"
+        description="Analyze mutation testing results from .mutmut-cache",
+        epilog="Examples:\n"
+        "  %(prog)s                  # Analyze all files\n"
+        "  %(prog)s cli.py           # Analyze only cli.py\n"
+        "  %(prog)s --cache .cache   # Use custom cache file\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "filename",
+        nargs="?",
+        help="Optional filename to filter results (e.g., 'cli.py')",
     )
     parser.add_argument(
         "--cache",
@@ -149,7 +187,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    analyze_cache(args.cache, args.top)
+    analyze_cache(args.cache, args.top, args.filename)
 
 
 if __name__ == "__main__":
