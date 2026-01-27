@@ -76,7 +76,7 @@ class TestClaudeMdGeneratorValidation:
         generator = ClaudeMdGenerator(orchestrator, reference_dir=nonexistent_dir)
 
         with pytest.raises(ValueError, match="Reference directory not found"):
-            generator._validate_reference_dir()  # noqa: SLF001  # noqa: SLF001
+            generator._validate_reference_dir()
 
     def test_validate_reference_dir_not_a_directory(self, tmp_path: Path) -> None:
         """Test validation raises error when path is not a directory."""
@@ -86,7 +86,7 @@ class TestClaudeMdGeneratorValidation:
         generator = ClaudeMdGenerator(orchestrator, reference_dir=file_path)
 
         with pytest.raises(ValueError, match="not a directory"):
-            generator._validate_reference_dir()  # noqa: SLF001
+            generator._validate_reference_dir()
 
     def test_validate_reference_dir_missing_claude_md(self, tmp_path: Path) -> None:
         """Test validation raises error for missing CLAUDE.md file."""
@@ -96,7 +96,7 @@ class TestClaudeMdGeneratorValidation:
         generator = ClaudeMdGenerator(orchestrator, reference_dir=empty_dir)
 
         with pytest.raises(ValueError, match=r"CLAUDE\.md not found"):
-            generator._validate_reference_dir()  # noqa: SLF001
+            generator._validate_reference_dir()
 
     def test_validate_reference_dir_success(self, tmp_path: Path) -> None:
         """Test validation succeeds with valid reference directory."""
@@ -106,7 +106,7 @@ class TestClaudeMdGeneratorValidation:
         (valid_dir / "CLAUDE.md").write_text("# CLAUDE.md\n\nContent")
 
         generator = ClaudeMdGenerator(orchestrator, reference_dir=valid_dir)
-        generator._validate_reference_dir()  # Should not raise  # noqa: SLF001
+        generator._validate_reference_dir()  # Should not raise
 
 
 class TestClaudeMdGeneratorLoadReferences:
@@ -121,7 +121,7 @@ class TestClaudeMdGeneratorLoadReferences:
         (ref_dir / "CLAUDE.md").write_text(claude_md_content)
 
         generator = ClaudeMdGenerator(orchestrator, reference_dir=ref_dir)
-        content = generator._load_claude_md_reference()  # noqa: SLF001
+        content = generator._load_claude_md_reference()
 
         assert content == claude_md_content
 
@@ -134,7 +134,7 @@ class TestClaudeMdGeneratorLoadReferences:
         generator = ClaudeMdGenerator(orchestrator, reference_dir=empty_dir)
 
         with pytest.raises(FileNotFoundError):
-            generator._load_claude_md_reference()  # noqa: SLF001
+            generator._load_claude_md_reference()
 
     def test_load_quality_reference_success(self, tmp_path: Path) -> None:
         """Test loading MAXIMUM_QUALITY_ENGINEERING.md reference file."""
@@ -144,7 +144,7 @@ class TestClaudeMdGeneratorLoadReferences:
         quality_path.write_text(quality_content)
 
         generator = ClaudeMdGenerator(orchestrator, quality_ref_path=quality_path)
-        content = generator._load_quality_reference()  # noqa: SLF001
+        content = generator._load_quality_reference()
 
         assert content == quality_content
 
@@ -156,7 +156,7 @@ class TestClaudeMdGeneratorLoadReferences:
         generator = ClaudeMdGenerator(orchestrator, quality_ref_path=nonexistent_path)
 
         with pytest.raises(FileNotFoundError):
-            generator._load_quality_reference()  # noqa: SLF001
+            generator._load_quality_reference()
 
 
 class TestClaudeMdGeneratorGenerate:
@@ -311,7 +311,7 @@ Content here
 More content
 """
         # Should not raise
-        generator._validate_markdown_structure(valid_markdown)  # noqa: SLF001
+        generator._validate_markdown_structure(valid_markdown)
 
     def test_validate_markdown_missing_h1_title(self) -> None:
         """Test validation fails if no H1 title."""
@@ -323,7 +323,7 @@ More content
 No H1 title
 """
         with pytest.raises(ValueError, match="missing H1 title"):
-            generator._validate_markdown_structure(invalid_markdown)  # noqa: SLF001
+            generator._validate_markdown_structure(invalid_markdown)
 
     def test_validate_markdown_empty_content(self) -> None:
         """Test validation fails for empty content."""
@@ -331,7 +331,7 @@ No H1 title
         generator = ClaudeMdGenerator(orchestrator)
 
         with pytest.raises(ValueError, match="empty"):
-            generator._validate_markdown_structure("")  # noqa: SLF001
+            generator._validate_markdown_structure("")
 
 
 class TestClaudeMdGeneratorIntegration:

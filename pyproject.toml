@@ -137,6 +137,7 @@ ignore = [
     "PLR2004",   # Allow magic values in tests
     "D",         # Don't require docstrings in tests
     "ANN",       # Don't require type annotations in tests
+    "SLF001",    # Allow access to private members in tests
 ]
 "start_green_stay_green/cli.py" = [
     "T201",      # Allow print in CLI
@@ -318,6 +319,8 @@ color = true
 [tool.refurb]
 # Ignore FURB184 (chained assignment with walrus operator) in tests
 # Reason: Reduces test readability
+# Ignore FURB171 (explicit bool comparison) and FURB110 (collection empty check)
+# Reason: Explicit assertions in tests are needed for mutation testing
 ignore = ["FURB184"]
 
 # Pydocstyle configuration
