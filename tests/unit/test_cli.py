@@ -16,6 +16,7 @@ from start_green_stay_green.cli import _generate_project_files
 from start_green_stay_green.cli import _get_api_key_with_source
 from start_green_stay_green.cli import _initialize_orchestrator
 from start_green_stay_green.cli import _load_config_data
+from start_green_stay_green.cli import _load_config_if_specified
 from start_green_stay_green.cli import _prompt_for_api_key
 from start_green_stay_green.cli import _resolve_parameter
 from start_green_stay_green.cli import _show_dry_run_preview
@@ -1095,3 +1096,136 @@ class TestCliMain:
         """cli_main invokes the Typer app."""
         cli_main()
         mock_app.assert_called_once()
+
+
+class TestVerboseModeAndConfig:
+    """Test verbose mode and configuration interactions.
+
+    Kills mutations in verbose output paths and config loading.
+    """
+
+    @patch("start_green_stay_green.cli.console")
+    @patch("start_green_stay_green.cli.load_config_file")
+    def test_load_config_if_specified_prints_when_verbose(
+        self, mock_load: Mock, mock_console: Mock, tmp_path: Path
+    ) -> None:
+        """_load_config_if_specified prints message when verbose is True."""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("")
+        mock_load.return_value = {}
+
+        _load_config_if_specified(config_file, verbose=True)
+
+        # Verify console.print was called with the verbose message
+        mock_console.print.assert_called_once_with(
+            f"[dim]Loaded configuration from {config_file}[/dim]"
+        )
+
+    @patch("start_green_stay_green.cli.console")
+    @patch("start_green_stay_green.cli.load_config_file")
+    def test_load_config_if_specified_silent_when_not_verbose(
+        self, mock_load: Mock, mock_console: Mock, tmp_path: Path
+    ) -> None:
+        """_load_config_if_specified does not print when verbose is False."""
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("")
+        mock_load.return_value = {}
+
+        _load_config_if_specified(config_file, verbose=False)
+
+        # Verify console.print was NOT called
+        mock_console.print.assert_not_called()
+
+
+class TestAPIKeyKeyringSaveFlow:
+    """Test API key keyring save confirmation flows.
+
+    Kills mutations in keyring save success/failure branches.
+    """
+
+    @patch("start_green_stay_green.cli.store_api_key_in_keyring")
+    @patch("start_green_stay_green.cli.console")
+    @patch("start_green_stay_green.cli.typer.confirm")
+    @patch("start_green_stay_green.cli.typer.prompt")
+    def test_prompt_for_api_key_saves_successfully_to_keyring(
+        self,
+        mock_prompt: Mock,
+        mock_confirm: Mock,
+        mock_console: Mock,
+        mock_store: Mock,
+    ) -> None:
+        """API key saved successfully to keyring when user confirms."""
+        mock_prompt.return_value = "test_key"  # pragma: allowlist secret
+        mock_confirm.return_value = True  # User confirms save
+        mock_store.return_value = True  # Save succeeds
+
+        result = _prompt_for_api_key()
+
+        assert result == "test_key"  # pragma: allowlist secret
+        mock_store.assert_called_once_with("test_key")  # pragma: allowlist secret
+        mock_console.print.assert_any_call("[green]✓[/green] API key saved to keyring")
+
+    @patch("start_green_stay_green.cli.store_api_key_in_keyring")
+    @patch("start_green_stay_green.cli.console")
+    @patch("start_green_stay_green.cli.typer.confirm")
+    @patch("start_green_stay_green.cli.typer.prompt")
+    def test_prompt_for_api_key_handles_keyring_save_failure(
+        self,
+        mock_prompt: Mock,
+        mock_confirm: Mock,
+        mock_console: Mock,
+        mock_store: Mock,
+    ) -> None:
+        """Warning message shown when keyring save fails."""
+        mock_prompt.return_value = "test_key"  # pragma: allowlist secret
+        mock_confirm.return_value = True  # User confirms save
+        mock_store.return_value = False  # Save fails
+
+        result = _prompt_for_api_key()
+
+        assert result == "test_key"  # pragma: allowlist secret
+        mock_store.assert_called_once_with("test_key")  # pragma: allowlist secret
+        mock_console.print.assert_any_call(
+            "[yellow]![/yellow] Failed to save to keyring "
+            "(you'll need to provide it again next time)"
+        )
+
+
+class TestInteractiveAPIKeyPromptFlow:
+    """Test interactive API key prompt success path.
+
+    Kills mutations in interactive key acquisition branch.
+    """
+
+    @patch("start_green_stay_green.cli._prompt_for_api_key")
+    @patch("start_green_stay_green.cli.get_api_key_from_keyring")
+    @patch("start_green_stay_green.cli.os.getenv")
+    def test_get_api_key_uses_interactive_prompt_when_provided(
+        self, mock_getenv: Mock, mock_keyring: Mock, mock_prompt: Mock
+    ) -> None:
+        """Interactive prompt used when no other source available."""
+        mock_getenv.return_value = None
+        mock_keyring.return_value = None
+        mock_prompt.return_value = "interactive_key"  # pragma: allowlist secret
+
+        key, source = _get_api_key_with_source(None, no_interactive=False)
+
+        assert key == "interactive_key"  # pragma: allowlist secret
+        assert source == "interactive prompt"
+        mock_prompt.assert_called_once()
+
+    @patch("start_green_stay_green.cli._prompt_for_api_key")
+    @patch("start_green_stay_green.cli.get_api_key_from_keyring")
+    @patch("start_green_stay_green.cli.os.getenv")
+    def test_get_api_key_returns_none_when_interactive_prompt_returns_none(
+        self, mock_getenv: Mock, mock_keyring: Mock, mock_prompt: Mock
+    ) -> None:
+        """None returned when interactive prompt returns None."""
+        mock_getenv.return_value = None
+        mock_keyring.return_value = None
+        mock_prompt.return_value = None
+
+        key, source = _get_api_key_with_source(None, no_interactive=False)
+
+        assert key is None
+        assert source is None
