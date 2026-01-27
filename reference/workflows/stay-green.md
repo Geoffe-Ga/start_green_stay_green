@@ -14,7 +14,7 @@ This workflow enforces iterative quality improvement through sequential gates, p
 
 ---
 
-## The Four Gates
+## The Three Gates
 
 ### Gate 1: Local Pre-Commit (Iterate Until Green)
 
@@ -81,42 +81,7 @@ gh pr checks --watch
 
 ---
 
-### Gate 3: Mutation Testing (Iterate Until 80%+)
-
-**Purpose**: Ensure tests effectively catch bugs (test quality validation).
-
-**Actions**:
-```bash
-# Wait for mutation CI job (runs on main branch merges only)
-# For feature branches, run locally:
-./scripts/mutation.sh
-```
-
-**Threshold**: 80% mutation score minimum
-
-**Mutation Score Calculation**:
-```
-score = (killed_mutants / total_mutants) * 100
-```
-
-**Iteration**:
-- Wait for mutation CI job to complete (or run locally)
-- If score < 80%:
-  1. Review surviving mutants: `mutmut results`
-  2. Add/improve tests to kill mutants
-  3. Run Gate 1 (check-all.sh) again
-  4. Push to branch
-  5. Wait for Gate 2 (CI) to pass
-  6. Wait for mutation job again
-- Repeat until score ≥ 80%
-
-**Proceed When**: Mutation score ≥ 80%
-
-**Note**: Mutation tests run on main branch only in CI (too slow for every PR). Run locally with `./scripts/mutation.sh` for feature branches.
-
----
-
-### Gate 4: Claude Code Review (Iterate Until LGTM)
+### Gate 3: Claude Code Review (Iterate Until LGTM)
 
 **Purpose**: AI-assisted code review for architecture, patterns, and quality.
 
@@ -144,8 +109,7 @@ gh pr checks --watch
   3. Run Gate 1 (check-all.sh) again
   4. Push to branch
   5. Wait for Gate 2 (CI) to pass
-  6. Wait for Gate 3 (mutation) to pass (if applicable)
-  7. Wait for new Claude review
+  6. Wait for new Claude review
 - Use polling/sleep to wait for CI jobs:
   ```bash
   # Wait for CI to complete
@@ -157,6 +121,29 @@ gh pr checks --watch
 - Repeat until Claude provides LGTM with NO reservations
 
 **Proceed When**: Claude review shows "LGTM" or "Approved" with no open concerns
+
+---
+
+### Mutation Testing (Periodic Quality Check)
+
+**Note**: Mutation testing (≥80% score) is **recommended as a periodic quality check** for critical infrastructure, not enforced continuously.
+
+**When to Run**:
+- Before major releases
+- For critical infrastructure (billing, authentication, core algorithms)
+- Quarterly quality audits
+- When test effectiveness is in question
+
+**How to Run**:
+```bash
+# Target specific critical files
+./scripts/mutation.sh --paths-to-mutate path/to/critical/file.py
+
+# Check mutation score
+python scripts/analyze_mutations.py critical-file.py
+```
+
+**Why Periodic**: Mutation testing provides valuable insights but takes 20-30 minutes per run. Running it continuously was breaking developer flow state. The new approach maintains quality through comprehensive test coverage (≥90%) while using mutation testing strategically for highest-risk code.
 
 ---
 
@@ -185,19 +172,7 @@ def stay_green_workflow():
             run("pre-commit run --all-files")
             git("push origin feature-branch")
 
-    # Gate 3: Mutation Testing
-    while mutation_score() < 80:
-        wait_for_mutation_job()  # Or run locally
-        if mutation_score() < 80:
-            review_surviving_mutants()
-            add_tests_to_kill_mutants()
-            # Re-run Gate 1
-            run("pre-commit run --all-files")
-            git("push origin feature-branch")
-            # Re-run Gate 2
-            wait_for_ci_completion()
-
-    # Gate 4: Claude Code Review
+    # Gate 3: Claude Code Review
     while not claude_approved():
         wait_for_claude_review()
         if has_feedback():
@@ -207,8 +182,6 @@ def stay_green_workflow():
             git("push origin feature-branch")
             # Re-run Gate 2
             wait_for_ci_completion()
-            # Re-run Gate 3 (if needed)
-            wait_for_mutation_job()
 
     # All gates passed!
     merge_pr()
@@ -315,8 +288,8 @@ def stay_green_workflow():
 | **Pylint Score** | ≥ 9.0 | Gate 1, Gate 2 | pylint |
 | **Type Checking** | Strict, 0 errors | Gate 1, Gate 2 | mypy |
 | **Security Issues** | 0 | Gate 1, Gate 2 | bandit, safety |
-| **Mutation Score** | ≥ 80% | Gate 3 | mutmut |
-| **Claude Review** | LGTM | Gate 4 | AI review |
+| **Mutation Score** | ≥ 80% (periodic) | Recommended for critical code | mutmut |
+| **Claude Review** | LGTM | Gate 3 | AI review |
 
 ---
 
@@ -379,22 +352,6 @@ git push origin feature-branch
 ```
 
 ### Gate 3 Failures
-
-**Mutation score < 80%**:
-```bash
-# View surviving mutants
-mutmut results
-mutmut html
-# Add tests to kill specific mutants
-# Focus on:
-#   - Boundary conditions
-#   - Error handling paths
-#   - Edge cases
-./scripts/test.sh
-./scripts/mutation.sh
-```
-
-### Gate 4 Failures
 
 **Claude requests changes**:
 ```bash
@@ -616,9 +573,10 @@ Before creating/updating a PR:
 - [ ] Gate 1: `pre-commit run --all-files` passes (all hooks pass)
 - [ ] Push changes: `git push origin feature-branch`
 - [ ] Gate 2: All CI jobs show ✅ (green)
-- [ ] Gate 3: Mutation score ≥ 80% (if applicable)
-- [ ] Gate 4: Claude review shows LGTM
+- [ ] Gate 3: Claude review shows LGTM
 - [ ] Ready to merge!
+
+**Optional**: Run mutation testing on critical code: `./scripts/mutation.sh --paths-to-mutate <files>`
 
 ---
 

@@ -35,12 +35,13 @@ git push origin feature/<issue-number>
 gh pr create --fill
 ```
 
-## Stay Green Workflow (4 Gates)
+## Stay Green Workflow (3 Gates)
 
 1. **Gate 1:** Local checks pass (`./scripts/check-all.sh`)
 2. **Gate 2:** CI pipeline green
-3. **Gate 3:** Mutation score ≥80%
-4. **Gate 4:** Code review LGTM
+3. **Gate 3:** Code review LGTM
+
+**Mutation Testing:** Recommended periodic quality check for critical infrastructure (≥80%). Run: `./scripts/mutation.sh --paths-to-mutate <files>`.
 
 **NEVER** merge with failing checks.
 

@@ -71,7 +71,7 @@ See [Troubleshooting](troubleshooting.md) for detailed examples.
 
 ## 4. Stay Green - Never Request Review with Failing Checks
 
-Follow the 4-gate workflow rigorously.
+Follow the 3-gate workflow rigorously.
 
 **The Rule**:
 - 🚫 **NEVER** create PR while CI is red
@@ -81,8 +81,9 @@ Follow the 4-gate workflow rigorously.
 **The Process**:
 1. Gate 1: Local checks pass (`pre-commit run --all-files` → all hooks pass)
 2. Gate 2: CI pipeline green (all jobs ✅)
-3. Gate 3: Mutation score ≥80%
-4. Gate 4: Code review LGTM
+3. Gate 3: Code review LGTM
+
+**Note**: Mutation testing (≥80% score) is recommended as a periodic quality check for critical infrastructure, not enforced continuously.
 
 See [Workflow](workflow.md) for complete documentation.
 

@@ -24,17 +24,13 @@ See [/reference/workflows/stay-green.md](../reference/workflows/stay-green.md) f
    - If CI fails: fix locally, re-run Gate 1, push again
    - Only proceed when all CI jobs show ✅
 
-3. **Gate 3: Mutation Testing** (Iterate Until 80%+)
-   - Run `./scripts/mutation.sh` (or wait for CI job)
-   - If score < 80%: add tests to kill surviving mutants
-   - Re-run Gate 1, push, wait for CI
-   - Only proceed when mutation score ≥ 80%
-
-4. **Gate 4: Claude Code Review** (Iterate Until LGTM)
+3. **Gate 3: Claude Code Review** (Iterate Until LGTM)
    - Wait for Claude code review CI job
    - If feedback provided: address ALL concerns
-   - Re-run Gate 1, push, wait for CI and mutation
+   - Re-run Gate 1, push, wait for CI
    - Only merge when Claude gives LGTM with no reservations
+
+**Note**: Mutation testing (80%+ score) is recommended as a periodic quality check for critical infrastructure (e.g., billing, authentication), not enforced continuously. Run with `./scripts/mutation.sh --paths-to-mutate <files>`.
 
 ### 1.2 Quick Checklist
 
@@ -43,8 +39,7 @@ Before creating/updating a PR:
 - [ ] Gate 1: `pre-commit run --all-files` passes (all hooks pass)
 - [ ] Push changes: `git push origin feature-branch`
 - [ ] Gate 2: All CI jobs show ✅ (green)
-- [ ] Gate 3: Mutation score ≥ 80% (if applicable)
-- [ ] Gate 4: Claude review shows LGTM
+- [ ] Gate 3: Claude review shows LGTM
 - [ ] Ready to merge!
 
 ### 1.3 Anti-Patterns (DO NOT DO)

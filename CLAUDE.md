@@ -30,16 +30,17 @@
 1. **Run `pre-commit run --all-files` before every commit** - Single comprehensive quality gate
 2. **Never duplicate content (DRY)** - Always reference canonical source
 3. **No shortcuts - fix root causes** - Never bypass quality checks
-4. **Stay Green** - Never request review with failing checks (4-gate workflow)
-5. **Quality First** - Meet MAXIMUM QUALITY standards (90% coverage, 80% mutation, ≤10 complexity)
+4. **Stay Green** - Never request review with failing checks (3-gate workflow)
+5. **Quality First** - Meet MAXIMUM QUALITY standards (90% coverage, ≤10 complexity, periodic mutation testing)
 6. **Operate from project root** - Use relative paths, never `cd`
 7. **Verify before commit** - All hooks must pass
 
-**The 4 Gates**:
+**The 3 Gates**:
 1. Gate 1: `pre-commit run --all-files` passes (all hooks)
 2. Gate 2: CI pipeline green (all jobs ✅)
-3. Gate 3: Mutation score ≥80%
-4. Gate 4: Code review LGTM
+3. Gate 3: Code review LGTM
+
+**Note**: Mutation testing (≥80% score) is recommended as a periodic quality gate for critical infrastructure, not enforced continuously.
 
 ---
 
@@ -144,11 +145,10 @@ git commit -m "feat(module): add my feature (#123)"
 git push origin feature/my-feature
 gh pr create --fill
 
-# 7. Wait for 4 gates to pass
+# 7. Wait for 3 gates to pass
 # - Gate 1: Local (done ✅)
 # - Gate 2: CI pipeline (monitor with `gh pr checks`)
-# - Gate 3: Mutation testing (≥80%)
-# - Gate 4: Claude code review (LGTM)
+# - Gate 3: Claude code review (LGTM)
 
 # 8. Merge when all gates pass
 ```

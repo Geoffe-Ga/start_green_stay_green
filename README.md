@@ -348,12 +348,13 @@ All generated projects enforce:
 
 ### The 4-Gate Stay Green Methodology
 
-All generated projects follow the Stay Green workflow with 4 sequential quality gates:
+All generated projects follow the Stay Green workflow with 3 sequential quality gates:
 
 1. **Gate 1 - Local Pre-Commit**: Run `./scripts/check-all.sh` - all checks must pass
 2. **Gate 2 - CI Pipeline**: Push to branch - all CI jobs must show ✅
-3. **Gate 3 - Mutation Testing**: Score must be ≥ 80%
-4. **Gate 4 - Code Review**: Address all feedback - only merge with LGTM
+3. **Gate 3 - Code Review**: Address all feedback - only merge with LGTM
+
+**Mutation Testing**: Recommended as periodic quality check for critical infrastructure (≥80% score). Run with `./scripts/mutation.sh --paths-to-mutate <files>`.
 
 **Never request review with failing checks. Never merge without LGTM.**
 

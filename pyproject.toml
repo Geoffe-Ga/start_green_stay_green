@@ -141,6 +141,9 @@ ignore = [
 "start_green_stay_green/cli.py" = [
     "T201",      # Allow print in CLI
 ]
+"scripts/analyze_mutations.py" = [
+    "S608",      # Allow SQL string formatting (parameterized queries used correctly)
+]
 
 [tool.ruff.lint.isort]
 force-single-line = true
