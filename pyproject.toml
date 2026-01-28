@@ -139,8 +139,14 @@ ignore = [
     "ANN",       # Don't require type annotations in tests
     "SLF001",    # Allow access to private members in tests
 ]
+"tests/e2e/**/*.py" = [
+    "S603",      # Allow subprocess calls in E2E tests (controlled test inputs)
+]
 "start_green_stay_green/cli.py" = [
     "T201",      # Allow print in CLI
+]
+"scripts/audit_tool_configs.py" = [
+    "T201",      # CLI script needs print for user feedback
 ]
 "scripts/analyze_mutations.py" = [
     "S608",      # Allow SQL string formatting (parameterized queries used correctly)

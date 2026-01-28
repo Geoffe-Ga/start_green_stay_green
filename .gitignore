@@ -133,3 +133,4 @@ worktrees/
 # Test artifacts - generated projects from init command tests
 test-project/
 *-project/
+tool-config-audit-report.md
