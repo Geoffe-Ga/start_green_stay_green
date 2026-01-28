@@ -137,13 +137,23 @@ ignore = [
     "PLR2004",   # Allow magic values in tests
     "D",         # Don't require docstrings in tests
     "ANN",       # Don't require type annotations in tests
-    "SLF001",    # Allow access to private members in tests
+    "SLF001",    # Allow accessing private members in tests
 ]
 "start_green_stay_green/cli.py" = [
     "T201",      # Allow print in CLI
 ]
 "scripts/analyze_mutations.py" = [
     "S608",      # Allow SQL string formatting (parameterized queries used correctly)
+]
+"examples/**/*.py" = [
+    "T201",      # Allow print in example scripts (user-facing output)
+    "BLE001",    # Allow broad exception in example error handling
+    "PLC0415",   # Allow import in exception handler (traceback)
+]
+"validate_implementation.py" = [
+    "T201",      # Allow print in validation script (user-facing output)
+    "BLE001",    # Allow broad exception in validation error handling
+    "PLC0415",   # Allow import in exception handler (traceback)
 ]
 
 [tool.ruff.lint.isort]
