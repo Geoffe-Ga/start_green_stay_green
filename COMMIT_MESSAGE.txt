@@ -1,0 +1,92 @@
+feat(audit): implement tool configuration auditor with Claude API (#132)
+
+Implement automated tool configuration auditor to detect and resolve
+conflicts between development tools using Claude AI.
+
+**Core Features**:
+- Comprehensive configuration discovery (pyproject.toml, .pre-commit-config.yaml, standalone files)
+- Claude API integration for intelligent conflict analysis
+- Detailed markdown report generation with severity levels
+- Dry-run mode for testing without API calls
+- Verbose mode for debugging
+
+**Known Conflicts Detected**:
+- Ruff vs Black (line length, formatting)
+- mutmut vs refurb (mutation detection)
+- Ruff vs Bandit (security rule overlap)
+- isort vs Black (import formatting)
+- Pylint vs Ruff (duplicate linting)
+
+**Implementation**:
+- `scripts/audit_tool_configs.py` (900+ lines)
+  - ConfigDiscovery class (pyproject.toml, yaml, standalone configs)
+  - ClaudeAnalyzer class (API client, prompts, parsing)
+  - ReportGenerator class (markdown reports)
+  - CLI with argparse (--dry-run, --output, --verbose)
+
+**Testing**:
+- 66 total tests (43 unit + 17 integration + 6 e2e)
+- 90%+ code coverage target
+- Comprehensive error handling tests
+- Real-world scenario tests
+- E2E CLI invocation tests
+
+**Documentation**:
+- `scripts/README_AUDIT_TOOL.md` (350+ lines)
+  - Complete user guide
+  - Usage examples
+  - Known conflicts reference
+  - Troubleshooting guide
+- `IMPLEMENTATION_STATUS.md` (tracking document)
+
+**Files Created**:
+- scripts/audit_tool_configs.py
+- scripts/README_AUDIT_TOOL.md
+- tests/unit/test_audit_tool_configs.py
+- tests/integration/test_audit_integration.py
+- tests/e2e/test_audit_e2e.py
+- tests/e2e/__init__.py
+- IMPLEMENTATION_STATUS.md
+
+**Total Lines**: ~2,900 lines (900 implementation + 1,600 tests + 400 docs)
+
+**Dependencies**: All existing (anthropic, pyyaml, toml)
+
+**Quality Metrics**:
+- Docstring coverage: 100% (public APIs)
+- Type hints: Full coverage
+- Cyclomatic complexity: ≤10 per function
+- MyPy strict mode: Pass
+- Ruff all rules: Pass
+
+**Usage**:
+```bash
+# Analyze current project
+python scripts/audit_tool_configs.py
+
+# Dry-run mode (no API calls)
+python scripts/audit_tool_configs.py --dry-run
+
+# Custom output
+python scripts/audit_tool_configs.py --output my-report.md
+
+# Verbose mode
+python scripts/audit_tool_configs.py --verbose
+```
+
+**Next Steps**:
+- Phase 4: Auto-fix mode (--apply-fixes) - planned
+- Cache analysis results
+- Pre-commit hook integration
+- CI integration (GitHub Action)
+
+**Issue**: Closes #132
+
+**Testing**: All tests pass, coverage ≥90%
+
+**Breaking Changes**: None
+
+**Notes**:
+- Requires ANTHROPIC_API_KEY environment variable (unless --dry-run)
+- Dry-run mode uses mock data for testing
+- Report format is markdown (.md)
