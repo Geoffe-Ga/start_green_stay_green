@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field
+import html
 import logging
+from pathlib import Path
+import re
 from typing import Any
 from typing import TYPE_CHECKING
 
@@ -18,8 +21,6 @@ import yaml
 from start_green_stay_green.generators.base import BaseGenerator
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from start_green_stay_green.ai.orchestrator import AIOrchestrator
 
 
@@ -27,6 +28,29 @@ logger = logging.getLogger(__name__)
 
 # Constants
 MAX_PERCENTAGE_THRESHOLD = 100
+
+# Security: Project name validation pattern (alphanumeric, hyphens, underscores only)
+PROJECT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+# Security: Dangerous paths that should never be used as output directories
+DANGEROUS_PATHS = {
+    "/etc",
+    "/sys",
+    "/proc",
+    "/dev",
+    "/boot",
+    "/root",
+    "/bin",
+    "/sbin",
+    "/usr/bin",
+    "/usr/sbin",
+    "/var/run",
+    "/var/log",
+    "~/.ssh",
+    "~/.gnupg",
+    "/home/.ssh",
+    "/Users/.ssh",
+}
 
 
 @dataclass(frozen=True)
@@ -273,6 +297,64 @@ class MetricsGenerator(BaseGenerator):
             msg = f"{name} threshold must be between 0 and {MAX_PERCENTAGE_THRESHOLD}"
             raise ValueError(msg)
 
+    def _validate_non_negative(self, value: int, name: str) -> None:
+        """Validate that a value is non-negative.
+
+        Args:
+            value: Value to validate
+            name: Name of value for error messages
+
+        Raises:
+            ValueError: If value is negative.
+        """
+        if value < 0:
+            msg = f"{name} must be non-negative (got {value})"
+            raise ValueError(msg)
+
+    def _validate_project_name(self, project_name: str) -> None:
+        """Validate project name for security (prevent injection attacks).
+
+        Args:
+            project_name: Project name to validate
+
+        Raises:
+            ValueError: If project name contains invalid characters.
+        """
+        if not PROJECT_NAME_PATTERN.match(project_name):
+            msg = (
+                f"Invalid project name '{project_name}'. "
+                "Project names must contain only alphanumeric characters, "
+                "hyphens, and underscores."
+            )
+            raise ValueError(msg)
+
+    def _validate_output_dir(self, output_dir: Path) -> None:
+        """Validate output directory to prevent path traversal attacks.
+
+        Args:
+            output_dir: Output directory to validate
+
+        Raises:
+            ValueError: If output directory is a dangerous system path.
+        """
+        # Resolve to absolute path
+        resolved_path = output_dir.resolve()
+        resolved_str = str(resolved_path)
+
+        # Check against dangerous paths
+        for dangerous_path in DANGEROUS_PATHS:
+            dangerous_resolved = Path(dangerous_path).expanduser().resolve()
+            if (
+                resolved_path == dangerous_resolved
+                or str(dangerous_resolved) in resolved_str
+            ):
+                msg = (
+                    f"Output directory '{output_dir}' resolves to dangerous "
+                    f"system path '{resolved_path}'. "
+                    "Cannot write to system directories."
+                )
+                raise ValueError(msg)
+
     def _validate_config(self) -> None:
         """Validate metrics generation configuration.
 
@@ -287,16 +369,40 @@ class MetricsGenerator(BaseGenerator):
             msg = "Project name cannot be empty"
             raise ValueError(msg)
 
+        # Security: Validate project name (prevent injection)
+        self._validate_project_name(self.config.project_name)
+
         if self.config.language not in LANGUAGE_TOOLS:
             msg = f"Unsupported language: {self.config.language}"
             raise ValueError(msg)
 
-        # Validate threshold ranges
+        # Validate percentage-based threshold ranges (0-100)
         self._validate_threshold(self.config.coverage_threshold, "Coverage")
         self._validate_threshold(
             self.config.branch_coverage_threshold, "Branch coverage"
         )
         self._validate_threshold(self.config.mutation_threshold, "Mutation")
+        self._validate_threshold(
+            self.config.debt_ratio_threshold, "Technical debt ratio"
+        )
+        self._validate_threshold(
+            self.config.doc_coverage_threshold, "Documentation coverage"
+        )
+
+        # Validate non-percentage thresholds (must be non-negative)
+        self._validate_non_negative(
+            self.config.complexity_threshold, "Cyclomatic complexity threshold"
+        )
+        self._validate_non_negative(
+            self.config.cognitive_complexity_threshold,
+            "Cognitive complexity threshold",
+        )
+        self._validate_non_negative(
+            self.config.maintainability_threshold, "Maintainability index threshold"
+        )
+        self._validate_non_negative(
+            self.config.dependency_freshness_days, "Dependency freshness days"
+        )
 
     def _get_tool_for_language(self, metric_type: str) -> str:
         """Get appropriate tool for language and metric type.
@@ -486,12 +592,15 @@ class MetricsGenerator(BaseGenerator):
         if not self.config.enable_dashboard:
             return None
 
+        # Security: HTML-escape project name to prevent XSS
+        safe_project_name = html.escape(self.config.project_name)
+
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{self.config.project_name} - Quality Metrics Dashboard</title>
+    <title>{safe_project_name} - Quality Metrics Dashboard</title>
     <style>
         * {{
             margin: 0;
@@ -583,7 +692,7 @@ class MetricsGenerator(BaseGenerator):
 </head>
 <body>
     <div class="container">
-        <h1>{self.config.project_name}</h1>
+        <h1>{safe_project_name}</h1>
         <p class="subtitle">Quality Metrics Dashboard</p>
 
         <div class="metrics-grid">
@@ -753,8 +862,12 @@ class MetricsGenerator(BaseGenerator):
             Path to written metrics.yml file.
 
         Raises:
+            ValueError: If output_dir is a dangerous system path.
             OSError: If file cannot be written.
         """
+        # Security: Validate output directory
+        self._validate_output_dir(output_dir)
+
         output_dir.mkdir(parents=True, exist_ok=True)
         config_path = output_dir / "metrics.yml"
 
@@ -774,10 +887,14 @@ class MetricsGenerator(BaseGenerator):
             Path to sonar-project.properties, or None if not enabled.
 
         Raises:
+            ValueError: If output_dir is a dangerous system path.
             OSError: If file cannot be written.
         """
         if not self.config.enable_sonarqube:
             return None
+
+        # Security: Validate output directory
+        self._validate_output_dir(output_dir)
 
         output_dir.mkdir(parents=True, exist_ok=True)
         sonar_path = output_dir / "sonar-project.properties"
@@ -800,10 +917,14 @@ class MetricsGenerator(BaseGenerator):
             Path to dashboard.html, or None if not enabled.
 
         Raises:
+            ValueError: If output_dir is a dangerous system path.
             OSError: If file cannot be written.
         """
         if not self.config.enable_dashboard:
             return None
+
+        # Security: Validate output directory
+        self._validate_output_dir(output_dir)
 
         output_dir.mkdir(parents=True, exist_ok=True)
         dashboard_path = output_dir / "dashboard.html"
@@ -826,8 +947,12 @@ class MetricsGenerator(BaseGenerator):
             Path to badges.md file.
 
         Raises:
+            ValueError: If output_dir is a dangerous system path.
             OSError: If file cannot be written.
         """
+        # Security: Validate output directory
+        self._validate_output_dir(output_dir)
+
         output_dir.mkdir(parents=True, exist_ok=True)
         badges_path = output_dir / "badges.md"
 

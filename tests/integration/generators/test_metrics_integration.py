@@ -381,6 +381,70 @@ class TestMetricsGeneratorErrorHandling:
             metrics_content = yaml.safe_load(artifacts["metrics"].read_text())
             assert metrics_content["metrics"]["code_coverage"]["threshold"] == 0
 
+    def test_dangerous_output_paths_blocked(self) -> None:
+        """Test that dangerous system paths are blocked (Issue #2)."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="security-test",
+        )
+        generator = MetricsGenerator(None, config)
+
+        dangerous_paths = [
+            Path("/etc"),
+            Path("/sys"),
+            Path("/proc"),
+            Path.home() / ".ssh",
+        ]
+
+        for dangerous_path in dangerous_paths:
+            with pytest.raises(ValueError, match="dangerous system path"):
+                generator.write_metrics_config(dangerous_path)
+
+    def test_invalid_project_names_rejected(self) -> None:
+        """Test that project names with invalid characters are rejected (Issue #1)."""
+        invalid_names = [
+            "test project",  # Space
+            "test<script>",  # HTML
+            "test;rm",  # Shell command
+            "../etc/passwd",  # Path traversal
+        ]
+
+        for invalid_name in invalid_names:
+            config = MetricsGenerationConfig(
+                language="python",
+                project_name=invalid_name,
+            )
+            with pytest.raises(ValueError, match="Invalid project name"):
+                MetricsGenerator(None, config)
+
+    def test_valid_project_names_work_end_to_end(self) -> None:
+        """Test that valid project names work in complete workflow."""
+        valid_names = [
+            "test-project",
+            "test_project",
+            "TestProject123",
+        ]
+
+        for valid_name in valid_names:
+            config = MetricsGenerationConfig(
+                language="python",
+                project_name=valid_name,
+                enable_dashboard=True,
+            )
+            generator = MetricsGenerator(None, config)
+
+            with TemporaryDirectory() as tmpdir:
+                output_dir = Path(tmpdir)
+                artifacts = generator.write_all(output_dir)
+
+                # Verify artifacts created successfully
+                assert artifacts["metrics"].exists()
+                assert artifacts["dashboard"].exists()
+
+                # Verify project name in dashboard
+                dashboard_content = artifacts["dashboard"].read_text()
+                assert valid_name in dashboard_content
+
 
 class TestMetricsGeneratorDocumentation:
     """Integration tests for documentation generation."""
@@ -434,12 +498,7 @@ class TestMetricsGeneratorDocumentation:
             assert "<!DOCTYPE html>" in html_content
             assert "<style>" in html_content  # Embedded CSS
             assert "<script>" in html_content  # Embedded JS
-            assert (
-                "http" not in html_content
-                or "https" not in html_content
-                or (
-                    # Some external resources are OK (fonts, etc.)
-                    "img.shields.io"
-                    not in html_content  # But not loading badges
-                )
-            )
+
+            # Check for external dependencies individually
+            # Should not load external badge images
+            assert "img.shields.io" not in html_content

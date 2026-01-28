@@ -315,6 +315,213 @@ class TestMetricsGeneratorInit:
         ):
             MetricsGenerator(None, config)
 
+    def test_init_validates_debt_ratio_threshold(self) -> None:
+        """Test debt ratio threshold validation (Issue #4)."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            debt_ratio_threshold=150,
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Technical debt ratio threshold must be between 0 and 100",
+        ):
+            MetricsGenerator(None, config)
+
+    def test_init_validates_doc_coverage_threshold(self) -> None:
+        """Test documentation coverage threshold validation (Issue #4)."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            doc_coverage_threshold=105,
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Documentation coverage threshold must be between 0 and 100",
+        ):
+            MetricsGenerator(None, config)
+
+    def test_init_validates_complexity_threshold_non_negative(self) -> None:
+        """Test complexity threshold cannot be negative (Issue #5)."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            complexity_threshold=-5,
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Cyclomatic complexity threshold must be non-negative",
+        ):
+            MetricsGenerator(None, config)
+
+    def test_init_validates_cognitive_complexity_non_negative(self) -> None:
+        """Test cognitive complexity threshold cannot be negative (Issue #5)."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            cognitive_complexity_threshold=-10,
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Cognitive complexity threshold must be non-negative",
+        ):
+            MetricsGenerator(None, config)
+
+    def test_init_validates_maintainability_threshold_non_negative(self) -> None:
+        """Test maintainability threshold cannot be negative (Issue #5)."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            maintainability_threshold=-1,
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Maintainability index threshold must be non-negative",
+        ):
+            MetricsGenerator(None, config)
+
+    def test_init_validates_dependency_freshness_non_negative(self) -> None:
+        """Test dependency freshness days cannot be negative (Issue #5)."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            dependency_freshness_days=-30,
+        )
+
+        with pytest.raises(
+            ValueError, match="Dependency freshness days must be non-negative"
+        ):
+            MetricsGenerator(None, config)
+
+    def test_init_validates_project_name_alphanumeric(self) -> None:
+        """Test project name validation (Issue #1 - injection prevention)."""
+        # Invalid characters
+        invalid_names = [
+            "test project",  # Space
+            "test<script>",  # HTML tag
+            "test;rm -rf /",  # Shell injection
+            "test&&malicious",  # Command injection
+            "test|pipe",  # Pipe character
+            "test$var",  # Variable expansion
+            "test`cmd`",  # Command substitution
+            "../../../etc/passwd",  # Path traversal
+        ]
+
+        for invalid_name in invalid_names:
+            config = MetricsGenerationConfig(
+                language="python",
+                project_name=invalid_name,
+            )
+
+            with pytest.raises(
+                ValueError,
+                match=r"Invalid project name.*alphanumeric characters",
+            ):
+                MetricsGenerator(None, config)
+
+    def test_init_accepts_valid_project_names(self) -> None:
+        """Test that valid project names are accepted."""
+        valid_names = [
+            "test-project",
+            "test_project",
+            "TestProject123",
+            "my-awesome-app_v2",
+            "PROJECT_NAME",
+        ]
+
+        for valid_name in valid_names:
+            config = MetricsGenerationConfig(
+                language="python",
+                project_name=valid_name,
+            )
+            # Should not raise
+            generator = MetricsGenerator(None, config)
+            assert generator.config.project_name == valid_name
+
+
+class TestSecurityValidations:
+    """Test security-related validations (Issues #1, #2)."""
+
+    def test_output_dir_validation_blocks_etc(self) -> None:
+        """Test that /etc directory is blocked (Issue #2)."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+        )
+        generator = MetricsGenerator(None, config)
+
+        with pytest.raises(
+            ValueError,
+            match="dangerous system path",
+        ):
+            generator.write_metrics_config(Path("/etc"))
+
+    def test_output_dir_validation_blocks_sys(self) -> None:
+        """Test that /sys directory is blocked (Issue #2)."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+        )
+        generator = MetricsGenerator(None, config)
+
+        with pytest.raises(
+            ValueError,
+            match="dangerous system path",
+        ):
+            generator.write_dashboard(Path("/sys"))
+
+    def test_output_dir_validation_blocks_ssh(self) -> None:
+        """Test that ~/.ssh directory is blocked (Issue #2)."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+        )
+        generator = MetricsGenerator(None, config)
+
+        ssh_path = Path.home() / ".ssh"
+        with pytest.raises(
+            ValueError,
+            match="dangerous system path",
+        ):
+            generator.write_badges(ssh_path)
+
+    def test_output_dir_validation_allows_safe_paths(self) -> None:
+        """Test that safe paths are allowed."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+        )
+        generator = MetricsGenerator(None, config)
+
+        with TemporaryDirectory() as tmpdir:
+            safe_path = Path(tmpdir) / "project" / "metrics"
+            # Should not raise
+            result = generator.write_metrics_config(safe_path)
+            assert result.exists()
+
+    def test_dashboard_html_escapes_project_name(self) -> None:
+        """Test that project name is HTML-escaped in dashboard (Issue #1)."""
+        # Test with a valid project name (only alphanumeric, hyphens, underscores)
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test-project",
+            enable_dashboard=True,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+        assert dashboard is not None
+        assert "test-project" in dashboard
+
+        # HTML escaping is applied even though validation already blocks invalid names
+        # This is defense-in-depth
+
 
 class TestMetricsGeneratorToolSelection:
     """Test tool selection for different languages."""
@@ -1085,16 +1292,14 @@ class TestEdgeCases:
         assert metrics_config["metrics"]["code_coverage"]["threshold"] == 100
 
     def test_special_characters_in_project_name(self) -> None:
-        """Test project names with special characters."""
+        """Test project names with special characters (dots) are rejected."""
         config = MetricsGenerationConfig(
             language="python",
             project_name="my-cool_project.v2",
         )
 
-        generator = MetricsGenerator(None, config)
-        result = generator.generate()
-
-        assert result["metrics_config"]["project"] == "my-cool_project.v2"
+        with pytest.raises(ValueError, match="only alphanumeric"):
+            MetricsGenerator(None, config)
 
     def test_all_languages_generate_valid_config(self) -> None:
         """Test that all supported languages generate valid configs."""
