@@ -3,8 +3,10 @@
 NOTE: This test suite includes direct testing of private methods (prefixed with _).
 This is intentional for unit testing granular internal functionality. While production
 code should not access private members, test code legitimately needs to verify
-internal implementation details for thorough coverage. All SLF001 warnings in this
-file are justified by this testing pattern.
+internal implementation details for thorough coverage.
+
+The SLF001 rule (accessing private members) is disabled for all test files via
+pyproject.toml per-file-ignores configuration, so no inline noqa comments are needed.
 """
 
 from __future__ import annotations
@@ -159,7 +161,7 @@ class TestConfigDiscovery:
     def test_discover_pyproject_toml(self, sample_project_root: Path) -> None:
         """Test discovering configurations from pyproject.toml."""
         discovery = ConfigDiscovery(sample_project_root)
-        discovery._discover_pyproject_toml()  # noqa: SLF001
+        discovery._discover_pyproject_toml()
 
         tool_names = {c.tool_name for c in discovery.configs}
         assert "ruff" in tool_names
@@ -170,14 +172,14 @@ class TestConfigDiscovery:
     def test_discover_pyproject_toml_missing(self, tmp_path: Path) -> None:
         """Test discovering when pyproject.toml doesn't exist."""
         discovery = ConfigDiscovery(tmp_path)
-        discovery._discover_pyproject_toml()  # noqa: SLF001
+        discovery._discover_pyproject_toml()
 
         assert discovery.configs == []
 
     def test_discover_precommit_config(self, sample_project_root: Path) -> None:
         """Test discovering configurations from .pre-commit-config.yaml."""
         discovery = ConfigDiscovery(sample_project_root)
-        discovery._discover_precommit_config()  # noqa: SLF001
+        discovery._discover_precommit_config()
 
         # Should find hooks
         assert len(discovery.configs) > 0
@@ -187,7 +189,7 @@ class TestConfigDiscovery:
     def test_discover_precommit_config_missing(self, tmp_path: Path) -> None:
         """Test discovering when .pre-commit-config.yaml doesn't exist."""
         discovery = ConfigDiscovery(tmp_path)
-        discovery._discover_precommit_config()  # noqa: SLF001
+        discovery._discover_precommit_config()
 
         assert discovery.configs == []
 
@@ -206,7 +208,7 @@ class TestConfigDiscovery:
         (tmp_path / ".ruff.toml").write_text("[lint]\nselect = ['E', 'F']\n")
 
         discovery = ConfigDiscovery(tmp_path)
-        discovery._discover_other_configs()  # noqa: SLF001
+        discovery._discover_other_configs()
 
         ruff_configs = [c for c in discovery.configs if c.tool_name == "ruff"]
         assert len(ruff_configs) == 1
@@ -228,7 +230,7 @@ class TestClaudeAnalyzer:
 
     def test_init(self) -> None:
         """Test ClaudeAnalyzer initialization."""
-        analyzer = ClaudeAnalyzer("test-key", dry_run=True)  # pragma: allowlist secret
+        analyzer = ClaudeAnalyzer("test-key", dry_run=True)
         assert analyzer.api_key == "test-key"  # pragma: allowlist secret
         assert analyzer.dry_run is True
         assert analyzer.client is None
@@ -242,7 +244,7 @@ class TestClaudeAnalyzer:
     def test_mock_analysis(self, sample_configs: list[ToolConfig]) -> None:
         """Test mock analysis in dry-run mode."""
         analyzer = ClaudeAnalyzer("test-key", dry_run=True)
-        result = analyzer._mock_analysis(sample_configs)  # noqa: SLF001
+        result = analyzer._mock_analysis(sample_configs)
 
         assert isinstance(result, AuditResult)
         assert result.discovered_configs == sample_configs
@@ -298,7 +300,7 @@ class TestClaudeAnalyzer:
     def test_build_analysis_prompt(self, sample_configs: list[ToolConfig]) -> None:
         """Test building analysis prompt."""
         analyzer = ClaudeAnalyzer("test-key", dry_run=True)
-        prompt = analyzer._build_analysis_prompt(sample_configs)  # noqa: SLF001
+        prompt = analyzer._build_analysis_prompt(sample_configs)
 
         assert "ruff" in prompt.lower()
         assert "black" in prompt.lower()
@@ -308,7 +310,7 @@ class TestClaudeAnalyzer:
     def test_format_configs_for_prompt(self, sample_configs: list[ToolConfig]) -> None:
         """Test formatting configs for prompt."""
         analyzer = ClaudeAnalyzer("test-key", dry_run=True)
-        formatted = analyzer._format_configs_for_prompt(sample_configs)  # noqa: SLF001
+        formatted = analyzer._format_configs_for_prompt(sample_configs)
 
         assert "ruff" in formatted
         assert "black" in formatted
@@ -319,7 +321,7 @@ class TestClaudeAnalyzer:
         analyzer = ClaudeAnalyzer("test-key", dry_run=True)
         data = {"key1": "value1", "key2": {"nested": "value2"}}
 
-        formatted = analyzer._format_config_data(data)  # noqa: SLF001
+        formatted = analyzer._format_config_data(data)
 
         assert "key1" in formatted
         assert "value1" in formatted
@@ -344,9 +346,7 @@ class TestClaudeAnalyzer:
             }
         )
 
-        conflicts = analyzer._parse_conflicts(  # noqa: SLF001
-            response_text, sample_configs
-        )
+        conflicts = analyzer._parse_conflicts(response_text, sample_configs)
 
         assert len(conflicts) == 1
         assert conflicts[0].severity == "HIGH"
@@ -379,9 +379,7 @@ Here is the analysis:
 Hope this helps!
 """
 
-        conflicts = analyzer._parse_conflicts(  # noqa: SLF001
-            response_text, sample_configs
-        )
+        conflicts = analyzer._parse_conflicts(response_text, sample_configs)
 
         assert len(conflicts) == 1
         assert conflicts[0].severity == "MEDIUM"
@@ -393,9 +391,7 @@ Hope this helps!
         analyzer = ClaudeAnalyzer("test-key", dry_run=True)
         response_text = "Not valid JSON at all"
 
-        conflicts = analyzer._parse_conflicts(  # noqa: SLF001
-            response_text, sample_configs
-        )
+        conflicts = analyzer._parse_conflicts(response_text, sample_configs)
 
         assert conflicts == []
 
@@ -517,7 +513,7 @@ class TestReportGenerator:
         generator = ReportGenerator(tmp_path / "report.md")
         result = AuditResult(model_used="test-model")
 
-        header = generator._generate_header(result)  # noqa: SLF001
+        header = generator._generate_header(result)
 
         assert "Tool Configuration Audit Report" in header
         assert "test-model" in header
@@ -550,7 +546,7 @@ class TestReportGenerator:
             token_usage={"input_tokens": 100, "output_tokens": 200},
         )
 
-        summary = generator._generate_summary(result)  # noqa: SLF001
+        summary = generator._generate_summary(result)
 
         assert "Summary" in summary
         assert "3" in summary  # 3 configs
@@ -564,7 +560,7 @@ class TestReportGenerator:
         generator = ReportGenerator(tmp_path / "report.md")
         result = AuditResult(discovered_configs=sample_configs)
 
-        section = generator._generate_discovered_configs(result)  # noqa: SLF001
+        section = generator._generate_discovered_configs(result)
 
         assert "Discovered Configurations" in section
         assert "ruff" in section
@@ -589,7 +585,7 @@ class TestReportGenerator:
             ]
         )
 
-        section = generator._generate_conflicts(result)  # noqa: SLF001
+        section = generator._generate_conflicts(result)
 
         assert "Conflicts" in section
         assert "HIGH" in section
@@ -601,7 +597,7 @@ class TestReportGenerator:
         generator = ReportGenerator(tmp_path / "report.md")
         result = AuditResult(conflicts=[])
 
-        section = generator._generate_conflicts(result)  # noqa: SLF001
+        section = generator._generate_conflicts(result)
 
         assert "Conflicts" in section
         assert "No conflicts detected" in section
@@ -610,7 +606,7 @@ class TestReportGenerator:
         """Test generating report footer."""
         generator = ReportGenerator(tmp_path / "report.md")
 
-        footer = generator._generate_footer()  # noqa: SLF001
+        footer = generator._generate_footer()
 
         assert "Next Steps" in footer
         assert "pre-commit" in footer

@@ -1,6 +1,10 @@
 """End-to-end tests for tool configuration auditor.
 
 These tests verify the complete workflow from CLI invocation to report generation.
+
+NOTE: This test suite uses subprocess.run() to invoke the CLI script with controlled
+test inputs. The S603 rule (subprocess without shell=True check) is disabled for all
+e2e test files via pyproject.toml per-file-ignores configuration.
 """
 
 from __future__ import annotations
@@ -62,7 +66,7 @@ class TestAuditE2E:
             Path(__file__).parent.parent.parent / "scripts" / "audit_tool_configs.py"
         )
 
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
@@ -94,7 +98,7 @@ class TestAuditE2E:
             Path(__file__).parent.parent.parent / "scripts" / "audit_tool_configs.py"
         )
 
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
@@ -123,7 +127,7 @@ class TestAuditE2E:
             Path(__file__).parent.parent.parent / "scripts" / "audit_tool_configs.py"
         )
 
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
@@ -145,7 +149,7 @@ class TestAuditE2E:
             Path(__file__).parent.parent.parent / "scripts" / "audit_tool_configs.py"
         )
 
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             [sys.executable, str(script_path), "--help"],
             capture_output=True,
             text=True,
@@ -163,7 +167,7 @@ class TestAuditE2E:
         )
 
         output_path = e2e_project / "test-report.md"
-        subprocess.run(  # noqa: S603
+        subprocess.run(
             [
                 sys.executable,
                 str(script_path),
@@ -204,7 +208,7 @@ class TestAuditRealProject:
 
         output_path = tmp_path / "sgsg-audit.md"
 
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             [
                 sys.executable,
                 str(script_path),

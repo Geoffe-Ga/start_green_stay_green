@@ -334,6 +334,7 @@ class ClaudeAnalyzer:
         prompt = self._build_analysis_prompt(configs)
 
         try:
+            # Type narrowing: dry_run check above ensures client is not None here
             response = self.client.messages.create(  # type: ignore[union-attr]
                 model=API_MODEL,
                 max_tokens=8192,
@@ -724,7 +725,8 @@ def get_api_key() -> str:  # pragma: allowlist secret
     if not api_key:
         msg = (  # pragma: allowlist secret
             "ANTHROPIC_API_KEY environment variable not set. "
-            "Set it with: export ANTHROPIC_API_KEY='your-key-here'"  # pragma: allowlist secret
+            "Set it with: "  # pragma: allowlist secret
+            "export ANTHROPIC_API_KEY='your-key-here'"  # pragma: allowlist secret
         )  # pragma: allowlist secret
         raise AuditorError(msg)
     return api_key
