@@ -764,12 +764,99 @@ class MetricsGenerator(BaseGenerator):
     </div>
 
     <script>
-        // Update timestamp
-        document.getElementById('last-updated').textContent =
-            new Date().toLocaleString();
+        // Production workflow: Fetch metrics from CI artifacts
+        // Supports: local metrics.json, GitHub Pages, or GitHub Actions artifacts
 
-        // TODO: Fetch actual metrics from CI artifacts or API
-        // This is a template - integrate with your CI/CD pipeline
+        async function loadMetrics() {{
+            try {{
+                // Try to load from local metrics.json (same directory as dashboard)
+                const response = await fetch('metrics.json');
+                if (!response.ok) {{
+                    throw new Error(`HTTP ${{response.status}}`);
+                }}
+
+                const data = await response.json();
+                updateDashboard(data);
+            }} catch (error) {{
+                console.warn('Could not load metrics.json:', error.message);
+                // Fallback: Show placeholder or error state
+                updatePlaceholder();
+            }}
+        }}
+
+        function updateDashboard(data) {{
+            const metrics = data.metrics;
+            const thresholds = data.thresholds;
+
+            // Update timestamp
+            document.getElementById('last-updated').textContent =
+                new Date(data.timestamp).toLocaleString();
+
+            // Coverage
+            if (metrics.coverage !== undefined) {{
+                updateMetric('coverage', metrics.coverage, '%',
+                    metrics.coverage >= thresholds.coverage);
+            }}
+
+            // Branch Coverage
+            if (metrics.branch_coverage !== undefined) {{
+                updateMetric('branch', metrics.branch_coverage, '%',
+                    metrics.branch_coverage >= thresholds.branch_coverage);
+            }}
+
+            // Mutation Score
+            if (metrics.mutation_score !== undefined) {{
+                updateMetric('mutation', metrics.mutation_score, '%',
+                    metrics.mutation_score >= thresholds.mutation_score);
+            }}
+
+            // Complexity
+            if (metrics.complexity_avg !== undefined) {{
+                updateMetric('complexity', metrics.complexity_avg, '',
+                    metrics.complexity_avg <= thresholds.complexity);
+            }}
+
+            // Documentation
+            if (metrics.docs_coverage !== undefined) {{
+                updateMetric('docs', metrics.docs_coverage, '%',
+                    metrics.docs_coverage >= thresholds.docs_coverage);
+            }}
+
+            // Security
+            if (metrics.security_issues !== undefined) {{
+                const elem = document.getElementById('security-value');
+                elem.textContent = metrics.security_issues;
+                updateStatus('security',
+                    metrics.security_issues === 0 ? 'PASSING' : 'FAILING',
+                    metrics.security_issues === 0);
+            }}
+        }}
+
+        function updateMetric(name, value, suffix, passing) {{
+            const elem = document.getElementById(`${{name}}-value`);
+            elem.textContent = value.toFixed(2) + suffix;
+            updateStatus(name, passing ? 'PASSING' : 'FAILING', passing);
+        }}
+
+        function updateStatus(name, text, passing) {{
+            const elem = document.getElementById(`${{name}}-status`);
+            elem.textContent = text;
+            const statusClass = passing ? 'status-pass' : 'status-fail';
+            elem.className = 'metric-status ' + statusClass;
+        }}
+
+        function updatePlaceholder() {{
+            // Show friendly message when metrics.json is not available
+            document.getElementById('last-updated').textContent = 'No data available';
+            const statusElements = document.querySelectorAll('.metric-status');
+            statusElements.forEach(elem => {{
+                elem.textContent = 'NO DATA';
+                elem.className = 'metric-status status-warn';
+            }});
+        }}
+
+        // Load metrics on page load
+        document.addEventListener('DOMContentLoaded', loadMetrics);
     </script>
 </body>
 </html>
