@@ -4,11 +4,15 @@ This module replaces the slow CliRunner-based tests with fast mock-based tests.
 Tests CLI behavior by mocking dependencies instead of running full CLI.
 """
 
+import json
 from pathlib import Path
 from unittest.mock import Mock
 from unittest.mock import patch
 
 import pytest
+from rich.progress import Progress
+from rich.progress import SpinnerColumn
+from rich.progress import TextColumn
 import typer
 
 from start_green_stay_green import cli
@@ -278,3 +282,130 @@ class TestInitCommand:
                 no_interactive=True,
             )
         assert exc_info.value.code == 1
+
+    @patch("start_green_stay_green.cli._generate_project_files")
+    def test_init_with_live_dashboard_passes_flag(
+        self, mock_generate: Mock, tmp_path: Path
+    ) -> None:
+        """Test init with enable_live_dashboard=True passes flag to generator."""
+        mock_generate.return_value = None
+        cli.init(
+            project_name="test-project",
+            output_dir=tmp_path,
+            language="python",
+            api_key=None,
+            dry_run=False,
+            no_interactive=True,
+            enable_live_dashboard=True,
+        )
+        # Verify enable_live_dashboard was passed to _generate_project_files
+        assert mock_generate.called
+        call_kwargs = mock_generate.call_args[1]
+        assert call_kwargs["enable_live_dashboard"] is True
+
+    @patch("start_green_stay_green.cli._generate_project_files")
+    def test_init_without_live_dashboard_defaults_false(
+        self, mock_generate: Mock, tmp_path: Path
+    ) -> None:
+        """Test init without enable_live_dashboard defaults to False."""
+        mock_generate.return_value = None
+        cli.init(
+            project_name="test-project",
+            output_dir=tmp_path,
+            language="python",
+            api_key=None,
+            dry_run=False,
+            no_interactive=True,
+        )
+        # Verify enable_live_dashboard defaults to False
+        assert mock_generate.called
+        call_kwargs = mock_generate.call_args[1]
+        assert call_kwargs.get("enable_live_dashboard", False) is False
+
+
+class TestMetricsDashboardGeneration:
+    """Test metrics dashboard generation functionality."""
+
+    @patch("start_green_stay_green.cli.MetricsGenerator")
+    @patch("start_green_stay_green.cli.shutil.copy")
+    def test_generate_metrics_dashboard_step_creates_files(
+        self,
+        mock_shutil_copy: Mock,
+        mock_generator_class: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Test _generate_metrics_dashboard_step creates dashboard and workflow."""
+        # Setup mock generator
+        mock_generator = Mock()
+        mock_generator_class.return_value = mock_generator
+
+        # Mock shutil.copy to create a dummy workflow file when called
+        def copy_side_effect(_src: Path, dst: Path) -> None:
+            # Create parent directory
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            # Write dummy workflow content
+            dst.write_text("name: Metrics\nproject: start-green-stay-green")
+
+        mock_shutil_copy.side_effect = copy_side_effect
+
+        # Create progress bar
+        with Progress(SpinnerColumn(), TextColumn("{task.description}")) as progress:
+            cli._generate_metrics_dashboard_step(
+                project_path=tmp_path,
+                project_name="test-project",
+                language="python",
+                progress=progress,
+            )
+
+        # Verify MetricsGenerator was instantiated with correct config
+        assert mock_generator_class.called
+        config_arg = mock_generator_class.call_args[0][1]
+        assert config_arg.project_name == "test-project"
+        assert config_arg.language == "python"
+        assert config_arg.enable_dashboard is True
+        assert config_arg.enable_badges is True
+
+        # Verify dashboard was written
+        mock_generator.write_dashboard.assert_called_once()
+
+        # Verify docs directory was created
+        assert (tmp_path / "docs").exists()
+
+        # Verify metrics.json was created
+        metrics_file = tmp_path / "docs" / "metrics.json"
+        assert metrics_file.exists()
+
+        # Verify metrics.json contains project name
+        metrics_data = json.loads(metrics_file.read_text())
+        assert metrics_data["project"] == "test-project"
+        assert "thresholds" in metrics_data
+        assert "metrics" in metrics_data
+
+    @patch("start_green_stay_green.cli.shutil.copy")
+    @patch("start_green_stay_green.cli.MetricsGenerator")
+    def test_generate_metrics_dashboard_creates_workflows_dir(
+        self, mock_generator_class: Mock, mock_shutil_copy: Mock, tmp_path: Path
+    ) -> None:
+        """Test _generate_metrics_dashboard_step creates .github/workflows."""
+        # Setup mock generator to avoid instantiation errors
+        mock_generator_class.return_value = Mock()
+
+        # Mock shutil.copy to create files
+        def copy_side_effect(_src: Path, dst: Path) -> None:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text("dummy content")
+
+        mock_shutil_copy.side_effect = copy_side_effect
+
+        with Progress(SpinnerColumn(), TextColumn("{task.description}")) as progress:
+            cli._generate_metrics_dashboard_step(
+                project_path=tmp_path,
+                project_name="test-project",
+                language="python",
+                progress=progress,
+            )
+
+        # Verify .github/workflows directory was created
+        workflows_dir = tmp_path / ".github" / "workflows"
+        assert workflows_dir.exists()
+        assert workflows_dir.is_dir()
