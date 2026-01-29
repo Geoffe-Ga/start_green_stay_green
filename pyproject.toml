@@ -132,6 +132,10 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"scripts/collect_metrics.py" = [
+    "T201",      # Allow print in CLI script for user feedback
+    "TRY301",    # Raise within try (intentional for CLIs)
+]
 "tests/**/*.py" = [
     "S101",      # Allow assert in tests
     "PLR2004",   # Allow magic values in tests
@@ -423,3 +427,7 @@ tests_dir = "tests/"
 # Pre-commit configuration reference
 [tool.pre-commit]
 # Configuration in .pre-commit-config.yaml
+
+[tool.tryceratops]
+exclude = ["tests/*"]
+ignore = ["TRY101"]  # Allow multiple try blocks in CLI scripts

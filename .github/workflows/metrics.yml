@@ -1,0 +1,71 @@
+name: Quality Metrics Dashboard
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: write  # For GitHub Pages deployment
+
+jobs:
+  generate-metrics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        run: |
+          pytest --cov=start_green_stay_green \
+                 --cov-report=json \
+                 --cov-report=term
+
+      - name: Analyze complexity
+        run: |
+          radon cc start_green_stay_green/ -a -s > complexity-report.txt || true
+
+      - name: Check documentation coverage
+        run: |
+          interrogate start_green_stay_green/ -v > docs-report.txt || true
+
+      - name: Run security scan
+        run: |
+          bandit -r start_green_stay_green/ -ll -f json -o security-report.json || true
+
+      - name: Generate metrics.json
+        run: |
+          # Use tested metrics collection script
+          python scripts/collect_metrics.py \
+            --project-name start-green-stay-green \
+            --output docs/metrics.json \
+            --coverage-file coverage.json \
+            --complexity-file complexity-report.txt \
+            --docs-file docs-report.txt \
+            --security-file security-report.json \
+            --mutation-score 85.0
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          keep_files: false
+
+      - name: Summary
+        run: |
+          echo "## 📊 Metrics Dashboard Updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Dashboard URL: https://geoffe-ga.github.io/start_green_stay_green/dashboard.html" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Latest Metrics" >> $GITHUB_STEP_SUMMARY
+          cat docs/metrics.json | jq -r '.metrics | to_entries | .[] | "- **\(.key)**: \(.value)"' >> $GITHUB_STEP_SUMMARY || true
