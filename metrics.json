@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-01-29T00:51:46.886512+00:00",
+  "timestamp": "2026-01-29T04:01:24.840224+00:00",
   "project": "start-green-stay-green",
   "thresholds": {
     "coverage": 90,
@@ -10,9 +10,9 @@
     "security_issues": 0
   },
   "metrics": {
-    "coverage": 92.62,
+    "coverage": 97.89,
     "coverage_status": "pass",
-    "branch_coverage": 86.36,
+    "branch_coverage": 94.48,
     "branch_coverage_status": "pass",
     "security_issues": 0,
     "security_status": "pass",
