@@ -134,3 +134,10 @@ worktrees/
 test-project/
 *-project/
 tool-config-audit-report.md
+
+# Generated API documentation (built by pdoc)
+docs/api/
+docs/_build/
+
+# Sphinx build artifacts
+docs/.doctrees/
