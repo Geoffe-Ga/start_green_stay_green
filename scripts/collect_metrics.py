@@ -91,12 +91,24 @@ class MetricsCollector:
             raise FileNotFoundError(msg)
 
         complexity_text = complexity_file.read_text()
-        match = re.search(r"Average complexity: [A-Z] \(([0-9.]+)\)", complexity_text)
-        if not match:
+        # Try multiple patterns for radon output
+        patterns = [
+            r"Average complexity: [A-Z] \(([0-9.]+)\)",  # radon cc -a format
+            r"Average complexity:\s+[A-Z]\s+\(([0-9.]+)\)",  # Alternative spacing
+            r"average:\s+([0-9.]+)",  # Simplified pattern
+        ]
+
+        comp = None
+        for pattern in patterns:
+            match = re.search(pattern, complexity_text, re.IGNORECASE)
+            if match:
+                comp = float(match.group(1))
+                break
+
+        if comp is None:
             msg = "Could not find complexity pattern in report"
             raise ValueError(msg)
 
-        comp = float(match.group(1))
         self.metrics["complexity_avg"] = round(comp, 2)
         self.metrics["complexity_status"] = (
             "pass" if comp <= self.thresholds["complexity"] else "fail"
@@ -117,12 +129,25 @@ class MetricsCollector:
             raise FileNotFoundError(msg)
 
         docs_text = docs_file.read_text()
-        match = re.search(r"RESULT: ([0-9.]+)%", docs_text)
-        if not match:
+        # Try multiple patterns for interrogate output
+        patterns = [
+            r"RESULT: ([0-9.]+)%",  # interrogate -v format
+            r"RESULT:\s+([0-9.]+)\s*%",  # Alternative spacing
+            r"Overall:\s+([0-9.]+)%",  # Alternative format
+            r"Coverage:\s+([0-9.]+)%",  # Alternative format
+        ]
+
+        docs = None
+        for pattern in patterns:
+            match = re.search(pattern, docs_text, re.IGNORECASE)
+            if match:
+                docs = float(match.group(1))
+                break
+
+        if docs is None:
             msg = "Could not find docs coverage pattern in report"
             raise ValueError(msg)
 
-        docs = float(match.group(1))
         self.metrics["docs_coverage"] = round(docs, 2)
         self.metrics["docs_status"] = (
             "pass" if docs >= self.thresholds["docs_coverage"] else "fail"
