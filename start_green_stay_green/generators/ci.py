@@ -8,6 +8,7 @@ from MAXIMUM_QUALITY_ENGINEERING.md.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
 from typing import Any
 from typing import TYPE_CHECKING
 
@@ -366,8 +367,9 @@ Start with 'name:' and end with the last workflow configuration line."""
             ValueError: If YAML is invalid.
         """
         try:
-            # Parse YAML to validate structure
-            parsed = yaml.safe_load(yaml_content)
+            # Parse YAML to validate structure - use StringIO for cleanup
+            with io.StringIO(yaml_content) as yaml_stream:
+                parsed = yaml.safe_load(yaml_stream)
 
             # Run all validations
             self._validate_structure(parsed)

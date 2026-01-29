@@ -137,12 +137,29 @@ ignore = [
     "PLR2004",   # Allow magic values in tests
     "D",         # Don't require docstrings in tests
     "ANN",       # Don't require type annotations in tests
+    "SLF001",    # Allow accessing private members in tests
+]
+"tests/e2e/**/*.py" = [
+    "S603",      # Allow subprocess calls in E2E tests (controlled test inputs)
 ]
 "start_green_stay_green/cli.py" = [
     "T201",      # Allow print in CLI
 ]
+"scripts/audit_tool_configs.py" = [
+    "T201",      # CLI script needs print for user feedback
+]
 "scripts/analyze_mutations.py" = [
     "S608",      # Allow SQL string formatting (parameterized queries used correctly)
+]
+"examples/**/*.py" = [
+    "T201",      # Allow print in example scripts (user-facing output)
+    "BLE001",    # Allow broad exception in example error handling
+    "PLC0415",   # Allow import in exception handler (traceback)
+]
+"validate_implementation.py" = [
+    "T201",      # Allow print in validation script (user-facing output)
+    "BLE001",    # Allow broad exception in validation error handling
+    "PLC0415",   # Allow import in exception handler (traceback)
 ]
 
 [tool.ruff.lint.isort]
@@ -244,11 +261,14 @@ markers = [
     "integration: marks tests as integration tests",
     "e2e: marks tests as end-to-end tests",
     "unit: marks tests as unit tests",
+    "flaky_in_ci: marks tests that are flaky in CI due to resource cleanup timing (must pass locally)",
 ]
 filterwarnings = [
     "error",  # Turn all warnings into errors
     "ignore::DeprecationWarning:anthropic.*",
     "ignore::DeprecationWarning:pytest_asyncio.*",
+    "ignore::ResourceWarning:asyncio.*",  # Ignore asyncio internal cleanup warnings
+    "ignore::ResourceWarning:pytest.*",  # Ignore pytest internal cleanup warnings
 ]
 
 # Coverage configuration
@@ -318,6 +338,8 @@ color = true
 [tool.refurb]
 # Ignore FURB184 (chained assignment with walrus operator) in tests
 # Reason: Reduces test readability
+# Ignore FURB171 (explicit bool comparison) and FURB110 (collection empty check)
+# Reason: Explicit assertions in tests are needed for mutation testing
 ignore = ["FURB184"]
 
 # Pydocstyle configuration

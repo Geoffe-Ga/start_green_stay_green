@@ -75,7 +75,7 @@ class TestGitHubActionsReviewGeneratorValidation:
         )
 
         with pytest.raises(FileNotFoundError, match=r"Template not found"):
-            generator._validate_template_exists()  # noqa: SLF001
+            generator._validate_template_exists()
 
     def test_validate_template_exists_passes_if_present(
         self,
@@ -92,7 +92,7 @@ class TestGitHubActionsReviewGeneratorValidation:
         )
 
         # Should not raise
-        generator._validate_template_exists()  # noqa: SLF001
+        generator._validate_template_exists()
 
 
 class TestGitHubActionsReviewGeneratorWorkflowGeneration:

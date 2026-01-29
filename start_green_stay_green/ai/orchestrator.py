@@ -295,5 +295,6 @@ class AIOrchestrator:
         self._validate_prompt(prompt)
         self._validate_output_format(output_format)
 
-        client = Anthropic(api_key=self.api_key)
-        return self._retry_with_backoff(client, prompt, output_format)
+        # Use context manager to ensure httpx client is properly closed
+        with Anthropic(api_key=self.api_key) as client:
+            return self._retry_with_backoff(client, prompt, output_format)

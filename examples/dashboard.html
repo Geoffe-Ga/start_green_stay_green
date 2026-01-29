@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>start-green-stay-green - Quality Metrics Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
+                         'Helvetica', 'Arial', sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 2rem;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            color: #58a6ff;
+        }
+        .subtitle {
+            color: #8b949e;
+            margin-bottom: 2rem;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .metric-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 1.5rem;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .metric-card:hover {
+            transform: translateY(-2px);
+            border-color: #58a6ff;
+        }
+        .metric-name {
+            font-size: 0.875rem;
+            color: #8b949e;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #58a6ff;
+            margin-bottom: 0.5rem;
+        }
+        .metric-threshold {
+            font-size: 0.875rem;
+            color: #8b949e;
+        }
+        .metric-status {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-top: 0.5rem;
+        }
+        .status-pass {
+            background: #238636;
+            color: #fff;
+        }
+        .status-warn {
+            background: #9e6a03;
+            color: #fff;
+        }
+        .status-fail {
+            background: #da3633;
+            color: #fff;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid #30363d;
+            color: #8b949e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>start-green-stay-green</h1>
+        <p class="subtitle">Quality Metrics Dashboard</p>
+
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-name">Code Coverage</div>
+                <div class="metric-value" id="coverage-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≥90%
+                </div>
+                <div class="metric-status status-pass" id="coverage-status">
+                    PASSING
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Branch Coverage</div>
+                <div class="metric-value" id="branch-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≥85%
+                </div>
+                <div class="metric-status status-pass" id="branch-status">PASSING</div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Mutation Score</div>
+                <div class="metric-value" id="mutation-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≥80%
+                </div>
+                <div class="metric-status status-pass" id="mutation-status">
+                    PASSING
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Cyclomatic Complexity</div>
+                <div class="metric-value" id="complexity-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≤10
+                </div>
+                <div class="metric-status status-pass" id="complexity-status">
+                    PASSING
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Documentation Coverage</div>
+                <div class="metric-value" id="docs-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≥95%
+                </div>
+                <div class="metric-status status-pass" id="docs-status">PASSING</div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Security Issues</div>
+                <div class="metric-value" id="security-value">--</div>
+                <div class="metric-threshold">Threshold: 0 critical/high</div>
+                <div class="metric-status status-pass" id="security-status">
+                    PASSING
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Generated by Start Green Stay Green</p>
+            <p>Last updated: <span id="last-updated">--</span></p>
+        </div>
+    </div>
+
+    <script>
+        // Update timestamp
+        document.getElementById('last-updated').textContent =
+            new Date().toLocaleString();
+
+        // TODO: Fetch actual metrics from CI artifacts or API
+        // This is a template - integrate with your CI/CD pipeline
+    </script>
+</body>
+</html>

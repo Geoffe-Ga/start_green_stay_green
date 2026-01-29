@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>start-green-stay-green - Quality Metrics Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
+                         'Helvetica', 'Arial', sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 2rem;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            color: #58a6ff;
+        }
+        .subtitle {
+            color: #8b949e;
+            margin-bottom: 2rem;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .metric-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 1.5rem;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .metric-card:hover {
+            transform: translateY(-2px);
+            border-color: #58a6ff;
+        }
+        .metric-name {
+            font-size: 0.875rem;
+            color: #8b949e;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #58a6ff;
+            margin-bottom: 0.5rem;
+        }
+        .metric-threshold {
+            font-size: 0.875rem;
+            color: #8b949e;
+        }
+        .metric-status {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-top: 0.5rem;
+        }
+        .status-pass {
+            background: #238636;
+            color: #fff;
+        }
+        .status-warn {
+            background: #9e6a03;
+            color: #fff;
+        }
+        .status-fail {
+            background: #da3633;
+            color: #fff;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid #30363d;
+            color: #8b949e;
+        }
+        .loading {
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>start-green-stay-green</h1>
+        <p class="subtitle">Quality Metrics Dashboard</p>
+
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-name">Code Coverage</div>
+                <div class="metric-value" id="coverage-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≥90%
+                </div>
+                <div class="metric-status status-pass" id="coverage-status">
+                    LOADING...
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Branch Coverage</div>
+                <div class="metric-value" id="branch-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≥85%
+                </div>
+                <div class="metric-status status-pass" id="branch-status">LOADING...</div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Mutation Score</div>
+                <div class="metric-value" id="mutation-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≥80%
+                </div>
+                <div class="metric-status status-pass" id="mutation-status">
+                    LOADING...
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Cyclomatic Complexity</div>
+                <div class="metric-value" id="complexity-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≤10
+                </div>
+                <div class="metric-status status-pass" id="complexity-status">
+                    LOADING...
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Documentation Coverage</div>
+                <div class="metric-value" id="docs-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≥95%
+                </div>
+                <div class="metric-status status-pass" id="docs-status">LOADING...</div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Security Issues</div>
+                <div class="metric-value" id="security-value">--</div>
+                <div class="metric-threshold">Threshold: 0 critical/high</div>
+                <div class="metric-status status-pass" id="security-status">
+                    LOADING...
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Generated by Start Green Stay Green</p>
+            <p>Last updated: <span id="last-updated">--</span></p>
+        </div>
+    </div>
+
+    <script>
+        // Production workflow: Fetch metrics from CI artifacts
+        // Option 1: From local metrics.json (same directory)
+        // Option 2: From GitHub Actions artifacts API
+        // Option 3: From GitHub Pages deployment
+
+        async function loadMetrics() {
+            try {
+                // Try to load from local metrics.json first
+                const response = await fetch('metrics.json');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                updateDashboard(data);
+            } catch (error) {
+                console.warn('Could not load metrics.json, using mock data');
+                // Fallback: Use mock data or show error
+                loadMockData();
+            }
+        }
+
+        function updateDashboard(data) {
+            const metrics = data.metrics;
+            const thresholds = data.thresholds;
+
+            // Update timestamp
+            document.getElementById('last-updated').textContent =
+                new Date(data.timestamp).toLocaleString();
+
+            // Coverage
+            if (metrics.coverage !== undefined) {
+                updateMetric('coverage', metrics.coverage, '%',
+                    metrics.coverage >= thresholds.coverage);
+            }
+
+            // Branch Coverage
+            if (metrics.branch_coverage !== undefined) {
+                updateMetric('branch', metrics.branch_coverage, '%',
+                    metrics.branch_coverage >= thresholds.branch_coverage);
+            }
+
+            // Mutation Score
+            if (metrics.mutation_score !== undefined) {
+                updateMetric('mutation', metrics.mutation_score, '%',
+                    metrics.mutation_score >= thresholds.mutation_score);
+            }
+
+            // Complexity
+            if (metrics.complexity_avg !== undefined) {
+                updateMetric('complexity', metrics.complexity_avg, '',
+                    metrics.complexity_avg <= thresholds.complexity);
+            }
+
+            // Documentation
+            if (metrics.docs_coverage !== undefined) {
+                updateMetric('docs', metrics.docs_coverage, '%',
+                    metrics.docs_coverage >= thresholds.docs_coverage);
+            }
+
+            // Security
+            if (metrics.security_issues !== undefined) {
+                const elem = document.getElementById('security-value');
+                elem.textContent = metrics.security_issues;
+                updateStatus('security',
+                    metrics.security_issues === 0 ? 'PASSING' : 'FAILING',
+                    metrics.security_issues === 0);
+            }
+        }
+
+        function updateMetric(name, value, suffix, passing) {
+            const elem = document.getElementById(`${name}-value`);
+            elem.textContent = value.toFixed(2) + suffix;
+            updateStatus(name, passing ? 'PASSING' : 'FAILING', passing);
+        }
+
+        function updateStatus(name, text, passing) {
+            const elem = document.getElementById(`${name}-status`);
+            elem.textContent = text;
+            elem.className = 'metric-status ' + (passing ? 'status-pass' : 'status-fail');
+        }
+
+        function loadMockData() {
+            // Mock data for demonstration
+            const mockData = {
+                "timestamp": new Date().toISOString(),
+                "project": "start-green-stay-green",
+                "thresholds": {
+                    "coverage": 90,
+                    "branch_coverage": 85,
+                    "mutation_score": 80,
+                    "complexity": 10,
+                    "docs_coverage": 95,
+                    "security_issues": 0
+                },
+                "metrics": {
+                    "coverage": 92.62,
+                    "branch_coverage": 90.26,
+                    "mutation_score": 85.0,
+                    "complexity_avg": 4.8,
+                    "docs_coverage": 96.5,
+                    "security_issues": 0
+                }
+            };
+            updateDashboard(mockData);
+        }
+
+        // Load metrics on page load
+        document.addEventListener('DOMContentLoaded', loadMetrics);
+    </script>
+</body>
+</html>

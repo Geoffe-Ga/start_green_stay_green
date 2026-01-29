@@ -1,0 +1,132 @@
+# Example GitHub Actions workflow for SGSG projects
+# This shows how metrics.json is generated and deployed
+
+name: Quality Metrics
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly for mutation testing
+
+jobs:
+  collect-metrics:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # For GitHub Pages deployment
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        run: |
+          pytest --cov=start_green_stay_green \
+                 --cov-report=json \
+                 --cov-report=term
+
+      - name: Analyze complexity
+        run: |
+          radon cc start_green_stay_green/ -a -s > complexity-report.txt
+
+      - name: Check documentation coverage
+        run: |
+          interrogate start_green_stay_green/ -v > docs-report.txt
+
+      - name: Run security scan
+        run: |
+          bandit -r start_green_stay_green/ -ll -f json -o security-report.json
+
+      - name: Generate metrics.json
+        run: |
+          python << 'PYTHON_SCRIPT'
+          import json
+          import re
+          from pathlib import Path
+          from datetime import datetime
+
+          metrics = {
+              "timestamp": datetime.now().isoformat(),
+              "project": "start-green-stay-green",
+              "thresholds": {
+                  "coverage": 90,
+                  "branch_coverage": 85,
+                  "mutation_score": 80,
+                  "complexity": 10,
+                  "docs_coverage": 95,
+                  "security_issues": 0
+              },
+              "metrics": {}
+          }
+
+          # Parse coverage
+          cov_data = json.loads(Path('.coverage.json').read_text())
+          metrics['metrics']['coverage'] = round(cov_data['totals']['percent_covered'], 2)
+
+          # Parse complexity
+          complexity_text = Path('complexity-report.txt').read_text()
+          match = re.search(r'Average complexity: [A-Z] \(([0-9.]+)\)', complexity_text)
+          if match:
+              metrics['metrics']['complexity_avg'] = float(match.group(1))
+
+          # Parse docs coverage
+          docs_text = Path('docs-report.txt').read_text()
+          match = re.search(r'RESULT: ([0-9.]+)%', docs_text)
+          if match:
+              metrics['metrics']['docs_coverage'] = float(match.group(1))
+
+          # Parse security
+          security_data = json.loads(Path('security-report.json').read_text())
+          metrics['metrics']['security_issues'] = len(security_data.get('results', []))
+
+          # Compute status for each metric
+          for key, value in metrics['metrics'].items():
+              if key.endswith('_avg'):
+                  continue
+              threshold_key = key
+              if key == 'complexity_avg':
+                  threshold_key = 'complexity'
+
+              if threshold_key in metrics['thresholds']:
+                  threshold = metrics['thresholds'][threshold_key]
+                  if threshold_key == 'complexity':
+                      status = 'pass' if value <= threshold else 'fail'
+                  elif threshold_key == 'security_issues':
+                      status = 'pass' if value == threshold else 'fail'
+                  else:
+                      status = 'pass' if value >= threshold else 'fail'
+                  metrics['metrics'][f'{key}_status'] = status
+
+          # Write metrics.json
+          Path('metrics.json').write_text(json.dumps(metrics, indent=2))
+          print("✓ Generated metrics.json")
+          print(json.dumps(metrics, indent=2))
+          PYTHON_SCRIPT
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .
+          keep_files: false
+          destination_dir: metrics
+
+      # Alternative: Upload as artifact
+      - name: Upload metrics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-metrics
+          path: |
+            metrics.json
+            dashboard.html
+          retention-days: 90
