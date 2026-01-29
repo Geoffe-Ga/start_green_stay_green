@@ -234,6 +234,7 @@ exclude = [
     "worktrees/",
     "reference/",
     "templates/",
+    "venv/",
 ]
 
 [[tool.mypy.overrides]]
