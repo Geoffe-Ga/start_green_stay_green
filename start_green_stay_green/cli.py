@@ -5,6 +5,8 @@ Implements the command-line interface using Typer with rich output formatting.
 
 from __future__ import annotations
 
+from datetime import UTC
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -734,15 +736,16 @@ def _generate_metrics_dashboard_step(
     # Generate dashboard and metrics.json
     generator.write_dashboard(docs_dir)
     initial_metrics_path = docs_dir / "metrics.json"
+    # Use thresholds from config to avoid duplication
     initial_metrics = {
-        "timestamp": "2026-01-28T00:00:00Z",
+        "timestamp": datetime.now(UTC).isoformat(),
         "project": project_name,
         "thresholds": {
-            "coverage": 90,
-            "branch_coverage": 85,
-            "mutation_score": 80,
-            "complexity": 10,
-            "docs_coverage": 95,
+            "coverage": config.coverage_threshold,
+            "branch_coverage": config.branch_coverage_threshold,
+            "mutation_score": config.mutation_threshold,
+            "complexity": config.complexity_threshold,
+            "docs_coverage": config.doc_coverage_threshold,
             "security_issues": 0,
         },
         "metrics": {
@@ -779,6 +782,11 @@ def _generate_metrics_dashboard_step(
             "start-green-stay-green", project_name
         )
         target_workflow.write_text(workflow_content)
+    else:
+        console.print(
+            "[yellow]Warning:[/yellow] Metrics workflow template not found. "
+            "You'll need to create .github/workflows/metrics.yml manually."
+        )
 
     # Copy collect_metrics.py script
     scripts_dir = project_path / "scripts"
@@ -786,6 +794,11 @@ def _generate_metrics_dashboard_step(
     sgsg_script = sgsg_root / "scripts" / "collect_metrics.py"
     if sgsg_script.exists():
         shutil.copy(sgsg_script, scripts_dir / "collect_metrics.py")
+    else:
+        console.print(
+            "[yellow]Warning:[/yellow] Metrics collection script not found. "
+            "You'll need to create scripts/collect_metrics.py manually."
+        )
 
     progress.update(task, completed=True)
 

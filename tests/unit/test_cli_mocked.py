@@ -409,3 +409,72 @@ class TestMetricsDashboardGeneration:
         workflows_dir = tmp_path / ".github" / "workflows"
         assert workflows_dir.exists()
         assert workflows_dir.is_dir()
+
+    @patch("start_green_stay_green.cli.shutil.copy")
+    @patch("start_green_stay_green.cli.MetricsGenerator")
+    @patch("start_green_stay_green.cli.console")
+    def test_generate_metrics_dashboard_warns_on_missing_workflow(
+        self,
+        mock_console: Mock,
+        mock_generator_class: Mock,
+        mock_shutil_copy: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Test _generate_metrics_dashboard_step warns when workflow missing."""
+        # Setup mock generator
+        mock_generator_class.return_value = Mock()
+        # Setup mock copy (not used but required by patch decorator order)
+        mock_shutil_copy.return_value = None
+
+        # Mock Path.exists to return False for workflow file
+        with (
+            patch.object(Path, "exists", return_value=False),
+            Progress(SpinnerColumn(), TextColumn("{task.description}")) as progress,
+        ):
+            cli._generate_metrics_dashboard_step(
+                project_path=tmp_path,
+                project_name="test-project",
+                language="python",
+                progress=progress,
+            )
+
+        # Verify warning was printed
+        assert mock_console.print.called
+        warning_calls = [
+            call for call in mock_console.print.call_args_list if "Warning" in str(call)
+        ]
+        assert warning_calls
+
+    @patch("start_green_stay_green.cli.shutil.copy")
+    @patch("start_green_stay_green.cli.MetricsGenerator")
+    def test_generate_metrics_dashboard_replaces_project_name(
+        self, mock_generator_class: Mock, mock_shutil_copy: Mock, tmp_path: Path
+    ) -> None:
+        """Test _generate_metrics_dashboard_step replaces project name in workflow."""
+        # Setup mock generator
+        mock_generator_class.return_value = Mock()
+
+        # Create source workflow with SGSG project name
+        workflow_content = "project: start-green-stay-green\nname: Metrics"
+
+        # Mock shutil.copy to create workflow with SGSG name
+        def copy_side_effect(_src: Path, dst: Path) -> None:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text(workflow_content)
+
+        mock_shutil_copy.side_effect = copy_side_effect
+
+        with Progress(SpinnerColumn(), TextColumn("{task.description}")) as progress:
+            cli._generate_metrics_dashboard_step(
+                project_path=tmp_path,
+                project_name="my-new-project",
+                language="python",
+                progress=progress,
+            )
+
+        # Verify workflow content was replaced
+        workflow_file = tmp_path / ".github" / "workflows" / "metrics.yml"
+        if workflow_file.exists():
+            content = workflow_file.read_text()
+            assert "my-new-project" in content
+            assert "start-green-stay-green" not in content
