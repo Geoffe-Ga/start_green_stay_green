@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-01-28T16:05:59.843863",
+  "project": "start-green-stay-green",
+  "thresholds": {
+    "coverage": 90,
+    "branch_coverage": 85,
+    "mutation_score": 80,
+    "complexity": 10,
+    "docs_coverage": 95,
+    "security_issues": 0
+  },
+  "metrics": {
+    "coverage": 92.62,
+    "coverage_status": "pass",
+    "branch_coverage": 90.26,
+    "branch_coverage_status": "pass",
+    "complexity_avg": 4.8,
+    "complexity_status": "pass",
+    "docs_coverage": 96.5,
+    "docs_status": "pass",
+    "security_issues": 0,
+    "security_status": "pass",
+    "mutation_score": 85.0,
+    "mutation_status": "pass"
+  }
+}

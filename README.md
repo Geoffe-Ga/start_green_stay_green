@@ -7,6 +7,8 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+📊 **[View Live Quality Metrics Dashboard](https://geoffe-ga.github.io/start_green_stay_green/dashboard.html)** - Auto-updated after every PR merge
+
 ## What is Start Green Stay Green?
 
 Start Green Stay Green is a meta-tool that scaffolds new software projects with comprehensive quality infrastructure pre-configured. Unlike traditional project generators, Start Green Stay Green creates **AI-orchestrated quality controls** that ensure your project stays green from the first commit.
