@@ -181,6 +181,63 @@ These options work with all commands:
 - `--config, --config-file PATH`: Path to configuration file (YAML or TOML)
 - `--help`: Show help message and exit
 
+
+## Documentation
+
+Comprehensive documentation for using Start Green Stay Green:
+
+### User Documentation
+
+- **[Tutorials](docs/TUTORIALS.md)** - Step-by-step guides and common workflows
+  - Getting started with your first project
+  - Common use cases and patterns
+  - Advanced project customization
+  - Troubleshooting guide
+
+- **[CLI Reference](docs/CLI_REFERENCE.md)** - Complete command-line reference
+  - All commands with options and examples
+  - Configuration file formats
+  - Environment variables
+  - Error codes and troubleshooting
+
+- **[Generator Guide](docs/GENERATOR_GUIDE.md)** - Generator documentation
+  - Built-in generator reference (PreCommit, Scripts, CI, Subagents, etc.)
+  - Custom generator development
+  - Integration patterns
+  - Examples for all generators
+
+- **[AI Orchestration](docs/AI_ORCHESTRATION.md)** - AI features guide
+  - API key management and credential storage
+  - Using AI-powered generators
+  - Error handling and best practices
+  - Integration with CI/CD
+
+### Developer Documentation
+
+- **[API Documentation](docs/API_DOCUMENTATION.md)** - Complete API reference
+- **[Contributing](CONTRIBUTING.md)** - Contribution guidelines
+- **[Architecture](plan/SPEC.md)** - Project specification and design
+- **[Quality Standards](plan/MAXIMUM_QUALITY_ENGINEERING.md)** - Quality framework
+
+### Generate Local Documentation
+
+Generate and view API documentation locally:
+
+```bash
+# Navigate to a generated project
+cd my-project
+
+# Generate and serve documentation
+./scripts/docs.sh --serve
+
+# Open http://localhost:8000 in your browser
+```
+
+### Online Documentation
+
+- **[ReadTheDocs](https://start-green-stay-green.readthedocs.io)** - Hosted documentation with search
+- **[GitHub Pages](https://geoffe-ga.github.io/start_green_stay_green/)** - API reference
+
 ## Configuration
 
 ### Configuration File Format
