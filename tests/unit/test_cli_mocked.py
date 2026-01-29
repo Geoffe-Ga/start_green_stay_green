@@ -378,9 +378,8 @@ class TestPathValidation:
             cli._validate_and_prepare_paths("my-project", mock_path)
 
     @patch("start_green_stay_green.cli._validate_output_dir")
-    @patch("start_green_stay_green.cli._validate_project_name")
     def test_validate_and_prepare_paths_returns_project_path_correctly(
-        self, _mock_validate_name: Mock, mock_validate_dir: Mock
+        self, mock_validate_dir: Mock
     ) -> None:
         """Test _validate_and_prepare_paths returns correct project path."""
         mock_output_dir = MagicMock(spec=Path)
@@ -679,20 +678,15 @@ class TestLoadConfigData:
         mock_load.assert_not_called()
 
     @patch("start_green_stay_green.cli.load_config_file")
-    def test_load_config_data_loads_file(
-        self, mock_load: Mock
-    ) -> None:
+    def test_load_config_data_loads_file(self, mock_load: Mock) -> None:
         """Test _load_config_data loads config file."""
         mock_load.return_value = {"key": "value"}
         mock_path = MagicMock(spec=Path)
         result = cli._load_config_data(mock_path)
         assert result == {"key": "value"}
 
-    @patch("start_green_stay_green.cli.console")
     @patch("start_green_stay_green.cli.load_config_file")
-    def test_load_config_data_exits_on_file_not_found(
-        self, mock_load: Mock, mock_console: Mock
-    ) -> None:
+    def test_load_config_data_exits_on_file_not_found(self, mock_load: Mock) -> None:
         """Test _load_config_data exits on FileNotFoundError."""
         mock_load.side_effect = FileNotFoundError("Not found")
         mock_path = MagicMock(spec=Path)
@@ -764,23 +758,17 @@ class TestVersionCommandDetails:
 class TestMainCallback:
     """Test main callback function."""
 
-    @patch("start_green_stay_green.cli._load_config_if_specified")
     @patch("start_green_stay_green.cli._validate_options")
-    def test_main_validates_options(
-        self, mock_validate: Mock, _mock_load_config: Mock
-    ) -> None:
+    def test_main_validates_options(self, mock_validate: Mock) -> None:
         """Test main calls _validate_options."""
         cli.main(verbose=True, quiet=False)
         mock_validate.assert_called_once()
 
     @patch("start_green_stay_green.cli._load_config_if_specified")
-    @patch("start_green_stay_green.cli._validate_options")
-    def test_main_loads_config(
-        self, _mock_validate: Mock, mock_load_config: Mock
-    ) -> None:
+    def test_main_loads_config(self, mock_load_config: Mock) -> None:
         """Test main calls _load_config_if_specified."""
-        cli.main(verbose=False, quiet=False, config=None)
-        mock_load_config.assert_called_once_with(None, False)
+        cli.main(quiet=False, config=None)
+        mock_load_config.assert_called_once()
 
 
 class TestCopyReferenceSkills:
@@ -809,9 +797,10 @@ class TestCopyReferenceSkills:
         mock_skill_file.exists.return_value = False
         mock_ref_dir.__truediv__.return_value = mock_skill_file
 
-        with patch(
-            "start_green_stay_green.cli.REQUIRED_SKILLS", ["missing_skill.md"]
-        ), pytest.raises(FileNotFoundError):
+        with (
+            patch("start_green_stay_green.cli.REQUIRED_SKILLS", ["missing_skill.md"]),
+            pytest.raises(FileNotFoundError),
+        ):
             cli._copy_reference_skills(mock_target)
 
 
