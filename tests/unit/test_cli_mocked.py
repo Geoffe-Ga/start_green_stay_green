@@ -1033,7 +1033,7 @@ class TestGenerateSteps:
         mock_task = MagicMock()
         mock_progress.add_task.return_value = mock_task
         mock_generator = MagicMock()
-        mock_generator.generate.return_value = "# config"
+        mock_generator.generate.return_value = {"content": "# config"}
         mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)

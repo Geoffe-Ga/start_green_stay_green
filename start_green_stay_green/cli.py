@@ -568,9 +568,9 @@ def _generate_precommit_step(
         language_config={},
     )
     precommit_generator = PreCommitGenerator(orchestrator=None)
-    precommit_content = precommit_generator.generate(precommit_config)
+    precommit_result = precommit_generator.generate(precommit_config)
     precommit_file = project_path / ".pre-commit-config.yaml"
-    precommit_file.write_text(precommit_content)
+    precommit_file.write_text(precommit_result["content"])
     progress.update(task, completed=True)
 
 
@@ -612,7 +612,8 @@ def _generate_review_step(
         review_result = review_generator.generate()
         workflows_dir = project_path / ".github" / "workflows"
         workflows_dir.mkdir(parents=True, exist_ok=True)
-        (workflows_dir / "code-review.yml").write_text(review_result.workflow_content)
+        workflow_file = workflows_dir / "code-review.yml"
+        workflow_file.write_text(review_result["workflow_content"])
         progress.update(task, completed=True)
     else:
         task = progress.add_task("Skipping code review (no API key)...", total=None)

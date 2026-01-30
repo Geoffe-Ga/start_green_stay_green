@@ -279,7 +279,7 @@ class MetricsGenerator(BaseGenerator):
         Raises:
             ValueError: If configuration is invalid.
         """
-        super().__init__(orchestrator)
+        self.orchestrator = orchestrator
         self.config = config
         self._validate_config()
 
