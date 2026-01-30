@@ -497,4 +497,4 @@ Now that you understand the basics:
 4. **Check the Workflows**: Look at `.github/workflows/` for CI/CD details
 5. **Start Developing**: Add your code and let the checks guide you
 
-For detailed API documentation, see [API Documentation](API_DOCUMENTATION.md).
+For detailed documentation, see [CLI Reference](CLI_REFERENCE.md), [Generator Guide](GENERATOR_GUIDE.md), and [AI Orchestration](AI_ORCHESTRATION.md).

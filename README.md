@@ -214,7 +214,10 @@ Comprehensive documentation for using Start Green Stay Green:
 
 ### Developer Documentation
 
-- **[API Documentation](docs/API_DOCUMENTATION.md)** - Complete API reference
+- **[CLI Reference](docs/CLI_REFERENCE.md)** - Complete command-line interface documentation
+- **[Generator Guide](docs/GENERATOR_GUIDE.md)** - Component generator API reference
+- **[AI Orchestration](docs/AI_ORCHESTRATION.md)** - AI integration and API usage
+- **[Tutorials](docs/TUTORIALS.md)** - Step-by-step guides and examples
 - **[Contributing](CONTRIBUTING.md)** - Contribution guidelines
 - **[Architecture](plan/SPEC.md)** - Project specification and design
 - **[Quality Standards](reference/MAXIMUM_QUALITY_ENGINEERING.md)** - Quality framework

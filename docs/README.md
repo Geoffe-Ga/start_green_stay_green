@@ -49,8 +49,11 @@ open docs/dashboard.html  # macOS
 
 - **`dashboard.html`**: Interactive metrics dashboard (auto-generated)
 - **`metrics.json`**: Live metrics data (updated by CI)
-- **`API_DOCUMENTATION.md`**: API documentation
 - **`METRICS_DASHBOARD.md`**: Complete metrics generator documentation
+- **`CLI_REFERENCE.md`**: Command-line interface documentation
+- **`GENERATOR_GUIDE.md`**: Component generator API reference
+- **`AI_ORCHESTRATION.md`**: AI integration and API usage
+- **`TUTORIALS.md`**: Step-by-step guides and examples
 
 ## GitHub Actions
 

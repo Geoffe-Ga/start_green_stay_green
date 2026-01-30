@@ -625,4 +625,3 @@ A: Yes, use `--no-interactive` mode and pass configuration via environment varia
 - [Tutorials](TUTORIALS.md) - Step-by-step guides
 - [Generator Guide](GENERATOR_GUIDE.md) - Detailed generator documentation
 - [AI Orchestration](AI_ORCHESTRATION.md) - API key and credential management
-- [API Documentation](API_DOCUMENTATION.md) - Complete API reference
