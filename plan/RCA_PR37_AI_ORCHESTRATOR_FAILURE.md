@@ -156,6 +156,6 @@ See: `/plan/ISSUE_7_FRESH_START_PROMPT.md`
 ## References
 
 - [CLAUDE.md - Forbidden Patterns](/CLAUDE.md#forbidden-patterns)
-- [Maximum Quality Engineering Framework](/plan/MAXIMUM_QUALITY_ENGINEERING.md)
+- [Maximum Quality Engineering Framework](/reference/MAXIMUM_QUALITY_ENGINEERING.md)
 - [Issue #7 - AI Orchestrator](/issues/7)
 - [PR #37 - Original Implementation](/pull/37)

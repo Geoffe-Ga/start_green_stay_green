@@ -1903,7 +1903,7 @@ When delegating work to subagents, provide:
 ### Documentation Files
 - `CLAUDE.md`: This file - Claude Code project context
 - `plan/SPEC.md`: Complete project specification (requirements, issues, phases)
-- `plan/MAXIMUM_QUALITY_ENGINEERING.md`: Quality framework and principles
+- `reference/MAXIMUM_QUALITY_ENGINEERING.md`: Quality framework and principles
 - `README.md`: Project overview and quick start
 - `reference/`: Reference implementations and examples
 
@@ -1920,7 +1920,7 @@ When delegating work to subagents, provide:
 
 ## Appendix C: External References
 
-- [MAXIMUM_QUALITY_ENGINEERING.md](plan/MAXIMUM_QUALITY_ENGINEERING.md) - Comprehensive quality framework
+- [MAXIMUM_QUALITY_ENGINEERING.md](reference/MAXIMUM_QUALITY_ENGINEERING.md) - Comprehensive quality framework
 - [SPEC.md](plan/SPEC.md) - Complete project specification
 - [README.md](README.md) - Project overview and setup
 - [Pre-commit Documentation](https://pre-commit.com) - Git hooks framework

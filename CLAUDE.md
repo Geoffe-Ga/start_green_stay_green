@@ -236,7 +236,7 @@ When delegating work to subagents, provide:
 - `claude/*.md`: Modular documentation (principles, quality, workflow, testing, tools, troubleshooting)
 - `reference/workflows/stay-green.md`: Complete Stay Green workflow documentation
 - `plan/SPEC.md`: Complete project specification
-- `plan/MAXIMUM_QUALITY_ENGINEERING.md`: Quality framework
+- `reference/MAXIMUM_QUALITY_ENGINEERING.md`: Quality framework
 - `README.md`: Project overview and quick start
 
 ### Scripts
@@ -253,7 +253,7 @@ When delegating work to subagents, provide:
 
 ## Appendix C: External References
 
-- [MAXIMUM_QUALITY_ENGINEERING.md](plan/MAXIMUM_QUALITY_ENGINEERING.md) - Comprehensive quality framework
+- [MAXIMUM_QUALITY_ENGINEERING.md](reference/MAXIMUM_QUALITY_ENGINEERING.md) - Comprehensive quality framework
 - [SPEC.md](plan/SPEC.md) - Complete project specification
 - [README.md](README.md) - Project overview and setup
 - [Pre-commit Documentation](https://pre-commit.com) - Git hooks framework
