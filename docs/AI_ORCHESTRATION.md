@@ -590,4 +590,3 @@ start-green-stay-green init --config project.yaml
 - [Tutorials](TUTORIALS.md) - Using AI features in projects
 - [Generator Guide](GENERATOR_GUIDE.md) - AI-powered generators
 - [CLI Reference](CLI_REFERENCE.md) - API key command line options
-- [API Documentation](API_DOCUMENTATION.md) - Complete API reference

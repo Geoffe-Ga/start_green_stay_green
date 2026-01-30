@@ -398,7 +398,7 @@ generator.write_all(Path("nonexistent/path"))  # OK
 
 ## References
 
-- [MAXIMUM_QUALITY_ENGINEERING.md](../plan/MAXIMUM_QUALITY_ENGINEERING.md) - Part 9.1
+- [MAXIMUM_QUALITY_ENGINEERING.md](../reference/MAXIMUM_QUALITY_ENGINEERING.md) - Quality framework
 - [Issue #17](https://github.com/your-repo/issues/17) - Original specification
 - [BaseGenerator](../start_green_stay_green/generators/base.py) - Parent class
 - [Pre-commit Hooks](../start_green_stay_green/generators/precommit.py) - CI integration

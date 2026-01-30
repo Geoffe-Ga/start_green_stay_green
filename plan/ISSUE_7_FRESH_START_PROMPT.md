@@ -291,4 +291,4 @@ Before creating PR:
 
 - [CLAUDE.md](/CLAUDE.md) - Development standards
 - [SPEC.md](/plan/SPEC.md) - Project specification
-- [Maximum Quality Engineering](/plan/MAXIMUM_QUALITY_ENGINEERING.md) - Quality framework
+- [Maximum Quality Engineering](/reference/MAXIMUM_QUALITY_ENGINEERING.md) - Quality framework

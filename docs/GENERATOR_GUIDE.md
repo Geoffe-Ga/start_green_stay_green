@@ -659,5 +659,5 @@ except GenerationError as e:
 ## Related Documentation
 
 - [Tutorials](TUTORIALS.md) - How to use generators
-- [API Documentation](API_DOCUMENTATION.md) - Complete API reference
+- [CLI Reference](CLI_REFERENCE.md) - Command-line interface documentation
 - [AI Orchestration](AI_ORCHESTRATION.md) - Using AI in generators

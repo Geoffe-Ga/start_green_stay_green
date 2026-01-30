@@ -214,29 +214,43 @@ Comprehensive documentation for using Start Green Stay Green:
 
 ### Developer Documentation
 
-- **[API Documentation](docs/API_DOCUMENTATION.md)** - Complete API reference
+- **[CLI Reference](docs/CLI_REFERENCE.md)** - Complete command-line interface documentation
+- **[Generator Guide](docs/GENERATOR_GUIDE.md)** - Component generator API reference
+- **[AI Orchestration](docs/AI_ORCHESTRATION.md)** - AI integration and API usage
+- **[Tutorials](docs/TUTORIALS.md)** - Step-by-step guides and examples
 - **[Contributing](CONTRIBUTING.md)** - Contribution guidelines
 - **[Architecture](plan/SPEC.md)** - Project specification and design
-- **[Quality Standards](plan/MAXIMUM_QUALITY_ENGINEERING.md)** - Quality framework
+- **[Quality Standards](reference/MAXIMUM_QUALITY_ENGINEERING.md)** - Quality framework
 
-### Generate Local Documentation
+### Viewing Documentation
 
-Generate and view API documentation locally:
+**For the Start Green Stay Green project itself:**
 
 ```bash
-# Navigate to a generated project
-cd my-project
-
-# Generate and serve documentation
+# Generate and serve API documentation locally
 ./scripts/docs.sh --serve
 
-# Open http://localhost:8000 in your browser
+# Open http://localhost:8080 in your browser
+```
+
+**For generated projects:**
+
+Once you run `start-green-stay-green init` to create a project, you can generate documentation for that project:
+
+```bash
+# Navigate to your generated project
+cd my-project
+
+# Generate and serve its documentation
+./scripts/docs.sh --serve
+
+# Open http://localhost:8080 in your browser
 ```
 
 ### Online Documentation
 
-- **[ReadTheDocs](https://start-green-stay-green.readthedocs.io)** - Hosted documentation with search
-- **[GitHub Pages](https://geoffe-ga.github.io/start_green_stay_green/)** - API reference
+- **[ReadTheDocs](https://start-green-stay-green.readthedocs.io)** - Hosted API documentation (auto-deployed on commits to main)
+- **[GitHub Pages Dashboard](https://geoffe-ga.github.io/start_green_stay_green/)** - Live metrics dashboard with quality metrics
 
 ## Configuration
 
