@@ -36,7 +36,7 @@ class TestPreCommitGeneratorIntegration:
         result = generator.generate(config)
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write(result)
+            f.write(result["content"])
             temp_path = Path(f.name)
 
         try:
@@ -71,7 +71,7 @@ class TestPreCommitGeneratorIntegration:
         result = generator.generate(config)
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write(result)
+            f.write(result["content"])
             temp_path = Path(f.name)
 
         try:
@@ -101,8 +101,11 @@ class TestPreCommitGeneratorIntegration:
                 language_config={},
             )
             result = generator.generate(config)
-            assert language in result or f"{language}-project" in result
-            assert "repos" in result
+            assert (
+                language in result["content"]
+                or f"{language}-project" in result["content"]
+            )
+            assert "repos" in result["content"]
 
     def test_generated_config_has_valid_structure_for_all_languages(
         self, mock_orchestrator: Mock
@@ -120,7 +123,9 @@ class TestPreCommitGeneratorIntegration:
 
             # Extract YAML content (skip comments)
             yaml_lines = [
-                line for line in result.split("\n") if not line.startswith("#")
+                line
+                for line in result["content"].split("\n")
+                if not line.startswith("#")
             ]
             yaml_content = "\n".join(yaml_lines)
 
@@ -145,7 +150,9 @@ class TestPreCommitGeneratorIntegration:
         )
         result = generator.generate(config)
 
-        yaml_lines = [line for line in result.split("\n") if not line.startswith("#")]
+        yaml_lines = [
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        ]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -170,7 +177,9 @@ class TestPreCommitGeneratorIntegration:
         )
         result = generator.generate(config)
 
-        yaml_lines = [line for line in result.split("\n") if not line.startswith("#")]
+        yaml_lines = [
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        ]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -197,7 +206,9 @@ class TestPreCommitGeneratorIntegration:
             result = generator.generate(config)
 
             yaml_lines = [
-                line for line in result.split("\n") if not line.startswith("#")
+                line
+                for line in result["content"].split("\n")
+                if not line.startswith("#")
             ]
             yaml_content = "\n".join(yaml_lines)
             parsed = yaml.safe_load(yaml_content)
@@ -224,7 +235,7 @@ class TestPreCommitGeneratorIntegration:
                 language_config={},
             )
             result = generator.generate(config)
-            assert project_name in result
+            assert project_name in result["content"]
 
     def test_yaml_roundtrip_consistency(self, mock_orchestrator: Mock) -> None:
         """Test YAML can be parsed, modified, and re-serialized."""
@@ -237,7 +248,9 @@ class TestPreCommitGeneratorIntegration:
         original = generator.generate(config)
 
         # Parse YAML
-        yaml_lines = [line for line in original.split("\n") if not line.startswith("#")]
+        yaml_lines = [
+            line for line in original["content"].split("\n") if not line.startswith("#")
+        ]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -262,7 +275,9 @@ class TestPreCommitGeneratorIntegration:
         )
         result = generator.generate(config)
 
-        yaml_lines = [line for line in result.split("\n") if not line.startswith("#")]
+        yaml_lines = [
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        ]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -282,7 +297,9 @@ class TestPreCommitGeneratorIntegration:
         )
         result = generator.generate(config)
 
-        yaml_lines = [line for line in result.split("\n") if not line.startswith("#")]
+        yaml_lines = [
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        ]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -302,7 +319,9 @@ class TestPreCommitGeneratorIntegration:
         )
         result = generator.generate(config)
 
-        yaml_lines = [line for line in result.split("\n") if not line.startswith("#")]
+        yaml_lines = [
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        ]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -345,7 +364,9 @@ class TestPreCommitGeneratorIntegration:
         )
         result = generator.generate(config)
 
-        yaml_lines = [line for line in result.split("\n") if not line.startswith("#")]
+        yaml_lines = [
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        ]
         yaml_content = "\n".join(yaml_lines)
         parsed = yaml.safe_load(yaml_content)
 
@@ -372,4 +393,4 @@ class TestPreCommitGeneratorIntegration:
             )
             result = generator.generate(config)
             assert result
-            assert f"perf-test-{i}" in result
+            assert f"perf-test-{i}" in result["content"]

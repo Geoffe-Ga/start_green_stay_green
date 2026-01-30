@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
+from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.github_actions import (
     GitHubActionsReviewGenerator,
 )
@@ -74,7 +75,7 @@ class TestGitHubActionsReviewGeneratorValidation:
             template_path=missing_template,
         )
 
-        with pytest.raises(FileNotFoundError, match=r"Template not found"):
+        with pytest.raises(GenerationError, match=r"Template not found"):
             generator._validate_template_exists()
 
     def test_validate_template_exists_passes_if_present(
@@ -130,13 +131,15 @@ jobs:
 
         result = generator.generate(workflow_name="Code Review")
 
-        # Verify result structure
-        assert isinstance(result, ReviewWorkflowResult)
-        assert result.workflow_content
-        assert result.workflow_path.name == "review.yml"
+        # Verify result is dict with expected keys
+        assert isinstance(result, dict)
+        assert "workflow_content" in result
+        assert "workflow_path" in result
+        assert result["workflow_content"]
+        assert result["workflow_path"] == Path(".github/workflows/review.yml")
 
         # Verify valid YAML
-        workflow_data = yaml.safe_load(result.workflow_content)
+        workflow_data = yaml.safe_load(result["workflow_content"])
         assert workflow_data["name"] == "Code Review"
 
     def test_generate_includes_pr_triggers(
@@ -169,7 +172,7 @@ jobs:
 
         result = generator.generate()
 
-        workflow_data = yaml.safe_load(result.workflow_content)
+        workflow_data = yaml.safe_load(result["workflow_content"])
         assert "pull_request" in workflow_data["on"]
         pr_types = workflow_data["on"]["pull_request"]["types"]
         assert "opened" in pr_types
@@ -210,8 +213,8 @@ jobs:
         result = generator.generate()
 
         # Check for Claude API key reference
-        assert "CLAUDE_API_KEY" in result.workflow_content
-        assert "secrets.CLAUDE_API_KEY" in result.workflow_content
+        assert "CLAUDE_API_KEY" in result["workflow_content"]
+        assert "secrets.CLAUDE_API_KEY" in result["workflow_content"]
 
     def test_generate_includes_response_format_template(
         self,
@@ -255,12 +258,12 @@ jobs:
         result = generator.generate()
 
         # Check for response format keywords
-        assert "Code Review Results" in result.workflow_content
-        assert "LGTM | CHANGES_REQUESTED" in result.workflow_content
-        assert "Critical (Block Merge)" in result.workflow_content
-        assert "High (Block Merge)" in result.workflow_content
-        assert "Medium (Block Merge)" in result.workflow_content
-        assert "Low (Create GitHub Issue" in result.workflow_content
+        assert "Code Review Results" in result["workflow_content"]
+        assert "LGTM | CHANGES_REQUESTED" in result["workflow_content"]
+        assert "Critical (Block Merge)" in result["workflow_content"]
+        assert "High (Block Merge)" in result["workflow_content"]
+        assert "Medium (Block Merge)" in result["workflow_content"]
+        assert "Low (Create GitHub Issue" in result["workflow_content"]
 
     def test_generate_includes_merge_blocking_logic(
         self,
@@ -298,8 +301,8 @@ jobs:
         result = generator.generate()
 
         # Check for merge blocking logic
-        assert "exit 1" in result.workflow_content
-        assert "CHANGES_REQUESTED" in result.workflow_content
+        assert "exit 1" in result["workflow_content"]
+        assert "CHANGES_REQUESTED" in result["workflow_content"]
 
 
 class TestGitHubActionsReviewGeneratorIssueCategorization:
@@ -339,7 +342,7 @@ jobs:
 
         result = generator.generate()
 
-        content = result.workflow_content
+        content = result["workflow_content"]
         assert "Critical" in content
         assert "High" in content
         assert "Medium" in content
@@ -378,7 +381,7 @@ jobs:
         result = generator.generate()
 
         # Check for gh issue create command
-        assert "gh issue create" in result.workflow_content
+        assert "gh issue create" in result["workflow_content"]
 
 
 class TestGitHubActionsReviewGeneratorClaudeCodeAction:
@@ -397,11 +400,11 @@ class TestGitHubActionsReviewGeneratorClaudeCodeAction:
         result = generator.generate()
 
         # Verify uses Claude Code Action
-        assert "anthropics/claude-code-action@v1" in result.workflow_content
+        assert "anthropics/claude-code-action@v1" in result["workflow_content"]
 
         # Verify no TODO placeholder (Issue #102)
-        assert "TODO(Issue #102)" not in result.workflow_content
-        assert "TODO: Implement Claude API" not in result.workflow_content
+        assert "TODO(Issue #102)" not in result["workflow_content"]
+        assert "TODO: Implement Claude API" not in result["workflow_content"]
 
     def test_generated_workflow_has_claude_code_oauth_token(self) -> None:
         """Test workflow includes CLAUDE_CODE_OAUTH_TOKEN secret."""
@@ -411,8 +414,8 @@ class TestGitHubActionsReviewGeneratorClaudeCodeAction:
         result = generator.generate()
 
         # Verify uses OAuth token (not deprecated API key)
-        assert "CLAUDE_CODE_OAUTH_TOKEN" in result.workflow_content
-        assert "secrets.CLAUDE_CODE_OAUTH_TOKEN" in result.workflow_content
+        assert "CLAUDE_CODE_OAUTH_TOKEN" in result["workflow_content"]
+        assert "secrets.CLAUDE_CODE_OAUTH_TOKEN" in result["workflow_content"]
 
     def test_generated_workflow_includes_review_prompt(self) -> None:
         """Test workflow includes comprehensive review prompt template."""
@@ -422,14 +425,14 @@ class TestGitHubActionsReviewGeneratorClaudeCodeAction:
         result = generator.generate()
 
         # Verify prompt includes key sections
-        assert "## Summary" in result.workflow_content
-        assert "## Strengths" in result.workflow_content
-        assert "## Security Concerns" in result.workflow_content
-        assert "## Problems" in result.workflow_content
-        assert "## Verdict" in result.workflow_content
+        assert "## Summary" in result["workflow_content"]
+        assert "## Strengths" in result["workflow_content"]
+        assert "## Security Concerns" in result["workflow_content"]
+        assert "## Problems" in result["workflow_content"]
+        assert "## Verdict" in result["workflow_content"]
         # Check for verdict options (with emojis)
-        assert "LGTM" in result.workflow_content
-        assert "CHANGES_REQUESTED" in result.workflow_content
+        assert "LGTM" in result["workflow_content"]
+        assert "CHANGES_REQUESTED" in result["workflow_content"]
 
     def test_generated_workflow_restricts_claude_to_read_only_tools(self) -> None:
         """Test workflow restricts Claude to read-only GitHub CLI commands.
@@ -444,21 +447,21 @@ class TestGitHubActionsReviewGeneratorClaudeCodeAction:
         result = generator.generate()
 
         # Verify claude_args restricts to read-only commands
-        assert "--allowed-tools" in result.workflow_content
-        assert "gh pr view" in result.workflow_content  # Read-only PR viewing
-        assert "gh pr diff" in result.workflow_content  # Read-only diff viewing
-        assert "gh issue view" in result.workflow_content  # Read-only issue viewing
+        assert "--allowed-tools" in result["workflow_content"]
+        assert "gh pr view" in result["workflow_content"]  # Read-only PR viewing
+        assert "gh pr diff" in result["workflow_content"]  # Read-only diff viewing
+        assert "gh issue view" in result["workflow_content"]  # Read-only issue viewing
         # Commenting (write operation, but needed for reviews)
-        assert "gh pr comment" in result.workflow_content
+        assert "gh pr comment" in result["workflow_content"]
 
         # Verify no write operations are allowed
-        assert "gh pr merge" not in result.workflow_content
-        assert "gh issue create" not in result.workflow_content
-        assert "gh pr edit" not in result.workflow_content
+        assert "gh pr merge" not in result["workflow_content"]
+        assert "gh issue create" not in result["workflow_content"]
+        assert "gh pr edit" not in result["workflow_content"]
 
         # Verify security documentation is present
-        assert "Security:" in result.workflow_content
-        assert "read-only" in result.workflow_content.lower()
+        assert "Security:" in result["workflow_content"]
+        assert "read-only" in result["workflow_content"].lower()
 
 
 class TestGitHubActionsReviewGeneratorOutputPath:
@@ -483,7 +486,7 @@ class TestGitHubActionsReviewGeneratorOutputPath:
 
         result = generator.generate()
 
-        assert result.workflow_path == Path(".github/workflows/review.yml")
+        assert result["workflow_path"] == Path(".github/workflows/review.yml")
 
     def test_generate_workflow_can_be_written_to_file(
         self,
@@ -505,9 +508,9 @@ class TestGitHubActionsReviewGeneratorOutputPath:
         result = generator.generate()
 
         # Write to file
-        output_path = tmp_path / result.workflow_path
+        output_path = tmp_path / result["workflow_path"]
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(result.workflow_content)
+        output_path.write_text(result["workflow_content"])
 
         # Verify file exists and is valid YAML
         assert output_path.exists()

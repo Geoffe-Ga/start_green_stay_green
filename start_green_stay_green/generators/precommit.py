@@ -8,11 +8,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from typing import TYPE_CHECKING
 from typing import cast
 
 import yaml
 
 from start_green_stay_green.generators.base import BaseGenerator
+
+if TYPE_CHECKING:
+    from start_green_stay_green.ai.orchestrator import AIOrchestrator
 
 
 @dataclass
@@ -367,20 +371,39 @@ class PreCommitGenerator(BaseGenerator):
 
     Supports: Python, TypeScript, Go, Rust, and other languages.
 
+    Attributes:
+        orchestrator: Optional AI orchestrator for enhanced generation.
+            If None, generator uses pure configuration-based generation.
+
     Example:
-        >>> from pathlib import Path
-        >>> from start_green_stay_green.generators.base import GenerationConfig
+        >>> from start_green_stay_green.generators.precommit import GenerationConfig
         >>> generator = PreCommitGenerator()
         >>> config = GenerationConfig(
         ...     project_name="my-project",
         ...     language="python",
-        ...     output_path=Path("."),
         ...     language_config={},
         ... )
-        >>> content = generator.generate(config)
-        >>> print(content[:100])
+        >>> result = generator.generate(config)
+        >>> print(result["content"][:100])
         # Pre-commit configuration for my-project
     """
+
+    def __init__(
+        self,
+        orchestrator: AIOrchestrator | None = None,
+        *,
+        config: dict[str, Any] | None = None,
+    ) -> None:
+        """Initialize pre-commit generator.
+
+        Args:
+            orchestrator: Optional AI orchestrator for enhanced generation.
+                If None, uses pure configuration-based generation.
+            config: Optional additional configuration dictionary.
+                Reserved for future use in AI-enhanced generation.
+        """
+        self.orchestrator = orchestrator
+        self.config = config or {}
 
     def _validate_language_supported(self, language: str) -> None:
         """Validate that language is supported.
@@ -433,8 +456,11 @@ class PreCommitGenerator(BaseGenerator):
             "# Run manually: pre-commit run --all-files\n\n"
         )
 
-    # Issue #114: BaseGenerator.generate() signature doesn't fit template generators
-    def generate(self, config: GenerationConfig) -> str:  # type: ignore[override]
+    def generate(
+        self,
+        config: GenerationConfig | None = None,
+        **kwargs: Any,  # noqa: ANN401
+    ) -> dict[str, Any]:
         """Generate .pre-commit-config.yaml content.
 
         Produces a complete pre-commit configuration file customized for the
@@ -443,13 +469,35 @@ class PreCommitGenerator(BaseGenerator):
 
         Args:
             config: Generation configuration with project name and language.
+                Can be passed as positional or keyword argument.
+            **kwargs: Alternative way to pass config as keyword arguments
+                (project_name, language, language_config).
 
         Returns:
-            YAML-formatted pre-commit configuration content.
+            Dictionary with keys:
+                - content: YAML-formatted pre-commit configuration
+                - repos: List of repository configurations
+                - languages: List of supported languages
 
         Raises:
             ValueError: If language is not supported.
+            TypeError: If config not provided or has wrong type.
         """
+        # Handle flexible input - config positional or via kwargs
+        if config is None:
+            if "project_name" in kwargs and "language" in kwargs:
+                config = GenerationConfig(
+                    project_name=kwargs["project_name"],
+                    language=kwargs["language"],
+                    language_config=kwargs.get("language_config", {}),
+                )
+            else:
+                msg = (
+                    "generate() requires GenerationConfig or "
+                    "(project_name, language) keyword arguments"
+                )
+                raise TypeError(msg)
+
         self._validate_language_supported(config.language)
         config_dict = self._build_config_dict(config.language)
 
@@ -462,7 +510,34 @@ class PreCommitGenerator(BaseGenerator):
         )
 
         header = self._generate_header(config.project_name)
-        return header + yaml_content
+        content = header + yaml_content
+
+        return {
+            "content": content,
+            "repos": config_dict["repos"],
+            "languages": list(LANGUAGE_CONFIGS.keys()),
+        }
+
+    def generate_yaml(self, config: GenerationConfig) -> str:
+        """Legacy method for backward compatibility.
+
+        This method wraps generate() and returns only the YAML content string.
+
+        Args:
+            config: Generation configuration with project name and language.
+
+        Returns:
+            YAML-formatted pre-commit configuration content as string.
+
+        Raises:
+            ValueError: If language is not supported.
+
+        Deprecated:
+            Use generate() instead. This method will be removed in v2.0.
+        """
+        result = self.generate(config)
+        content: str = result["content"]
+        return content
 
     def validate_language(self, language: str) -> bool:
         """Check if language is supported.

@@ -92,7 +92,7 @@ class SubagentsGenerator(BaseGenerator):
                 Defaults to .claude/agents/ in project root.
             dry_run: If True, skip actual tuning (for testing).
         """
-        super().__init__(orchestrator)
+        self.orchestrator = orchestrator
         self.tuner = ContentTuner(orchestrator, dry_run=dry_run)
         self.reference_dir = reference_dir or REFERENCE_AGENTS_DIR
         self.dry_run = dry_run

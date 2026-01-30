@@ -86,7 +86,7 @@ class SkillsGenerator(BaseGenerator):
                 built-in reference/skills/.
             dry_run: Run in dry-run mode (copy without tuning).
         """
-        super().__init__(orchestrator)
+        self.orchestrator = orchestrator
         self.reference_dir = reference_dir or REFERENCE_SKILLS_DIR
         self.dry_run = dry_run
 
