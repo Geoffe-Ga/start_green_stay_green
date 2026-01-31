@@ -754,6 +754,10 @@ def _generate_project_files(
         console.print(
             f"\n[green]✓[/green] Project generated successfully at: {project_path}"
         )
+        console.print("\nTo get started, run:")
+        console.print(f"  cd {project_path}")
+        console.print("  pre-commit install")
+        console.print("  ./scripts/check-all.sh\n")
     except Exception as e:
         console.print(f"\n[red]Error:[/red] Generation failed: {e}", style="bold")
         raise typer.Exit(code=1) from e
