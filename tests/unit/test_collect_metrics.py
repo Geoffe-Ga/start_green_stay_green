@@ -302,6 +302,37 @@ class TestMetricsCollector:
             assert output_file.exists()
             assert output_file.parent.exists()
 
+    def test_generate_json_with_null_metrics(self) -> None:
+        """Test JSON generation handles null metric values (Issue #153)."""
+        with TemporaryDirectory() as tmpdir:
+            output_file = Path(tmpdir) / "metrics.json"
+
+            thresholds = {
+                "coverage": 90,
+                "complexity": 10,
+                "docs_coverage": 95,
+            }
+            collector = MetricsCollector("test-project", thresholds)
+            # Simulate what happens when parsing fails
+            collector.metrics = {
+                "coverage": 92.5,
+                "coverage_status": "pass",
+                "complexity_avg": None,  # Failed to parse
+                "complexity_status": "unknown",
+                "docs_coverage": None,  # Failed to parse
+                "docs_status": "unknown",
+            }
+
+            collector.generate_json(output_file)
+
+            assert output_file.exists()
+            data = json.loads(output_file.read_text())
+
+            # Verify null values are preserved in JSON
+            assert data["metrics"]["complexity_avg"] is None
+            assert data["metrics"]["docs_coverage"] is None
+            # Dashboard should handle these nulls gracefully
+
 
 class TestMetricsCollectorIntegration:
     """Integration tests for complete metrics collection workflow."""
