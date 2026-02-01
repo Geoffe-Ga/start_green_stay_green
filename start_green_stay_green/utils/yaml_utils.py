@@ -50,9 +50,7 @@ def strip_markdown_fences(content: str) -> str:
         # The captured group includes content up to (but not including) closing fence
         result = match.group(1)
         # Remove final newline if present (the one immediately before closing fence)
-        if result.endswith("\n"):
-            result = result[:-1]
-        return result
+        return result.removesuffix("\n")
 
-    # No fences found, return as-is (strip only leading/trailing whitespace)
-    return content.strip()
+    # No fences found, return as-is (preserve exact content including whitespace)
+    return content

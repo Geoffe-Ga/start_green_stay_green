@@ -1,11 +1,11 @@
 """Test init command with custom output directory (Issue #157, #158)."""
+
 from __future__ import annotations
 
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
-
-from pathlib import Path
 
 
 def test_init_with_output_dir_creates_files() -> None:
@@ -59,10 +59,9 @@ def test_init_with_output_dir_creates_files() -> None:
             assert file_path.exists(), f"Expected file not created: {expected_file}"
 
         # Check that skills directory exists (path may be .claude/ or .claudecode/)
-        skills_created = (
-            (project_path / ".claude" / "skills").exists()
-            or (project_path / ".claudecode" / "skills").exists()
-        )
+        skills_created = (project_path / ".claude" / "skills").exists() or (
+            project_path / ".claudecode" / "skills"
+        ).exists()
         assert skills_created, "Skills directory not created"
 
         # Verify pre-commit config has content
