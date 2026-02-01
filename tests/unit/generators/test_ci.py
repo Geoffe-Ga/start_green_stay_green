@@ -375,6 +375,39 @@ jobs:
         with pytest.raises(ValueError, match="missing required jobs"):
             generator._validate_and_parse(workflow_yaml)
 
+    def test_validate_workflow_with_quality_job_only(self) -> None:
+        """Test validation accepts workflow with only quality job.
+
+        This matches the pattern in reference/ci/python.yml where tests
+        are run within the quality job, not as a separate job.
+
+        Fixes Issue #165: AI-generated workflows follow reference pattern.
+        """
+        mock_orchestrator = Mock(spec=AIOrchestrator)
+        generator = CIGenerator(mock_orchestrator, "python")
+
+        # Workflow with only quality job (like reference/ci/python.yml)
+        workflow_yaml = """name: Python Quality Checks
+on: push
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run tests
+        run: pytest --cov=src
+  complexity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check complexity
+        run: radon cc src/
+"""
+        # Should NOT raise - quality job is present with test steps
+        workflow = generator._validate_and_parse(workflow_yaml)
+        assert workflow.is_valid
+        assert workflow.name == "Python Quality Checks"
+
     def test_validate_quality_job_missing_steps_raises_error(
         self,
     ) -> None:
@@ -760,6 +793,9 @@ jobs:
 
         Kills mutations: required_jobs set → different set,
         set operations changed
+
+        Updated for Issue #165: Only 'quality' job is required now.
+        Tests can be run within the quality job (like reference workflows).
         """
         mock_orchestrator = Mock(spec=AIOrchestrator)
         generator = CIGenerator(mock_orchestrator, "python")
@@ -780,8 +816,8 @@ jobs:
         workflow = generator._validate_and_parse(valid_yaml)
         assert workflow.is_valid
 
-        # Should reject workflow with only quality (missing test)
-        missing_test = """name: CI
+        # Should also accept workflow with only quality (test is optional)
+        quality_only = """name: CI
 on: push
 jobs:
   quality:
@@ -789,8 +825,20 @@ jobs:
     steps:
       - run: test
 """
+        workflow = generator._validate_and_parse(quality_only)
+        assert workflow.is_valid
+
+        # Should reject workflow with neither quality nor test
+        no_required_jobs = """name: CI
+on: push
+jobs:
+  other:
+    runs-on: ubuntu-latest
+    steps:
+      - run: test
+"""
         with pytest.raises(ValueError, match="missing required jobs"):
-            generator._validate_and_parse(missing_test)
+            generator._validate_and_parse(no_required_jobs)
 
     def test_is_valid_flag_exact_true_when_successful(self) -> None:
         """Test is_valid is exactly True on successful validation.

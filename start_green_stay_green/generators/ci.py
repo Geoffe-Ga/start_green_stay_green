@@ -243,13 +243,17 @@ Context:
 {context}
 
 Generate a complete, valid GitHub Actions workflow in YAML format that:
-1. Defines all necessary jobs (quality, test, mutation, security, etc.)
-2. Uses appropriate language-specific tools and commands
-3. Includes matrix testing for multiple versions
-4. Has proper caching for dependencies
-5. Uploads artifacts and coverage reports
-6. Enforces all quality standards mentioned above
-7. Is ready to be saved as .github/workflows/ci.yml
+1. MUST define a 'quality' job with linting, security checks, tests, coverage
+2. Can optionally include additional jobs (complexity, build, mutation, etc.)
+3. Uses appropriate language-specific tools and commands
+4. Includes matrix testing for multiple versions
+5. Has proper caching for dependencies
+6. Uploads artifacts and coverage reports
+7. Enforces all quality standards mentioned above
+8. Is ready to be saved as .github/workflows/ci.yml
+
+IMPORTANT: The 'quality' job is REQUIRED and must include test execution.
+Additional jobs like 'test', 'mutation', 'complexity', 'build' are OPTIONAL.
 
 Output ONLY valid YAML - no markdown, no explanations, no code fences.
 Start with 'name:' and end with the last workflow configuration line."""
@@ -319,8 +323,13 @@ Start with 'name:' and end with the last workflow configuration line."""
 
         Raises:
             ValueError: If required jobs are missing.
+
+        Note:
+            Only requires 'quality' job. The 'test' job is optional as tests
+            can be run within the quality job (as in reference/ci/python.yml).
+            This matches the pattern used in reference CI workflows.
         """
-        required_jobs = {"quality", "test"}
+        required_jobs = {"quality"}
         actual_jobs = set(parsed["jobs"].keys())
         missing_jobs = required_jobs - actual_jobs
         if missing_jobs:
@@ -342,16 +351,20 @@ Start with 'name:' and end with the last workflow configuration line."""
             raise ValueError(msg)
 
     def _validate_test_job(self, parsed: dict[str, Any]) -> None:
-        """Validate test job has steps.
+        """Validate test job has steps if present.
 
         Args:
             parsed: Parsed YAML content.
 
         Raises:
-            ValueError: If test job has no steps.
+            ValueError: If test job exists but has no steps.
+
+        Note:
+            Test job is optional (Issue #165). Only validates if present.
         """
-        test_job = parsed["jobs"].get("test", {})
-        if "steps" not in test_job or not test_job["steps"]:
+        test_job = parsed["jobs"].get("test")
+        # Only validate if test job exists and has no steps
+        if test_job is not None and ("steps" not in test_job or not test_job["steps"]):
             msg = "Test job must have at least one step"
             raise ValueError(msg)
 
