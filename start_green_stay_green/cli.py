@@ -868,6 +868,10 @@ def _generate_project_files(
         console.print(
             f"\n[green]✓[/green] Project generated successfully at: {project_path}"
         )
+        console.print("\nTo get started, run:")
+        console.print(f"  cd {project_path}")
+        console.print("  pre-commit install")
+        console.print("  ./scripts/check-all.sh\n")
         if enable_live_dashboard:
             console.print(
                 "[green]✓[/green] Live metrics dashboard enabled - "
