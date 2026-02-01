@@ -48,7 +48,7 @@ class TestVersionCommand:
         """Test get_version returns __version__."""
         version = cli.get_version()
         assert isinstance(version, str)
-        assert version == "2.0.0"
+        assert version == "1.0.0"
 
     def test_get_version_is_semantic_versioning(self) -> None:
         """Test get_version returns valid semantic version."""

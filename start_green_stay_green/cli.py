@@ -45,7 +45,7 @@ from start_green_stay_green.utils.credentials import get_api_key_from_keyring
 from start_green_stay_green.utils.credentials import store_api_key_in_keyring
 
 # Version information
-__version__ = "2.0.0"
+__version__ = "1.0.0"
 
 # Constants
 MAX_PROJECT_NAME_LENGTH = 100
@@ -212,7 +212,7 @@ def version(
         )
     else:
         # Simple version output
-        console.print(f"[bold cyan]Start Green Stay Green[/bold cyan] v{version_str}")
+        console.print(f"[bold cyan]Start Green Stay Green v{version_str}[/bold cyan]")
 
 
 def _validate_project_name(name: str) -> None:
