@@ -32,7 +32,7 @@ jobs:
 
       - name: Analyze complexity
         run: |
-          radon cc start_green_stay_green/ -a -s > complexity-report.txt || true
+          radon cc start_green_stay_green/ -a > complexity-report.txt || true
 
       - name: Check documentation coverage
         run: |
