@@ -34,7 +34,7 @@ class TestGitHubActionsIntegration:
         result = generator.generate(workflow_name="Code Review")
 
         # Parse as YAML - will raise exception if invalid
-        workflow_data = yaml.safe_load(result.workflow_content)
+        workflow_data = yaml.safe_load(result["workflow_content"])
 
         # Basic structure validation
         assert isinstance(workflow_data, dict)
@@ -55,7 +55,7 @@ class TestGitHubActionsIntegration:
 
         result = generator.generate()
 
-        workflow_data = yaml.safe_load(result.workflow_content)
+        workflow_data = yaml.safe_load(result["workflow_content"])
 
         # Required top-level fields
         assert "name" in workflow_data
@@ -91,7 +91,7 @@ class TestGitHubActionsIntegration:
 
         result = generator.generate()
 
-        workflow_data = yaml.safe_load(result.workflow_content)
+        workflow_data = yaml.safe_load(result["workflow_content"])
 
         pr_triggers = workflow_data["on"]["pull_request"]["types"]
         assert "opened" in pr_triggers
@@ -118,10 +118,10 @@ class TestGitHubActionsIntegration:
         result = generator.generate()
 
         # Verify uses Claude Code Action (secure by design)
-        assert "anthropics/claude-code-action@v1" in result.workflow_content
+        assert "anthropics/claude-code-action@v1" in result["workflow_content"]
 
         # Verify no direct shell command usage (Claude Code Action handles this)
-        workflow_data = yaml.safe_load(result.workflow_content)
+        workflow_data = yaml.safe_load(result["workflow_content"])
         steps = workflow_data["jobs"]["claude-review"]["steps"]
 
         # All steps should either be checkout or Claude Code Action
@@ -151,8 +151,8 @@ class TestGitHubActionsIntegration:
         result = generator.generate()
 
         # Verify CLAUDE_CODE_OAUTH_TOKEN is referenced in workflow content
-        assert "CLAUDE_CODE_OAUTH_TOKEN" in result.workflow_content
-        assert "secrets.CLAUDE_CODE_OAUTH_TOKEN" in result.workflow_content
+        assert "CLAUDE_CODE_OAUTH_TOKEN" in result["workflow_content"]
+        assert "secrets.CLAUDE_CODE_OAUTH_TOKEN" in result["workflow_content"]
 
     def test_workflow_uses_claude_code_action_for_review(self) -> None:
         """Test workflow uses Claude Code Action for automated review.
@@ -172,7 +172,7 @@ class TestGitHubActionsIntegration:
 
         result = generator.generate()
 
-        workflow_data = yaml.safe_load(result.workflow_content)
+        workflow_data = yaml.safe_load(result["workflow_content"])
 
         steps = workflow_data["jobs"]["claude-review"]["steps"]
 
@@ -212,7 +212,7 @@ class TestGitHubActionsIntegration:
         # Write to file
         output_file = tmp_path / ".github" / "workflows" / "review.yml"
         output_file.parent.mkdir(parents=True)
-        output_file.write_text(result.workflow_content)
+        output_file.write_text(result["workflow_content"])
 
         # Verify file exists
         assert output_file.exists()

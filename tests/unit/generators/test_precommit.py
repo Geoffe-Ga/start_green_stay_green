@@ -71,8 +71,8 @@ class TestPreCommitGeneratorInitialization:
 class TestGenerateWithPython:
     """Test content generation for Python projects."""
 
-    def test_generate_python_returns_string(self, mock_orchestrator: Mock) -> None:
-        """Test generate returns string for Python."""
+    def test_generate_python_returns_dict(self, mock_orchestrator: Mock) -> None:
+        """Test generate returns dict for Python."""
         generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="test-project",
@@ -80,8 +80,11 @@ class TestGenerateWithPython:
             language_config={},
         )
         result = generator.generate(config)
-        assert isinstance(result, str)
-        assert result
+        assert isinstance(result, dict)
+        assert "content" in result
+        assert "repos" in result
+        assert "languages" in result
+        assert result["content"]
 
     def test_generate_python_includes_header_comment(
         self, mock_orchestrator: Mock
@@ -94,7 +97,7 @@ class TestGenerateWithPython:
             language_config={},
         )
         result = generator.generate(config)
-        assert "# Pre-commit hooks configuration for test-project" in result
+        assert "# Pre-commit hooks configuration for test-project" in result["content"]
 
     def test_generate_python_includes_installation_instructions(
         self, mock_orchestrator: Mock
@@ -107,8 +110,8 @@ class TestGenerateWithPython:
             language_config={},
         )
         result = generator.generate(config)
-        assert "# Install: pre-commit install" in result
-        assert "# Run manually: pre-commit run --all-files" in result
+        assert "# Install: pre-commit install" in result["content"]
+        assert "# Run manually: pre-commit run --all-files" in result["content"]
 
     def test_generate_python_is_valid_yaml(self, mock_orchestrator: Mock) -> None:
         """Test generated Python config is valid YAML."""
@@ -121,7 +124,7 @@ class TestGenerateWithPython:
         result = generator.generate(config)
         # Remove header comments for YAML parsing
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         assert isinstance(parsed, dict)
@@ -136,7 +139,7 @@ class TestGenerateWithPython:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         assert "repos" in parsed
@@ -155,7 +158,7 @@ class TestGenerateWithPython:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         assert "ci" in parsed
@@ -172,7 +175,7 @@ class TestGenerateWithPython:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         repos = parsed["repos"]
@@ -189,7 +192,7 @@ class TestGenerateWithPython:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         repos = parsed["repos"]
@@ -206,7 +209,7 @@ class TestGenerateWithPython:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         repos = parsed["repos"]
@@ -223,7 +226,7 @@ class TestGenerateWithPython:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         repos = parsed["repos"]
@@ -242,7 +245,7 @@ class TestGenerateWithPython:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         assert "default_language_version" in parsed
@@ -252,8 +255,8 @@ class TestGenerateWithPython:
 class TestGenerateWithTypeScript:
     """Test content generation for TypeScript projects."""
 
-    def test_generate_typescript_returns_string(self, mock_orchestrator: Mock) -> None:
-        """Test generate returns string for TypeScript."""
+    def test_generate_typescript_returns_dict(self, mock_orchestrator: Mock) -> None:
+        """Test generate returns dict for TypeScript."""
         generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="ts-project",
@@ -261,8 +264,8 @@ class TestGenerateWithTypeScript:
             language_config={},
         )
         result = generator.generate(config)
-        assert isinstance(result, str)
-        assert result
+        assert isinstance(result, dict)
+        assert result["content"]
 
     def test_generate_typescript_includes_project_name(
         self, mock_orchestrator: Mock
@@ -275,7 +278,7 @@ class TestGenerateWithTypeScript:
             language_config={},
         )
         result = generator.generate(config)
-        assert "my-ts-app" in result
+        assert "my-ts-app" in result["content"]
 
     def test_generate_typescript_includes_prettier(
         self, mock_orchestrator: Mock
@@ -289,7 +292,7 @@ class TestGenerateWithTypeScript:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         repos = parsed["repos"]
@@ -300,8 +303,8 @@ class TestGenerateWithTypeScript:
 class TestGenerateWithGo:
     """Test content generation for Go projects."""
 
-    def test_generate_go_returns_string(self, mock_orchestrator: Mock) -> None:
-        """Test generate returns string for Go."""
+    def test_generate_go_returns_dict(self, mock_orchestrator: Mock) -> None:
+        """Test generate returns dict for Go."""
         generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="go-project",
@@ -309,8 +312,8 @@ class TestGenerateWithGo:
             language_config={},
         )
         result = generator.generate(config)
-        assert isinstance(result, str)
-        assert result
+        assert isinstance(result, dict)
+        assert result["content"]
 
     def test_generate_go_includes_golangci_lint(self, mock_orchestrator: Mock) -> None:
         """Test generated Go config includes golangci-lint."""
@@ -322,7 +325,7 @@ class TestGenerateWithGo:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         repos = parsed["repos"]
@@ -333,8 +336,8 @@ class TestGenerateWithGo:
 class TestGenerateWithRust:
     """Test content generation for Rust projects."""
 
-    def test_generate_rust_returns_string(self, mock_orchestrator: Mock) -> None:
-        """Test generate returns string for Rust."""
+    def test_generate_rust_returns_dict(self, mock_orchestrator: Mock) -> None:
+        """Test generate returns dict for Rust."""
         generator = PreCommitGenerator(mock_orchestrator)
         config = GenerationConfig(
             project_name="rust-project",
@@ -342,8 +345,8 @@ class TestGenerateWithRust:
             language_config={},
         )
         result = generator.generate(config)
-        assert isinstance(result, str)
-        assert result
+        assert isinstance(result, dict)
+        assert result["content"]
 
     def test_generate_rust_includes_rustfmt(self, mock_orchestrator: Mock) -> None:
         """Test generated Rust config includes rustfmt."""
@@ -355,7 +358,7 @@ class TestGenerateWithRust:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         repos = parsed["repos"]
@@ -383,7 +386,7 @@ class TestGenerateWithRust:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         repos = parsed["repos"]
@@ -733,7 +736,7 @@ class TestEdgeCases:
             language_config={},
         )
         result = generator.generate(config)
-        assert "my-test-project_v2.0" in result
+        assert "my-test-project_v2.0" in result["content"]
 
     def test_generate_with_unicode_in_project_name(
         self, mock_orchestrator: Mock
@@ -746,7 +749,7 @@ class TestEdgeCases:
             language_config={},
         )
         result = generator.generate(config)
-        assert "projet-fr" in result
+        assert "projet-fr" in result["content"]
 
     def test_generate_with_long_project_name(self, mock_orchestrator: Mock) -> None:
         """Test generate handles long project name."""
@@ -758,7 +761,7 @@ class TestEdgeCases:
             language_config={},
         )
         result = generator.generate(config)
-        assert long_name in result
+        assert long_name in result["content"]
 
     def test_generate_idempotent(self, mock_orchestrator: Mock) -> None:
         """Test generate produces same output when called multiple times."""
@@ -770,7 +773,7 @@ class TestEdgeCases:
         )
         result1 = generator.generate(config)
         result2 = generator.generate(config)
-        assert result1 == result2
+        assert result1["content"] == result2["content"]
 
     def test_multiple_generators_independent(self, mock_orchestrator: Mock) -> None:
         """Test multiple generator instances are independent."""
@@ -791,9 +794,9 @@ class TestEdgeCases:
         result1 = gen1.generate(config1)
         result2 = gen2.generate(config2)
 
-        assert "project1" in result1
-        assert "project2" in result2
-        assert "project1" not in result2
+        assert "project1" in result1["content"]
+        assert "project2" in result2["content"]
+        assert "project1" not in result2["content"]
 
 
 class TestYAMLValidation:
@@ -809,7 +812,7 @@ class TestYAMLValidation:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         assert parsed is not None
@@ -824,7 +827,7 @@ class TestYAMLValidation:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         assert parsed is not None
@@ -839,7 +842,7 @@ class TestYAMLValidation:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         assert parsed is not None
@@ -854,7 +857,7 @@ class TestYAMLValidation:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
         assert parsed is not None
@@ -923,7 +926,7 @@ class TestMutationKillers:
         )
         result = generator.generate(config)
         yaml_content = "\n".join(
-            line for line in result.split("\n") if not line.startswith("#")
+            line for line in result["content"].split("\n") if not line.startswith("#")
         )
         parsed = yaml.safe_load(yaml_content)
 
@@ -958,7 +961,9 @@ class TestMutationKillers:
             language_config={},
         )
         result = generator.generate(config)
-        assert result.startswith("# Pre-commit hooks configuration for my-project\n")
+        assert result["content"].startswith(
+            "# Pre-commit hooks configuration for my-project\n"
+        )
 
     def test_language_config_python_exact_hooks_count(self) -> None:
         """Test Python has exact expected hook count.

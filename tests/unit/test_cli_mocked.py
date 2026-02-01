@@ -26,12 +26,16 @@ def test_something(mock_path: Mock) -> None:
 ```
 """
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 from unittest.mock import Mock
 from unittest.mock import patch
 
 import pytest
+from rich.progress import Progress
+from rich.progress import SpinnerColumn
+from rich.progress import TextColumn
 import typer
 
 from start_green_stay_green import cli
@@ -551,6 +555,45 @@ class TestInitCommand:
             )
         assert exc_info.value.code == 1
 
+    @patch("start_green_stay_green.cli._generate_project_files")
+    def test_init_with_live_dashboard_passes_flag(
+        self, mock_generate: Mock, tmp_path: Path
+    ) -> None:
+        """Test init with enable_live_dashboard=True passes flag to generator."""
+        mock_generate.return_value = None
+        cli.init(
+            project_name="test-project",
+            output_dir=tmp_path,
+            language="python",
+            api_key=None,
+            dry_run=False,
+            no_interactive=True,
+            enable_live_dashboard=True,
+        )
+        # Verify enable_live_dashboard was passed to _generate_project_files
+        assert mock_generate.called
+        call_kwargs = mock_generate.call_args[1]
+        assert call_kwargs["enable_live_dashboard"] is True
+
+    @patch("start_green_stay_green.cli._generate_project_files")
+    def test_init_without_live_dashboard_defaults_false(
+        self, mock_generate: Mock, tmp_path: Path
+    ) -> None:
+        """Test init without enable_live_dashboard defaults to False."""
+        mock_generate.return_value = None
+        cli.init(
+            project_name="test-project",
+            output_dir=tmp_path,
+            language="python",
+            api_key=None,
+            dry_run=False,
+            no_interactive=True,
+        )
+        # Verify enable_live_dashboard defaults to False
+        assert mock_generate.called
+        call_kwargs = mock_generate.call_args[1]
+        assert call_kwargs.get("enable_live_dashboard", False) is False
+
     @patch("start_green_stay_green.cli._load_config_data")
     @patch("start_green_stay_green.cli._validate_and_prepare_paths")
     def test_init_loads_config_when_provided(
@@ -587,6 +630,163 @@ class TestInitCommand:
             no_interactive=True,
         )
         mock_validate.assert_called_once_with("test-project", mock_path)
+
+
+class TestMetricsDashboardGeneration:
+    """Test metrics dashboard generation functionality."""
+
+    @patch("start_green_stay_green.cli.MetricsGenerator")
+    @patch("start_green_stay_green.cli.shutil.copy")
+    def test_generate_metrics_dashboard_step_creates_files(
+        self,
+        mock_shutil_copy: Mock,
+        mock_generator_class: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Test _generate_metrics_dashboard_step creates dashboard and workflow."""
+        # Setup mock generator
+        mock_generator = Mock()
+        mock_generator_class.return_value = mock_generator
+
+        # Mock shutil.copy to create a dummy workflow file when called
+        def copy_side_effect(_src: Path, dst: Path) -> None:
+            # Create parent directory
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            # Write dummy workflow content
+            dst.write_text("name: Metrics\nproject: start-green-stay-green")
+
+        mock_shutil_copy.side_effect = copy_side_effect
+
+        # Create progress bar
+        with Progress(SpinnerColumn(), TextColumn("{task.description}")) as progress:
+            cli._generate_metrics_dashboard_step(
+                project_path=tmp_path,
+                project_name="test-project",
+                language="python",
+                progress=progress,
+            )
+
+        # Verify MetricsGenerator was instantiated with correct config
+        assert mock_generator_class.called
+        config_arg = mock_generator_class.call_args[0][1]
+        assert config_arg.project_name == "test-project"
+        assert config_arg.language == "python"
+        assert config_arg.enable_dashboard is True
+        assert config_arg.enable_badges is True
+
+        # Verify dashboard was written
+        mock_generator.write_dashboard.assert_called_once()
+
+        # Verify docs directory was created
+        assert (tmp_path / "docs").exists()
+
+        # Verify metrics.json was created
+        metrics_file = tmp_path / "docs" / "metrics.json"
+        assert metrics_file.exists()
+
+        # Verify metrics.json contains project name
+        metrics_data = json.loads(metrics_file.read_text())
+        assert metrics_data["project"] == "test-project"
+        assert "thresholds" in metrics_data
+        assert "metrics" in metrics_data
+
+    @patch("start_green_stay_green.cli.shutil.copy")
+    @patch("start_green_stay_green.cli.MetricsGenerator")
+    def test_generate_metrics_dashboard_creates_workflows_dir(
+        self, mock_generator_class: Mock, mock_shutil_copy: Mock, tmp_path: Path
+    ) -> None:
+        """Test _generate_metrics_dashboard_step creates .github/workflows."""
+        # Setup mock generator to avoid instantiation errors
+        mock_generator_class.return_value = Mock()
+
+        # Mock shutil.copy to create files
+        def copy_side_effect(_src: Path, dst: Path) -> None:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text("dummy content")
+
+        mock_shutil_copy.side_effect = copy_side_effect
+
+        with Progress(SpinnerColumn(), TextColumn("{task.description}")) as progress:
+            cli._generate_metrics_dashboard_step(
+                project_path=tmp_path,
+                project_name="test-project",
+                language="python",
+                progress=progress,
+            )
+
+        # Verify .github/workflows directory was created
+        workflows_dir = tmp_path / ".github" / "workflows"
+        assert workflows_dir.exists()
+        assert workflows_dir.is_dir()
+
+    @patch("start_green_stay_green.cli.shutil.copy")
+    @patch("start_green_stay_green.cli.MetricsGenerator")
+    @patch("start_green_stay_green.cli.console")
+    def test_generate_metrics_dashboard_warns_on_missing_workflow(
+        self,
+        mock_console: Mock,
+        mock_generator_class: Mock,
+        mock_shutil_copy: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Test _generate_metrics_dashboard_step warns when workflow missing."""
+        # Setup mock generator
+        mock_generator_class.return_value = Mock()
+        # Setup mock copy (not used but required by patch decorator order)
+        mock_shutil_copy.return_value = None
+
+        # Mock Path.exists to return False for workflow file
+        with (
+            patch.object(Path, "exists", return_value=False),
+            Progress(SpinnerColumn(), TextColumn("{task.description}")) as progress,
+        ):
+            cli._generate_metrics_dashboard_step(
+                project_path=tmp_path,
+                project_name="test-project",
+                language="python",
+                progress=progress,
+            )
+
+        # Verify warning was printed
+        assert mock_console.print.called
+        warning_calls = [
+            call for call in mock_console.print.call_args_list if "Warning" in str(call)
+        ]
+        assert warning_calls
+
+    @patch("start_green_stay_green.cli.shutil.copy")
+    @patch("start_green_stay_green.cli.MetricsGenerator")
+    def test_generate_metrics_dashboard_replaces_project_name(
+        self, mock_generator_class: Mock, mock_shutil_copy: Mock, tmp_path: Path
+    ) -> None:
+        """Test _generate_metrics_dashboard_step replaces project name in workflow."""
+        # Setup mock generator
+        mock_generator_class.return_value = Mock()
+
+        # Create source workflow with SGSG project name
+        workflow_content = "project: start-green-stay-green\nname: Metrics"
+
+        # Mock shutil.copy to create workflow with SGSG name
+        def copy_side_effect(_src: Path, dst: Path) -> None:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text(workflow_content)
+
+        mock_shutil_copy.side_effect = copy_side_effect
+
+        with Progress(SpinnerColumn(), TextColumn("{task.description}")) as progress:
+            cli._generate_metrics_dashboard_step(
+                project_path=tmp_path,
+                project_name="my-new-project",
+                language="python",
+                progress=progress,
+            )
+
+        # Verify workflow content was replaced
+        workflow_file = tmp_path / ".github" / "workflows" / "metrics.yml"
+        if workflow_file.exists():
+            content = workflow_file.read_text()
+            assert "my-new-project" in content
+            assert "start-green-stay-green" not in content
 
 
 class TestShowDryRunPreview:
@@ -833,7 +1033,7 @@ class TestGenerateSteps:
         mock_task = MagicMock()
         mock_progress.add_task.return_value = mock_task
         mock_generator = MagicMock()
-        mock_generator.generate.return_value = "# config"
+        mock_generator.generate.return_value = {"content": "# config"}
         mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)

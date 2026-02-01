@@ -1,7 +1,7 @@
-"""Base generator class for all component generators.
+"""Base generator classes and exceptions for component generation.
 
-Provides abstract interface for AI-powered component generation with
-orchestrator support for generating quality control artifacts.
+Provides abstract interfaces for both template-based and AI-powered generation
+with clean dependency injection patterns.
 """
 
 from __future__ import annotations
@@ -12,55 +12,125 @@ from typing import Any
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from start_green_stay_green.ai.orchestrator import AIOrchestrator
 
 
-class BaseGenerator(ABC):
-    """Abstract base class for AI-powered component generators.
+class GenerationError(Exception):
+    """Base exception for generation failures.
 
-    All generators must extend this class and implement the generate()
-    method to produce quality control artifacts using AI orchestration.
-
-    Generators can work with or without an orchestrator:
-    - With orchestrator: AI-powered customization and tuning
-    - Without orchestrator: Template-based or direct copy mode
+    Raised when a generator cannot complete its operation due to
+    validation failures, missing dependencies, or other errors.
 
     Attributes:
-        orchestrator: Optional AI orchestrator for generation tasks.
-            None indicates graceful degradation to template mode.
+        message: Human-readable error description
+        cause: Optional underlying exception that caused this error
+    """
+
+    def __init__(self, message: str, cause: Exception | None = None) -> None:
+        """Initialize generation error.
+
+        Args:
+            message: Error description
+            cause: Optional underlying exception
+        """
+        super().__init__(message)
+        self.message = message
+        self.cause = cause
+
+
+class AIGenerationError(GenerationError):
+    """Exception for AI-specific generation failures.
+
+    Raised when AI orchestration fails (API errors, timeout, etc.)
+    """
+
+
+class BaseGenerator(ABC):
+    """Minimal abstract base class for all generators.
+
+    Defines only the essential interface that all generators must implement.
+    Subclasses define their own initialization requirements.
 
     Example:
         >>> class MyGenerator(BaseGenerator):
-        ...     def __init__(self, orchestrator: AIOrchestrator | None) -> None:
-        ...         super().__init__(orchestrator)
-        ...
         ...     def generate(self) -> dict[str, Any]:
-        ...         if self.orchestrator:
-        ...             return self._generate_with_ai()
-        ...         return self._generate_template()
+        ...         return {"content": "generated output"}
     """
-
-    def __init__(self, orchestrator: AIOrchestrator | None) -> None:
-        """Initialize generator with optional AI orchestrator.
-
-        Args:
-            orchestrator: Optional AIOrchestrator instance for AI-powered
-                generation. If None, generator falls back to template mode.
-        """
-        self.orchestrator = orchestrator
 
     @abstractmethod
     def generate(self) -> dict[str, Any]:
-        """Generate component content using AI orchestration.
-
-        Implementations should use self.orchestrator to generate content
-        tailored to the target project's language and requirements.
+        """Generate component content.
 
         Returns:
-            Generated content as a dictionary with component-specific structure.
+            Generated content as a dictionary with component-specific structure
 
         Raises:
-            GenerationError: If AI generation fails.
-            ValueError: If configuration is invalid or incomplete.
-            NotImplementedError: If language is not supported.
+            GenerationError: If generation fails
+            ValueError: If configuration is invalid
         """
+
+
+class TemplateBasedGenerator(BaseGenerator):
+    """Base class for Jinja2 template-based generators.
+
+    Provides common functionality for generators that use Jinja2 templates,
+    with optional AI orchestration support.
+
+    Attributes:
+        orchestrator: Optional AI orchestrator for enhanced generation.
+            If None, generator uses pure template-based generation.
+        template_dir: Base directory containing Jinja2 templates
+
+    Example:
+        >>> class MyTemplateGenerator(TemplateBasedGenerator):
+        ...     def __init__(self, orchestrator: AIOrchestrator | None = None):
+        ...         super().__init__(orchestrator, Path("templates/my_component"))
+        ...
+        ...     def generate(self) -> dict[str, Any]:
+        ...         # Use self.orchestrator if available for AI enhancement
+        ...         return {"content": self._render_template("template.j2")}
+    """
+
+    def __init__(
+        self,
+        orchestrator: AIOrchestrator | None = None,
+        template_dir: Path | None = None,
+    ) -> None:
+        """Initialize template-based generator.
+
+        Args:
+            orchestrator: Optional AI orchestrator for enhanced generation.
+                If None, uses pure template-based generation.
+            template_dir: Optional base directory for templates.
+                If None, subclass should define its own template management.
+        """
+        self.orchestrator = orchestrator
+        self.template_dir = template_dir
+
+    def _validate_template_path(self, template_name: str) -> Path:
+        """Validate that a template file exists.
+
+        Args:
+            template_name: Name of template file relative to template_dir
+
+        Returns:
+            Absolute path to validated template file
+
+        Raises:
+            GenerationError: If template_dir not set or template doesn't exist
+        """
+        if self.template_dir is None:
+            msg = "Template directory not configured for this generator"
+            raise GenerationError(msg)
+
+        template_path = self.template_dir / template_name
+        if not template_path.exists():
+            msg = f"Template not found: {template_path}"
+            raise GenerationError(
+                msg,
+                cause=FileNotFoundError(str(template_path)),
+            )
+
+        return template_path

@@ -5,9 +5,13 @@ Implements the command-line interface using Typer with rich output formatting.
 
 from __future__ import annotations
 
+from datetime import UTC
+from datetime import datetime
+import json
 import os
 from pathlib import Path
 import re
+import shutil
 import sys
 from typing import Annotated
 
@@ -27,6 +31,8 @@ from start_green_stay_green.generators.claude_md import ClaudeMdGenerator
 from start_green_stay_green.generators.github_actions import (
     GitHubActionsReviewGenerator,
 )
+from start_green_stay_green.generators.metrics import MetricsGenerationConfig
+from start_green_stay_green.generators.metrics import MetricsGenerator
 from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import PreCommitGenerator
 from start_green_stay_green.generators.scripts import ScriptConfig
@@ -562,9 +568,9 @@ def _generate_precommit_step(
         language_config={},
     )
     precommit_generator = PreCommitGenerator(orchestrator=None)
-    precommit_content = precommit_generator.generate(precommit_config)
+    precommit_result = precommit_generator.generate(precommit_config)
     precommit_file = project_path / ".pre-commit-config.yaml"
-    precommit_file.write_text(precommit_content)
+    precommit_file.write_text(precommit_result["content"])
     progress.update(task, completed=True)
 
 
@@ -606,7 +612,8 @@ def _generate_review_step(
         review_result = review_generator.generate()
         workflows_dir = project_path / ".github" / "workflows"
         workflows_dir.mkdir(parents=True, exist_ok=True)
-        (workflows_dir / "code-review.yml").write_text(review_result.workflow_content)
+        workflow_file = workflows_dir / "code-review.yml"
+        workflow_file.write_text(review_result["workflow_content"])
         progress.update(task, completed=True)
     else:
         task = progress.add_task("Skipping code review (no API key)...", total=None)
@@ -699,6 +706,104 @@ def _generate_subagents_step(
         progress.update(task, completed=True)
 
 
+def _generate_metrics_dashboard_step(
+    project_path: Path,
+    project_name: str,
+    language: str,
+    progress: Progress,
+) -> None:
+    """Generate live metrics dashboard and workflow."""
+    task = progress.add_task("Generating metrics dashboard...", total=None)
+
+    # Create metrics configuration with SGSG defaults
+    config = MetricsGenerationConfig(
+        language=language,
+        project_name=project_name,
+        coverage_threshold=90,
+        branch_coverage_threshold=85,
+        mutation_threshold=80,
+        complexity_threshold=10,
+        doc_coverage_threshold=95,
+        enable_dashboard=True,
+        enable_badges=True,
+    )
+
+    generator = MetricsGenerator(None, config)
+
+    # Create docs directory for GitHub Pages
+    docs_dir = project_path / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate dashboard and metrics.json
+    generator.write_dashboard(docs_dir)
+    initial_metrics_path = docs_dir / "metrics.json"
+    # Use thresholds from config to avoid duplication
+    initial_metrics = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "project": project_name,
+        "thresholds": {
+            "coverage": config.coverage_threshold,
+            "branch_coverage": config.branch_coverage_threshold,
+            "mutation_score": config.mutation_threshold,
+            "complexity": config.complexity_threshold,
+            "docs_coverage": config.doc_coverage_threshold,
+            "security_issues": 0,
+        },
+        "metrics": {
+            "coverage": 0.0,
+            "coverage_status": "fail",
+            "branch_coverage": 0.0,
+            "branch_coverage_status": "fail",
+            "mutation_score": 0.0,
+            "mutation_status": "fail",
+            "complexity_avg": 0.0,
+            "complexity_status": "pass",
+            "docs_coverage": 0.0,
+            "docs_status": "fail",
+            "security_issues": 0,
+            "security_status": "pass",
+        },
+    }
+    initial_metrics_path.write_text(json.dumps(initial_metrics, indent=2))
+
+    # Generate metrics collection workflow
+    workflows_dir = project_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy the metrics workflow from SGSG repo
+    sgsg_root = Path(__file__).parent.parent
+    sgsg_workflow = sgsg_root / ".github" / "workflows" / "metrics.yml"
+    if sgsg_workflow.exists():
+        target_workflow = workflows_dir / "metrics.yml"
+        shutil.copy(sgsg_workflow, target_workflow)
+
+        # Update project name in workflow
+        workflow_content = target_workflow.read_text()
+        workflow_content = workflow_content.replace(
+            "start-green-stay-green", project_name
+        )
+        target_workflow.write_text(workflow_content)
+    else:
+        console.print(
+            "[yellow]Warning:[/yellow] Metrics workflow template not found. "
+            "You'll need to create .github/workflows/metrics.yml manually."
+        )
+
+    # Copy collect_metrics.py script
+    scripts_dir = project_path / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    sgsg_script = sgsg_root / "scripts" / "collect_metrics.py"
+    if sgsg_script.exists():
+        shutil.copy(sgsg_script, scripts_dir / "collect_metrics.py")
+    else:
+        console.print(
+            "[yellow]Warning:[/yellow] Metrics collection script not found. "
+            "You'll need to create scripts/collect_metrics.py manually."
+        )
+
+    progress.update(task, completed=True)
+
+
 def _generate_with_orchestrator(
     project_path: Path,
     project_name: str,
@@ -725,6 +830,8 @@ def _generate_project_files(
     project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
+    *,
+    enable_live_dashboard: bool = False,
 ) -> None:
     """Generate all project files with progress indicators.
 
@@ -734,6 +841,7 @@ def _generate_project_files(
         language: Programming language.
         orchestrator: Optional AI orchestrator for AI-powered features.
             None indicates fallback to template mode.
+        enable_live_dashboard: Whether to generate live metrics dashboard.
 
     Raises:
         typer.Exit: If generation fails.
@@ -751,6 +859,12 @@ def _generate_project_files(
                 project_path, project_name, language, orchestrator, progress
             )
 
+            # Generate live metrics dashboard if enabled
+            if enable_live_dashboard:
+                _generate_metrics_dashboard_step(
+                    project_path, project_name, language, progress
+                )
+
         console.print(
             f"\n[green]✓[/green] Project generated successfully at: {project_path}"
         )
@@ -758,6 +872,11 @@ def _generate_project_files(
         console.print(f"  cd {project_path}")
         console.print("  pre-commit install")
         console.print("  ./scripts/check-all.sh\n")
+        if enable_live_dashboard:
+            console.print(
+                "[green]✓[/green] Live metrics dashboard enabled - "
+                "configure GitHub Pages to deploy from /docs"
+            )
     except Exception as e:
         console.print(f"\n[red]Error:[/red] Generation failed: {e}", style="bold")
         raise typer.Exit(code=1) from e
@@ -812,6 +931,13 @@ def init(  # noqa: PLR0913
             hide_input=True,
         ),
     ] = None,
+    enable_live_dashboard: Annotated[
+        bool,
+        typer.Option(
+            "--enable-live-dashboard",
+            help="Generate live metrics dashboard with auto-updating workflow.",
+        ),
+    ] = False,
     config: config_file_option = None,
 ) -> None:
     """Initialize a new project with quality controls.
@@ -829,6 +955,7 @@ def init(  # noqa: PLR0913
         dry_run: Preview mode without file creation.
         no_interactive: Non-interactive mode.
         api_key: Optional Claude API key for AI features.
+        enable_live_dashboard: Generate live metrics dashboard with workflow.
         config: Configuration file path.
 
     Raises:
@@ -885,7 +1012,11 @@ def init(  # noqa: PLR0913
 
     # Generate all project files (handles errors internally)
     _generate_project_files(
-        project_path, resolved_project_name, resolved_language, orchestrator
+        project_path,
+        resolved_project_name,
+        resolved_language,
+        orchestrator,
+        enable_live_dashboard=enable_live_dashboard,
     )
 
 

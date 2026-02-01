@@ -7,10 +7,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from typing import TYPE_CHECKING
 
 from jinja2 import Environment
 from jinja2 import FileSystemLoader
+
+from start_green_stay_green.generators.base import GenerationError
+from start_green_stay_green.generators.base import TemplateBasedGenerator
 
 if TYPE_CHECKING:
     from start_green_stay_green.ai.orchestrator import AIOrchestrator
@@ -29,7 +33,7 @@ class ReviewWorkflowResult:
     workflow_path: Path
 
 
-class GitHubActionsReviewGenerator:
+class GitHubActionsReviewGenerator(TemplateBasedGenerator):
     """Generates GitHub Actions workflow for automated PR code review.
 
     Uses Jinja2 templates to generate GitHub Actions workflow that:
@@ -41,26 +45,24 @@ class GitHubActionsReviewGenerator:
     - Blocks merge for Medium+ severity
 
     Example:
-        >>> orchestrator = AIOrchestrator(api_key="...")
-        >>> generator = GitHubActionsReviewGenerator(orchestrator)
+        >>> generator = GitHubActionsReviewGenerator()  # No orchestrator yet
         >>> result = generator.generate(workflow_name="Code Review")
-        >>> print(result.workflow_path)
+        >>> print(result["workflow_path"])
         .github/workflows/review.yml
     """
 
     def __init__(
         self,
-        orchestrator: AIOrchestrator,
+        orchestrator: AIOrchestrator | None = None,
         *,
         template_path: Path | None = None,
     ) -> None:
         """Initialize GitHub Actions Review Generator.
 
         Args:
-            orchestrator: AI orchestrator for Claude API integration.
+            orchestrator: Optional AI orchestrator for Claude API integration.
                 Reserved for future use in Issue #102 (Claude API integration).
-                Currently, the generator only renders workflow templates without
-                AI assistance.
+                Currently unused - generator only renders workflow templates.
             template_path: Path to Jinja2 template file. If None, uses default
                 template at templates/github/code_review.yml.j2.
 
@@ -69,7 +71,7 @@ class GitHubActionsReviewGenerator:
             but not yet used. Issue #102 tracks implementation of actual Claude API
             integration in the generated workflow.
         """
-        self.orchestrator = orchestrator
+        super().__init__(orchestrator=orchestrator)
 
         if template_path is None:
             project_root = Path(__file__).parent.parent.parent
@@ -81,17 +83,20 @@ class GitHubActionsReviewGenerator:
         """Validate that template file exists.
 
         Raises:
-            FileNotFoundError: If template file doesn't exist.
+            GenerationError: If template file doesn't exist.
         """
         if not self.template_path.exists():
             msg = f"Template not found: {self.template_path}"
-            raise FileNotFoundError(msg)
+            raise GenerationError(
+                msg,
+                cause=FileNotFoundError(str(self.template_path)),
+            )
 
     def generate(
         self,
         *,
         workflow_name: str = "Code Review",
-    ) -> ReviewWorkflowResult:
+    ) -> dict[str, Any]:
         """Generate GitHub Actions code review workflow.
 
         Creates a GitHub Actions workflow YAML file that:
@@ -107,16 +112,18 @@ class GitHubActionsReviewGenerator:
                 Defaults to "Code Review".
 
         Returns:
-            ReviewWorkflowResult containing workflow content and target path.
+            Dictionary with keys:
+                - workflow_content: Generated YAML content
+                - workflow_path: Target path (.github/workflows/review.yml)
 
         Raises:
-            FileNotFoundError: If template file doesn't exist.
+            GenerationError: If template file doesn't exist.
 
         Example:
             >>> result = generator.generate(workflow_name="PR Review")
-            >>> output_path = Path(result.workflow_path)
+            >>> output_path = Path(result["workflow_path"])
             >>> output_path.parent.mkdir(parents=True, exist_ok=True)
-            >>> output_path.write_text(result.workflow_content)
+            >>> output_path.write_text(result["workflow_content"])
         """
         self._validate_template_exists()
 
@@ -136,7 +143,35 @@ class GitHubActionsReviewGenerator:
             workflow_name=workflow_name,
         )
 
+        return {
+            "workflow_content": workflow_content,
+            "workflow_path": Path(".github/workflows/review.yml"),
+        }
+
+    def generate_review_workflow(
+        self,
+        *,
+        workflow_name: str = "Code Review",
+    ) -> ReviewWorkflowResult:
+        """Legacy method for backward compatibility.
+
+        This method wraps generate() and returns ReviewWorkflowResult
+        for code that expects the old interface.
+
+        Args:
+            workflow_name: Name of the GitHub Actions workflow.
+
+        Returns:
+            ReviewWorkflowResult with workflow content and path.
+
+        Raises:
+            GenerationError: If template doesn't exist.
+
+        Deprecated:
+            Use generate() instead. This method will be removed in v2.0.
+        """
+        result = self.generate(workflow_name=workflow_name)
         return ReviewWorkflowResult(
-            workflow_content=workflow_content,
-            workflow_path=Path(".github/workflows/review.yml"),
+            workflow_content=result["workflow_content"],
+            workflow_path=result["workflow_path"],
         )

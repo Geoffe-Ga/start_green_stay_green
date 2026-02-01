@@ -1,10 +1,12 @@
 """Test YAML fence stripping for Issue #160."""
 
+from __future__ import annotations
 
-def test_strip_markdown_fences_yaml():
+from start_green_stay_green.utils.yaml_utils import strip_markdown_fences
+
+
+def test_strip_markdown_fences_yaml() -> None:
     """Test stripping markdown fences from YAML content."""
-    from start_green_stay_green.utils.yaml_utils import strip_markdown_fences
-
     # YAML wrapped in markdown fences (with trailing newline preserved)
     input_yaml = """```yaml
 name: CI
@@ -25,10 +27,8 @@ jobs:
     assert result == expected
 
 
-def test_strip_markdown_fences_no_language():
+def test_strip_markdown_fences_no_language() -> None:
     """Test stripping markdown fences without language specifier."""
-    from start_green_stay_green.utils.yaml_utils import strip_markdown_fences
-
     input_yaml = """```
 name: CI
 on: [push]
@@ -41,10 +41,8 @@ on: [push]"""
     assert result == expected
 
 
-def test_strip_markdown_fences_already_clean():
+def test_strip_markdown_fences_already_clean() -> None:
     """Test that clean YAML is returned unchanged."""
-    from start_green_stay_green.utils.yaml_utils import strip_markdown_fences
-
     input_yaml = """name: CI
 on: [push]
 jobs:
@@ -55,10 +53,8 @@ jobs:
     assert result == input_yaml
 
 
-def test_strip_markdown_fences_multiple_code_blocks():
+def test_strip_markdown_fences_multiple_code_blocks() -> None:
     """Test stripping when there are multiple code blocks (take first)."""
-    from start_green_stay_green.utils.yaml_utils import strip_markdown_fences
-
     input_yaml = """```yaml
 name: CI
 ```
@@ -73,10 +69,8 @@ print("hello")
     assert result == expected
 
 
-def test_strip_markdown_fences_with_backticks_in_yaml():
+def test_strip_markdown_fences_with_backticks_in_yaml() -> None:
     """Test that backticks inside YAML content are preserved."""
-    from start_green_stay_green.utils.yaml_utils import strip_markdown_fences
-
     input_yaml = """```yaml
 name: CI
 description: "This is a `special` character"

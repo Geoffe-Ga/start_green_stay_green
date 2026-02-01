@@ -134,7 +134,7 @@ class CIGenerator(BaseGenerator):
         Raises:
             ValueError: If language is not supported.
         """
-        super().__init__(orchestrator)
+        self.orchestrator = orchestrator
 
         language = language.lower()
         if language not in LANGUAGE_CONFIGS:

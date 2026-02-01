@@ -10,6 +10,13 @@
 
 When working on code changes, follow these 4 gates in sequence:
 
+### Gate 0: TDD ✅
+- Red: Write tests that will pass when code is implemented correctly but that fail without that code
+- Green: Write the source code to get the tests to pass
+- Refactor: Make any changes necessary to keep the code clean, DRY and well structured
+
+This is an iterative loop, you should be writing new assertions before writing each new chunk of code
+
 ### Gate 1: Local Pre-Commit ✅
 
 ```bash
@@ -36,20 +43,7 @@ gh pr checks --watch
 - Push again
 - Wait for CI
 
-### Gate 3: Mutation Testing ✅
-
-```bash
-./scripts/mutation.sh  # Or wait for CI job
-```
-
-**If score < 80%**:
-- Review surviving mutants: `mutmut results`
-- Add tests to kill mutants
-- Re-run Gate 1
-- Push and wait for CI
-- Check mutation score again
-
-### Gate 4: Claude Code Review ✅
+### Gate 3: Claude Code Review ✅
 
 ```bash
 gh pr checks --watch
@@ -91,29 +85,18 @@ gh pr checks --watch
 ./scripts/complexity.sh
 ```
 
-### Mutation Score < 80%
-```bash
-# View surviving mutants
-mutmut results
-mutmut html
-
-# Add tests for:
-# - Boundary conditions
-# - Error paths
-# - Edge cases
-
-./scripts/test.sh
-./scripts/mutation.sh
-```
-
 ---
 
 ## Anti-Patterns (Avoid)
 
-❌ **Don't** request review with failing CI
 ❌ **Don't** skip local checks (`--no-verify`)
+
+❌ **Don't** request review with failing CI
+
 ❌ **Don't** lower quality thresholds to pass
+
 ❌ **Don't** ignore Claude feedback
+
 ❌ **Don't** merge without LGTM
 
 ---
@@ -144,14 +127,6 @@ def implement_feature():
             # Back to Gate 1
             run("./scripts/check-all.sh")
             run("git push")
-
-    # Gate 3: Mutation
-    while mutation_score() < 80:
-        add_tests_to_kill_mutants()
-        # Back to Gate 1
-        run("./scripts/check-all.sh")
-        run("git push")
-        wait_for_ci()
 
     # Gate 4: Review
     while not claude_approved():
@@ -191,9 +166,6 @@ def implement_feature():
 
 # Run tests
 ./scripts/test.sh
-
-# Check mutation score
-./scripts/mutation.sh
 
 # Watch CI status
 gh pr checks --watch

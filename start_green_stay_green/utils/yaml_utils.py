@@ -11,7 +11,7 @@ import re
 
 
 def strip_markdown_fences(content: str) -> str:
-    """Strip markdown code fences from YAML content.
+    r"""Strip markdown code fences from YAML content.
 
     AI models sometimes wrap YAML output in markdown code fences like:
     ```yaml
@@ -33,19 +33,19 @@ def strip_markdown_fences(content: str) -> str:
         Clean content with fences removed.
 
     Examples:
-        >>> strip_markdown_fences("```yaml\\nname: CI\\n```")
+        >>> strip_markdown_fences("```yaml\nname: CI\n```")
         'name: CI'
         >>> strip_markdown_fences("name: CI")
         'name: CI'
     """
     # Pattern matches: ``` or ```yaml at start, content, ``` at end
-    # Uses DOTALL flag so . matches newlines
-    # Non-greedy match to get first code block
-    fence_pattern = r"^```(?:yaml|yml)?\s*\n(.*?)\n```"
+    # Uses DOTALL flag so . matches newlines (including trailing newlines)
+    # Captures everything between opening fence newline and closing fence
+    fence_pattern = r"^```(?:yaml|yml)?\s*\n(.*)```\s*$"
 
     match = re.match(fence_pattern, content.strip(), re.DOTALL)
     if match:
-        # Return the content without fences, preserving internal whitespace
+        # Return the content without fences, preserving all internal whitespace
         return match.group(1)
 
     # No fences found, return as-is (strip only leading/trailing whitespace)
