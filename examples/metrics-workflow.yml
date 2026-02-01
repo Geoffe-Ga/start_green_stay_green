@@ -36,11 +36,13 @@ jobs:
 
       - name: Analyze complexity
         run: |
-          radon cc start_green_stay_green/ -a -s > complexity-report.txt
+          chmod +x scripts/metrics-complexity.sh
+          ./scripts/metrics-complexity.sh > complexity-report.txt
 
       - name: Check documentation coverage
         run: |
-          interrogate start_green_stay_green/ -v > docs-report.txt
+          chmod +x scripts/metrics-docs.sh
+          ./scripts/metrics-docs.sh > docs-report.txt
 
       - name: Run security scan
         run: |
