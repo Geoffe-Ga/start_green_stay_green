@@ -411,7 +411,7 @@ Platform: darwin
 ```bash
 start-green-stay-green version
 
-# Output: Start Green Stay Green v2.0.0
+# Output: Start Green Stay Green v1.0.0
 ```
 
 **Verbose Version**:
@@ -420,7 +420,7 @@ start-green-stay-green version --verbose
 
 # Output:
 # Start Green Stay Green
-# Version: 2.0.0
+# Version: 1.0.0
 # Python: 3.11.6
 # Platform: darwin
 ```
