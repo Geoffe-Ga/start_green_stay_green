@@ -812,14 +812,24 @@ class MetricsGenerator(BaseGenerator):
 
             // Complexity
             if (metrics.complexity_avg !== undefined) {{
-                updateMetric('complexity', metrics.complexity_avg, '',
-                    metrics.complexity_avg <= thresholds.complexity);
+                if (metrics.complexity_avg === null) {{
+                    document.getElementById('complexity-value').textContent = 'N/A';
+                    updateStatus('complexity', 'NO DATA', false);
+                }} else {{
+                    updateMetric('complexity', metrics.complexity_avg, '',
+                        metrics.complexity_avg <= thresholds.complexity);
+                }}
             }}
 
             // Documentation
             if (metrics.docs_coverage !== undefined) {{
-                updateMetric('docs', metrics.docs_coverage, '%',
-                    metrics.docs_coverage >= thresholds.docs_coverage);
+                if (metrics.docs_coverage === null) {{
+                    document.getElementById('docs-value').textContent = 'N/A';
+                    updateStatus('docs', 'NO DATA', false);
+                }} else {{
+                    updateMetric('docs', metrics.docs_coverage, '%',
+                        metrics.docs_coverage >= thresholds.docs_coverage);
+                }}
             }}
 
             // Security

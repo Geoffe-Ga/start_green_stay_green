@@ -277,11 +277,17 @@ def main() -> int:
         collector.collect_complexity(args.complexity_file)
     except (FileNotFoundError, ValueError) as e:
         print(f"Warning: Could not parse complexity ({type(e).__name__}): {e}")
+        # Set null value so dashboard knows metric exists but has no data
+        collector.metrics["complexity_avg"] = None
+        collector.metrics["complexity_status"] = "unknown"
 
     try:
         collector.collect_docs_coverage(args.docs_file)
     except (FileNotFoundError, ValueError) as e:
         print(f"Warning: Could not parse docs coverage ({type(e).__name__}): {e}")
+        # Set null value so dashboard knows metric exists but has no data
+        collector.metrics["docs_coverage"] = None
+        collector.metrics["docs_status"] = "unknown"
 
     try:
         collector.collect_security(args.security_file)
