@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import yaml
 
 from start_green_stay_green.generators.base import BaseGenerator
+from start_green_stay_green.utils.yaml_utils import strip_markdown_fences
 
 if TYPE_CHECKING:
     from start_green_stay_green.ai.orchestrator import AIOrchestrator
@@ -367,8 +368,11 @@ Start with 'name:' and end with the last workflow configuration line."""
             ValueError: If YAML is invalid.
         """
         try:
+            # Strip markdown fences if present (AI sometimes adds them)
+            clean_yaml = strip_markdown_fences(yaml_content)
+
             # Parse YAML to validate structure - use StringIO for cleanup
-            with io.StringIO(yaml_content) as yaml_stream:
+            with io.StringIO(clean_yaml) as yaml_stream:
                 parsed = yaml.safe_load(yaml_stream)
 
             # Run all validations
@@ -389,7 +393,7 @@ Start with 'name:' and end with the last workflow configuration line."""
         else:
             return CIWorkflow(
                 name=parsed.get("name", "CI"),
-                content=yaml_content,
+                content=clean_yaml,
                 language=self.language,
                 is_valid=True,
                 error_message=None,
