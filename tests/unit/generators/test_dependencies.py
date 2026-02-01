@@ -6,6 +6,7 @@ import tomllib
 
 import pytest
 
+from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.dependencies import DependenciesGenerator
 from start_green_stay_green.generators.dependencies import DependencyConfig
 
@@ -205,3 +206,23 @@ class TestDependencyConfigValidation:
                 language="python",
                 package_name="",  # Empty string
             )
+
+
+class TestUnsupportedLanguage:
+    """Test error handling for unsupported languages."""
+
+    def test_unsupported_language_raises_generation_error(self) -> None:
+        """Test that unsupported language raises GenerationError."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = DependencyConfig(
+                project_name="test-project",
+                language="rust",  # Not yet supported
+                package_name="test_project",
+            )
+            generator = DependenciesGenerator(Path(tmpdir), config)
+
+            with pytest.raises(GenerationError) as exc_info:
+                generator.generate()
+
+            assert "not supported" in str(exc_info.value).lower()
+            assert "rust" in str(exc_info.value).lower()

@@ -4,8 +4,14 @@ Generates dependency files for target projects (requirements.txt, requirements-d
 pyproject.toml) with appropriate dependencies and tool configurations.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+from start_green_stay_green.generators.base import BaseGenerator
+from start_green_stay_green.generators.base import GenerationError
 
 
 @dataclass(frozen=True)
@@ -39,7 +45,7 @@ class DependencyConfig:
             raise ValueError(msg)
 
 
-class DependenciesGenerator:
+class DependenciesGenerator(BaseGenerator):
     """Generate dependency files for target projects.
 
     This generator creates dependency files (requirements.txt, requirements-dev.txt,
@@ -90,14 +96,15 @@ class DependenciesGenerator:
         # Ensure output directory exists
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def generate(self) -> dict[str, Path]:
+    def generate(self) -> dict[str, Any]:
         """Generate all dependency files.
 
         Returns:
             Dictionary mapping file names to their generated file paths
 
         Raises:
-            OSError: If dependency files cannot be written
+            GenerationError: If generation fails
+            ValueError: If configuration is invalid
         """
         files: dict[str, Path] = {}
 
@@ -107,7 +114,7 @@ class DependenciesGenerator:
         else:
             # For now, only Python is supported
             msg = f"Language {self.config.language} not supported yet"
-            raise ValueError(msg)
+            raise GenerationError(msg)
 
         return files
 
@@ -148,9 +155,16 @@ class DependenciesGenerator:
 
         Returns:
             Path to the written file
+
+        Raises:
+            GenerationError: If file cannot be written
         """
         file_path = self.output_dir / filename
-        file_path.write_text(content)
+        try:
+            file_path.write_text(content)
+        except OSError as e:
+            msg = f"Failed to write {filename}: {e}"
+            raise GenerationError(msg, cause=e) from e
         return file_path
 
     def _python_requirements_txt(self) -> str:
