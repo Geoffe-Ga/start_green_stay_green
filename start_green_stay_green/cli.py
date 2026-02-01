@@ -685,10 +685,9 @@ def _generate_subagents_step(
     """Generate subagents or skip if no orchestrator."""
     if orchestrator:
         task = progress.add_task("Generating subagents...", total=None)
-        subagents_dir = project_path / ".claude" / "agents"
-        subagents_generator = SubagentsGenerator(
-            orchestrator, reference_dir=subagents_dir
-        )
+        # Use default reference_dir (SGSG's .claude/agents with template agents)
+        # Output directory is where we write the generated files
+        subagents_generator = SubagentsGenerator(orchestrator)
         project_config_for_agents = (
             f"Project: {project_name}, "
             f"Language: {language}, "
@@ -697,9 +696,11 @@ def _generate_subagents_step(
         results = run_async(
             subagents_generator.generate_all_agents(project_config_for_agents)
         )
-        subagents_dir.mkdir(parents=True, exist_ok=True)
+        # Create output directory and write generated agent files
+        subagents_output_dir = project_path / ".claude" / "agents"
+        subagents_output_dir.mkdir(parents=True, exist_ok=True)
         for agent_name, result in results.items():
-            (subagents_dir / f"{agent_name}.md").write_text(result.content)
+            (subagents_output_dir / f"{agent_name}.md").write_text(result.content)
         progress.update(task, completed=True)
     else:
         task = progress.add_task("Skipping subagents (no API key)...", total=None)
