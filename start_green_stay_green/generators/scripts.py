@@ -128,6 +128,14 @@ class ScriptsGenerator:
             "test.sh",
             self._python_test_script(),
         )
+        scripts["typecheck.sh"] = self._write_script(
+            "typecheck.sh",
+            self._python_typecheck_script(),
+        )
+        scripts["coverage.sh"] = self._write_script(
+            "coverage.sh",
+            self._python_coverage_script(),
+        )
         scripts["fix-all.sh"] = self._write_script(
             "fix-all.sh",
             self._python_fix_all_script(),
@@ -546,14 +554,14 @@ fi
 
     def _python_test_script(self) -> str:
         """Generate Python test.sh script."""
-        return """#!/usr/bin/env bash
+        return f"""#!/usr/bin/env bash
 # scripts/test.sh - Run tests with Pytest
 # Usage: ./scripts/test.sh [--unit|--integration|--e2e|--all] [--coverage]
 #                          [--mutation] [--verbose] [--help]
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 TEST_TYPE="unit"
@@ -660,7 +668,7 @@ esac
 if $COVERAGE; then
     echo "Coverage enabled"
     PYTEST_ARGS+=(
-        --cov=start_green_stay_green
+        --cov={self.config.package_name}
         --cov-branch
         --cov-report=term-missing
         --cov-report=html
@@ -671,10 +679,10 @@ fi
 
 # Run tests
 if $VERBOSE; then
-    echo "Running pytest with args: ${PYTEST_ARGS[*]}"
+    echo "Running pytest with args: ${{PYTEST_ARGS[*]}}"
 fi
 
-pytest "${PYTEST_ARGS[@]}" tests/ || { echo "✗ Tests failed" >&2; exit 1; }
+pytest "${{PYTEST_ARGS[@]}}" tests/ || {{ echo "✗ Tests failed" >&2; exit 1; }}
 
 echo "✓ Tests passed"
 
@@ -682,12 +690,186 @@ echo "✓ Tests passed"
 if $MUTATION; then
     echo "=== Running Mutation Tests ==="
     if command -v mutmut &> /dev/null; then
-        mutmut run || { echo "✗ Mutation tests failed" >&2; exit 1; }
+        mutmut run || {{ echo "✗ Mutation tests failed" >&2; exit 1; }}
         echo "✓ Mutation tests passed"
     else
         echo "Warning: mutmut not installed, skipping mutation tests" >&2
     fi
 fi
+
+exit 0
+"""
+
+    def _python_typecheck_script(self) -> str:
+        """Generate Python typecheck.sh script."""
+        return f"""#!/usr/bin/env bash
+# scripts/typecheck.sh - Run type checking with MyPy
+# Usage: ./scripts/typecheck.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run type checking on the project using MyPy.
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All type checks passed
+    1           Type errors found
+    2           Error running type checker
+
+EXAMPLES:
+    $(basename "$0")          # Run type checking
+    $(basename "$0") --verbose # Show detailed output
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+# Set verbosity
+if $VERBOSE; then
+    set -x
+fi
+
+echo "=== Type Checking (MyPy) ==="
+
+if command -v mypy &> /dev/null; then
+    mypy {self.config.package_name}/ || {{
+        echo "✗ Type checking failed" >&2
+        exit 1
+    }}
+    echo "✓ Type checking passed"
+else
+    echo "Warning: mypy not installed, skipping type checking" >&2
+    echo "Install with: pip install mypy" >&2
+    exit 0
+fi
+
+exit 0
+"""
+
+    def _python_coverage_script(self) -> str:
+        """Generate Python coverage.sh script."""
+        return f"""#!/usr/bin/env bash
+# scripts/coverage.sh - Run tests with coverage report
+# Usage: ./scripts/coverage.sh [--html] [--xml] [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+HTML_REPORT=false
+XML_REPORT=false
+VERBOSE=false
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --html)
+            HTML_REPORT=true
+            shift
+            ;;
+        --xml)
+            XML_REPORT=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run tests with coverage report.
+
+OPTIONS:
+    --html      Generate HTML coverage report
+    --xml       Generate XML coverage report (for CI)
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           Coverage threshold met
+    1           Coverage below threshold
+    2           Error running coverage
+
+EXAMPLES:
+    $(basename "$0")          # Run coverage with terminal report
+    $(basename "$0") --html   # Generate HTML report
+    $(basename "$0") --xml    # Generate XML report for CI
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+# Set verbosity
+if $VERBOSE; then
+    set -x
+fi
+
+echo "=== Coverage Report ==="
+
+# Build pytest arguments
+PYTEST_ARGS=(
+    -v
+    --cov={self.config.package_name}
+    --cov-branch
+    --cov-report=term-missing
+    --cov-fail-under=90
+)
+
+# Add HTML report if requested
+if $HTML_REPORT; then
+    PYTEST_ARGS+=(--cov-report=html)
+    echo "HTML report will be generated in htmlcov/"
+fi
+
+# Add XML report if requested
+if $XML_REPORT; then
+    PYTEST_ARGS+=(--cov-report=xml)
+    echo "XML report will be generated as coverage.xml"
+fi
+
+# Run tests with coverage
+pytest "${{PYTEST_ARGS[@]}}" tests/ || {{
+    echo "✗ Coverage below threshold" >&2
+    exit 1
+}}
+
+echo "✓ Coverage threshold met"
 
 exit 0
 """

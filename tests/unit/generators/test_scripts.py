@@ -708,9 +708,9 @@ class TestMutationKillers:
             generator = ScriptsGenerator(Path(tmpdir), config)
             scripts = generator.generate()
 
-            assert len(scripts) == 9
-            assert len(scripts) > 8
-            assert len(scripts) < 10
+            assert len(scripts) == 11
+            assert len(scripts) > 10
+            assert len(scripts) < 12
 
     def test_generated_scripts_exact_count_typescript(self) -> None:
         """Test TypeScript generator creates EXACTLY 5 scripts."""
