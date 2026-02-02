@@ -554,8 +554,8 @@ def _generate_scripts_step(
         config=scripts_config,
     )
     scripts_generator.generate()
-    progress.update(task, description="[green]✓[/green] Generated scripts")
     progress.stop_task(task)
+    progress.update(task, description="[green]✓[/green] Generated scripts")
 
 
 def _generate_precommit_step(
@@ -572,8 +572,8 @@ def _generate_precommit_step(
     precommit_result = precommit_generator.generate(precommit_config)
     precommit_file = project_path / ".pre-commit-config.yaml"
     precommit_file.write_text(precommit_result["content"])
-    progress.update(task, description="[green]✓[/green] Generated pre-commit config")
     progress.stop_task(task)
+    progress.update(task, description="[green]✓[/green] Generated pre-commit config")
 
 
 def _generate_skills_step(project_path: Path, progress: Progress) -> None:
@@ -581,8 +581,8 @@ def _generate_skills_step(project_path: Path, progress: Progress) -> None:
     task = progress.add_task("Generating skills...", total=None)
     skills_dir = project_path / ".claude" / "skills"
     _copy_reference_skills(skills_dir)
-    progress.update(task, description="[green]✓[/green] Generated skills")
     progress.stop_task(task)
+    progress.update(task, description="[green]✓[/green] Generated skills")
 
 
 def _generate_ci_step(
@@ -599,12 +599,12 @@ def _generate_ci_step(
         workflows_dir = project_path / ".github" / "workflows"
         workflows_dir.mkdir(parents=True, exist_ok=True)
         (workflows_dir / "ci.yml").write_text(workflow.content)
-        progress.update(task, description="[green]✓[/green] Generated CI pipeline")
         progress.stop_task(task)
+        progress.update(task, description="[green]✓[/green] Generated CI pipeline")
     else:
         task = progress.add_task("Skipping CI (no API key)...", total=None)
-        progress.update(task, description="[yellow]⊘[/yellow] Skipped CI (no API key)")
         progress.stop_task(task)
+        progress.update(task, description="[yellow]⊘[/yellow] Skipped CI (no API key)")
 
 
 def _generate_review_step(
@@ -619,16 +619,16 @@ def _generate_review_step(
         workflows_dir.mkdir(parents=True, exist_ok=True)
         workflow_file = workflows_dir / "code-review.yml"
         workflow_file.write_text(review_result["workflow_content"])
+        progress.stop_task(task)
         progress.update(
             task, description="[green]✓[/green] Generated GitHub Actions review"
         )
-        progress.stop_task(task)
     else:
         task = progress.add_task("Skipping code review (no API key)...", total=None)
+        progress.stop_task(task)
         progress.update(
             task, description="[yellow]⊘[/yellow] Skipped code review (no API key)"
         )
-        progress.stop_task(task)
 
 
 def _generate_claude_md_step(
@@ -657,14 +657,14 @@ def _generate_claude_md_step(
         }
         claude_md_result = claude_md_generator.generate(project_config)
         (project_path / "CLAUDE.md").write_text(claude_md_result.content)
-        progress.update(task, description="[green]✓[/green] Generated CLAUDE.md")
         progress.stop_task(task)
+        progress.update(task, description="[green]✓[/green] Generated CLAUDE.md")
     else:
         task = progress.add_task("Skipping CLAUDE.md (no API key)...", total=None)
+        progress.stop_task(task)
         progress.update(
             task, description="[yellow]⊘[/yellow] Skipped CLAUDE.md (no API key)"
         )
-        progress.stop_task(task)
 
 
 def _generate_architecture_step(
@@ -682,19 +682,19 @@ def _generate_architecture_step(
             output_dir=project_path / "plans" / "architecture",
         )
         arch_generator.generate(language=language, project_name=project_name)
+        progress.stop_task(task)
         progress.update(
             task, description="[green]✓[/green] Generated architecture rules"
         )
-        progress.stop_task(task)
     else:
         task = progress.add_task(
             "Skipping architecture rules (no API key)...", total=None
         )
+        progress.stop_task(task)
         progress.update(
             task,
             description="[yellow]⊘[/yellow] Skipped architecture rules (no API key)",
         )
-        progress.stop_task(task)
 
 
 def _generate_subagents_step(
@@ -723,14 +723,14 @@ def _generate_subagents_step(
         subagents_output_dir.mkdir(parents=True, exist_ok=True)
         for agent_name, result in results.items():
             (subagents_output_dir / f"{agent_name}.md").write_text(result.content)
-        progress.update(task, description="[green]✓[/green] Generated subagents")
         progress.stop_task(task)
+        progress.update(task, description="[green]✓[/green] Generated subagents")
     else:
         task = progress.add_task("Skipping subagents (no API key)...", total=None)
+        progress.stop_task(task)
         progress.update(
             task, description="[yellow]⊘[/yellow] Skipped subagents (no API key)"
         )
-        progress.stop_task(task)
 
 
 def _generate_metrics_dashboard_step(
@@ -828,8 +828,8 @@ def _generate_metrics_dashboard_step(
             "You'll need to create scripts/collect_metrics.py manually."
         )
 
-    progress.update(task, description="[green]✓[/green] Generated metrics dashboard")
     progress.stop_task(task)
+    progress.update(task, description="[green]✓[/green] Generated metrics dashboard")
 
 
 def _generate_with_orchestrator(
