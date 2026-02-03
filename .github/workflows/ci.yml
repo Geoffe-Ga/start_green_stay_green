@@ -99,8 +99,22 @@ jobs:
         if: always()
         run: |
           echo "Cleaning up test artifacts..."
+          # Remove test project directories
           rm -rf my_project MagicMock *_project test-project 2>/dev/null || true
-          ls -la | grep -E "project|MagicMock" || echo "✓ No test artifacts found"
+          # Remove pytest cache that might interfere
+          rm -rf .pytest_cache 2>/dev/null || true
+          # Remove test artifact files created by generators
+          if [ -f tests/test_main.py ]; then
+            echo "Removing tests/test_main.py artifact..."
+            rm -f tests/test_main.py
+          fi
+          # Remove any pyproject.toml files in test directories
+          find . -maxdepth 2 -name "pyproject.toml" ! -path "./pyproject.toml" -delete 2>/dev/null || true
+          # Verify cleanup
+          echo "Verification:"
+          ls -la | grep -E "my_project|MagicMock|test-project" || echo "✓ No test artifact directories"
+          [ -f tests/test_main.py ] && echo "⚠ tests/test_main.py still exists!" || echo "✓ tests/test_main.py removed"
+          echo "✓ Cleanup complete"
 
       - name: Run integration tests
         run: ./scripts/test.sh --integration --ci
