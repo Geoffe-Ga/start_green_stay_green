@@ -10,7 +10,7 @@
 
 ### 1. Root Cause Analysis (RCA)
 
-Create `RCA_ISSUE_XXX.md` with:
+Create `plan/bugs/RCA_ISSUE_XXX.md` with:
 - **Problem Statement**: Error message, reproduction steps
 - **Root Cause**: Exact line/logic causing failure
 - **Analysis**: Why it happens, what was confused/wrong
