@@ -287,8 +287,11 @@ omit = [
     "*/site-packages/*",
     "*/templates/*",
     "*/reference/*",
-    "*/MagicMock/*",  # Exclude test-generated mock projects
-    "*/my_project/*",  # Exclude test-generated sample projects
+    "*/MagicMock/*",  # Exclude test-generated mock projects (nested)
+    "MagicMock/*",    # Exclude test-generated mock projects (root)
+    "*/my_project/*", # Exclude test-generated sample projects (nested)
+    "my_project/*",   # Exclude test-generated sample projects (root)
+    "*_project/*",    # Exclude any test-generated *_project directories
 ]
 parallel = true
 concurrency = ["thread", "multiprocessing"]
