@@ -318,3 +318,75 @@ Add debug output to see what pytest is reading:
 3. ⏳ Push fix and verify CI passes
 4. ⏳ Phase 2: Investigate which test creates `my_project/`
 5. ⏳ Create follow-up issue for root cause fix
+
+---
+
+## Implementation Log
+
+### Iteration 1 (Commit 133d020)
+**Date**: 2026-02-03 19:00 UTC
+**Changes**: Added basic cleanup step in CI workflow
+- Removed: `my_project`, `MagicMock`, `*_project`, `test-project` directories
+
+**Results**:
+- ✅ Cleanup step executed successfully
+- ❌ Marker errors persisted
+- ❌ New error: `ModuleNotFoundError: No module named 'my_project'` from `tests/test_main.py`
+- ❌ Coverage: 0% (no tests collected due to errors)
+
+**Analysis**:
+- Cleanup removed directories but not individual artifact files
+- `tests/test_main.py` created by TestsGenerator persists
+- File tries to `from my_project.main import main` which no longer exists
+- Marker errors suggest pytest cache or configuration interference
+
+### Iteration 2 (Commit 6b95f68)
+**Date**: 2026-02-03 19:30 UTC
+**Changes**: Enhanced cleanup with comprehensive artifact removal
+- Added: `tests/test_main.py` file removal
+- Added: `.pytest_cache` directory removal
+- Added: Rogue `pyproject.toml` cleanup (max depth 2)
+- Added: Better verification output
+
+**Implementation**:
+```bash
+# Remove test project directories
+rm -rf my_project MagicMock *_project test-project 2>/dev/null || true
+# Remove pytest cache
+rm -rf .pytest_cache 2>/dev/null || true
+# Remove test artifact files
+if [ -f tests/test_main.py ]; then
+  rm -f tests/test_main.py
+fi
+# Remove rogue pyproject.toml files
+find . -maxdepth 2 -name "pyproject.toml" ! -path "./pyproject.toml" -delete 2>/dev/null || true
+```
+
+**Expected Results**:
+- Should fix `ModuleNotFoundError` by removing `tests/test_main.py`
+- Should fix marker errors by clearing pytest cache
+- Should prevent configuration interference from rogue pyproject.toml files
+
+**Status**: ⏳ CI Running
+
+---
+
+## Root Cause Confirmed
+
+Based on Iteration 1 results, the root cause is now confirmed:
+
+**Primary Issue**: TestsGenerator creates `tests/test_main.py` during unit tests that persists into integration test run.
+
+**Secondary Issue**: Marker errors likely caused by:
+1. pytest cache containing stale marker information
+2. Possible `pyproject.toml` files in test-generated directories
+
+**Evidence**:
+- Error: `tests/test_main.py:3: from my_project.main import main`
+- This file is created by TestsGenerator but references a project that gets cleaned up
+- File persists because cleanup only targeted directories, not individual files
+
+**Phase 2 Investigation Target**:
+- Identify which unit test creates `tests/test_main.py` in project root (not tmpdir)
+- Likely culprit: A test that doesn't use `tmp_path` or `tempfile.TemporaryDirectory()`
+- Fix: Ensure all generator tests use proper isolation

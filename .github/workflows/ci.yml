@@ -116,6 +116,16 @@ jobs:
           [ -f tests/test_main.py ] && echo "⚠ tests/test_main.py still exists!" || echo "✓ tests/test_main.py removed"
           echo "✓ Cleanup complete"
 
+      - name: Debug pytest configuration before integration tests
+        run: |
+          echo "=== Pytest Configuration Debug ==="
+          pytest --markers | grep -E "e2e|integration|flaky_in_ci" || echo "⚠ Custom markers NOT found!"
+          echo "=== Checking pyproject.toml markers section ==="
+          grep -A 10 "^\[tool.pytest.ini_options\]" pyproject.toml | head -15
+          echo "=== Python/Pytest Version ==="
+          python --version
+          pytest --version
+
       - name: Run integration tests
         run: ./scripts/test.sh --integration --ci
 
