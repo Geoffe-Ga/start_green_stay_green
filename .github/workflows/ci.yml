@@ -108,12 +108,17 @@ jobs:
             echo "Removing tests/test_main.py artifact..."
             rm -f tests/test_main.py
           fi
-          # Remove any pyproject.toml files in test directories
+          # Restore original pyproject.toml from git (in case test overwrote it)
+          echo "Restoring original pyproject.toml from git..."
+          git checkout HEAD -- pyproject.toml
+          # Remove any OTHER pyproject.toml files in subdirectories
           find . -maxdepth 2 -name "pyproject.toml" ! -path "./pyproject.toml" -delete 2>/dev/null || true
           # Verify cleanup
           echo "Verification:"
           ls -la | grep -E "my_project|MagicMock|test-project" || echo "✓ No test artifact directories"
           [ -f tests/test_main.py ] && echo "⚠ tests/test_main.py still exists!" || echo "✓ tests/test_main.py removed"
+          echo "✓ Checking pyproject.toml has correct coverage target:"
+          grep "cov=start_green_stay_green" pyproject.toml && echo "✓ pyproject.toml is correct" || echo "⚠ pyproject.toml may be corrupted!"
           echo "✓ Cleanup complete"
 
       - name: Debug pytest configuration before integration tests
