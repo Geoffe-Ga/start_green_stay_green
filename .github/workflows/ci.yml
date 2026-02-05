@@ -95,6 +95,42 @@ jobs:
       - name: Run unit tests with coverage
         run: ./scripts/test.sh --unit --coverage --ci
 
+      - name: Clean up test artifacts before integration tests
+        if: always()
+        run: |
+          echo "Cleaning up test artifacts..."
+          # Remove test project directories
+          rm -rf my_project MagicMock *_project test-project 2>/dev/null || true
+          # Remove pytest cache that might interfere
+          rm -rf .pytest_cache 2>/dev/null || true
+          # Remove test artifact files created by generators
+          if [ -f tests/test_main.py ]; then
+            echo "Removing tests/test_main.py artifact..."
+            rm -f tests/test_main.py
+          fi
+          # Restore original pyproject.toml from git (in case test overwrote it)
+          echo "Restoring original pyproject.toml from git..."
+          git checkout HEAD -- pyproject.toml
+          # Remove any OTHER pyproject.toml files in subdirectories
+          find . -maxdepth 2 -name "pyproject.toml" ! -path "./pyproject.toml" -delete 2>/dev/null || true
+          # Verify cleanup
+          echo "Verification:"
+          ls -la | grep -E "my_project|MagicMock|test-project" || echo "✓ No test artifact directories"
+          [ -f tests/test_main.py ] && echo "⚠ tests/test_main.py still exists!" || echo "✓ tests/test_main.py removed"
+          echo "✓ Checking pyproject.toml has correct coverage target:"
+          grep "cov=start_green_stay_green" pyproject.toml && echo "✓ pyproject.toml is correct" || echo "⚠ pyproject.toml may be corrupted!"
+          echo "✓ Cleanup complete"
+
+      - name: Debug pytest configuration before integration tests
+        run: |
+          echo "=== Pytest Configuration Debug ==="
+          pytest --markers | grep -E "e2e|integration|flaky_in_ci" || echo "⚠ Custom markers NOT found!"
+          echo "=== Checking pyproject.toml markers section ==="
+          grep -A 10 "^\[tool.pytest.ini_options\]" pyproject.toml | head -15
+          echo "=== Python/Pytest Version ==="
+          python --version
+          pytest --version
+
       - name: Run integration tests
         run: ./scripts/test.sh --integration --ci
 

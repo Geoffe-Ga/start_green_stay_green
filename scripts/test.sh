@@ -223,6 +223,11 @@ pytest "${PYTEST_ARGS[@]}" tests/ 2>/tmp/pytest-stderr.txt || {
         echo "{\"status\": \"fail\", \"duration_seconds\": $TOTAL_TIME, \"test_duration\": $TEST_TIME}"
     else
         echo "✗ Tests failed" >&2
+        # Output stderr to help debug the failure
+        if [ -f /tmp/pytest-stderr.txt ]; then
+            echo "=== Pytest stderr output ===" >&2
+            cat /tmp/pytest-stderr.txt >&2
+        fi
     fi
     exit 1
 }

@@ -28,6 +28,8 @@ from start_green_stay_green.generators.architecture import (
 )
 from start_green_stay_green.generators.ci import CIGenerator
 from start_green_stay_green.generators.claude_md import ClaudeMdGenerator
+from start_green_stay_green.generators.dependencies import DependenciesGenerator
+from start_green_stay_green.generators.dependencies import DependencyConfig
 from start_green_stay_green.generators.github_actions import (
     GitHubActionsReviewGenerator,
 )
@@ -35,11 +37,17 @@ from start_green_stay_green.generators.metrics import MetricsGenerationConfig
 from start_green_stay_green.generators.metrics import MetricsGenerator
 from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import PreCommitGenerator
+from start_green_stay_green.generators.readme import ReadmeConfig
+from start_green_stay_green.generators.readme import ReadmeGenerator
 from start_green_stay_green.generators.scripts import ScriptConfig
 from start_green_stay_green.generators.scripts import ScriptsGenerator
 from start_green_stay_green.generators.skills import REFERENCE_SKILLS_DIR
 from start_green_stay_green.generators.skills import REQUIRED_SKILLS
+from start_green_stay_green.generators.structure import StructureConfig
+from start_green_stay_green.generators.structure import StructureGenerator
 from start_green_stay_green.generators.subagents import SubagentsGenerator
+from start_green_stay_green.generators.tests_gen import TestsConfig
+from start_green_stay_green.generators.tests_gen import TestsGenerator
 from start_green_stay_green.utils.async_bridge import run_async
 from start_green_stay_green.utils.credentials import get_api_key_from_keyring
 from start_green_stay_green.utils.credentials import store_api_key_in_keyring
@@ -540,6 +548,70 @@ def _copy_reference_skills(target_dir: Path) -> None:
         target_file.write_text(source_file.read_text())
 
 
+def _generate_structure_step(
+    project_path: Path, project_name: str, language: str, progress: Progress
+) -> None:
+    """Generate source code structure with progress indicator."""
+    task = progress.add_task("Generating source structure...", total=None)
+    config = StructureConfig(
+        project_name=project_name,
+        language=language,
+        package_name=project_name.replace("-", "_"),
+    )
+    generator = StructureGenerator(project_path, config)
+    generator.generate()
+    progress.stop_task(task)
+    progress.update(task, description="[green]✓[/green] Generated source structure")
+
+
+def _generate_dependencies_step(
+    project_path: Path, project_name: str, language: str, progress: Progress
+) -> None:
+    """Generate dependencies files with progress indicator."""
+    task = progress.add_task("Generating dependencies...", total=None)
+    config = DependencyConfig(
+        project_name=project_name,
+        language=language,
+        package_name=project_name.replace("-", "_"),
+    )
+    generator = DependenciesGenerator(project_path, config)
+    generator.generate()
+    progress.stop_task(task)
+    progress.update(task, description="[green]✓[/green] Generated dependencies")
+
+
+def _generate_tests_step(
+    project_path: Path, project_name: str, language: str, progress: Progress
+) -> None:
+    """Generate tests directory with progress indicator."""
+    task = progress.add_task("Generating tests...", total=None)
+    config = TestsConfig(
+        project_name=project_name,
+        language=language,
+        package_name=project_name.replace("-", "_"),
+    )
+    generator = TestsGenerator(project_path, config)
+    generator.generate()
+    progress.stop_task(task)
+    progress.update(task, description="[green]✓[/green] Generated tests")
+
+
+def _generate_readme_step(
+    project_path: Path, project_name: str, language: str, progress: Progress
+) -> None:
+    """Generate README.md with progress indicator."""
+    task = progress.add_task("Generating README...", total=None)
+    config = ReadmeConfig(
+        project_name=project_name,
+        language=language,
+        package_name=project_name.replace("-", "_"),
+    )
+    generator = ReadmeGenerator(project_path, config)
+    generator.generate()
+    progress.stop_task(task)
+    progress.update(task, description="[green]✓[/green] Generated README")
+
+
 def _generate_scripts_step(
     project_path: Path, project_name: str, language: str, progress: Progress
 ) -> None:
@@ -880,9 +952,18 @@ def _generate_project_files(
             TextColumn("[progress.description]{task.description}"),
             console=console,
         ) as progress:
+            # Core project structure first
+            _generate_structure_step(project_path, project_name, language, progress)
+            _generate_dependencies_step(project_path, project_name, language, progress)
+            _generate_tests_step(project_path, project_name, language, progress)
+            _generate_readme_step(project_path, project_name, language, progress)
+
+            # Quality infrastructure
             _generate_scripts_step(project_path, project_name, language, progress)
             _generate_precommit_step(project_path, project_name, language, progress)
             _generate_skills_step(project_path, progress)
+
+            # AI-powered features
             _generate_with_orchestrator(
                 project_path, project_name, language, orchestrator, progress
             )

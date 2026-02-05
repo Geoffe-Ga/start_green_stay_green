@@ -145,6 +145,7 @@ ignore = [
 ]
 "tests/e2e/**/*.py" = [
     "S603",      # Allow subprocess calls in E2E tests (controlled test inputs)
+    "S607",      # Allow partial executable paths in E2E tests (sgsg, python)
 ]
 "start_green_stay_green/cli.py" = [
     "T201",      # Allow print in CLI
@@ -255,7 +256,6 @@ addopts = [
     "--strict-config",
     "-p", "no:cacheprovider",
     "--tb=short",
-    "--hypothesis-seed=0",
 ]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -286,6 +286,11 @@ omit = [
     "*/site-packages/*",
     "*/templates/*",
     "*/reference/*",
+    "*/MagicMock/*",  # Exclude test-generated mock projects (nested)
+    "MagicMock/*",    # Exclude test-generated mock projects (root)
+    "*/my_project/*", # Exclude test-generated sample projects (nested)
+    "my_project/*",   # Exclude test-generated sample projects (root)
+    "*_project/*",    # Exclude any test-generated *_project directories
 ]
 parallel = true
 concurrency = ["thread", "multiprocessing"]

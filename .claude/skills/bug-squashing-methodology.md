@@ -10,7 +10,7 @@
 
 ### 1. Root Cause Analysis (RCA)
 
-Create `RCA_ISSUE_XXX.md` with:
+Create `plan/bugs/RCA_ISSUE_XXX.md` with:
 - **Problem Statement**: Error message, reproduction steps
 - **Root Cause**: Exact line/logic causing failure
 - **Analysis**: Why it happens, what was confused/wrong
@@ -54,6 +54,14 @@ git checkout -b fix-component-issue-XXX
 
 ### 4. The 3-Gate Workflow
 
+**Gate 0 - TDD (Optional but Recommended)**:
+```bash
+# Write failing test first
+pytest tests/path/to/test.py::test_name  # Should FAIL
+# Fix the code
+pytest tests/path/to/test.py::test_name  # Should PASS
+```
+
 **Gate 1 - Local (Pre-Commit)**:
 ```bash
 pre-commit run --all-files  # All 32 hooks must pass
@@ -68,6 +76,115 @@ pre-commit run --all-files  # All 32 hooks must pass
 - Must receive LGTM
 
 **Rule**: Never merge until ALL THREE gates are green ✅
+
+## CRITICAL: Gate Failure = Return to Gate 0
+
+**When ANY gate fails, you MUST return to Gate 0 and iterate through ALL gates again.**
+
+### If Gate 1 (Pre-Commit) Fails:
+```bash
+# DON'T: Just fix and re-run Gate 1
+# DO: Return to Gate 0
+pytest tests/  # Verify tests still pass
+# Fix the issue
+pytest tests/  # Verify fix works
+pre-commit run --all-files  # Gate 1 again
+```
+
+### If Gate 2 (CI) Fails:
+```bash
+# DON'T: Just fix and push
+# DO: Return to Gate 0
+git checkout fix-branch
+
+# Gate 0: TDD - Add test for CI failure scenario
+pytest tests/path/to/test.py::test_that_exposes_ci_bug  # Should FAIL
+# Fix the code
+pytest tests/path/to/test.py::test_that_exposes_ci_bug  # Should PASS
+
+# Gate 1: Local verification
+pre-commit run --all-files  # Must pass
+
+# Commit and push
+git add . && git commit -m "fix: address CI failure" && git push
+
+# Gate 2: Monitor CI again
+gh pr checks <PR#>  # Wait for green
+```
+
+### If Gate 3 (Claude Review) Requests Changes:
+```bash
+# DON'T: Just make changes and push
+# DO: Return to Gate 0
+
+# Gate 0: TDD for requested changes
+# Write/update tests for the changes Claude requested
+pytest tests/  # Verify current behavior
+# Make the changes Claude requested
+pytest tests/  # Verify changes work
+
+# Gate 1: Local verification
+pre-commit run --all-files  # Must pass
+
+# Commit and push
+git add . && git commit -m "fix: address code review feedback" && git push
+
+# Gate 2: Wait for CI
+gh pr checks <PR#>
+
+# Gate 3: Wait for new review
+# Claude will re-review automatically
+```
+
+### Why This Matters
+
+**Skipping Gate 0 after failures leads to:**
+- ❌ Pushing broken fixes that fail at Gate 1
+- ❌ Fixing Gate 1 issues that then fail at Gate 2
+- ❌ Multiple failed CI runs wasting resources
+- ❌ Accumulating technical debt
+- ❌ Breaking the "Stay Green" principle
+
+**Returning to Gate 0 ensures:**
+- ✅ Tests verify your fix works
+- ✅ Local checks pass before pushing
+- ✅ CI passes on first try after fix
+- ✅ No wasted CI resources
+- ✅ Maintains "Stay Green" discipline
+
+### Example: CI Failure Iteration
+
+**Wrong Approach** (what I did):
+```bash
+# CI fails with coverage issue
+vim pyproject.toml  # Fix coverage config
+git commit -m "fix coverage" && git push  # Push without testing
+# CI fails again with different issue
+vim pyproject.toml  # Fix again
+git commit -m "fix coverage again" && git push
+# CI fails AGAIN...
+# 3-4 failed CI runs, wasted time
+```
+
+**Right Approach** (Stay Green):
+```bash
+# CI fails with coverage issue
+
+# Gate 0: Reproduce and test fix locally
+pytest tests/e2e/ --cov=start_green_stay_green  # See the problem
+vim pyproject.toml  # Fix coverage config
+pytest tests/e2e/ --cov=start_green_stay_green  # Verify fix works
+
+# Gate 1: Run all pre-commit hooks
+pre-commit run --all-files  # All pass
+
+# Commit and push ONCE
+git commit -m "fix(tests): correct coverage exclusion patterns" && git push
+
+# Gate 2: CI passes on first try ✅
+```
+
+**Savings**: 3 failed CI runs → 1 successful CI run
 
 ### 5. Commit & PR
 

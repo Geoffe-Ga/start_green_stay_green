@@ -142,3 +142,8 @@ docs/_build/
 
 # Sphinx build artifacts
 docs/.doctrees/
+MagicMock
+
+# Test-generated artifacts
+MagicMock/
+my_project/
