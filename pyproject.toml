@@ -256,7 +256,6 @@ addopts = [
     "--strict-config",
     "-p", "no:cacheprovider",
     "--tb=short",
-    "--hypothesis-seed=0",
 ]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
