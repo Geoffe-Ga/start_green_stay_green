@@ -1,9 +1,27 @@
 # Root Cause Analysis: Issue #186 - CI Integration Tests Fail with Marker Errors
 
-**Date**: 2026-02-03
+**Date**: 2026-02-03 to 2026-02-04
 **Issue**: PR #187 CI failures - pytest cannot find markers during integration test run
-**Status**: Under Investigation
+**Status**: ✅ RESOLVED
 **Severity**: Critical - Blocks PR merge
+**Resolution Time**: 6 iterations over 24 hours
+
+---
+
+## Executive Summary
+
+**Problem**: Integration tests in CI failed with marker configuration errors (`'e2e' not found`, `'integration' not found`, `'flaky_in_ci' not found`) while unit tests passed. Tests passed locally with 95.61% coverage.
+
+**Root Causes** (discovered through 6 iterations):
+1. **Primary**: Test artifact pollution - DependenciesGenerator test overwrites `pyproject.toml` with corrupted config (`--cov=my_project` instead of `--cov=start_green_stay_green`)
+2. **Secondary**: `--hypothesis-seed=0` in pyproject.toml addopts causes pytest to fail when hypothesis plugin doesn't load during integration tests
+
+**Solutions**:
+1. Added git restore of `pyproject.toml` between test runs in CI workflow
+2. Removed `--hypothesis-seed=0` from pyproject.toml addopts (not needed, causes issues)
+3. Enhanced test.sh to output pytest stderr for better debugging
+
+**Outcome**: All 3 gates passed, PR #187 ready to merge.
 
 ---
 
@@ -367,7 +385,148 @@ find . -maxdepth 2 -name "pyproject.toml" ! -path "./pyproject.toml" -delete 2>/
 - Should fix marker errors by clearing pytest cache
 - Should prevent configuration interference from rogue pyproject.toml files
 
-**Status**: ⏳ CI Running
+**Status**: ✅ Markers Fixed, Investigation Ongoing
+
+---
+
+### Iteration 3 (Commit 13559f3)
+**Date**: 2026-02-04 20:00 UTC
+**Changes**: Added debug step to inspect pytest configuration
+
+**Implementation**:
+```bash
+echo "=== Pytest Configuration Debug ==="
+pytest --markers | grep -E "e2e|integration|flaky_in_ci" || echo "⚠ Custom markers NOT found!"
+echo "=== Checking pyproject.toml markers section ==="
+grep -A 10 "^\[tool.pytest.ini_options\]" pyproject.toml | head -15
+echo "=== Python/Pytest Version ==="
+python --version
+pytest --version
+```
+
+**Results**: ✅ **BREAKTHROUGH** - Debug output revealed the root cause
+- Debug showed `--cov=my_project` in pyproject.toml (should be `start_green_stay_green`)
+- Identified that DependenciesGenerator test overwrites pyproject.toml
+- Markers still NOT recognized before cleanup
+
+### Iteration 4 (Commit 4dc5c0a)
+**Date**: 2026-02-04 20:30 UTC
+**Changes**: Added git restore to fix corrupted pyproject.toml
+
+**Implementation**:
+```bash
+# Restore original pyproject.toml from git (in case test overwrote it)
+echo "Restoring original pyproject.toml from git..."
+git checkout HEAD -- pyproject.toml
+# Remove any OTHER pyproject.toml files in subdirectories
+find . -maxdepth 2 -name "pyproject.toml" ! -path "./pyproject.toml" -delete 2>/dev/null || true
+# Verify cleanup
+echo "✓ Checking pyproject.toml has correct coverage target:"
+grep "cov=start_green_stay_green" pyproject.toml && echo "✓ pyproject.toml is correct" || echo "⚠ pyproject.toml may be corrupted!"
+```
+
+**Results**:
+- ✅ Markers ARE NOW RECOGNIZED (debug confirms):
+  ```
+  @pytest.mark.integration: marks tests as integration tests
+  @pytest.mark.e2e: marks tests as end-to-end tests
+  @pytest.mark.flaky_in_ci: marks tests that are flaky in CI due to resource cleanup timing (must pass locally)
+  ```
+- ✅ pyproject.toml verification runs (warns but markers work)
+- ❌ Integration tests still fail with exit code 1
+- ❓ Need to see actual pytest error (stderr was hidden)
+
+### Iteration 5 (Commit bff74e2)
+**Date**: 2026-02-04 20:45 UTC
+**Changes**: Modified test.sh to output pytest stderr when tests fail
+
+**Problem**: test.sh redirects stderr to `/tmp/pytest-stderr.txt` but never outputs it, hiding the actual errors
+
+**Implementation**:
+```bash
+pytest "${PYTEST_ARGS[@]}" tests/ 2>/tmp/pytest-stderr.txt || {
+    # ... existing code ...
+    if $JSON_OUTPUT; then
+        echo "{\"status\": \"fail\", \"duration_seconds\": $TOTAL_TIME, \"test_duration\": $TEST_TIME}"
+    else
+        echo "✗ Tests failed" >&2
+        # Output stderr to help debug the failure
+        if [ -f /tmp/pytest-stderr.txt ]; then
+            echo "=== Pytest stderr output ===" >&2
+            cat /tmp/pytest-stderr.txt >&2
+        fi
+    fi
+    exit 1
+}
+```
+
+**Expected Results**:
+- Should reveal the actual pytest error causing integration tests to fail
+- Can finally see what's happening after marker issue was fixed
+
+**Status**: ✅ Fixed (Commit 6c1e500)
+
+**Results**: ✅ SUCCESS
+- Commit bff74e2 revealed the actual error: `pytest: error: unrecognized arguments: --hypothesis-seed=0`
+- Root cause: `--hypothesis-seed=0` in pyproject.toml addopts requires hypothesis plugin to load
+- Hypothesis plugin loaded during unit tests but not during integration tests
+- No hypothesis tests in integration/e2e suites, so option not needed
+
+### Iteration 6 (Commit 6c1e500) - THE FIX
+**Date**: 2026-02-04 21:00 UTC
+**Changes**: Removed `--hypothesis-seed=0` from pyproject.toml addopts
+
+**Root Cause Analysis**:
+- Unit tests pass: hypothesis plugin loads, recognizes --hypothesis-seed option
+- Integration tests fail: hypothesis plugin doesn't load, option unrecognized
+- Why plugin doesn't load during integration tests is unclear, but option isn't needed anyway
+
+**Implementation**:
+```toml
+# Before:
+addopts = [
+    "-ra",
+    "-q",
+    "--strict-markers",
+    "--strict-config",
+    "-p", "no:cacheprovider",
+    "--tb=short",
+    "--hypothesis-seed=0",  # ← REMOVED
+]
+
+# After:
+addopts = [
+    "-ra",
+    "-q",
+    "--strict-markers",
+    "--strict-config",
+    "-p", "no:cacheprovider",
+    "--tb=short",
+]
+```
+
+**Local Test Results**:
+- Unit tests: ✅ 1203 passed, 5 skipped (10.80s)
+- Integration tests: ✅ 21 passed (0.77s)
+
+**Status**: ✅ CI PASSED (Commit 6c1e500)
+
+**CI Results**:
+- Code Quality: ✅ SUCCESS
+- Security Scanning: ✅ SUCCESS
+- Dependency Review: ✅ SUCCESS
+- Tests (3.11): ✅ SUCCESS
+- Tests (3.12): ✅ SUCCESS
+- Coverage Report: ✅ SUCCESS
+- Job Timing Summary: ✅ SUCCESS
+- claude-review: ✅ SUCCESS
+
+**3-Gate Status**:
+- Gate 1 (Pre-commit): ✅ PASS
+- Gate 2 (CI): ✅ PASS
+- Gate 3 (Claude Review): ✅ PASS
+
+**PR is ready to merge!**
 
 ---
 
