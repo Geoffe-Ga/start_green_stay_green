@@ -1362,13 +1362,10 @@ Usage:
     python scripts/analyze_mutations.py --top 10
 """
 
-# ruff: noqa: T201  # print() is intentional for CLI output script
-# ruff: noqa: PLR0915  # Many statements acceptable for reporting script
-
 import argparse
-from pathlib import Path
 import sqlite3
 import sys
+from pathlib import Path
 
 # Quality thresholds
 MINIMUM_MUTATION_SCORE = 80
@@ -1385,7 +1382,7 @@ def analyze_cache(
         filter_file: Optional filename to filter results (e.g., "cli.py").
     """
     if not cache_path.exists():
-        print(f"Error: Cache file not found: {{cache_path}}", file=sys.stderr)
+        print(f"Error: Cache file not found: {cache_path}", file=sys.stderr)
         print("Run mutation tests first: ./scripts/mutation.sh", file=sys.stderr)
         sys.exit(1)
 
@@ -1400,31 +1397,31 @@ def analyze_cache(
         file_filter_sql = """
             AND sf.filename LIKE ?
         """
-        file_filter_params = (f"%{{filter_file}}",)
-        print(f"=== Mutmut Cache Analysis (filtered: {{filter_file}}) ===\\n")
+        file_filter_params = (f"%{filter_file}",)
+        print(f"=== Mutmut Cache Analysis (filtered: {filter_file}) ===\\n")
     else:
         print("=== Mutmut Cache Analysis ===\\n")
 
     # Get total mutants (with optional filter)
-    query = f"""  # noqa: S608
+    query = f"""
         SELECT COUNT(*)
         FROM Mutant m, Line l, SourceFile sf
         WHERE m.line = l.id
           AND l.sourcefile = sf.id
-          {{file_filter_sql}}
+          {file_filter_sql}
     """
     cursor.execute(query, file_filter_params)
     total = cursor.fetchone()[0]
-    print(f"Total mutants: {{total}}")
+    print(f"Total mutants: {total}")
     print()
 
     # Get status counts (with optional filter)
-    query = f"""  # noqa: S608
+    query = f"""
         SELECT m.status, COUNT(*)
         FROM Mutant m, Line l, SourceFile sf
         WHERE m.line = l.id
           AND l.sourcefile = sf.id
-          {{file_filter_sql}}
+          {file_filter_sql}
         GROUP BY m.status
     """
     cursor.execute(query, file_filter_params)
@@ -1437,7 +1434,7 @@ def analyze_cache(
 
     print("Status counts:")
     for status, count in sorted(status_counts.items()):
-        print(f"  {{status}}: {{count}}")
+        print(f"  {status}: {count}")
     print()
 
     # Calculate score
@@ -1445,38 +1442,38 @@ def analyze_cache(
         tested_total = total - untested
         if tested_total > 0:
             score = (killed / tested_total) * 100
-            print(f"Mutation Score: {{score:.1f}}%")
-            print(f"Required: {{MINIMUM_MUTATION_SCORE}}%")
+            print(f"Mutation Score: {score:.1f}%")
+            print(f"Required: {MINIMUM_MUTATION_SCORE}%")
             print()
             print("Breakdown:")
             killed_pct = killed / tested_total * 100
             survived_pct = survived / tested_total * 100
             suspicious_pct = suspicious / tested_total * 100
             timeout_pct = timeout / tested_total * 100
-            print(f"  Killed: {{killed}} ({{killed_pct:.1f}}% of tested)")
-            print(f"  Survived: {{survived}} ({{survived_pct:.1f}}% of tested)")
-            print(f"  Suspicious: {{suspicious}} ({{suspicious_pct:.1f}}%)")
-            print(f"  Timeout: {{timeout}} ({{timeout_pct:.1f}}%)")
-            print(f"  Untested: {{untested}}")
+            print(f"  Killed: {killed} ({killed_pct:.1f}% of tested)")
+            print(f"  Survived: {survived} ({survived_pct:.1f}% of tested)")
+            print(f"  Suspicious: {suspicious} ({suspicious_pct:.1f}%)")
+            print(f"  Timeout: {timeout} ({timeout_pct:.1f}%)")
+            print(f"  Untested: {untested}")
             print()
 
             if score < MINIMUM_MUTATION_SCORE:
                 gap = int((MINIMUM_MUTATION_SCORE / 100 * tested_total) - killed)
-                msg = f"⚠️  Need to kill {{gap}} more mutants"
-                msg += f" to reach {{MINIMUM_MUTATION_SCORE}}%"
+                msg = f"⚠️  Need to kill {gap} more mutants"
+                msg += f" to reach {MINIMUM_MUTATION_SCORE}%"
                 print(msg)
                 print()
 
     # Show files with most survived mutants (with optional filter)
     if survived > 0:
-        print(f"=== Files with Most Survived Mutants (Top {{top_files}}) ===")
-        query = f"""  # noqa: S608
+        print(f"=== Files with Most Survived Mutants (Top {top_files}) ===")
+        query = f"""
             SELECT sf.filename, COUNT(*) as count
             FROM Mutant m, Line l, SourceFile sf
             WHERE m.line = l.id
               AND l.sourcefile = sf.id
               AND m.status = "bad_survived"
-              {{file_filter_sql}}
+              {file_filter_sql}
             GROUP BY sf.filename
             ORDER BY count DESC
             LIMIT ?
@@ -1484,24 +1481,24 @@ def analyze_cache(
         cursor.execute(query, (*file_filter_params, top_files))
         for filename, count in cursor.fetchall():
             percentage = (count / survived) * 100
-            print(f"  {{count:3d}} ({{percentage:5.1f}}%): {{filename}}")
+            print(f"  {count:3d} ({percentage:5.1f}%): {filename}")
         print()
 
         # Show sample of survived mutants (with optional filter)
         print("Sample of survived mutants (first 10):")
-        query = f"""  # noqa: S608
+        query = f"""
             SELECT m.id, sf.filename, l.line_number
             FROM Mutant m, Line l, SourceFile sf
             WHERE m.line = l.id
               AND l.sourcefile = sf.id
               AND m.status = "bad_survived"
-              {{file_filter_sql}}
+              {file_filter_sql}
             ORDER BY sf.filename, l.line_number
             LIMIT 10
         """
         cursor.execute(query, file_filter_params)
         for mutant_id, filename, line_number in cursor.fetchall():
-            print(f"  Mutant {{mutant_id}}: {{filename}}:{{line_number}}")
+            print(f"  Mutant {mutant_id}: {filename}:{line_number}")
         print()
         print("To view a specific mutant: mutmut show <id>")
         print("To generate HTML report: mutmut html")

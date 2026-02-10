@@ -253,6 +253,7 @@ dev = [
     "isort>=5.12.0",
     "mypy>=1.5.0",
     "bandit>=1.7.5",
+    "safety>=3.0.0",
     "radon>=6.0.0",
     "mutmut>=2.4.0",
     "pre-commit>=3.4.0",
@@ -310,6 +311,10 @@ precision = 2
 show_missing = true
 skip_covered = false
 fail_under = 90
+exclude_lines = [
+    "if __name__ == .__main__.",
+    "pragma: no cover",
+]
 
 [tool.coverage.html]
 directory = "htmlcov"
