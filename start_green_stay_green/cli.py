@@ -548,7 +548,7 @@ def _copy_reference_skills(target_dir: Path) -> None:
 def _generate_structure_step(
     project_path: Path, project_name: str, language: str
 ) -> None:
-    """Generate source code structure with progress indicator."""
+    """Generate source code structure."""
     with console.status("Generating source structure..."):
         config = StructureConfig(
             project_name=project_name,
@@ -563,7 +563,7 @@ def _generate_structure_step(
 def _generate_dependencies_step(
     project_path: Path, project_name: str, language: str
 ) -> None:
-    """Generate dependencies files with progress indicator."""
+    """Generate dependencies files."""
     with console.status("Generating dependencies..."):
         config = DependencyConfig(
             project_name=project_name,
@@ -576,7 +576,7 @@ def _generate_dependencies_step(
 
 
 def _generate_tests_step(project_path: Path, project_name: str, language: str) -> None:
-    """Generate tests directory with progress indicator."""
+    """Generate tests directory."""
     with console.status("Generating tests..."):
         config = TestsConfig(
             project_name=project_name,
@@ -589,7 +589,7 @@ def _generate_tests_step(project_path: Path, project_name: str, language: str) -
 
 
 def _generate_readme_step(project_path: Path, project_name: str, language: str) -> None:
-    """Generate README.md with progress indicator."""
+    """Generate README.md."""
     with console.status("Generating README..."):
         config = ReadmeConfig(
             project_name=project_name,
@@ -604,7 +604,7 @@ def _generate_readme_step(project_path: Path, project_name: str, language: str) 
 def _generate_scripts_step(
     project_path: Path, project_name: str, language: str
 ) -> None:
-    """Generate quality scripts with progress indicator."""
+    """Generate quality scripts."""
     with console.status("Generating scripts..."):
         scripts_config = ScriptConfig(
             language=language,
@@ -621,7 +621,7 @@ def _generate_scripts_step(
 def _generate_precommit_step(
     project_path: Path, project_name: str, language: str
 ) -> None:
-    """Generate pre-commit configuration with progress indicator."""
+    """Generate pre-commit configuration."""
     with console.status("Generating pre-commit config..."):
         precommit_config = GenerationConfig(
             project_name=project_name,
@@ -636,7 +636,7 @@ def _generate_precommit_step(
 
 
 def _generate_skills_step(project_path: Path) -> None:
-    """Generate Claude skills with progress indicator."""
+    """Generate Claude skills."""
     with console.status("Generating skills..."):
         skills_dir = project_path / ".claude" / "skills"
         _copy_reference_skills(skills_dir)
@@ -676,7 +676,7 @@ def _generate_review_step(
             workflow_file.write_text(review_result["workflow_content"])
         console.print("[green]✓[/green] Generated GitHub Actions review")
     else:
-        console.print("[yellow]⊘[/yellow] Skipped code review " "(no API key)")
+        console.print("[yellow]⊘[/yellow] Skipped code review (no API key)")
 
 
 def _generate_claude_md_step(
@@ -706,7 +706,7 @@ def _generate_claude_md_step(
             (project_path / "CLAUDE.md").write_text(claude_md_result.content)
         console.print("[green]✓[/green] Generated CLAUDE.md")
     else:
-        console.print("[yellow]⊘[/yellow] Skipped CLAUDE.md " "(no API key)")
+        console.print("[yellow]⊘[/yellow] Skipped CLAUDE.md (no API key)")
 
 
 def _generate_architecture_step(
@@ -725,7 +725,7 @@ def _generate_architecture_step(
             arch_generator.generate(language=language, project_name=project_name)
         console.print("[green]✓[/green] Generated architecture rules")
     else:
-        console.print("[yellow]⊘[/yellow] Skipped architecture rules " "(no API key)")
+        console.print("[yellow]⊘[/yellow] Skipped architecture rules (no API key)")
 
 
 def _generate_subagents_step(
@@ -752,7 +752,7 @@ def _generate_subagents_step(
                 (subagents_output_dir / f"{agent_name}.md").write_text(result.content)
         console.print("[green]✓[/green] Generated subagents")
     else:
-        console.print("[yellow]⊘[/yellow] Skipped subagents " "(no API key)")
+        console.print("[yellow]⊘[/yellow] Skipped subagents (no API key)")
 
 
 def _generate_metrics_dashboard_step(
@@ -841,15 +841,13 @@ def _generate_metrics_dashboard_step(
     console.print("[green]✓[/green] Generated metrics dashboard")
     if missing_workflow:
         console.print(
-            "[yellow]Warning:[/yellow] Metrics workflow "
-            "template not found. You'll need to create "
-            ".github/workflows/metrics.yml manually."
+            "[yellow]Warning:[/yellow] Metrics workflow template not found. "
+            "You'll need to create .github/workflows/metrics.yml manually."
         )
     if missing_script:
         console.print(
-            "[yellow]Warning:[/yellow] Metrics collection "
-            "script not found. You'll need to create "
-            "scripts/collect_metrics.py manually."
+            "[yellow]Warning:[/yellow] Metrics collection script not found. "
+            "You'll need to create scripts/collect_metrics.py manually."
         )
 
 
@@ -908,7 +906,7 @@ def _generate_project_files(
             _generate_metrics_dashboard_step(project_path, project_name, language)
 
         console.print(
-            f"\n[green]✓[/green] Project generated " f"successfully at: {project_path}"
+            f"\n[green]✓[/green] Project generated successfully at: {project_path}"
         )
         console.print("\nTo get started, run:")
         console.print(f"  cd {project_path}")
@@ -916,9 +914,8 @@ def _generate_project_files(
         console.print("  ./scripts/check-all.sh\n")
         if enable_live_dashboard:
             console.print(
-                "[green]✓[/green] Live metrics dashboard "
-                "enabled - configure GitHub Pages to deploy "
-                "from /docs"
+                "[green]✓[/green] Live metrics dashboard enabled "
+                "- configure GitHub Pages to deploy from /docs"
             )
     except Exception as e:
         console.print(
