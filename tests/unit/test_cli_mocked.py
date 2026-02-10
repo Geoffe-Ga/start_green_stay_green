@@ -33,9 +33,6 @@ from unittest.mock import Mock
 from unittest.mock import patch
 
 import pytest
-from rich.progress import Progress
-from rich.progress import SpinnerColumn
-from rich.progress import TextColumn
 import typer
 
 from start_green_stay_green import cli
@@ -657,14 +654,11 @@ class TestMetricsDashboardGeneration:
 
         mock_shutil_copy.side_effect = copy_side_effect
 
-        # Create progress bar
-        with Progress(SpinnerColumn(), TextColumn("{task.description}")) as progress:
-            cli._generate_metrics_dashboard_step(
-                project_path=tmp_path,
-                project_name="test-project",
-                language="python",
-                progress=progress,
-            )
+        cli._generate_metrics_dashboard_step(
+            project_path=tmp_path,
+            project_name="test-project",
+            language="python",
+        )
 
         # Verify MetricsGenerator was instantiated with correct config
         assert mock_generator_class.called
@@ -706,13 +700,11 @@ class TestMetricsDashboardGeneration:
 
         mock_shutil_copy.side_effect = copy_side_effect
 
-        with Progress(SpinnerColumn(), TextColumn("{task.description}")) as progress:
-            cli._generate_metrics_dashboard_step(
-                project_path=tmp_path,
-                project_name="test-project",
-                language="python",
-                progress=progress,
-            )
+        cli._generate_metrics_dashboard_step(
+            project_path=tmp_path,
+            project_name="test-project",
+            language="python",
+        )
 
         # Verify .github/workflows directory was created
         workflows_dir = tmp_path / ".github" / "workflows"
@@ -736,15 +728,11 @@ class TestMetricsDashboardGeneration:
         mock_shutil_copy.return_value = None
 
         # Mock Path.exists to return False for workflow file
-        with (
-            patch.object(Path, "exists", return_value=False),
-            Progress(SpinnerColumn(), TextColumn("{task.description}")) as progress,
-        ):
+        with patch.object(Path, "exists", return_value=False):
             cli._generate_metrics_dashboard_step(
                 project_path=tmp_path,
                 project_name="test-project",
                 language="python",
-                progress=progress,
             )
 
         # Verify warning was printed
@@ -773,13 +761,11 @@ class TestMetricsDashboardGeneration:
 
         mock_shutil_copy.side_effect = copy_side_effect
 
-        with Progress(SpinnerColumn(), TextColumn("{task.description}")) as progress:
-            cli._generate_metrics_dashboard_step(
-                project_path=tmp_path,
-                project_name="my-new-project",
-                language="python",
-                progress=progress,
-            )
+        cli._generate_metrics_dashboard_step(
+            project_path=tmp_path,
+            project_name="my-new-project",
+            language="python",
+        )
 
         # Verify workflow content was replaced
         workflow_file = tmp_path / ".github" / "workflows" / "metrics.yml"
@@ -1012,14 +998,12 @@ class TestGenerateSteps:
         self, mock_generator_class: Mock
     ) -> None:
         """Test _generate_scripts_step creates ScriptsGenerator."""
-        mock_progress = MagicMock()
-        mock_task = MagicMock()
-        mock_progress.add_task.return_value = mock_task
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
 
-        cli._generate_scripts_step(mock_path, "my-project", "python", mock_progress)
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_scripts_step(mock_path, "my-project", "python")
 
         mock_generator_class.assert_called()
         mock_generator.generate.assert_called()
@@ -1029,30 +1013,30 @@ class TestGenerateSteps:
         self, mock_generator_class: Mock
     ) -> None:
         """Test _generate_precommit_step creates PreCommitGenerator."""
-        mock_progress = MagicMock()
-        mock_task = MagicMock()
-        mock_progress.add_task.return_value = mock_task
         mock_generator = MagicMock()
-        mock_generator.generate.return_value = {"content": "# config"}
+        mock_generator.generate.return_value = {
+            "content": "# config",
+        }
         mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
-        cli._generate_precommit_step(mock_path, "my-project", "python", mock_progress)
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_precommit_step(mock_path, "my-project", "python")
 
         mock_generator.generate.assert_called()
 
     @patch("start_green_stay_green.cli._copy_reference_skills")
     def test_generate_skills_step_copies_skills(self, mock_copy: Mock) -> None:
         """Test _generate_skills_step copies reference skills."""
-        mock_progress = MagicMock()
-        mock_task = MagicMock()
-        mock_progress.add_task.return_value = mock_task
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
-        with patch("start_green_stay_green.cli.REQUIRED_SKILLS", []):
-            cli._generate_skills_step(mock_path, mock_progress)
+        with (
+            patch("start_green_stay_green.cli.REQUIRED_SKILLS", []),
+            patch("start_green_stay_green.cli.console"),
+        ):
+            cli._generate_skills_step(mock_path)
             mock_copy.assert_called()
 
     @patch("start_green_stay_green.cli.CIGenerator")
@@ -1061,9 +1045,6 @@ class TestGenerateSteps:
     ) -> None:
         """Test _generate_ci_step with orchestrator."""
         mock_orchestrator = MagicMock()
-        mock_progress = MagicMock()
-        mock_task = MagicMock()
-        mock_progress.add_task.return_value = mock_task
         mock_generator = MagicMock()
         mock_workflow = MagicMock()
         mock_workflow.content = "workflow content"
@@ -1072,19 +1053,19 @@ class TestGenerateSteps:
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
-        cli._generate_ci_step(mock_path, "python", mock_orchestrator, mock_progress)
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_ci_step(mock_path, "python", mock_orchestrator)
 
         mock_ci_generator_class.assert_called_with(mock_orchestrator, "python")
 
-    def test_generate_ci_step_skips_without_orchestrator(self) -> None:
+    def test_generate_ci_step_skips_without_orchestrator(
+        self,
+    ) -> None:
         """Test _generate_ci_step skips without orchestrator."""
-        mock_progress = MagicMock()
-        mock_task = MagicMock()
-        mock_progress.add_task.return_value = mock_task
         mock_path = MagicMock(spec=Path)
 
-        # Should not raise when orchestrator is None
-        cli._generate_ci_step(mock_path, "python", None, mock_progress)
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_ci_step(mock_path, "python", None)
 
     @patch("start_green_stay_green.cli.GitHubActionsReviewGenerator")
     def test_generate_review_step_with_orchestrator(
@@ -1092,9 +1073,6 @@ class TestGenerateSteps:
     ) -> None:
         """Test _generate_review_step with orchestrator."""
         mock_orchestrator = MagicMock()
-        mock_progress = MagicMock()
-        mock_task = MagicMock()
-        mock_progress.add_task.return_value = mock_task
         mock_generator = MagicMock()
         mock_workflow = MagicMock()
         mock_workflow.content = "workflow content"
@@ -1103,27 +1081,24 @@ class TestGenerateSteps:
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
-        cli._generate_review_step(mock_path, mock_orchestrator, mock_progress)
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_review_step(mock_path, mock_orchestrator)
 
         mock_generator_class.assert_called_with(mock_orchestrator)
 
-    def test_generate_review_step_skips_without_orchestrator(self) -> None:
+    def test_generate_review_step_skips_without_orchestrator(
+        self,
+    ) -> None:
         """Test _generate_review_step skips without orchestrator."""
-        mock_progress = MagicMock()
-        mock_task = MagicMock()
-        mock_progress.add_task.return_value = mock_task
         mock_path = MagicMock(spec=Path)
 
-        # Should not raise when orchestrator is None
-        cli._generate_review_step(mock_path, None, mock_progress)
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_review_step(mock_path, None)
 
     @patch("start_green_stay_green.cli.ClaudeMdGenerator")
     def test_generate_claude_md_step(self, mock_generator_class: Mock) -> None:
         """Test _generate_claude_md_step creates generator."""
         mock_orchestrator = MagicMock()
-        mock_progress = MagicMock()
-        mock_task = MagicMock()
-        mock_progress.add_task.return_value = mock_task
         mock_generator = MagicMock()
         mock_result = MagicMock()
         mock_result.content = "# CLAUDE.md content"
@@ -1132,9 +1107,13 @@ class TestGenerateSteps:
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
-        cli._generate_claude_md_step(
-            mock_path, "my-project", "python", mock_orchestrator, mock_progress
-        )
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_claude_md_step(
+                mock_path,
+                "my-project",
+                "python",
+                mock_orchestrator,
+            )
 
         mock_generator.generate.assert_called()
 
@@ -1142,39 +1121,43 @@ class TestGenerateSteps:
     def test_generate_architecture_step(self, mock_generator_class: Mock) -> None:
         """Test _generate_architecture_step creates generator."""
         mock_orchestrator = MagicMock()
-        mock_progress = MagicMock()
-        mock_task = MagicMock()
-        mock_progress.add_task.return_value = mock_task
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
-        cli._generate_architecture_step(
-            mock_path, "my-project", "python", mock_orchestrator, mock_progress
-        )
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_architecture_step(
+                mock_path,
+                "my-project",
+                "python",
+                mock_orchestrator,
+            )
 
         mock_generator.generate.assert_called()
 
     @patch("start_green_stay_green.cli.run_async")
     @patch("start_green_stay_green.cli.SubagentsGenerator")
     def test_generate_subagents_step(
-        self, mock_generator_class: Mock, mock_run_async: Mock
+        self,
+        mock_generator_class: Mock,
+        mock_run_async: Mock,
     ) -> None:
         """Test _generate_subagents_step creates generator."""
         mock_orchestrator = MagicMock()
-        mock_progress = MagicMock()
-        mock_task = MagicMock()
-        mock_progress.add_task.return_value = mock_task
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
-        mock_run_async.return_value = {}  # Mock async result (not bool)
+        mock_run_async.return_value = {}
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
-        cli._generate_subagents_step(
-            mock_path, "my-project", "python", mock_orchestrator, mock_progress
-        )
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_subagents_step(
+                mock_path,
+                "my-project",
+                "python",
+                mock_orchestrator,
+            )
 
         mock_generator_class.assert_called()
 
