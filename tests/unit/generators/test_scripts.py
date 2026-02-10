@@ -1208,8 +1208,8 @@ class TestPythonAnalyzeMutationsScript:
             assert "mutmut show <id>" in content
             assert "mutmut html" in content
 
-    def test_analyze_mutations_script_has_ruff_noqa_annotations(self) -> None:
-        """Test analyze_mutations.py has appropriate ruff noqa annotations."""
+    def test_analyze_mutations_script_has_no_unnecessary_noqa(self) -> None:
+        """Test analyze_mutations.py omits noqa for rules not in generated config."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
                 language="python",
@@ -1219,9 +1219,11 @@ class TestPythonAnalyzeMutationsScript:
             scripts = generator.generate()
 
             content = scripts["analyze_mutations.py"].read_text()
-            assert "# ruff: noqa: T201" in content  # print() allowed
-            assert "# ruff: noqa: PLR0915" in content  # Many statements allowed
-            assert "# noqa: S608" in content  # SQL string formatting allowed
+            # T201 and PLR0915 are not enabled in generated ruff config
+            assert "# ruff: noqa: T201" not in content
+            assert "# ruff: noqa: PLR0915" not in content
+            # S608 should not appear inside SQL f-strings as string content
+            assert "# noqa: S608" not in content
 
     def test_analyze_mutations_script_handles_file_filter(self) -> None:
         """Test analyze_mutations.py supports filtering by filename."""
