@@ -786,10 +786,10 @@ def _generate_metrics_dashboard_step(
             "project": project_name,
             "thresholds": {
                 "coverage": config.coverage_threshold,
-                "branch_coverage": (config.branch_coverage_threshold),
+                "branch_coverage": config.branch_coverage_threshold,
                 "mutation_score": config.mutation_threshold,
                 "complexity": config.complexity_threshold,
-                "docs_coverage": (config.doc_coverage_threshold),
+                "docs_coverage": config.doc_coverage_threshold,
                 "security_issues": 0,
             },
             "metrics": {
