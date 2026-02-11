@@ -17,9 +17,6 @@ from typing import Annotated
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress
-from rich.progress import SpinnerColumn
-from rich.progress import TextColumn
 import typer
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
@@ -549,158 +546,137 @@ def _copy_reference_skills(target_dir: Path) -> None:
 
 
 def _generate_structure_step(
-    project_path: Path, project_name: str, language: str, progress: Progress
+    project_path: Path, project_name: str, language: str
 ) -> None:
-    """Generate source code structure with progress indicator."""
-    task = progress.add_task("Generating source structure...", total=None)
-    config = StructureConfig(
-        project_name=project_name,
-        language=language,
-        package_name=project_name.replace("-", "_"),
-    )
-    generator = StructureGenerator(project_path, config)
-    generator.generate()
-    progress.stop_task(task)
-    progress.update(task, description="[green]✓[/green] Generated source structure")
+    """Generate source code structure."""
+    with console.status("Generating source structure..."):
+        config = StructureConfig(
+            project_name=project_name,
+            language=language,
+            package_name=project_name.replace("-", "_"),
+        )
+        generator = StructureGenerator(project_path, config)
+        generator.generate()
+    console.print("[green]✓[/green] Generated source structure")
 
 
 def _generate_dependencies_step(
-    project_path: Path, project_name: str, language: str, progress: Progress
+    project_path: Path, project_name: str, language: str
 ) -> None:
-    """Generate dependencies files with progress indicator."""
-    task = progress.add_task("Generating dependencies...", total=None)
-    config = DependencyConfig(
-        project_name=project_name,
-        language=language,
-        package_name=project_name.replace("-", "_"),
-    )
-    generator = DependenciesGenerator(project_path, config)
-    generator.generate()
-    progress.stop_task(task)
-    progress.update(task, description="[green]✓[/green] Generated dependencies")
+    """Generate dependencies files."""
+    with console.status("Generating dependencies..."):
+        config = DependencyConfig(
+            project_name=project_name,
+            language=language,
+            package_name=project_name.replace("-", "_"),
+        )
+        generator = DependenciesGenerator(project_path, config)
+        generator.generate()
+    console.print("[green]✓[/green] Generated dependencies")
 
 
-def _generate_tests_step(
-    project_path: Path, project_name: str, language: str, progress: Progress
-) -> None:
-    """Generate tests directory with progress indicator."""
-    task = progress.add_task("Generating tests...", total=None)
-    config = TestsConfig(
-        project_name=project_name,
-        language=language,
-        package_name=project_name.replace("-", "_"),
-    )
-    generator = TestsGenerator(project_path, config)
-    generator.generate()
-    progress.stop_task(task)
-    progress.update(task, description="[green]✓[/green] Generated tests")
+def _generate_tests_step(project_path: Path, project_name: str, language: str) -> None:
+    """Generate tests directory."""
+    with console.status("Generating tests..."):
+        config = TestsConfig(
+            project_name=project_name,
+            language=language,
+            package_name=project_name.replace("-", "_"),
+        )
+        generator = TestsGenerator(project_path, config)
+        generator.generate()
+    console.print("[green]✓[/green] Generated tests")
 
 
-def _generate_readme_step(
-    project_path: Path, project_name: str, language: str, progress: Progress
-) -> None:
-    """Generate README.md with progress indicator."""
-    task = progress.add_task("Generating README...", total=None)
-    config = ReadmeConfig(
-        project_name=project_name,
-        language=language,
-        package_name=project_name.replace("-", "_"),
-    )
-    generator = ReadmeGenerator(project_path, config)
-    generator.generate()
-    progress.stop_task(task)
-    progress.update(task, description="[green]✓[/green] Generated README")
+def _generate_readme_step(project_path: Path, project_name: str, language: str) -> None:
+    """Generate README.md."""
+    with console.status("Generating README..."):
+        config = ReadmeConfig(
+            project_name=project_name,
+            language=language,
+            package_name=project_name.replace("-", "_"),
+        )
+        generator = ReadmeGenerator(project_path, config)
+        generator.generate()
+    console.print("[green]✓[/green] Generated README")
 
 
 def _generate_scripts_step(
-    project_path: Path, project_name: str, language: str, progress: Progress
+    project_path: Path, project_name: str, language: str
 ) -> None:
-    """Generate quality scripts with progress indicator."""
-    task = progress.add_task("Generating scripts...", total=None)
-    scripts_config = ScriptConfig(
-        language=language,
-        package_name=project_name.replace("-", "_"),
-    )
-    scripts_generator = ScriptsGenerator(
-        output_dir=project_path / "scripts",
-        config=scripts_config,
-    )
-    scripts_generator.generate()
-    progress.stop_task(task)
-    progress.update(task, description="[green]✓[/green] Generated scripts")
+    """Generate quality scripts."""
+    with console.status("Generating scripts..."):
+        scripts_config = ScriptConfig(
+            language=language,
+            package_name=project_name.replace("-", "_"),
+        )
+        scripts_generator = ScriptsGenerator(
+            output_dir=project_path / "scripts",
+            config=scripts_config,
+        )
+        scripts_generator.generate()
+    console.print("[green]✓[/green] Generated scripts")
 
 
 def _generate_precommit_step(
-    project_path: Path, project_name: str, language: str, progress: Progress
+    project_path: Path, project_name: str, language: str
 ) -> None:
-    """Generate pre-commit configuration with progress indicator."""
-    task = progress.add_task("Generating pre-commit config...", total=None)
-    precommit_config = GenerationConfig(
-        project_name=project_name,
-        language=language,
-        language_config={},
-    )
-    precommit_generator = PreCommitGenerator(orchestrator=None)
-    precommit_result = precommit_generator.generate(precommit_config)
-    precommit_file = project_path / ".pre-commit-config.yaml"
-    precommit_file.write_text(precommit_result["content"])
-    progress.stop_task(task)
-    progress.update(task, description="[green]✓[/green] Generated pre-commit config")
+    """Generate pre-commit configuration."""
+    with console.status("Generating pre-commit config..."):
+        precommit_config = GenerationConfig(
+            project_name=project_name,
+            language=language,
+            language_config={},
+        )
+        precommit_generator = PreCommitGenerator(orchestrator=None)
+        precommit_result = precommit_generator.generate(precommit_config)
+        precommit_file = project_path / ".pre-commit-config.yaml"
+        precommit_file.write_text(precommit_result["content"])
+    console.print("[green]✓[/green] Generated pre-commit config")
 
 
-def _generate_skills_step(project_path: Path, progress: Progress) -> None:
-    """Generate Claude skills with progress indicator."""
-    task = progress.add_task("Generating skills...", total=None)
-    skills_dir = project_path / ".claude" / "skills"
-    _copy_reference_skills(skills_dir)
-    progress.stop_task(task)
-    progress.update(task, description="[green]✓[/green] Generated skills")
+def _generate_skills_step(project_path: Path) -> None:
+    """Generate Claude skills."""
+    with console.status("Generating skills..."):
+        skills_dir = project_path / ".claude" / "skills"
+        _copy_reference_skills(skills_dir)
+    console.print("[green]✓[/green] Generated skills")
 
 
 def _generate_ci_step(
     project_path: Path,
     language: str,
     orchestrator: AIOrchestrator | None,
-    progress: Progress,
 ) -> None:
     """Generate CI pipeline or skip if no orchestrator."""
     if orchestrator:
-        task = progress.add_task("Generating CI pipeline...", total=None)
-        ci_generator = CIGenerator(orchestrator, language)
-        workflow = ci_generator.generate_workflow()
-        workflows_dir = project_path / ".github" / "workflows"
-        workflows_dir.mkdir(parents=True, exist_ok=True)
-        (workflows_dir / "ci.yml").write_text(workflow.content)
-        progress.stop_task(task)
-        progress.update(task, description="[green]✓[/green] Generated CI pipeline")
+        with console.status("Generating CI pipeline..."):
+            ci_generator = CIGenerator(orchestrator, language)
+            workflow = ci_generator.generate_workflow()
+            workflows_dir = project_path / ".github" / "workflows"
+            workflows_dir.mkdir(parents=True, exist_ok=True)
+            (workflows_dir / "ci.yml").write_text(workflow.content)
+        console.print("[green]✓[/green] Generated CI pipeline")
     else:
-        task = progress.add_task("Skipping CI (no API key)...", total=None)
-        progress.stop_task(task)
-        progress.update(task, description="[yellow]⊘[/yellow] Skipped CI (no API key)")
+        console.print("[yellow]⊘[/yellow] Skipped CI (no API key)")
 
 
 def _generate_review_step(
-    project_path: Path, orchestrator: AIOrchestrator | None, progress: Progress
+    project_path: Path,
+    orchestrator: AIOrchestrator | None,
 ) -> None:
     """Generate GitHub Actions code review or skip if no orchestrator."""
     if orchestrator:
-        task = progress.add_task("Generating GitHub Actions review...", total=None)
-        review_generator = GitHubActionsReviewGenerator(orchestrator)
-        review_result = review_generator.generate()
-        workflows_dir = project_path / ".github" / "workflows"
-        workflows_dir.mkdir(parents=True, exist_ok=True)
-        workflow_file = workflows_dir / "code-review.yml"
-        workflow_file.write_text(review_result["workflow_content"])
-        progress.stop_task(task)
-        progress.update(
-            task, description="[green]✓[/green] Generated GitHub Actions review"
-        )
+        with console.status("Generating GitHub Actions review..."):
+            review_generator = GitHubActionsReviewGenerator(orchestrator)
+            review_result = review_generator.generate()
+            workflows_dir = project_path / ".github" / "workflows"
+            workflows_dir.mkdir(parents=True, exist_ok=True)
+            workflow_file = workflows_dir / "code-review.yml"
+            workflow_file.write_text(review_result["workflow_content"])
+        console.print("[green]✓[/green] Generated GitHub Actions review")
     else:
-        task = progress.add_task("Skipping code review (no API key)...", total=None)
-        progress.stop_task(task)
-        progress.update(
-            task, description="[yellow]⊘[/yellow] Skipped code review (no API key)"
-        )
+        console.print("[yellow]⊘[/yellow] Skipped code review (no API key)")
 
 
 def _generate_claude_md_step(
@@ -708,35 +684,29 @@ def _generate_claude_md_step(
     project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
-    progress: Progress,
 ) -> None:
     """Generate CLAUDE.md or skip if no orchestrator."""
     if orchestrator:
-        task = progress.add_task("Generating CLAUDE.md...", total=None)
-        claude_md_generator = ClaudeMdGenerator(orchestrator)
-        project_config = {
-            "project_name": project_name,
-            "language": language,
-            "scripts": [
-                "check-all.sh",
-                "test.sh",
-                "lint.sh",
-                "format.sh",
-                "security.sh",
-                "mutation.sh",
-            ],
-            "skills": REQUIRED_SKILLS.copy(),
-        }
-        claude_md_result = claude_md_generator.generate(project_config)
-        (project_path / "CLAUDE.md").write_text(claude_md_result.content)
-        progress.stop_task(task)
-        progress.update(task, description="[green]✓[/green] Generated CLAUDE.md")
+        with console.status("Generating CLAUDE.md..."):
+            claude_md_generator = ClaudeMdGenerator(orchestrator)
+            project_config = {
+                "project_name": project_name,
+                "language": language,
+                "scripts": [
+                    "check-all.sh",
+                    "test.sh",
+                    "lint.sh",
+                    "format.sh",
+                    "security.sh",
+                    "mutation.sh",
+                ],
+                "skills": REQUIRED_SKILLS.copy(),
+            }
+            claude_md_result = claude_md_generator.generate(project_config)
+            (project_path / "CLAUDE.md").write_text(claude_md_result.content)
+        console.print("[green]✓[/green] Generated CLAUDE.md")
     else:
-        task = progress.add_task("Skipping CLAUDE.md (no API key)...", total=None)
-        progress.stop_task(task)
-        progress.update(
-            task, description="[yellow]⊘[/yellow] Skipped CLAUDE.md (no API key)"
-        )
+        console.print("[yellow]⊘[/yellow] Skipped CLAUDE.md (no API key)")
 
 
 def _generate_architecture_step(
@@ -744,29 +714,18 @@ def _generate_architecture_step(
     project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
-    progress: Progress,
 ) -> None:
     """Generate architecture rules or skip if no orchestrator."""
     if orchestrator:
-        task = progress.add_task("Generating architecture rules...", total=None)
-        arch_generator = ArchitectureEnforcementGenerator(
-            orchestrator,
-            output_dir=project_path / "plans" / "architecture",
-        )
-        arch_generator.generate(language=language, project_name=project_name)
-        progress.stop_task(task)
-        progress.update(
-            task, description="[green]✓[/green] Generated architecture rules"
-        )
+        with console.status("Generating architecture rules..."):
+            arch_generator = ArchitectureEnforcementGenerator(
+                orchestrator,
+                output_dir=project_path / "plans" / "architecture",
+            )
+            arch_generator.generate(language=language, project_name=project_name)
+        console.print("[green]✓[/green] Generated architecture rules")
     else:
-        task = progress.add_task(
-            "Skipping architecture rules (no API key)...", total=None
-        )
-        progress.stop_task(task)
-        progress.update(
-            task,
-            description="[yellow]⊘[/yellow] Skipped architecture rules (no API key)",
-        )
+        console.print("[yellow]⊘[/yellow] Skipped architecture rules (no API key)")
 
 
 def _generate_subagents_step(
@@ -774,134 +733,122 @@ def _generate_subagents_step(
     project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
-    progress: Progress,
 ) -> None:
     """Generate subagents or skip if no orchestrator."""
     if orchestrator:
-        task = progress.add_task("Generating subagents...", total=None)
-        # Use default reference_dir (SGSG's .claude/agents with template agents)
-        # Output directory is where we write the generated files
-        subagents_generator = SubagentsGenerator(orchestrator)
-        project_config_for_agents = (
-            f"Project: {project_name}, "
-            f"Language: {language}, "
-            f"Type: quality-control-tool"
-        )
-        results = run_async(
-            subagents_generator.generate_all_agents(project_config_for_agents)
-        )
-        # Create output directory and write generated agent files
-        subagents_output_dir = project_path / ".claude" / "agents"
-        subagents_output_dir.mkdir(parents=True, exist_ok=True)
-        for agent_name, result in results.items():
-            (subagents_output_dir / f"{agent_name}.md").write_text(result.content)
-        progress.stop_task(task)
-        progress.update(task, description="[green]✓[/green] Generated subagents")
+        with console.status("Generating subagents..."):
+            subagents_generator = SubagentsGenerator(orchestrator)
+            project_config_for_agents = (
+                f"Project: {project_name}, "
+                f"Language: {language}, "
+                f"Type: quality-control-tool"
+            )
+            results = run_async(
+                subagents_generator.generate_all_agents(project_config_for_agents)
+            )
+            subagents_output_dir = project_path / ".claude" / "agents"
+            subagents_output_dir.mkdir(parents=True, exist_ok=True)
+            for agent_name, result in results.items():
+                (subagents_output_dir / f"{agent_name}.md").write_text(result.content)
+        console.print("[green]✓[/green] Generated subagents")
     else:
-        task = progress.add_task("Skipping subagents (no API key)...", total=None)
-        progress.stop_task(task)
-        progress.update(
-            task, description="[yellow]⊘[/yellow] Skipped subagents (no API key)"
-        )
+        console.print("[yellow]⊘[/yellow] Skipped subagents (no API key)")
 
 
 def _generate_metrics_dashboard_step(
     project_path: Path,
     project_name: str,
     language: str,
-    progress: Progress,
 ) -> None:
     """Generate live metrics dashboard and workflow."""
-    task = progress.add_task("Generating metrics dashboard...", total=None)
-
-    # Create metrics configuration with SGSG defaults
-    config = MetricsGenerationConfig(
-        language=language,
-        project_name=project_name,
-        coverage_threshold=90,
-        branch_coverage_threshold=85,
-        mutation_threshold=80,
-        complexity_threshold=10,
-        doc_coverage_threshold=95,
-        enable_dashboard=True,
-        enable_badges=True,
-    )
-
-    generator = MetricsGenerator(None, config)
-
-    # Create docs directory for GitHub Pages
-    docs_dir = project_path / "docs"
-    docs_dir.mkdir(parents=True, exist_ok=True)
-
-    # Generate dashboard and metrics.json
-    generator.write_dashboard(docs_dir)
-    initial_metrics_path = docs_dir / "metrics.json"
-    # Use thresholds from config to avoid duplication
-    initial_metrics = {
-        "timestamp": datetime.now(UTC).isoformat(),
-        "project": project_name,
-        "thresholds": {
-            "coverage": config.coverage_threshold,
-            "branch_coverage": config.branch_coverage_threshold,
-            "mutation_score": config.mutation_threshold,
-            "complexity": config.complexity_threshold,
-            "docs_coverage": config.doc_coverage_threshold,
-            "security_issues": 0,
-        },
-        "metrics": {
-            "coverage": 0.0,
-            "coverage_status": "fail",
-            "branch_coverage": 0.0,
-            "branch_coverage_status": "fail",
-            "mutation_score": 0.0,
-            "mutation_status": "fail",
-            "complexity_avg": 0.0,
-            "complexity_status": "pass",
-            "docs_coverage": 0.0,
-            "docs_status": "fail",
-            "security_issues": 0,
-            "security_status": "pass",
-        },
-    }
-    initial_metrics_path.write_text(json.dumps(initial_metrics, indent=2))
-
-    # Generate metrics collection workflow
-    workflows_dir = project_path / ".github" / "workflows"
-    workflows_dir.mkdir(parents=True, exist_ok=True)
-
-    # Copy the metrics workflow from SGSG repo
-    sgsg_root = Path(__file__).parent.parent
-    sgsg_workflow = sgsg_root / ".github" / "workflows" / "metrics.yml"
-    if sgsg_workflow.exists():
-        target_workflow = workflows_dir / "metrics.yml"
-        shutil.copy(sgsg_workflow, target_workflow)
-
-        # Update project name in workflow
-        workflow_content = target_workflow.read_text()
-        workflow_content = workflow_content.replace(
-            "start-green-stay-green", project_name
+    with console.status("Generating metrics dashboard..."):
+        config = MetricsGenerationConfig(
+            language=language,
+            project_name=project_name,
+            coverage_threshold=90,
+            branch_coverage_threshold=85,
+            mutation_threshold=80,
+            complexity_threshold=10,
+            doc_coverage_threshold=95,
+            enable_dashboard=True,
+            enable_badges=True,
         )
-        target_workflow.write_text(workflow_content)
-    else:
+
+        generator = MetricsGenerator(None, config)
+
+        docs_dir = project_path / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+
+        generator.write_dashboard(docs_dir)
+        initial_metrics_path = docs_dir / "metrics.json"
+        initial_metrics = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "project": project_name,
+            "thresholds": {
+                "coverage": config.coverage_threshold,
+                "branch_coverage": config.branch_coverage_threshold,
+                "mutation_score": config.mutation_threshold,
+                "complexity": config.complexity_threshold,
+                "docs_coverage": config.doc_coverage_threshold,
+                "security_issues": 0,
+            },
+            "metrics": {
+                "coverage": 0.0,
+                "coverage_status": "fail",
+                "branch_coverage": 0.0,
+                "branch_coverage_status": "fail",
+                "mutation_score": 0.0,
+                "mutation_status": "fail",
+                "complexity_avg": 0.0,
+                "complexity_status": "pass",
+                "docs_coverage": 0.0,
+                "docs_status": "fail",
+                "security_issues": 0,
+                "security_status": "pass",
+            },
+        }
+        initial_metrics_path.write_text(json.dumps(initial_metrics, indent=2))
+
+        workflows_dir = project_path / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True, exist_ok=True)
+
+        sgsg_root = Path(__file__).parent.parent
+        sgsg_workflow = sgsg_root / ".github" / "workflows" / "metrics.yml"
+        missing_workflow = False
+        missing_script = False
+        if sgsg_workflow.exists():
+            target_workflow = workflows_dir / "metrics.yml"
+            shutil.copy(sgsg_workflow, target_workflow)
+            workflow_content = target_workflow.read_text()
+            workflow_content = workflow_content.replace(
+                "start-green-stay-green", project_name
+            )
+            target_workflow.write_text(workflow_content)
+        else:
+            missing_workflow = True
+
+        scripts_dir = project_path / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        sgsg_script = sgsg_root / "scripts" / "collect_metrics.py"
+        if sgsg_script.exists():
+            shutil.copy(
+                sgsg_script,
+                scripts_dir / "collect_metrics.py",
+            )
+        else:
+            missing_script = True
+
+    console.print("[green]✓[/green] Generated metrics dashboard")
+    if missing_workflow:
         console.print(
             "[yellow]Warning:[/yellow] Metrics workflow template not found. "
             "You'll need to create .github/workflows/metrics.yml manually."
         )
-
-    # Copy collect_metrics.py script
-    scripts_dir = project_path / "scripts"
-    scripts_dir.mkdir(parents=True, exist_ok=True)
-    sgsg_script = sgsg_root / "scripts" / "collect_metrics.py"
-    if sgsg_script.exists():
-        shutil.copy(sgsg_script, scripts_dir / "collect_metrics.py")
-    else:
+    if missing_script:
         console.print(
             "[yellow]Warning:[/yellow] Metrics collection script not found. "
             "You'll need to create scripts/collect_metrics.py manually."
         )
-
-    progress.stop_task(task)
-    progress.update(task, description="[green]✓[/green] Generated metrics dashboard")
 
 
 def _generate_with_orchestrator(
@@ -909,20 +856,13 @@ def _generate_with_orchestrator(
     project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
-    progress: Progress,
 ) -> None:
     """Generate AI-powered artifacts (CI, CLAUDE.md, etc.) with progress indicators."""
-    _generate_ci_step(project_path, language, orchestrator, progress)
-    _generate_review_step(project_path, orchestrator, progress)
-    _generate_claude_md_step(
-        project_path, project_name, language, orchestrator, progress
-    )
-    _generate_architecture_step(
-        project_path, project_name, language, orchestrator, progress
-    )
-    _generate_subagents_step(
-        project_path, project_name, language, orchestrator, progress
-    )
+    _generate_ci_step(project_path, language, orchestrator)
+    _generate_review_step(project_path, orchestrator)
+    _generate_claude_md_step(project_path, project_name, language, orchestrator)
+    _generate_architecture_step(project_path, project_name, language, orchestrator)
+    _generate_subagents_step(project_path, project_name, language, orchestrator)
 
 
 def _generate_project_files(
@@ -947,32 +887,23 @@ def _generate_project_files(
         typer.Exit: If generation fails.
     """
     try:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            # Core project structure first
-            _generate_structure_step(project_path, project_name, language, progress)
-            _generate_dependencies_step(project_path, project_name, language, progress)
-            _generate_tests_step(project_path, project_name, language, progress)
-            _generate_readme_step(project_path, project_name, language, progress)
+        # Core project structure first
+        _generate_structure_step(project_path, project_name, language)
+        _generate_dependencies_step(project_path, project_name, language)
+        _generate_tests_step(project_path, project_name, language)
+        _generate_readme_step(project_path, project_name, language)
 
-            # Quality infrastructure
-            _generate_scripts_step(project_path, project_name, language, progress)
-            _generate_precommit_step(project_path, project_name, language, progress)
-            _generate_skills_step(project_path, progress)
+        # Quality infrastructure
+        _generate_scripts_step(project_path, project_name, language)
+        _generate_precommit_step(project_path, project_name, language)
+        _generate_skills_step(project_path)
 
-            # AI-powered features
-            _generate_with_orchestrator(
-                project_path, project_name, language, orchestrator, progress
-            )
+        # AI-powered features
+        _generate_with_orchestrator(project_path, project_name, language, orchestrator)
 
-            # Generate live metrics dashboard if enabled
-            if enable_live_dashboard:
-                _generate_metrics_dashboard_step(
-                    project_path, project_name, language, progress
-                )
+        # Generate live metrics dashboard if enabled
+        if enable_live_dashboard:
+            _generate_metrics_dashboard_step(project_path, project_name, language)
 
         console.print(
             f"\n[green]✓[/green] Project generated successfully at: {project_path}"
@@ -983,11 +914,14 @@ def _generate_project_files(
         console.print("  ./scripts/check-all.sh\n")
         if enable_live_dashboard:
             console.print(
-                "[green]✓[/green] Live metrics dashboard enabled - "
-                "configure GitHub Pages to deploy from /docs"
+                "[green]✓[/green] Live metrics dashboard enabled "
+                "- configure GitHub Pages to deploy from /docs"
             )
     except Exception as e:
-        console.print(f"\n[red]Error:[/red] Generation failed: {e}", style="bold")
+        console.print(
+            f"\n[red]Error:[/red] Generation failed: {e}",
+            style="bold",
+        )
         raise typer.Exit(code=1) from e
 
 
