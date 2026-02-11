@@ -34,8 +34,10 @@ from unittest.mock import patch
 
 import pytest
 import typer
+from typer.testing import CliRunner
 
 from start_green_stay_green import cli
+from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 
 
 class TestVersionCommand:
@@ -627,6 +629,54 @@ class TestInitCommand:
             no_interactive=True,
         )
         mock_validate.assert_called_once_with("test-project", mock_path)
+
+
+class TestLanguageValidation:
+    """Test CLI language validation against SUPPORTED_LANGUAGES."""
+
+    def test_init_rejects_unsupported_language(self) -> None:
+        """Test init exits with error for unsupported language."""
+        mock_path = MagicMock(spec=Path)
+        with patch("start_green_stay_green.cli.console"):
+            with pytest.raises(typer.Exit) as exc_info:
+                cli.init(
+                    project_name="test-project",
+                    output_dir=mock_path,
+                    language="brainfuck",
+                    api_key=None,
+                    dry_run=False,
+                    no_interactive=True,
+                )
+            assert exc_info.value.exit_code == 1
+
+    def test_help_text_includes_all_supported_languages(self) -> None:
+        """Test CLI help text dynamically lists all supported languages."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["init", "--help"])
+        help_text = result.output
+
+        for lang in SUPPORTED_LANGUAGES:
+            assert lang in help_text, f"Language '{lang}' missing from help text"
+
+    @patch("start_green_stay_green.cli._generate_project_files")
+    @patch("start_green_stay_green.cli._validate_and_prepare_paths")
+    def test_init_accepts_all_supported_languages(
+        self, mock_validate: Mock, mock_generate: Mock
+    ) -> None:
+        """Test init accepts every supported language without error."""
+        mock_path = MagicMock(spec=Path)
+        mock_validate.return_value = (mock_path, mock_path / "test-project")
+        mock_generate.return_value = None
+
+        for lang in SUPPORTED_LANGUAGES:
+            cli.init(
+                project_name="test-project",
+                output_dir=mock_path,
+                language=lang,
+                api_key=None,
+                dry_run=True,
+                no_interactive=True,
+            )
 
 
 class TestMetricsDashboardGeneration:
