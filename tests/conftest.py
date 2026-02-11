@@ -4,12 +4,58 @@ This module provides:
 - Working directory cleanliness checks
 - Common test fixtures
 - Test isolation enforcement
+- Language parametrization fixtures for multi-language testing
 """
 
 from collections.abc import Generator
 from pathlib import Path
 
 import pytest
+
+from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
+
+# Expected file extensions per language
+LANGUAGE_EXTENSIONS: dict[str, str] = {
+    "python": ".py",
+    "typescript": ".ts",
+    "go": ".go",
+    "rust": ".rs",
+    "java": ".java",
+    "csharp": ".cs",
+    "ruby": ".rb",
+}
+
+
+@pytest.fixture(params=SUPPORTED_LANGUAGES)
+def language(request: pytest.FixtureRequest) -> str:
+    """Parametrized fixture providing each supported language.
+
+    Yields each of the 7 supported languages as a separate test case.
+
+    Args:
+        request: Pytest fixture request.
+
+    Returns:
+        Language string.
+    """
+    return str(request.param)
+
+
+@pytest.fixture(
+    params=[lang for lang in SUPPORTED_LANGUAGES if lang != "python"],
+)
+def non_python_language(request: pytest.FixtureRequest) -> str:
+    """Parametrized fixture providing each non-Python supported language.
+
+    Yields each supported language except Python.
+
+    Args:
+        request: Pytest fixture request.
+
+    Returns:
+        Language string.
+    """
+    return str(request.param)
 
 
 @pytest.fixture(scope="session", autouse=True)
