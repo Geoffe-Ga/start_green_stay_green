@@ -23,6 +23,8 @@ from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.generators.architecture import (
     ArchitectureEnforcementGenerator,
 )
+from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
+from start_green_stay_green.generators.base import validate_language
 from start_green_stay_green.generators.ci import CIGenerator
 from start_green_stay_green.generators.claude_md import ClaudeMdGenerator
 from start_green_stay_green.generators.dependencies import DependenciesGenerator
@@ -940,7 +942,9 @@ def init(  # noqa: PLR0913
         typer.Option(
             "--language",
             "-l",
-            help="Primary programming language (python, typescript, go, rust).",
+            help=(
+                "Primary programming language " f"({', '.join(SUPPORTED_LANGUAGES)})."
+            ),
         ),
     ] = None,
     output_dir: Annotated[
@@ -1022,6 +1026,13 @@ def init(  # noqa: PLR0913
         "Primary language",
         no_interactive=no_interactive,
     )
+
+    # Validate language is supported
+    try:
+        validate_language(resolved_language)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}", style="bold")
+        raise typer.Exit(code=1) from e
 
     # Validate project name and paths
     try:

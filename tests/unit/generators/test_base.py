@@ -12,7 +12,9 @@ import pytest
 from start_green_stay_green.generators.base import AIGenerationError
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
+from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.base import TemplateBasedGenerator
+from start_green_stay_green.generators.base import validate_language
 
 
 class ConcreteGenerator(BaseGenerator):
@@ -217,3 +219,58 @@ class TestTemplateBasedGenerator:
 
         assert error.cause is underlying
         assert isinstance(error.cause, FileNotFoundError)
+
+
+class TestSupportedLanguages:
+    """Test SUPPORTED_LANGUAGES constant."""
+
+    def test_contains_all_seven_languages(self) -> None:
+        """Test SUPPORTED_LANGUAGES contains all 7 expected languages."""
+        expected = {"python", "typescript", "go", "rust", "java", "csharp", "ruby"}
+        assert set(SUPPORTED_LANGUAGES) == expected
+
+    def test_is_tuple(self) -> None:
+        """Test SUPPORTED_LANGUAGES is an immutable tuple."""
+        assert isinstance(SUPPORTED_LANGUAGES, tuple)
+
+    def test_has_seven_entries(self) -> None:
+        """Test SUPPORTED_LANGUAGES has exactly 7 entries."""
+        assert len(SUPPORTED_LANGUAGES) == 7
+
+    def test_python_is_first(self) -> None:
+        """Test Python is the first language (default)."""
+        assert SUPPORTED_LANGUAGES[0] == "python"
+
+
+class TestValidateLanguage:
+    """Test validate_language function."""
+
+    def test_accepts_all_supported_languages(self) -> None:
+        """Test validate_language accepts each supported language."""
+        for lang in SUPPORTED_LANGUAGES:
+            validate_language(lang)  # Should not raise
+
+    def test_rejects_unsupported_language(self) -> None:
+        """Test validate_language raises ValueError for unsupported language."""
+        with pytest.raises(ValueError, match="Unsupported language: 'brainfuck'"):
+            validate_language("brainfuck")
+
+    def test_rejects_empty_string(self) -> None:
+        """Test validate_language raises ValueError for empty string."""
+        with pytest.raises(ValueError, match="Unsupported language"):
+            validate_language("")
+
+    def test_error_message_lists_supported_languages(self) -> None:
+        """Test error message includes list of supported languages."""
+        with pytest.raises(ValueError, match="Supported languages:") as exc_info:
+            validate_language("unknown")
+        error_msg = str(exc_info.value)
+        for lang in SUPPORTED_LANGUAGES:
+            assert lang in error_msg
+
+    def test_case_sensitive(self) -> None:
+        """Test validate_language is case-sensitive."""
+        with pytest.raises(ValueError, match="Unsupported language"):
+            validate_language("Python")
+        with pytest.raises(ValueError, match="Unsupported language"):
+            validate_language("PYTHON")

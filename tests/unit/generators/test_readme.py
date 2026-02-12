@@ -5,9 +5,20 @@ import tempfile
 
 import pytest
 
-from start_green_stay_green.generators.base import GenerationError
+from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.readme import ReadmeConfig
 from start_green_stay_green.generators.readme import ReadmeGenerator
+
+# Expected commands that should appear in README per language
+EXPECTED_COMMANDS: dict[str, list[str]] = {
+    "python": ["pip install", "pytest"],
+    "typescript": ["npm install", "npm test"],
+    "go": ["go build", "go test"],
+    "rust": ["cargo build", "cargo test"],
+    "java": ["mvn compile", "mvn test"],
+    "csharp": ["dotnet build", "dotnet test"],
+    "ruby": ["bundle install", "rspec"],
+}
 
 
 class TestReadmeGeneratorInitialization:
@@ -219,18 +230,99 @@ class TestReadmeConfigValidation:
 class TestUnsupportedLanguage:
     """Test error handling for unsupported languages."""
 
-    def test_unsupported_language_raises_generation_error(self) -> None:
-        """Test that unsupported language raises GenerationError."""
+    def test_unsupported_language_raises_error(self) -> None:
+        """Test that unsupported language raises ValueError."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ReadmeConfig(
                 project_name="test-project",
-                language="rust",  # Not yet supported
+                language="brainfuck",
                 package_name="test_project",
             )
             generator = ReadmeGenerator(Path(tmpdir), config)
 
-            with pytest.raises(GenerationError) as exc_info:
+            with pytest.raises(ValueError, match="Unsupported language"):
                 generator.generate()
 
-            assert "not supported" in str(exc_info.value).lower()
-            assert "rust" in str(exc_info.value).lower()
+
+class TestMultiLanguageReadme:
+    """Test README generation for all supported languages."""
+
+    @pytest.mark.parametrize("lang", SUPPORTED_LANGUAGES)
+    def test_generate_creates_readme(self, lang: str) -> None:
+        """Test generate creates README.md for each language."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language=lang,
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            assert "README.md" in files
+            readme_path = files["README.md"]
+            assert readme_path.exists()
+
+    @pytest.mark.parametrize("lang", SUPPORTED_LANGUAGES)
+    def test_readme_contains_project_name(self, lang: str) -> None:
+        """Test README contains project name for each language."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language=lang,
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "test-project" in content
+
+    @pytest.mark.parametrize("lang", SUPPORTED_LANGUAGES)
+    def test_readme_contains_language_commands(self, lang: str) -> None:
+        """Test README contains language-specific commands."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language=lang,
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            expected = EXPECTED_COMMANDS[lang]
+            for cmd in expected:
+                assert (
+                    cmd in content
+                ), f"Expected command '{cmd}' not in README for {lang}"
+
+    @pytest.mark.parametrize("lang", SUPPORTED_LANGUAGES)
+    def test_readme_has_installation_section(self, lang: str) -> None:
+        """Test README has installation section for each language."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language=lang,
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "## Installation" in content or "install" in content.lower()
+
+    @pytest.mark.parametrize("lang", SUPPORTED_LANGUAGES)
+    def test_readme_has_license_section(self, lang: str) -> None:
+        """Test README has license section for each language."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language=lang,
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "License" in content

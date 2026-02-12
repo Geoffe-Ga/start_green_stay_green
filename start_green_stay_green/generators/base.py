@@ -16,6 +16,34 @@ if TYPE_CHECKING:
 
     from start_green_stay_green.ai.orchestrator import AIOrchestrator
 
+# Single source of truth for all supported languages across generators
+SUPPORTED_LANGUAGES: tuple[str, ...] = (
+    "python",
+    "typescript",
+    "go",
+    "rust",
+    "java",
+    "csharp",
+    "ruby",
+)
+
+
+def validate_language(language: str) -> None:
+    """Validate that a language is supported.
+
+    Args:
+        language: Language string to validate.
+
+    Raises:
+        ValueError: If the language is not in SUPPORTED_LANGUAGES.
+    """
+    if language not in SUPPORTED_LANGUAGES:
+        supported = ", ".join(SUPPORTED_LANGUAGES)
+        msg = (
+            f"Unsupported language: '{language}'. " f"Supported languages: {supported}"
+        )
+        raise ValueError(msg)
+
 
 class GenerationError(Exception):
     """Base exception for generation failures.
