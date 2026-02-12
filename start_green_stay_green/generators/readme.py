@@ -53,6 +53,11 @@ class ReadmeGenerator(BaseGenerator):
     description, installation instructions, usage guide, and documentation
     for the quality tools included in the project.
 
+    All 7 supported languages (python, typescript, go, rust, java, csharp, ruby)
+    are available at the generator level. Note that java, csharp, and ruby are
+    not yet supported by the full CLI pipeline (``sgsg init``) because
+    PreCommitGenerator does not yet handle those languages.
+
     Attributes:
         output_dir: Directory where README.md will be created
         config: Configuration for README generation

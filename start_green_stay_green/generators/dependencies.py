@@ -53,6 +53,11 @@ class DependenciesGenerator(BaseGenerator):
     pyproject.toml) with appropriate dependencies and tool configurations for the
     target project's language and tooling.
 
+    All 7 supported languages (python, typescript, go, rust, java, csharp, ruby)
+    are available at the generator level. Note that java, csharp, and ruby are
+    not yet supported by the full CLI pipeline (``sgsg init``) because
+    PreCommitGenerator does not yet handle those languages.
+
     Attributes:
         output_dir: Directory where dependency files will be written
         config: Configuration for dependency file generation

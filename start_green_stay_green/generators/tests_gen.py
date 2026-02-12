@@ -52,6 +52,11 @@ class TestsGenerator(BaseGenerator):
     This generator creates the tests directory structure (tests/, tests/__init__.py,
     tests/test_main.py) with a passing test for the Hello World code.
 
+    All 7 supported languages (python, typescript, go, rust, java, csharp, ruby)
+    are available at the generator level. Note that java, csharp, and ruby are
+    not yet supported by the full CLI pipeline (``sgsg init``) because
+    PreCommitGenerator does not yet handle those languages.
+
     Attributes:
         output_dir: Directory where tests structure will be created
         config: Configuration for tests generation
@@ -218,13 +223,11 @@ def test_main_runs() -> None:
         """Generate TypeScript tests/index.test.ts content.
 
         Returns:
-            Content for index.test.ts with Jest/Vitest test
+            Content for index.test.ts with Jest test
         """
         return f"""/**
  * Tests for {self.config.project_name} main entry point
  */
-
-import {{ describe, it, expect }} from 'vitest';
 
 describe('main', () => {{
   it('should run without error', () => {{

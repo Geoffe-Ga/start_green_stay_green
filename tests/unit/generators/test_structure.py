@@ -39,7 +39,7 @@ EXPECTED_CONFIG_FILES: dict[str, list[str]] = {
     "go": ["go.mod"],
     "rust": ["Cargo.toml"],
     "java": ["pom.xml"],
-    "csharp": ["test-project.csproj"],
+    "csharp": [],
     "ruby": ["Gemfile"],
 }
 
@@ -414,8 +414,8 @@ class TestMultiLanguageStructure:
             content = files["pom.xml"].read_text()
             assert "<project" in content
 
-    def test_csharp_creates_csproj(self) -> None:
-        """Test C# generates .csproj file."""
+    def test_csharp_creates_program_cs(self) -> None:
+        """Test C# generates Program.cs source file."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = StructureConfig(
                 project_name="test-project",
@@ -425,9 +425,9 @@ class TestMultiLanguageStructure:
             generator = StructureGenerator(Path(tmpdir), config)
             files = generator.generate()
 
-            assert "test-project.csproj" in files
-            content = files["test-project.csproj"].read_text()
-            assert "<Project" in content
+            assert "src/Program.cs" in files
+            content = files["src/Program.cs"].read_text()
+            assert "Hello from" in content
 
     def test_ruby_creates_gemfile(self) -> None:
         """Test Ruby generates Gemfile."""

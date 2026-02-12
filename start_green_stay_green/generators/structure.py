@@ -52,6 +52,11 @@ class StructureGenerator(BaseGenerator):
     This generator creates the source code directory structure (package directory,
     __init__.py, Hello World starter code) for the target project's language.
 
+    All 7 supported languages (python, typescript, go, rust, java, csharp, ruby)
+    are available at the generator level. Note that java, csharp, and ruby are
+    not yet supported by the full CLI pipeline (``sgsg init``) because
+    PreCommitGenerator does not yet handle those languages.
+
     Attributes:
         output_dir: Directory where structure will be created
         config: Configuration for structure generation
@@ -495,13 +500,6 @@ public class Main {{
             self._csharp_program_cs(),
         )
 
-        # Generate .csproj file
-        csproj_key = f"{self.config.project_name}.csproj"
-        files[csproj_key] = self._write_file(
-            self.output_dir / f"{self.config.project_name}.csproj",
-            self._csharp_csproj(),
-        )
-
         return files
 
     def _csharp_program_cs(self) -> str:
@@ -522,25 +520,6 @@ namespace {self.config.package_name}
         }}
     }}
 }}
-"""
-
-    def _csharp_csproj(self) -> str:
-        """Generate C# .csproj content.
-
-        Returns:
-            Content for .csproj file
-        """
-        return f"""<Project Sdk="Microsoft.NET.Sdk">
-
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
-    <RootNamespace>{self.config.package_name}</RootNamespace>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
-
-</Project>
 """
 
     def _generate_ruby_structure(self) -> dict[str, Path]:
