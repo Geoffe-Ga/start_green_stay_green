@@ -35,7 +35,13 @@ EXPECTED_ENTRY_POINTS: dict[str, str] = {
 # Expected config files per language
 EXPECTED_CONFIG_FILES: dict[str, list[str]] = {
     "python": [],
-    "typescript": ["tsconfig.json"],
+    "typescript": [
+        "tsconfig.json",
+        ".eslintrc.js",
+        ".prettierrc",
+        "jest.config.js",
+        ".prettierignore",
+    ],
     "go": ["go.mod"],
     "rust": ["Cargo.toml"],
     "java": ["pom.xml"],
@@ -443,3 +449,184 @@ class TestMultiLanguageStructure:
             assert "Gemfile" in files
             content = files["Gemfile"].read_text()
             assert "source" in content
+
+
+class TestTypeScriptConfigGeneration:
+    """Test TypeScript config file generation."""
+
+    def test_typescript_creates_eslintrc(self) -> None:
+        """Test TypeScript generates .eslintrc.js."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            assert ".eslintrc.js" in files
+            assert files[".eslintrc.js"].exists()
+
+    def test_eslintrc_uses_typescript_parser(self) -> None:
+        """Test .eslintrc.js configures @typescript-eslint/parser."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files[".eslintrc.js"].read_text()
+            assert "@typescript-eslint/parser" in content
+            assert "@typescript-eslint" in content
+
+    def test_eslintrc_has_jest_env(self) -> None:
+        """Test .eslintrc.js enables jest environment."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files[".eslintrc.js"].read_text()
+            assert "jest: true" in content
+
+    def test_eslintrc_ignores_dist_and_node_modules(self) -> None:
+        """Test .eslintrc.js ignores dist and node_modules."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files[".eslintrc.js"].read_text()
+            assert "dist" in content
+            assert "node_modules" in content
+
+    def test_typescript_creates_prettierrc(self) -> None:
+        """Test TypeScript generates .prettierrc."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            assert ".prettierrc" in files
+            assert files[".prettierrc"].exists()
+
+    def test_prettierrc_has_formatting_options(self) -> None:
+        """Test .prettierrc contains formatting options."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files[".prettierrc"].read_text()
+            assert "semi" in content
+            assert "trailingComma" in content
+            assert "printWidth" in content
+            assert "tabWidth" in content
+
+    def test_typescript_creates_jest_config(self) -> None:
+        """Test TypeScript generates jest.config.js."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            assert "jest.config.js" in files
+            assert files["jest.config.js"].exists()
+
+    def test_jest_config_uses_ts_jest_preset(self) -> None:
+        """Test jest.config.js uses ts-jest preset."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["jest.config.js"].read_text()
+            assert "ts-jest" in content
+            assert "node" in content
+
+    def test_jest_config_has_coverage_thresholds(self) -> None:
+        """Test jest.config.js has 90% coverage thresholds."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["jest.config.js"].read_text()
+            assert "coverageThreshold" in content
+            assert "90" in content
+
+    def test_jest_config_excludes_declaration_files(self) -> None:
+        """Test jest.config.js excludes .d.ts files from coverage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["jest.config.js"].read_text()
+            assert ".d.ts" in content
+
+    def test_typescript_creates_prettierignore(self) -> None:
+        """Test TypeScript generates .prettierignore."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            assert ".prettierignore" in files
+            assert files[".prettierignore"].exists()
+
+    def test_prettierignore_excludes_claude_directory(self) -> None:
+        """Test .prettierignore excludes .claude directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files[".prettierignore"].read_text()
+            assert ".claude" in content
+            assert "dist" in content
+            assert "node_modules" in content

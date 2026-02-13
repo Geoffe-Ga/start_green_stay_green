@@ -232,6 +232,34 @@ if __name__ == "__main__":
             self._typescript_tsconfig_json(),
         )
 
+        # Generate .eslintrc.js
+        eslintrc_key = ".eslintrc.js"
+        files[eslintrc_key] = self._write_file(
+            self.output_dir / ".eslintrc.js",
+            self._typescript_eslintrc_js(),
+        )
+
+        # Generate .prettierrc
+        prettierrc_key = ".prettierrc"
+        files[prettierrc_key] = self._write_file(
+            self.output_dir / ".prettierrc",
+            self._typescript_prettierrc(),
+        )
+
+        # Generate jest.config.js
+        jest_config_key = "jest.config.js"
+        files[jest_config_key] = self._write_file(
+            self.output_dir / "jest.config.js",
+            self._typescript_jest_config_js(),
+        )
+
+        # Generate .prettierignore
+        prettierignore_key = ".prettierignore"
+        files[prettierignore_key] = self._write_file(
+            self.output_dir / ".prettierignore",
+            self._typescript_prettierignore(),
+        )
+
         return files
 
     def _typescript_index_ts(self) -> str:
@@ -276,6 +304,85 @@ main();
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
+"""
+
+    def _typescript_eslintrc_js(self) -> str:
+        """Generate TypeScript .eslintrc.js content.
+
+        Returns:
+            Content for .eslintrc.js with TypeScript parser and recommended rules
+        """
+        return """module.exports = {
+  root: true,
+  parser: "@typescript-eslint/parser",
+  parserOptions: {
+    ecmaVersion: 2020,
+    sourceType: "module",
+  },
+  plugins: ["@typescript-eslint"],
+  extends: [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended",
+  ],
+  env: {
+    node: true,
+    jest: true,
+  },
+  ignorePatterns: ["dist", "node_modules"],
+};
+"""
+
+    def _typescript_prettierignore(self) -> str:
+        """Generate TypeScript .prettierignore content.
+
+        Returns:
+            Content for .prettierignore to exclude non-source files
+        """
+        return """dist
+node_modules
+coverage
+.claude
+"""
+
+    def _typescript_prettierrc(self) -> str:
+        """Generate TypeScript .prettierrc content.
+
+        Returns:
+            Content for .prettierrc with standard formatting options
+        """
+        return """{
+  "semi": true,
+  "trailingComma": "all",
+  "printWidth": 80,
+  "tabWidth": 2
+}
+"""
+
+    def _typescript_jest_config_js(self) -> str:
+        """Generate TypeScript jest.config.js content.
+
+        Returns:
+            Content for jest.config.js with ts-jest preset and coverage thresholds
+        """
+        return """module.exports = {
+  preset: "ts-jest",
+  testEnvironment: "node",
+  roots: ["<rootDir>/src", "<rootDir>/tests"],
+  testMatch: ["**/*.test.ts", "**/*.spec.ts"],
+  moduleFileExtensions: ["ts", "js", "json"],
+  collectCoverageFrom: [
+    "src/**/*.ts",
+    "!src/**/*.d.ts",
+  ],
+  coverageThreshold: {
+    global: {
+      branches: 90,
+      functions: 90,
+      lines: 90,
+      statements: 90,
+    },
+  },
+};
 """
 
     def _generate_go_structure(self) -> dict[str, Path]:

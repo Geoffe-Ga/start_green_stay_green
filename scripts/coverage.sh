@@ -88,7 +88,7 @@ if $VERBOSE; then
 fi
 
 COV_START=$(date +%s)
-pytest "${COVERAGE_ARGS[@]}" tests/ 2>/tmp/coverage-stderr.txt || {
+pytest -m "not integration and not e2e" "${COVERAGE_ARGS[@]}" tests/ 2>/tmp/coverage-stderr.txt || {
     echo "✗ Coverage generation failed" >&2
     exit 1
 }

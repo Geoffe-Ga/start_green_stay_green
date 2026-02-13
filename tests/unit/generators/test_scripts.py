@@ -288,6 +288,7 @@ class TestScriptsGeneratorTypeScriptGeneration:
             assert "format.sh" in scripts
             assert "lint.sh" in scripts
             assert "test.sh" in scripts
+            assert "typecheck.sh" in scripts
             assert "fix-all.sh" in scripts
 
     def test_typescript_format_script_uses_prettier(self) -> None:
@@ -713,7 +714,7 @@ class TestMutationKillers:
             assert len(scripts) < 12
 
     def test_generated_scripts_exact_count_typescript(self) -> None:
-        """Test TypeScript generator creates EXACTLY 5 scripts."""
+        """Test TypeScript generator creates EXACTLY 6 scripts."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
                 language="typescript",
@@ -722,9 +723,9 @@ class TestMutationKillers:
             generator = ScriptsGenerator(Path(tmpdir), config)
             scripts = generator.generate()
 
-            assert len(scripts) == 5
-            assert len(scripts) > 4
-            assert len(scripts) < 6
+            assert len(scripts) == 6
+            assert len(scripts) > 5
+            assert len(scripts) < 7
 
     def test_script_file_executable_permission_exact(self) -> None:
         """Test generated scripts have EXACT executable permission (0o755).
@@ -1266,3 +1267,77 @@ class TestPythonAnalyzeMutationsScript:
             content = scripts["analyze_mutations.py"].read_text()
             assert "Examples:" in content
             assert "%(prog)s" in content  # argparse example format
+
+
+class TestTypeScriptTypecheckScript:
+    """Test TypeScript typecheck.sh script generation."""
+
+    def test_typescript_typecheck_script_uses_tsc(self) -> None:
+        """Test TypeScript typecheck.sh runs tsc --noEmit."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="typescript",
+                package_name="my_app",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["typecheck.sh"].read_text()
+            assert "npx tsc --noEmit" in content
+            assert "Type Checking" in content
+
+    def test_typescript_typecheck_script_has_bash_safety(self) -> None:
+        """Test TypeScript typecheck.sh has set -euo pipefail."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="typescript",
+                package_name="my_app",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["typecheck.sh"].read_text()
+            assert "set -euo pipefail" in content
+            assert "#!/usr/bin/env bash" in content
+
+    def test_typescript_typecheck_script_has_help(self) -> None:
+        """Test TypeScript typecheck.sh has --help option."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="typescript",
+                package_name="my_app",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["typecheck.sh"].read_text()
+            assert "--help" in content
+            assert "Usage:" in content
+            assert "--verbose" in content
+
+    def test_typescript_check_all_references_typecheck(self) -> None:
+        """Test TypeScript check-all.sh references typecheck.sh."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="typescript",
+                package_name="my_app",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["check-all.sh"].read_text()
+            assert "typecheck.sh" in content
+
+    def test_typescript_test_script_handles_empty_jest_args(self) -> None:
+        """Test TypeScript test.sh uses safe empty-array expansion for JEST_ARGS."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="typescript",
+                package_name="my_app",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["test.sh"].read_text()
+            # Should use safe expansion pattern, not bare "${JEST_ARGS[@]}"
+            assert '${JEST_ARGS[@]+"${JEST_ARGS[@]}"}' in content

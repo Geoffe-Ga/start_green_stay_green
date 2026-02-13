@@ -20,6 +20,7 @@ from rich.panel import Panel
 import typer
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
+from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
 from start_green_stay_green.generators.architecture import (
     ArchitectureEnforcementGenerator,
 )
@@ -900,8 +901,22 @@ def _generate_project_files(
         _generate_precommit_step(project_path, project_name, language)
         _generate_skills_step(project_path)
 
-        # AI-powered features
-        _generate_with_orchestrator(project_path, project_name, language, orchestrator)
+        # AI-powered features (non-fatal: project is usable without AI content)
+        try:
+            _generate_with_orchestrator(
+                project_path, project_name, language, orchestrator
+            )
+        except (AIGenerationError, OSError) as ai_err:
+            console.print(
+                f"\n[yellow]Warning:[/yellow] AI-powered generation failed: {ai_err}"
+            )
+            console.print(
+                "[yellow]⊘[/yellow] Project generated without AI features "
+                "(CI, CLAUDE.md, architecture rules, subagents)."
+            )
+            console.print(
+                "  Re-run with a valid API key to generate these artifacts.\n"
+            )
 
         # Generate live metrics dashboard if enabled
         if enable_live_dashboard:
