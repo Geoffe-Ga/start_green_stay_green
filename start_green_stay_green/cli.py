@@ -537,15 +537,15 @@ def _copy_reference_skills(target_dir: Path) -> None:
     # Create target directory
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    # Copy each required skill
+    # Copy each required skill directory
     for skill_name in REQUIRED_SKILLS:
-        source_file = REFERENCE_SKILLS_DIR / skill_name
-        if not source_file.exists():
+        source_dir = REFERENCE_SKILLS_DIR / skill_name
+        if not source_dir.is_dir():
             msg = f"Reference skill not found: {skill_name}"
             raise FileNotFoundError(msg)
 
-        target_file = target_dir / skill_name
-        target_file.write_text(source_file.read_text())
+        target_skill_dir = target_dir / skill_name
+        shutil.copytree(source_dir, target_skill_dir, dirs_exist_ok=True)
 
 
 def _generate_structure_step(

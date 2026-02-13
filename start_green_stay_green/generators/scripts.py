@@ -1052,7 +1052,7 @@ echo "=== Security Checks (Bandit) ==="
 if $VERBOSE; then
     echo "Running Bandit security scanner..."
 fi
-bandit -r start_green_stay_green/ || { echo "✗ Bandit found issues" >&2; exit 1; }
+bandit -r __PACKAGE_NAME__/ || { echo "✗ Bandit found issues" >&2; exit 1; }
 
 echo "=== Security Checks (Safety) ==="
 
@@ -1081,7 +1081,9 @@ fi
 
 echo "✓ Security checks passed"
 exit 0
-"""
+""".replace(
+            "__PACKAGE_NAME__", self.config.package_name
+        )
 
     def _python_complexity_script(self) -> str:
         """Generate Python complexity.sh script."""
@@ -1149,11 +1151,11 @@ echo "=== Code Complexity Analysis ==="
 if command -v radon &> /dev/null; then
     echo ""
     echo "Cyclomatic Complexity (should be <= 10):"
-    radon cc -a start_green_stay_green/ || true
+    radon cc -a __PACKAGE_NAME__/ || true
 
     echo ""
     echo "Maintainability Index (should be >= 20):"
-    radon mi -a start_green_stay_green/ || true
+    radon mi -a __PACKAGE_NAME__/ || true
 else
     echo "Warning: radon not installed, skipping cyclomatic complexity check" >&2
 fi
@@ -1163,7 +1165,7 @@ if command -v xenon &> /dev/null; then
     if $VERBOSE; then
         echo "Running Xenon complexity check..."
     fi
-    xenon --max-absolute B --max-modules B --max-average B start_green_stay_green/ || \
+    xenon --max-absolute B --max-modules B --max-average B __PACKAGE_NAME__/ || \
         { echo "✗ Complexity exceeds thresholds" >&2; exit 1; }
 else
     if $VERBOSE; then
@@ -1173,7 +1175,9 @@ fi
 
 echo "✓ Complexity analysis completed"
 exit 0
-"""
+""".replace(
+            "__PACKAGE_NAME__", self.config.package_name
+        )
 
     def _python_mutation_script(self) -> str:
         """Generate Python mutation.sh script."""

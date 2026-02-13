@@ -13,19 +13,26 @@ from start_green_stay_green.generators.skills import SkillGenerationResult
 from start_green_stay_green.generators.skills import SkillsGenerator
 
 
+def _create_skill(skills_dir: Path, skill_name: str, content: str) -> None:
+    """Create a skill directory with SKILL.md content."""
+    skill_dir = skills_dir / skill_name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(content)
+
+
 class TestSkillGenerationResult:
     """Test SkillGenerationResult dataclass."""
 
     def test_skill_generation_result_creation(self) -> None:
         """Test creating SkillGenerationResult with all fields."""
         result = SkillGenerationResult(
-            skill_name="vibe.md",
+            skill_name="vibe",
             content="# Vibe Skill\n\nContent here",
             tuned=True,
             changes=["Change 1", "Change 2"],
         )
 
-        assert result.skill_name == "vibe.md"
+        assert result.skill_name == "vibe"
         assert result.content == "# Vibe Skill\n\nContent here"
         assert result.tuned
         assert len(result.changes) == 2
@@ -33,7 +40,7 @@ class TestSkillGenerationResult:
     def test_skill_generation_result_untuned(self) -> None:
         """Test SkillGenerationResult for untuned (copied) content."""
         result = SkillGenerationResult(
-            skill_name="testing.md",
+            skill_name="testing",
             content="Original content",
             tuned=False,
             changes=["[DRY RUN] No changes made"],
@@ -45,14 +52,14 @@ class TestSkillGenerationResult:
     def test_skill_generation_result_is_immutable(self) -> None:
         """Test SkillGenerationResult is immutable."""
         result = SkillGenerationResult(
-            skill_name="test.md",
+            skill_name="test",
             content="content",
             tuned=True,
             changes=[],
         )
 
         with pytest.raises(AttributeError):
-            result.skill_name = "changed.md"  # type: ignore[misc]
+            result.skill_name = "changed"  # type: ignore[misc]
 
 
 class TestSkillsGeneratorInit:
@@ -124,8 +131,8 @@ class TestSkillsGeneratorValidation:
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
 
-        # Create only one skill (vibe.md) - missing the others
-        (skills_dir / "vibe.md").write_text("# Vibe")
+        # Create only one skill (vibe) - missing the others
+        _create_skill(skills_dir, "vibe", "# Vibe")
 
         generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
 
@@ -140,7 +147,7 @@ class TestSkillsGeneratorValidation:
 
         # Create all required skills
         for skill in REQUIRED_SKILLS:
-            (skills_dir / skill).write_text(f"# {skill}")
+            _create_skill(skills_dir, skill, f"# {skill}")
 
         generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
 
@@ -158,10 +165,10 @@ class TestSkillsGeneratorLoadSkill:
         skills_dir.mkdir()
 
         skill_content = "# Vibe Skill\n\nContent here"
-        (skills_dir / "vibe.md").write_text(skill_content)
+        _create_skill(skills_dir, "vibe", skill_content)
 
         generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
-        loaded_content = generator._load_skill("vibe.md")
+        loaded_content = generator._load_skill("vibe")
 
         assert loaded_content == skill_content
 
@@ -174,7 +181,7 @@ class TestSkillsGeneratorLoadSkill:
         generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
 
         with pytest.raises(FileNotFoundError, match="Skill file not found"):
-            generator._load_skill("nonexistent.md")
+            generator._load_skill("nonexistent")
 
 
 class TestSkillsGeneratorTuneSkill:
@@ -204,12 +211,12 @@ class TestSkillsGeneratorTuneSkill:
         mocker.patch.object(generator.tuner, "tune", return_value=mock_tuning_result)
 
         result = await generator.tune_skill(
-            skill_name="vibe.md",
+            skill_name="vibe",
             skill_content="# Original Vibe Skill",
             target_context="Django web application",
         )
 
-        assert result.skill_name == "vibe.md"
+        assert result.skill_name == "vibe"
         assert result.content == "# Tuned Vibe Skill\n\nAdapted content"
         assert result.tuned
         assert len(result.changes) == 2
@@ -243,12 +250,12 @@ class TestSkillsGeneratorTuneSkill:
         mocker.patch.object(generator.tuner, "tune", return_value=mock_tuning_result)
 
         result = await generator.tune_skill(
-            skill_name="vibe.md",
+            skill_name="vibe",
             skill_content="# Original Vibe Skill",
             target_context="Django web application",
         )
 
-        assert result.skill_name == "vibe.md"
+        assert result.skill_name == "vibe"
         assert result.content == "# Original Vibe Skill"
         assert not result.tuned
         assert result.changes == ["[DRY RUN] No changes made"]
@@ -270,8 +277,8 @@ class TestSkillsGeneratorGenerateAllSkills:
 
         # Create all required skills
         for skill in REQUIRED_SKILLS:
-            skill_title = skill.replace(".md", "").title()
-            (skills_dir / skill).write_text(f"# {skill_title} Skill")
+            skill_title = skill.replace("-", " ").title()
+            _create_skill(skills_dir, skill, f"# {skill_title} Skill")
 
         generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
 
@@ -341,10 +348,10 @@ class TestSkillsGeneratorIntegration:
 
         # Create all required skills with realistic content
         for skill in REQUIRED_SKILLS:
-            content = f"""# {skill.replace('.md', '').replace('-', ' ').title()} Skill
+            content = f"""# {skill.replace('-', ' ').title()} Skill
 
 ## Purpose
-Guide developers in {skill.replace('.md', '').replace('-', ' ')}.
+Guide developers in {skill.replace('-', ' ')}.
 
 ## Principles
 1. Principle one
@@ -353,7 +360,7 @@ Guide developers in {skill.replace('.md', '').replace('-', ' ')}.
 ## Examples
 Example code here
 """
-            (skills_dir / skill).write_text(content)
+            _create_skill(skills_dir, skill, content)
 
         generator = SkillsGenerator(
             orchestrator,
@@ -386,7 +393,7 @@ class TestSkillsGeneratorLoggerBehavior:
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         for skill in REQUIRED_SKILLS:
-            (skills_dir / skill).write_text("# Skill")
+            _create_skill(skills_dir, skill, "# Skill")
 
         mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
 
@@ -407,7 +414,7 @@ class TestSkillsGeneratorLoggerBehavior:
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         for skill in REQUIRED_SKILLS:
-            (skills_dir / skill).write_text("# Skill")
+            _create_skill(skills_dir, skill, "# Skill")
 
         orchestrator = mocker.Mock()
         mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
@@ -428,16 +435,16 @@ class TestSkillsGeneratorLoggerBehavior:
         """Test logger.info called with skill name when loading."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
-        (skills_dir / "vibe.md").write_text("# Vibe Skill")
+        _create_skill(skills_dir, "vibe", "# Vibe Skill")
 
         orchestrator = mocker.Mock()
         mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
 
         generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
-        content = generator._load_skill("vibe.md")
+        content = generator._load_skill("vibe")
 
         assert content == "# Vibe Skill"
-        mock_logger.info.assert_any_call("Loading skill: %s", "vibe.md")
+        mock_logger.info.assert_any_call("Loading skill: %s", "vibe")
 
     @pytest.mark.asyncio
     async def test_tune_skill_without_tuner_logs_copy_message(
@@ -447,7 +454,7 @@ class TestSkillsGeneratorLoggerBehavior:
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         for skill in REQUIRED_SKILLS:
-            (skills_dir / skill).write_text("# Skill")
+            _create_skill(skills_dir, skill, "# Skill")
 
         mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
 
@@ -457,13 +464,13 @@ class TestSkillsGeneratorLoggerBehavior:
         )
 
         result = await generator.tune_skill(
-            skill_name="vibe.md",
+            skill_name="vibe",
             skill_content="# Original",
             target_context="Target",
         )
 
         assert not result.tuned
-        mock_logger.info.assert_any_call("Copying skill %s (no AI tuning)", "vibe.md")
+        mock_logger.info.assert_any_call("Copying skill %s (no AI tuning)", "vibe")
 
     @pytest.mark.asyncio
     async def test_tune_skill_with_tuner_logs_tuning_message(
@@ -473,7 +480,7 @@ class TestSkillsGeneratorLoggerBehavior:
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         for skill in REQUIRED_SKILLS:
-            (skills_dir / skill).write_text("# Skill")
+            _create_skill(skills_dir, skill, "# Skill")
 
         orchestrator = mocker.Mock()
         mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
@@ -488,14 +495,12 @@ class TestSkillsGeneratorLoggerBehavior:
         generator.tuner.tune = mocker.AsyncMock(return_value=mock_tune_result)  # type: ignore[method-assign]
 
         await generator.tune_skill(
-            skill_name="vibe.md",
+            skill_name="vibe",
             skill_content="# Original",
             target_context="Target Context",
         )
 
-        mock_logger.info.assert_any_call(
-            "Tuning skill %s for target context", "vibe.md"
-        )
+        mock_logger.info.assert_any_call("Tuning skill %s for target context", "vibe")
 
     @pytest.mark.asyncio
     async def test_generate_all_skills_logs_completion(
@@ -506,7 +511,7 @@ class TestSkillsGeneratorLoggerBehavior:
         skills_dir.mkdir()
         # Create all required skills
         for skill in REQUIRED_SKILLS:
-            (skills_dir / skill).write_text(f"# {skill}")
+            _create_skill(skills_dir, skill, f"# {skill}")
 
         orchestrator = mocker.Mock()
         mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
@@ -524,9 +529,7 @@ class TestSkillsGeneratorLoggerBehavior:
 
         # Verify logger called for each skill with change count
         log_calls = [str(call) for call in mock_logger.info.call_args_list]
-        vibe_log = [
-            call for call in log_calls if "vibe.md" in call and "changes" in call
-        ]
+        vibe_log = [call for call in log_calls if "vibe" in call and "changes" in call]
         assert vibe_log
 
     @pytest.mark.asyncio
@@ -537,7 +540,7 @@ class TestSkillsGeneratorLoggerBehavior:
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         for skill in REQUIRED_SKILLS:
-            (skills_dir / skill).write_text("# Skill")
+            _create_skill(skills_dir, skill, "# Skill")
 
         generator = SkillsGenerator(
             orchestrator=None,  # No AI
@@ -546,7 +549,7 @@ class TestSkillsGeneratorLoggerBehavior:
 
         original = "# Original\n\nWith special chars: !@#$%"
         result = await generator.tune_skill(
-            skill_name="vibe.md",
+            skill_name="vibe",
             skill_content=original,
             target_context="Target",
         )
@@ -564,11 +567,11 @@ class TestSkillsGeneratorLoggerBehavior:
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         for skill in REQUIRED_SKILLS:
-            (skills_dir / skill).write_text("# Skill")
+            _create_skill(skills_dir, skill, "# Skill")
 
         # Case 1: No tuner (None)
         gen_no_ai = SkillsGenerator(orchestrator=None, reference_dir=skills_dir)
-        result_no_ai = await gen_no_ai.tune_skill("vibe.md", "# Content", "Target")
+        result_no_ai = await gen_no_ai.tune_skill("vibe", "# Content", "Target")
         assert gen_no_ai.tuner is None
         assert not result_no_ai.tuned
 
@@ -582,6 +585,6 @@ class TestSkillsGeneratorLoggerBehavior:
         gen_with_ai.tuner = mocker.Mock()
         gen_with_ai.tuner.tune = mocker.AsyncMock(return_value=mock_tune_result)  # type: ignore[method-assign]
 
-        result_with_ai = await gen_with_ai.tune_skill("vibe.md", "# Content", "Target")
+        result_with_ai = await gen_with_ai.tune_skill("vibe", "# Content", "Target")
         assert gen_with_ai.tuner is not None
         assert result_with_ai.content == "# Tuned"  # Tuned version
