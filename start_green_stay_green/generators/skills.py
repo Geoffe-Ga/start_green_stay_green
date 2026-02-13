@@ -24,14 +24,28 @@ logger = logging.getLogger(__name__)
 # Reference skills directory
 REFERENCE_SKILLS_DIR = Path(__file__).parent.parent.parent / "reference" / "skills"
 
-# Required skills that must be present
+# Required skills that must be present (directory names)
 REQUIRED_SKILLS = [
-    "vibe.md",
-    "concurrency.md",
-    "error-handling.md",
-    "testing.md",
-    "documentation.md",
-    "security.md",
+    "architectural-decisions",
+    "backlog-grooming",
+    "bug-squashing-methodology",
+    "ci-debugging",
+    "comprehensive-pr-review",
+    "concurrency",
+    "documentation",
+    "error-handling",
+    "file-naming-conventions",
+    "frontend-aesthetics",
+    "git-workflow",
+    "max-quality-no-shortcuts",
+    "mutation-testing",
+    "prompt-engineering",
+    "security",
+    "skill-craft",
+    "stay-green",
+    "testing",
+    "tracer-code",
+    "vibe",
 ]
 
 
@@ -40,7 +54,7 @@ class SkillGenerationResult:
     """Result from skill generation.
 
     Attributes:
-        skill_name: Name of the skill file (e.g., "vibe.md").
+        skill_name: Name of the skill directory (e.g., "vibe").
         content: Generated/tuned skill content.
         tuned: Whether content was tuned (vs just copied).
         changes: List of changes made during tuning.
@@ -121,7 +135,8 @@ class SkillsGenerator(BaseGenerator):
         missing_skills = [
             skill
             for skill in REQUIRED_SKILLS
-            if not (self.reference_dir / skill).exists()
+            if not (self.reference_dir / skill).is_dir()
+            or not (self.reference_dir / skill / "SKILL.md").exists()
         ]
 
         if missing_skills:
@@ -142,7 +157,7 @@ class SkillsGenerator(BaseGenerator):
         """Load skill content from reference directory.
 
         Args:
-            skill_name: Name of skill file (e.g., "vibe.md").
+            skill_name: Name of skill directory (e.g., "vibe").
 
         Returns:
             Skill content as string.
@@ -150,7 +165,7 @@ class SkillsGenerator(BaseGenerator):
         Raises:
             FileNotFoundError: If skill file doesn't exist.
         """
-        skill_path = self.reference_dir / skill_name
+        skill_path = self.reference_dir / skill_name / "SKILL.md"
         if not skill_path.exists():
             msg = f"Skill file not found: {skill_path}"
             raise FileNotFoundError(msg)
@@ -224,7 +239,7 @@ class SkillsGenerator(BaseGenerator):
             >>> results = await generator.generate_all_skills(
             ...     target_context="Django web application"
             ... )
-            >>> print(results["vibe.md"].content)
+            >>> print(results["vibe"].content)
             # Vibe Skill
             ...
         """

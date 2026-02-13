@@ -110,21 +110,22 @@ class TestSkillsReferences:
         assert skills_dir.is_dir()
 
     def test_all_required_skills_exist(self, skills_dir: Path) -> None:
-        """Test that all required skills exist."""
+        """Test that all required skill directories exist with SKILL.md."""
         required_skills = [
-            "vibe.md",
-            "concurrency.md",
-            "error-handling.md",
-            "testing.md",
-            "documentation.md",
-            "security.md",
+            "vibe",
+            "concurrency",
+            "error-handling",
+            "testing",
+            "documentation",
+            "security",
         ]
 
         for skill in required_skills:
-            skill_path = skills_dir / skill
-            assert skill_path.exists(), f"Missing skill: {skill}"
-            assert skill_path.is_file()
-            assert skill_path.stat().st_size > 0, f"Empty skill: {skill}"
+            skill_dir = skills_dir / skill
+            assert skill_dir.is_dir(), f"Missing skill directory: {skill}"
+            skill_file = skill_dir / "SKILL.md"
+            assert skill_file.exists(), f"Missing SKILL.md in: {skill}"
+            assert skill_file.stat().st_size > 0, f"Empty SKILL.md in: {skill}"
 
 
 class TestSubagentsReferences:

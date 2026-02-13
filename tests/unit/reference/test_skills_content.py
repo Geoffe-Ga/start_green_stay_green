@@ -1,22 +1,14 @@
 """Tests for skills content quality (Issue #23: Verify Skills).
 
-This test file verifies that all skills follow consistent format
-and meet quality requirements from SPEC.md.
+This test file verifies that all skills follow the directory-per-skill
+format with YAML frontmatter and consistent section structure.
 """
 
 from pathlib import Path
 
 import pytest
 
-# Module-level constant: required skills per SPEC.md
-REQUIRED_SKILLS = [
-    "vibe.md",
-    "concurrency.md",
-    "error-handling.md",
-    "testing.md",
-    "documentation.md",
-    "security.md",
-]
+from start_green_stay_green.generators.skills import REQUIRED_SKILLS
 
 
 @pytest.fixture
@@ -36,52 +28,52 @@ class TestSkillsStructure:
     def test_all_required_skills_exist(
         self, skills_dir: Path, required_skills: list[str]
     ) -> None:
-        """Test that all required skills exist."""
+        """Test that all required skill directories exist with SKILL.md."""
         for skill in required_skills:
-            skill_path = skills_dir / skill
-            assert skill_path.exists(), f"Missing skill: {skill}"
-            assert skill_path.is_file()
-            assert skill_path.stat().st_size > 0, f"Empty skill: {skill}"
+            skill_dir = skills_dir / skill
+            assert skill_dir.is_dir(), f"Missing skill directory: {skill}"
+            skill_file = skill_dir / "SKILL.md"
+            assert skill_file.exists(), f"Missing SKILL.md in: {skill}"
+            assert skill_file.stat().st_size > 0, f"Empty SKILL.md in: {skill}"
 
     def test_vibe_skill_structure(self, skills_dir: Path) -> None:
-        """Test vibe.md has required sections."""
-        vibe_path = skills_dir / "vibe.md"
+        """Test vibe skill has required sections."""
+        vibe_path = skills_dir / "vibe" / "SKILL.md"
         content = vibe_path.read_text()
 
-        # Required sections per SPEC.md
         required_sections = [
-            "# Vibe",  # Title
-            "## Purpose",  # Purpose section
-            "## Principles",  # Principles section
-            "## Anti-patterns",  # Anti-patterns section
-            "## Examples",  # Examples section
+            "# Vibe",
+            "## Instructions",
+            "## Examples",
+            "## Troubleshooting",
         ]
 
         for section in required_sections:
-            assert section in content, f"vibe.md missing section: {section}"
+            assert section in content, f"vibe SKILL.md missing section: {section}"
 
     def test_concurrency_skill_structure(self, skills_dir: Path) -> None:
-        """Test concurrency.md has required sections."""
-        concurrency_path = skills_dir / "concurrency.md"
+        """Test concurrency skill has required sections."""
+        concurrency_path = skills_dir / "concurrency" / "SKILL.md"
         content = concurrency_path.read_text()
 
-        # Required sections per SPEC.md
         required_sections = [
-            "# Concurrency",  # Title
-            "## Purpose",  # Purpose section
-            "## Principles",  # Principles section
-            "## Anti-patterns",  # Anti-patterns section
+            "# Concurrency",
+            "## Instructions",
+            "## Examples",
+            "## Troubleshooting",
         ]
 
         for section in required_sections:
-            assert section in content, f"concurrency.md missing section: {section}"
+            assert (
+                section in content
+            ), f"concurrency SKILL.md missing section: {section}"
 
     def test_all_skills_have_title(
         self, skills_dir: Path, required_skills: list[str]
     ) -> None:
         """Test all skills have H1 title."""
         for skill in required_skills:
-            skill_path = skills_dir / skill
+            skill_path = skills_dir / skill / "SKILL.md"
             content = skill_path.read_text()
             lines = content.split("\n")
 
@@ -94,35 +86,47 @@ class TestSkillsStructure:
 
             assert has_h1, f"{skill} missing H1 title"
 
-    def test_all_skills_have_purpose(
+    def test_all_skills_have_instructions(
         self, skills_dir: Path, required_skills: list[str]
     ) -> None:
-        """Test all skills have Purpose section."""
+        """Test all skills have Instructions section."""
         for skill in required_skills:
-            skill_path = skills_dir / skill
+            skill_path = skills_dir / skill / "SKILL.md"
+            content = skill_path.read_text()
+
+            assert "## Instructions" in content, f"{skill} missing Instructions section"
+
+    def test_all_skills_have_troubleshooting(
+        self, skills_dir: Path, required_skills: list[str]
+    ) -> None:
+        """Test all skills have Troubleshooting section."""
+        for skill in required_skills:
+            skill_path = skills_dir / skill / "SKILL.md"
             content = skill_path.read_text()
 
             assert (
-                "## Purpose" in content or "## Overview" in content
-            ), f"{skill} missing Purpose/Overview section"
+                "## Troubleshooting" in content
+            ), f"{skill} missing Troubleshooting section"
 
-    def test_all_skills_have_antipatterns(
+    def test_all_skills_have_yaml_frontmatter(
         self, skills_dir: Path, required_skills: list[str]
     ) -> None:
-        """Test all skills have Anti-patterns section."""
+        """Test all skills have YAML frontmatter with name and description."""
         for skill in required_skills:
-            skill_path = skills_dir / skill
+            skill_path = skills_dir / skill / "SKILL.md"
             content = skill_path.read_text()
 
-            # Should have anti-patterns section (various possible names)
-            has_antipatterns = (
-                "## Anti-patterns" in content
-                or "## Common Mistakes" in content
-                or "## Antipatterns" in content
-                or "## What Not to Do" in content
-            )
+            # Check YAML frontmatter delimiters
+            assert content.startswith("---"), f"{skill} missing YAML frontmatter start"
+            # Find the closing ---
+            second_delimiter = content.find("---", 3)
+            assert second_delimiter > 3, f"{skill} missing YAML frontmatter end"
 
-            assert has_antipatterns, f"{skill} missing Anti-patterns section"
+            frontmatter = content[3:second_delimiter]
+            assert "name:" in frontmatter, f"{skill} missing 'name:' in frontmatter"
+            assert (
+                "description:" in frontmatter
+            ), f"{skill} missing 'description:' in frontmatter"
 
 
 class TestSkillsQuality:
@@ -131,7 +135,7 @@ class TestSkillsQuality:
     def test_skills_are_not_too_short(self, skills_dir: Path) -> None:
         """Test skills have substantial content (>1000 chars)."""
         for skill in REQUIRED_SKILLS:
-            skill_path = skills_dir / skill
+            skill_path = skills_dir / skill / "SKILL.md"
             content = skill_path.read_text()
 
             assert (
@@ -141,7 +145,7 @@ class TestSkillsQuality:
     def test_skills_have_code_examples(self, skills_dir: Path) -> None:
         """Test skills contain code examples (code blocks)."""
         for skill in REQUIRED_SKILLS:
-            skill_path = skills_dir / skill
+            skill_path = skills_dir / skill / "SKILL.md"
             content = skill_path.read_text()
 
             # Check for code blocks (```language or ```)

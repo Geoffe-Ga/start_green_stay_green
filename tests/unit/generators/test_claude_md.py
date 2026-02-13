@@ -193,7 +193,7 @@ class TestClaudeMdGeneratorGenerate:
             "project_name": "test-project",
             "language": "python",
             "scripts": ["lint.sh", "test.sh", "format.sh"],
-            "skills": ["vibe.md", "concurrency.md"],
+            "skills": ["vibe", "concurrency"],
         }
 
         result = generator.generate(project_config)
@@ -373,7 +373,7 @@ class TestClaudeMdGeneratorIntegration:
             "project_name": "awesome-project",
             "language": "rust",
             "scripts": ["cargo-lint.sh", "cargo-test.sh"],
-            "skills": ["concurrency.md", "error-handling.md"],
+            "skills": ["concurrency", "error-handling"],
         }
 
         result = generator.generate(config)

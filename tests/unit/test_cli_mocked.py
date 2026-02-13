@@ -1015,7 +1015,7 @@ class TestCopyReferenceSkills:
         """Test _copy_reference_skills creates target directory."""
         mock_target = MagicMock(spec=Path)
         mock_ref_dir.__truediv__.return_value = MagicMock(
-            spec=Path, exists=lambda: True
+            spec=Path, is_dir=lambda: True
         )
 
         # Mock REQUIRED_SKILLS to be empty to avoid file not found errors
@@ -1029,12 +1029,12 @@ class TestCopyReferenceSkills:
     ) -> None:
         """Test _copy_reference_skills raises FileNotFoundError."""
         mock_target = MagicMock(spec=Path)
-        mock_skill_file = MagicMock(spec=Path)
-        mock_skill_file.exists.return_value = False
-        mock_ref_dir.__truediv__.return_value = mock_skill_file
+        mock_skill_dir = MagicMock(spec=Path)
+        mock_skill_dir.is_dir.return_value = False
+        mock_ref_dir.__truediv__.return_value = mock_skill_dir
 
         with (
-            patch("start_green_stay_green.cli.REQUIRED_SKILLS", ["missing_skill.md"]),
+            patch("start_green_stay_green.cli.REQUIRED_SKILLS", ["missing_skill"]),
             pytest.raises(FileNotFoundError),
         ):
             cli._copy_reference_skills(mock_target)

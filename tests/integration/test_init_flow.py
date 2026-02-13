@@ -260,19 +260,21 @@ class TestInitFlowIntegration:
         assert skills_dir.exists()
         assert skills_dir.is_dir()
 
-        # Verify required skills are present
+        # Verify required skills are present (directory-per-skill format)
         required_skills = [
-            "vibe.md",
-            "concurrency.md",
-            "error-handling.md",
-            "testing.md",
-            "documentation.md",
-            "security.md",
+            "vibe",
+            "concurrency",
+            "error-handling",
+            "testing",
+            "documentation",
+            "security",
         ]
 
         for skill in required_skills:
-            skill_file = skills_dir / skill
-            assert skill_file.exists(), f"Missing skill: {skill}"
+            skill_dir = skills_dir / skill
+            assert skill_dir.is_dir(), f"Missing skill directory: {skill}"
+            skill_file = skill_dir / "SKILL.md"
+            assert skill_file.exists(), f"Missing SKILL.md in: {skill}"
             # Verify skill has content
             content = skill_file.read_text()
             assert len(content) > 100, f"Skill {skill} has insufficient content"
