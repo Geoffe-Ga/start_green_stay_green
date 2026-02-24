@@ -11,6 +11,8 @@ permissions:
 jobs:
   generate-metrics:
     runs-on: ubuntu-latest
+    env:
+      VIRTUAL_ENV: ${{ github.workspace }}/.venv
     steps:
       - uses: actions/checkout@v4
 
@@ -44,21 +46,7 @@ jobs:
       - name: Regenerate dashboard.html from template
         run: |
           . .venv/bin/activate
-          python -c "
-          from start_green_stay_green.generators.metrics import (
-              MetricsGenerator,
-              MetricsGenerationConfig,
-          )
-          config = MetricsGenerationConfig(
-              language='python',
-              project_name='start-green-stay-green',
-          )
-          gen = MetricsGenerator(None, config)
-          html = gen._generate_dashboard_template()
-          with open('docs/dashboard.html', 'w') as f:
-              f.write(html)
-          print('Regenerated docs/dashboard.html')
-          "
+          python scripts/regenerate_dashboard.py
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
@@ -74,4 +62,4 @@ jobs:
           echo "Dashboard URL: https://geoffe-ga.github.io/start_green_stay_green/dashboard.html" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Latest Metrics" >> $GITHUB_STEP_SUMMARY
-          cat docs/metrics.json | jq -r '.metrics | to_entries | .[] | "- **\(.key)**: \(.value)"' >> $GITHUB_STEP_SUMMARY || true
+          jq -r '.metrics | to_entries | .[] | "- **\(.key)**: \(.value)"' docs/metrics.json >> $GITHUB_STEP_SUMMARY || true
