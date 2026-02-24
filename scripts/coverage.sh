@@ -96,7 +96,7 @@ cov = round(totals['percent_covered'], 2)
 branches = totals.get('num_branches', 0)
 covered = totals.get('covered_branches', 0)
 branch_cov = round((covered / branches) * 100, 2) if branches > 0 else None
-result = {'coverage_pct': cov, 'branch_coverage_pct': branch_cov, 'status': 'pass' if cov >= 90 else 'fail'}
+result = {'coverage_pct': cov, 'branch_coverage_pct': branch_cov}  # status computed by collect_metrics.py
 print(json.dumps(result))
 "
     else
