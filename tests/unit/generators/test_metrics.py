@@ -1615,6 +1615,26 @@ class TestDashboardJavaScript:
         dashboard = self._get_dashboard()
         assert "metrics.tests_failed" in dashboard
 
+    def test_js_handles_null_coverage(self) -> None:
+        """Test JavaScript has null check for coverage (#212)."""
+        dashboard = self._get_dashboard()
+        assert "metrics.coverage === null" in dashboard
+
+    def test_js_handles_null_branch_coverage(self) -> None:
+        """Test JavaScript has null check for branch coverage (#212)."""
+        dashboard = self._get_dashboard()
+        assert "metrics.branch_coverage === null" in dashboard
+
+    def test_js_handles_null_mutation_score(self) -> None:
+        """Test JavaScript has null check for mutation score (#212)."""
+        dashboard = self._get_dashboard()
+        assert "metrics.mutation_score === null" in dashboard
+
+    def test_js_handles_null_security_issues(self) -> None:
+        """Test JavaScript has null check for security issues (#212)."""
+        dashboard = self._get_dashboard()
+        assert "metrics.security_issues === null" in dashboard
+
     def test_js_handles_null_maintainability(self) -> None:
         """Test JavaScript has null check for maintainability."""
         dashboard = self._get_dashboard()
