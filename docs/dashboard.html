@@ -158,6 +158,44 @@
                     PASSING
                 </div>
             </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Maintainability Index</div>
+                <div class="metric-value" id="maintainability-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≥20
+                </div>
+                <div class="metric-status status-pass" id="maintainability-status">
+                    PASSING
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Lint Violations</div>
+                <div class="metric-value" id="lint-value">--</div>
+                <div class="metric-threshold">Threshold: 0</div>
+                <div class="metric-status status-pass" id="lint-status">
+                    PASSING
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Type Errors</div>
+                <div class="metric-value" id="typecheck-value">--</div>
+                <div class="metric-threshold">Threshold: 0</div>
+                <div class="metric-status status-pass" id="typecheck-status">
+                    PASSING
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Test Count</div>
+                <div class="metric-value" id="tests-value">--</div>
+                <div class="metric-threshold">Threshold: All passing</div>
+                <div class="metric-status status-pass" id="tests-status">
+                    PASSING
+                </div>
+            </div>
         </div>
 
         <div class="footer">
@@ -242,6 +280,64 @@
                 updateStatus('security',
                     metrics.security_issues === 0 ? 'PASSING' : 'FAILING',
                     metrics.security_issues === 0);
+            }
+
+            // Maintainability Index
+            if (metrics.maintainability_avg !== undefined) {
+                if (metrics.maintainability_avg === null) {
+                    const mv = document.getElementById('maintainability-value');
+                    mv.textContent = 'N/A';
+                    updateStatus('maintainability', 'NO DATA', false);
+                } else {
+                    const t = thresholds.maintainability || 20;
+                    updateMetric('maintainability',
+                        metrics.maintainability_avg, '',
+                        metrics.maintainability_avg >= t);
+                }
+            }
+
+            // Lint Violations
+            if (metrics.lint_violations !== undefined) {
+                if (metrics.lint_violations === null) {
+                    document.getElementById('lint-value').textContent = 'N/A';
+                    updateStatus('lint', 'NO DATA', false);
+                } else {
+                    const elem = document.getElementById('lint-value');
+                    elem.textContent = metrics.lint_violations;
+                    updateStatus('lint',
+                        metrics.lint_violations === 0 ? 'PASSING' : 'FAILING',
+                        metrics.lint_violations === 0);
+                }
+            }
+
+            // Type Errors
+            if (metrics.type_errors !== undefined) {
+                if (metrics.type_errors === null) {
+                    document.getElementById('typecheck-value').textContent = 'N/A';
+                    updateStatus('typecheck', 'NO DATA', false);
+                } else {
+                    const elem = document.getElementById('typecheck-value');
+                    elem.textContent = metrics.type_errors;
+                    updateStatus('typecheck',
+                        metrics.type_errors === 0 ? 'PASSING' : 'FAILING',
+                        metrics.type_errors === 0);
+                }
+            }
+
+            // Test Count
+            if (metrics.tests_total !== undefined) {
+                if (metrics.tests_total === null) {
+                    document.getElementById('tests-value').textContent = 'N/A';
+                    updateStatus('tests', 'NO DATA', false);
+                } else {
+                    const elem = document.getElementById('tests-value');
+                    const failed = metrics.tests_failed || 0;
+                    elem.textContent = metrics.tests_total +
+                        (failed > 0 ? ' (' + failed + ' failed)' : '');
+                    updateStatus('tests',
+                        failed === 0 ? 'PASSING' : 'FAILING',
+                        failed === 0);
+                }
             }
         }
 

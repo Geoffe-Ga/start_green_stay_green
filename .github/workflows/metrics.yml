@@ -11,6 +11,8 @@ permissions:
 jobs:
   generate-metrics:
     runs-on: ubuntu-latest
+    env:
+      VIRTUAL_ENV: ${{ github.workspace }}/.venv
     steps:
       - uses: actions/checkout@v4
 
@@ -19,23 +21,32 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Install dependencies
+      - name: Install dependencies in .venv
         run: |
+          python -m venv .venv
+          . .venv/bin/activate
           pip install -e .
           pip install -r requirements-dev.txt
 
       - name: Check documentation coverage
         run: |
+          . .venv/bin/activate
           interrogate -v start_green_stay_green/ > docs-report.txt 2>&1 || true
 
       - name: Generate metrics.json via script mode
         run: |
+          . .venv/bin/activate
           python scripts/collect_metrics.py \
             --project-name start-green-stay-green \
             --output docs/metrics.json \
             --metrics-mode script \
             --scripts-dir scripts/ \
             --docs-file docs-report.txt
+
+      - name: Regenerate dashboard.html from template
+        run: |
+          . .venv/bin/activate
+          python scripts/regenerate_dashboard.py
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
@@ -51,4 +62,4 @@ jobs:
           echo "Dashboard URL: https://geoffe-ga.github.io/start_green_stay_green/dashboard.html" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Latest Metrics" >> $GITHUB_STEP_SUMMARY
-          cat docs/metrics.json | jq -r '.metrics | to_entries | .[] | "- **\(.key)**: \(.value)"' >> $GITHUB_STEP_SUMMARY || true
+          jq -r '.metrics | to_entries | .[] | "- **\(.key)**: \(.value)"' docs/metrics.json >> $GITHUB_STEP_SUMMARY || true

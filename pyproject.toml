@@ -153,6 +153,9 @@ ignore = [
 "scripts/audit_tool_configs.py" = [
     "T201",      # CLI script needs print for user feedback
 ]
+"scripts/regenerate_dashboard.py" = [
+    "T201",      # CLI script needs print for user feedback
+]
 "scripts/analyze_mutations.py" = [
     "S608",      # Allow SQL string formatting (parameterized queries used correctly)
 ]
