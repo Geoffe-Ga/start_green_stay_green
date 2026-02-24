@@ -82,8 +82,14 @@ ensure_venv || exit 2
 # Machine-readable metrics mode
 if $METRICS_OUTPUT; then
     BANDIT_JSON=$(bandit -r start_green_stay_green/ -ll -f json 2>/dev/null || true)
-    ISSUES=$(echo "$BANDIT_JSON" | python3 -c "import sys,json; data=json.load(sys.stdin); print(len(data.get('results',[])))" 2>/dev/null || echo "0")
-    if [ "$ISSUES" = "0" ]; then
+    if [ -z "$BANDIT_JSON" ]; then
+        echo '{"bandit_issues": null, "status": "unknown"}'
+        exit 0
+    fi
+    ISSUES=$(echo "$BANDIT_JSON" | python3 -c "import sys,json; data=json.load(sys.stdin); print(len(data.get('results',[])))" 2>/dev/null || echo "")
+    if [ -z "$ISSUES" ]; then
+        echo '{"bandit_issues": null, "status": "unknown"}'
+    elif [ "$ISSUES" = "0" ]; then
         echo '{"bandit_issues": 0, "status": "pass"}'
     else
         echo "{\"bandit_issues\": $ISSUES, \"status\": \"fail\"}"
