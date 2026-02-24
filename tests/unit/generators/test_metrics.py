@@ -7,6 +7,7 @@ across multiple languages and configurations.
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -503,6 +504,33 @@ class TestSecurityValidations:
             safe_path = Path(tmpdir) / "project" / "metrics"
             # Should not raise
             result = generator.write_metrics_config(safe_path)
+            assert result.exists()
+
+    @patch(
+        "start_green_stay_green.generators.metrics.DANGEROUS_PATHS",
+        {"/run", "/etc"},
+    )
+    def test_output_dir_no_false_positive_on_substring_match(self) -> None:
+        """Test that paths containing dangerous substrings are not blocked (#209).
+
+        On Ubuntu, /var/run resolves to /run via symlink. A naive substring
+        check would block /home/runner/work/... because '/run' appears in
+        '/runner'. The fix uses proper path ancestry checks.
+        """
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+        )
+        generator = MetricsGenerator(None, config)
+
+        with TemporaryDirectory() as tmpdir:
+            # Create path that contains '/run' as a substring (like /runner)
+            runner_path = Path(tmpdir) / "runner" / "work" / "docs"
+            runner_path.mkdir(parents=True)
+            # Should NOT raise — /runner is not a child of /run
+            result = generator.write_dashboard(runner_path)
+            assert result is not None
             assert result.exists()
 
     def test_dashboard_html_escapes_project_name(self) -> None:
