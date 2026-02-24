@@ -830,20 +830,35 @@ class MetricsGenerator(BaseGenerator):
 
             // Coverage
             if (metrics.coverage !== undefined) {{
-                updateMetric('coverage', metrics.coverage, '%',
-                    metrics.coverage >= thresholds.coverage);
+                if (metrics.coverage === null) {{
+                    document.getElementById('coverage-value').textContent = 'N/A';
+                    updateStatus('coverage', 'NO DATA', false);
+                }} else {{
+                    updateMetric('coverage', metrics.coverage, '%',
+                        metrics.coverage >= thresholds.coverage);
+                }}
             }}
 
             // Branch Coverage
             if (metrics.branch_coverage !== undefined) {{
-                updateMetric('branch', metrics.branch_coverage, '%',
-                    metrics.branch_coverage >= thresholds.branch_coverage);
+                if (metrics.branch_coverage === null) {{
+                    document.getElementById('branch-value').textContent = 'N/A';
+                    updateStatus('branch', 'NO DATA', false);
+                }} else {{
+                    updateMetric('branch', metrics.branch_coverage, '%',
+                        metrics.branch_coverage >= thresholds.branch_coverage);
+                }}
             }}
 
             // Mutation Score
             if (metrics.mutation_score !== undefined) {{
-                updateMetric('mutation', metrics.mutation_score, '%',
-                    metrics.mutation_score >= thresholds.mutation_score);
+                if (metrics.mutation_score === null) {{
+                    document.getElementById('mutation-value').textContent = 'N/A';
+                    updateStatus('mutation', 'NO DATA', false);
+                }} else {{
+                    updateMetric('mutation', metrics.mutation_score, '%',
+                        metrics.mutation_score >= thresholds.mutation_score);
+                }}
             }}
 
             // Complexity
@@ -870,11 +885,16 @@ class MetricsGenerator(BaseGenerator):
 
             // Security
             if (metrics.security_issues !== undefined) {{
-                const elem = document.getElementById('security-value');
-                elem.textContent = metrics.security_issues;
-                updateStatus('security',
-                    metrics.security_issues === 0 ? 'PASSING' : 'FAILING',
-                    metrics.security_issues === 0);
+                if (metrics.security_issues === null) {{
+                    document.getElementById('security-value').textContent = 'N/A';
+                    updateStatus('security', 'NO DATA', false);
+                }} else {{
+                    const elem = document.getElementById('security-value');
+                    elem.textContent = metrics.security_issues;
+                    updateStatus('security',
+                        metrics.security_issues === 0 ? 'PASSING' : 'FAILING',
+                        metrics.security_issues === 0);
+                }}
             }}
 
             // Maintainability Index
