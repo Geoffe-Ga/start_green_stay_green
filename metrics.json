@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-24T02:31:19.978635+00:00",
+  "timestamp": "2026-02-24T21:15:37.289485+00:00",
   "project": "start-green-stay-green",
   "thresholds": {
     "coverage": 90,
@@ -7,20 +7,35 @@
     "mutation_score": 80,
     "complexity": 10,
     "docs_coverage": 95,
-    "security_issues": 0
+    "security_issues": 0,
+    "maintainability": 20,
+    "lint_violations": 0,
+    "type_errors": 0,
+    "tests_total": 0
   },
   "metrics": {
-    "coverage": 95.19,
+    "coverage": 94.92,
     "coverage_status": "pass",
-    "branch_coverage": 91.05,
+    "branch_coverage": 90.53,
     "branch_coverage_status": "pass",
     "complexity_avg": null,
     "complexity_status": "unknown",
+    "maintainability_avg": 77.15,
+    "maintainability_status": "pass",
     "docs_coverage": null,
     "docs_status": "unknown",
     "security_issues": 0,
     "security_status": "pass",
-    "mutation_score": 85.0,
-    "mutation_status": "pass"
+    "mutation_score": null,
+    "mutation_status": "unknown",
+    "lint_violations": 0,
+    "lint_status": "pass",
+    "type_errors": null,
+    "typecheck_status": "unknown",
+    "tests_total": 0,
+    "tests_passed": 0,
+    "tests_failed": 0,
+    "tests_skipped": 0,
+    "tests_status": "unknown"
   }
 }
