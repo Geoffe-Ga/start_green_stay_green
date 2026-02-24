@@ -275,8 +275,6 @@ filterwarnings = [
     "ignore::DeprecationWarning:pytest_asyncio.*",
     "ignore::ResourceWarning:asyncio.*",  # Ignore asyncio internal cleanup warnings
     "ignore::ResourceWarning:pytest.*",  # Ignore pytest internal cleanup warnings
-    "ignore:.*Exception ignored.*sqlite3.*:pytest.PytestUnraisableExceptionWarning",  # sqlite3 GC
-    "ignore::pluggy.PluggyTeardownRaisedWarning",  # pluggy teardown from sqlite3 GC
 ]
 
 # Coverage configuration

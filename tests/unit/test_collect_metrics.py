@@ -430,7 +430,8 @@ class TestMutationFromCache:
             cache_path: Path to create the database at
             mutants: List of (status, count) tuples
         """
-        with sqlite3.connect(str(cache_path)) as conn:
+        conn = sqlite3.connect(str(cache_path))
+        try:
             conn.execute("CREATE TABLE Mutant (id INTEGER PRIMARY KEY, status TEXT)")
             mutant_id = 1
             for status, count in mutants:
@@ -441,6 +442,8 @@ class TestMutationFromCache:
                     )
                     mutant_id += 1
             conn.commit()
+        finally:
+            conn.close()
 
     def test_no_cache_returns_null(self) -> None:
         """Test that missing cache file returns null values."""

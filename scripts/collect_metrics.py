@@ -219,11 +219,11 @@ class MetricsCollector:
             counts = dict(cursor.fetchall())
             cursor.close()
         except (sqlite3.Error, KeyError):
-            conn.close()
             self._set_mutation_unknown()
-        else:
+            return
+        finally:
             conn.close()
-            self._apply_mutation_counts(counts)
+        self._apply_mutation_counts(counts)
 
     def _apply_mutation_counts(self, counts: dict[str, int]) -> None:
         """Apply mutation counts from cache to metrics.
