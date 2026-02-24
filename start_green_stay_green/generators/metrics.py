@@ -339,14 +339,12 @@ class MetricsGenerator(BaseGenerator):
         """
         # Resolve to absolute path
         resolved_path = output_dir.resolve()
-        resolved_str = str(resolved_path)
 
-        # Check against dangerous paths
+        # Check against dangerous paths using proper path ancestry
         for dangerous_path in DANGEROUS_PATHS:
             dangerous_resolved = Path(dangerous_path).expanduser().resolve()
-            if (
-                resolved_path == dangerous_resolved
-                or str(dangerous_resolved) in resolved_str
+            if resolved_path == dangerous_resolved or resolved_path.is_relative_to(
+                dangerous_resolved
             ):
                 msg = (
                     f"Output directory '{output_dir}' resolves to dangerous "
