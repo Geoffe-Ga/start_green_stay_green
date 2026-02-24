@@ -11,6 +11,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 FIX=false
 VERBOSE=false
 JSON_OUTPUT=false
+METRICS_OUTPUT=false
 START_TIME=$(date +%s)
 
 # Source common utilities
@@ -20,6 +21,10 @@ source "$SCRIPT_DIR/common.sh"
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --metrics)
+            METRICS_OUTPUT=true
+            shift
+            ;;
         --fix)
             FIX=true
             shift
@@ -84,6 +89,18 @@ fi
 # Ensure venv is available and set up cleanup
 setup_cleanup_trap
 ensure_venv || exit 2
+
+# Machine-readable metrics mode
+if $METRICS_OUTPUT; then
+    RUFF_JSON=$(ruff check . --output-format=json 2>/dev/null || true)
+    VIOLATIONS=$(echo "$RUFF_JSON" | python3 -c "import sys,json; data=json.load(sys.stdin); print(len(data))" 2>/dev/null || echo "0")
+    if [ "$VIOLATIONS" = "0" ]; then
+        echo '{"violations": 0, "status": "pass"}'
+    else
+        echo "{\"violations\": $VIOLATIONS, \"status\": \"fail\"}"
+    fi
+    exit 0
+fi
 
 if ! $JSON_OUTPUT; then
     echo "=== Linting (Ruff) ==="

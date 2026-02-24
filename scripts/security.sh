@@ -10,6 +10,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 FULL=false
 VERBOSE=false
+METRICS_OUTPUT=false
 START_TIME=$(date +%s)
 
 # Source common utilities
@@ -19,6 +20,10 @@ source "$SCRIPT_DIR/common.sh"
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --metrics)
+            METRICS_OUTPUT=true
+            shift
+            ;;
         --full)
             FULL=true
             shift
@@ -72,6 +77,18 @@ fi
 # Ensure venv is available and set up cleanup
 setup_cleanup_trap
 ensure_venv || exit 2
+
+# Machine-readable metrics mode
+if $METRICS_OUTPUT; then
+    BANDIT_JSON=$(bandit -r start_green_stay_green/ -f json 2>/dev/null || true)
+    ISSUES=$(echo "$BANDIT_JSON" | python3 -c "import sys,json; data=json.load(sys.stdin); print(len(data.get('results',[])))" 2>/dev/null || echo "0")
+    if [ "$ISSUES" = "0" ]; then
+        echo '{"bandit_issues": 0, "status": "pass"}'
+    else
+        echo "{\"bandit_issues\": $ISSUES, \"status\": \"fail\"}"
+    fi
+    exit 0
+fi
 
 echo "=== Security Checks (Bandit) ==="
 

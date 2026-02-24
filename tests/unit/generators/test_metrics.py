@@ -1440,3 +1440,170 @@ class TestMutationKillers:
         # Badges should be list (not None)
         assert result["badges"] is not None
         assert isinstance(result["badges"], list)
+
+
+class TestDashboardNewCards:
+    """Tests for the 4 new dashboard cards (Issue #204)."""
+
+    def _get_dashboard(self) -> str:
+        """Generate a dashboard with default config.
+
+        Returns:
+            Dashboard HTML string.
+        """
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+        )
+        generator = MetricsGenerator(None, config)
+        dashboard = generator._generate_dashboard_template()
+        assert dashboard is not None
+        return dashboard
+
+    def test_all_ten_card_ids_exist(self) -> None:
+        """Test that all 10 metric card IDs exist in generated HTML."""
+        dashboard = self._get_dashboard()
+
+        expected_ids = [
+            "coverage-value",
+            "branch-value",
+            "mutation-value",
+            "complexity-value",
+            "docs-value",
+            "security-value",
+            "maintainability-value",
+            "lint-value",
+            "typecheck-value",
+            "tests-value",
+        ]
+        for card_id in expected_ids:
+            assert card_id in dashboard, f"Missing card ID: {card_id}"
+
+    def test_all_ten_status_ids_exist(self) -> None:
+        """Test that all 10 status element IDs exist in generated HTML."""
+        dashboard = self._get_dashboard()
+
+        expected_ids = [
+            "coverage-status",
+            "branch-status",
+            "mutation-status",
+            "complexity-status",
+            "docs-status",
+            "security-status",
+            "maintainability-status",
+            "lint-status",
+            "typecheck-status",
+            "tests-status",
+        ]
+        for status_id in expected_ids:
+            assert status_id in dashboard, f"Missing status ID: {status_id}"
+
+    def test_maintainability_card_has_threshold(self) -> None:
+        """Test maintainability card shows configured threshold."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            maintainability_threshold=25,
+        )
+        generator = MetricsGenerator(None, config)
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "≥25" in dashboard
+
+    def test_lint_card_exists(self) -> None:
+        """Test lint violations card exists in dashboard."""
+        dashboard = self._get_dashboard()
+
+        assert "Lint Violations" in dashboard
+        assert "lint-value" in dashboard
+
+    def test_typecheck_card_exists(self) -> None:
+        """Test type errors card exists in dashboard."""
+        dashboard = self._get_dashboard()
+
+        assert "Type Errors" in dashboard
+        assert "typecheck-value" in dashboard
+
+    def test_tests_card_exists(self) -> None:
+        """Test test count card exists in dashboard."""
+        dashboard = self._get_dashboard()
+
+        assert "Test Count" in dashboard
+        assert "tests-value" in dashboard
+
+    def test_dashboard_has_ten_metric_cards(self) -> None:
+        """Test dashboard has exactly 10 metric cards."""
+        dashboard = self._get_dashboard()
+
+        # Count metric-card div occurrences
+        card_count = dashboard.count('class="metric-card"')
+        assert card_count == 10
+
+
+class TestDashboardJavaScript:
+    """Tests for JavaScript updateDashboard() handling of new metric keys."""
+
+    def _get_dashboard(self) -> str:
+        """Generate a dashboard with default config.
+
+        Returns:
+            Dashboard HTML string.
+        """
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+        )
+        generator = MetricsGenerator(None, config)
+        dashboard = generator._generate_dashboard_template()
+        assert dashboard is not None
+        return dashboard
+
+    def test_js_handles_maintainability_avg(self) -> None:
+        """Test JavaScript handles maintainability_avg metric."""
+        dashboard = self._get_dashboard()
+        assert "metrics.maintainability_avg" in dashboard
+
+    def test_js_handles_lint_violations(self) -> None:
+        """Test JavaScript handles lint_violations metric."""
+        dashboard = self._get_dashboard()
+        assert "metrics.lint_violations" in dashboard
+
+    def test_js_handles_type_errors(self) -> None:
+        """Test JavaScript handles type_errors metric."""
+        dashboard = self._get_dashboard()
+        assert "metrics.type_errors" in dashboard
+
+    def test_js_handles_tests_total(self) -> None:
+        """Test JavaScript handles tests_total metric."""
+        dashboard = self._get_dashboard()
+        assert "metrics.tests_total" in dashboard
+
+    def test_js_handles_tests_failed(self) -> None:
+        """Test JavaScript handles tests_failed metric."""
+        dashboard = self._get_dashboard()
+        assert "metrics.tests_failed" in dashboard
+
+    def test_js_handles_null_maintainability(self) -> None:
+        """Test JavaScript has null check for maintainability."""
+        dashboard = self._get_dashboard()
+        # Should have null check pattern
+        assert "maintainability_avg === null" in dashboard
+
+    def test_js_handles_null_lint(self) -> None:
+        """Test JavaScript has null check for lint violations."""
+        dashboard = self._get_dashboard()
+        assert "lint_violations === null" in dashboard
+
+    def test_js_handles_null_typecheck(self) -> None:
+        """Test JavaScript has null check for type errors."""
+        dashboard = self._get_dashboard()
+        assert "type_errors === null" in dashboard
+
+    def test_js_handles_null_tests(self) -> None:
+        """Test JavaScript has null check for test count."""
+        dashboard = self._get_dashboard()
+        assert "tests_total === null" in dashboard

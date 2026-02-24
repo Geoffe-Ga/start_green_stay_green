@@ -12,6 +12,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 MIN_SCORE=80  # MAXIMUM QUALITY: 80% mutation score minimum
 VERBOSE=false
+METRICS_OUTPUT=false
 PATHS_TO_MUTATE=""
 
 # Source common utilities
@@ -21,6 +22,10 @@ source "$SCRIPT_DIR/common.sh"
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --metrics)
+            METRICS_OUTPUT=true
+            shift
+            ;;
         --min-score)
             MIN_SCORE="$2"
             shift 2
@@ -84,6 +89,43 @@ cd "$PROJECT_ROOT"
 # Set verbosity
 if $VERBOSE; then
     set -x
+fi
+
+# Machine-readable metrics mode (reads from cache only, does not run mutmut)
+if $METRICS_OUTPUT; then
+    if [ ! -f .mutmut-cache ]; then
+        echo '{"killed": null, "survived": null, "timeout": null, "score": null}'
+        exit 0
+    fi
+
+    python3 << 'PYEOF'
+import sqlite3, json, sys
+try:
+    conn = sqlite3.connect('.mutmut-cache')
+    cursor = conn.cursor()
+    cursor.execute('SELECT status, COUNT(*) FROM Mutant GROUP BY status')
+    counts = dict(cursor.fetchall())
+    conn.close()
+
+    killed = counts.get('ok_killed', 0)
+    survived = counts.get('bad_survived', 0)
+    timeout = counts.get('bad_timeout', 0)
+    total = killed + survived + timeout
+    score = round((killed / total) * 100, 1) if total > 0 else None
+
+    print(json.dumps({
+        "killed": killed,
+        "survived": survived,
+        "timeout": timeout,
+        "score": score,
+    }))
+except Exception:
+    print(json.dumps({
+        "killed": None, "survived": None,
+        "timeout": None, "score": None,
+    }))
+PYEOF
+    exit 0
 fi
 
 # Cleanup function to remove stale cache on interrupt
