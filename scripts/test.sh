@@ -84,6 +84,7 @@ OPTIONS:
     --ci            CI mode: skip flaky_in_ci tests
     --verbose       Show detailed output
     --json          Output results in JSON format
+    --metrics       Output machine-readable JSON metrics to stdout
     --version       Show version and exit
     --help          Display this help message
 

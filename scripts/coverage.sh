@@ -44,6 +44,7 @@ Generate coverage reports using coverage/pytest-cov.
 
 OPTIONS:
     --html      Generate HTML coverage report
+    --metrics   Output machine-readable JSON metrics to stdout
     --verbose   Show detailed output
     --version   Show version and exit
     --help      Display this help message

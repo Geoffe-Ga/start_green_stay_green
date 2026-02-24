@@ -55,6 +55,7 @@ indicates effective tests.
 OPTIONS:
     --min-score SCORE         Minimum mutation score (default: 80)
     --paths-to-mutate FILES   Only mutate specific files (space-separated)
+    --metrics                 Output machine-readable JSON metrics to stdout
     --verbose                 Show detailed output
     --help                    Display this help message
 

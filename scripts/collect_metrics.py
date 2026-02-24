@@ -262,7 +262,7 @@ class MetricsCollector:
             return None
 
         try:
-            result = subprocess.run(  # noqa: S603
+            result = subprocess.run(  # noqa: S603 — script_path is a hardcoded internal filename, validated by exists() above
                 [str(full_path), "--metrics"],
                 capture_output=True,
                 text=True,

@@ -44,6 +44,7 @@ Run security checks using Bandit and pip-audit.
 
 OPTIONS:
     --full      Run comprehensive security scan
+    --metrics   Output machine-readable JSON metrics to stdout
     --verbose   Show detailed output
     --version   Show version and exit
     --help      Display this help message
