@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 VERBOSE=false
+METRICS_OUTPUT=false
 START_TIME=$(date +%s)
 
 # Source common utilities
@@ -23,6 +24,10 @@ MAX_COMPLEXITY_GRADE="A"  # A = 1-5 (best), B = 6-10, C = 11-20, etc.
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --metrics)
+            METRICS_OUTPUT=true
+            shift
+            ;;
         --verbose)
             VERBOSE=true
             shift
@@ -46,6 +51,7 @@ MAXIMUM QUALITY THRESHOLDS:
   - Max Lines: 50 per function (enforced by ruff/pylint)
 
 OPTIONS:
+    --metrics   Output machine-readable JSON metrics to stdout and exit
     --verbose   Show detailed output
     --version   Show version and exit
     --help      Display this help message
@@ -78,6 +84,37 @@ fi
 # Ensure venv is available and set up cleanup
 setup_cleanup_trap
 ensure_venv || exit 2
+
+# Machine-readable metrics mode
+if $METRICS_OUTPUT; then
+    CC_OUT=$(radon cc -s -a start_green_stay_green/ 2>&1)
+    CC_AVG=$(echo "$CC_OUT" | grep -oE 'Average complexity: [A-Z] \(([0-9.]+)\)' | grep -oE '[0-9.]+' || echo "null")
+
+    MI_OUT=$(radon mi -s start_green_stay_green/ 2>&1)
+    MI_AVG=$(echo "$MI_OUT" | python3 -c "
+import sys, re
+scores = []
+for line in sys.stdin:
+    m = re.search(r'- [A-F] \(([0-9.]+)\)', line)
+    if m:
+        scores.append(float(m.group(1)))
+if scores:
+    print(f'{sum(scores)/len(scores):.2f}')
+else:
+    print('null')
+")
+
+    if [ "$CC_AVG" = "null" ] && [ "$MI_AVG" = "null" ]; then
+        echo '{"cyclomatic_avg": null, "maintainability_avg": null}'
+    elif [ "$CC_AVG" = "null" ]; then
+        echo "{\"cyclomatic_avg\": null, \"maintainability_avg\": $MI_AVG}"
+    elif [ "$MI_AVG" = "null" ]; then
+        echo "{\"cyclomatic_avg\": $CC_AVG, \"maintainability_avg\": null}"
+    else
+        echo "{\"cyclomatic_avg\": $CC_AVG, \"maintainability_avg\": $MI_AVG}"
+    fi
+    exit 0
+fi
 
 echo "=== Code Complexity Analysis (MAXIMUM QUALITY) ==="
 echo ""

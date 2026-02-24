@@ -10,6 +10,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 FULL=false
 VERBOSE=false
+METRICS_OUTPUT=false
 START_TIME=$(date +%s)
 
 # Source common utilities
@@ -19,6 +20,10 @@ source "$SCRIPT_DIR/common.sh"
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --metrics)
+            METRICS_OUTPUT=true
+            shift
+            ;;
         --full)
             FULL=true
             shift
@@ -39,6 +44,7 @@ Run security checks using Bandit and pip-audit.
 
 OPTIONS:
     --full      Run comprehensive security scan
+    --metrics   Output machine-readable JSON metrics to stdout
     --verbose   Show detailed output
     --version   Show version and exit
     --help      Display this help message
@@ -72,6 +78,24 @@ fi
 # Ensure venv is available and set up cleanup
 setup_cleanup_trap
 ensure_venv || exit 2
+
+# Machine-readable metrics mode
+if $METRICS_OUTPUT; then
+    BANDIT_JSON=$(bandit -r start_green_stay_green/ -ll -f json 2>/dev/null || true)
+    if [ -z "$BANDIT_JSON" ]; then
+        echo '{"bandit_issues": null, "status": "unknown"}'
+        exit 0
+    fi
+    ISSUES=$(echo "$BANDIT_JSON" | python3 -c "import sys,json; data=json.load(sys.stdin); print(len(data.get('results',[])))" 2>/dev/null || echo "")
+    if [ -z "$ISSUES" ]; then
+        echo '{"bandit_issues": null, "status": "unknown"}'
+    elif [ "$ISSUES" = "0" ]; then
+        echo '{"bandit_issues": 0, "status": "pass"}'
+    else
+        echo "{\"bandit_issues\": $ISSUES, \"status\": \"fail\"}"
+    fi
+    exit 0
+fi
 
 echo "=== Security Checks (Bandit) ==="
 

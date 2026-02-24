@@ -13,6 +13,7 @@ COVERAGE=false
 MUTATION=false
 VERBOSE=false
 JSON_OUTPUT=false
+METRICS_OUTPUT=false
 CI_MODE=false
 START_TIME=$(date +%s)
 
@@ -23,6 +24,10 @@ source "$SCRIPT_DIR/common.sh"
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --metrics)
+            METRICS_OUTPUT=true
+            shift
+            ;;
         --unit)
             TEST_TYPE="unit"
             shift
@@ -79,6 +84,7 @@ OPTIONS:
     --ci            CI mode: skip flaky_in_ci tests
     --verbose       Show detailed output
     --json          Output results in JSON format
+    --metrics       Output machine-readable JSON metrics to stdout
     --version       Show version and exit
     --help          Display this help message
 
@@ -113,6 +119,48 @@ fi
 # Ensure venv is available and set up cleanup
 setup_cleanup_trap
 ensure_venv || exit 2
+
+# Machine-readable metrics mode
+if $METRICS_OUTPUT; then
+    TEST_OUT=$(pytest -m "not integration and not e2e" -q --tb=no tests/ 2>&1 || true)
+    # Parse pytest summary line like "X passed, Y failed, Z skipped in N.NNs"
+    python3 -c "
+import re, json, sys
+text = sys.stdin.read()
+# Match summary: '123 passed, 4 failed, 5 skipped in 12.34s'
+failed_m = re.search(r'(\d+) failed', text)
+skipped_m = re.search(r'(\d+) skipped', text)
+passed_m = re.search(r'(\d+) passed', text)
+duration_m = re.search(r'in ([0-9.]+)s', text)
+
+total_passed = int(passed_m.group(1)) if passed_m else 0
+total_failed = int(failed_m.group(1)) if failed_m else 0
+total_skipped = int(skipped_m.group(1)) if skipped_m else 0
+total = total_passed + total_failed + total_skipped
+duration = float(duration_m.group(1)) if duration_m else 0.0
+
+# Distinguish zero collected tests (broken suite) from zero failures
+if total == 0 and not passed_m and not failed_m:
+    print(json.dumps({
+        'tests_total': 0,
+        'tests_passed': 0,
+        'tests_failed': 0,
+        'tests_skipped': 0,
+        'duration_seconds': 0.0,
+        'status': 'unknown',
+    }))
+else:
+    print(json.dumps({
+        'tests_total': total,
+        'tests_passed': total_passed,
+        'tests_failed': total_failed,
+        'tests_skipped': total_skipped,
+        'duration_seconds': duration,
+        'status': 'fail' if total_failed > 0 else 'pass',
+    }))
+" <<< "$TEST_OUT"
+    exit 0
+fi
 
 # Build pytest arguments
 PYTEST_ARGS=(-v)

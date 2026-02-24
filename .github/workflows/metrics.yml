@@ -24,37 +24,18 @@ jobs:
           pip install -e .
           pip install -r requirements-dev.txt
 
-      - name: Run tests with coverage
-        run: |
-          pytest --cov=start_green_stay_green \
-                 --cov-report=json \
-                 --cov-report=term
-
-      - name: Analyze complexity
-        run: |
-          chmod +x scripts/metrics-complexity.sh
-          ./scripts/metrics-complexity.sh > complexity-report.txt || true
-
       - name: Check documentation coverage
         run: |
-          chmod +x scripts/metrics-docs.sh
-          ./scripts/metrics-docs.sh > docs-report.txt || true
+          interrogate -v start_green_stay_green/ > docs-report.txt 2>&1 || true
 
-      - name: Run security scan
+      - name: Generate metrics.json via script mode
         run: |
-          bandit -r start_green_stay_green/ -ll -f json -o security-report.json || true
-
-      - name: Generate metrics.json
-        run: |
-          # Use tested metrics collection script
           python scripts/collect_metrics.py \
             --project-name start-green-stay-green \
             --output docs/metrics.json \
-            --coverage-file coverage.json \
-            --complexity-file complexity-report.txt \
-            --docs-file docs-report.txt \
-            --security-file security-report.json \
-            --mutation-score 85.0
+            --metrics-mode script \
+            --scripts-dir scripts/ \
+            --docs-file docs-report.txt
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3

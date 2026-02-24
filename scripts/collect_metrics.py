@@ -6,6 +6,7 @@ This script aggregates metrics from:
 - radon complexity analysis (complexity-report.txt)
 - interrogate documentation coverage (docs-report.txt)
 - bandit security scanning (security-report.json)
+- quality scripts via --metrics flag (script mode)
 
 Output: metrics.json in the specified output directory
 """
@@ -18,6 +19,8 @@ from datetime import datetime
 import json
 from pathlib import Path
 import re
+import sqlite3
+import subprocess
 import sys
 from typing import Any
 from typing import TYPE_CHECKING
@@ -91,11 +94,10 @@ class MetricsCollector:
             raise FileNotFoundError(msg)
 
         complexity_text = complexity_file.read_text()
-        # Try multiple patterns for radon output
         patterns = [
-            r"Average complexity: [A-Z] \(([0-9.]+)\)",  # radon cc -a format
-            r"Average complexity:\s+[A-Z]\s+\(([0-9.]+)\)",  # Alternative spacing
-            r"average:\s+([0-9.]+)",  # Simplified pattern
+            r"Average complexity: [A-Z] \(([0-9.]+)\)",
+            r"Average complexity:\s+[A-Z]\s+\(([0-9.]+)\)",
+            r"average:\s+([0-9.]+)",
         ]
 
         comp = None
@@ -129,12 +131,11 @@ class MetricsCollector:
             raise FileNotFoundError(msg)
 
         docs_text = docs_file.read_text()
-        # Try multiple patterns for interrogate output
         patterns = [
-            r"RESULT: ([0-9.]+)%",  # interrogate -v format
-            r"RESULT:\s+([0-9.]+)\s*%",  # Alternative spacing
-            r"Overall:\s+([0-9.]+)%",  # Alternative format
-            r"Coverage:\s+([0-9.]+)%",  # Alternative format
+            r"RESULT: ([0-9.]+)%",
+            r"RESULT:\s+([0-9.]+)\s*%",
+            r"Overall:\s+([0-9.]+)%",
+            r"Coverage:\s+([0-9.]+)%",
         ]
 
         docs = None
@@ -178,9 +179,6 @@ class MetricsCollector:
     def add_mutation_score(self, score: float) -> None:
         """Add mutation testing score.
 
-        Note: Mutation testing is run periodically (not on every commit)
-        per SGSG workflow. See scripts/mutation.sh for details.
-
         Args:
             score: Mutation score (0-100)
         """
@@ -188,6 +186,197 @@ class MetricsCollector:
         self.metrics["mutation_status"] = (
             "pass" if score >= self.thresholds["mutation_score"] else "fail"
         )
+
+    def _set_mutation_unknown(self) -> None:
+        """Set mutation metrics to unknown/null state."""
+        self.metrics["mutation_score"] = None
+        self.metrics["mutation_status"] = "unknown"
+
+    @staticmethod
+    def _compute_status(
+        value: float | None,
+        threshold: float,
+        *,
+        higher_is_better: bool = True,
+    ) -> str:
+        """Compute pass/fail/unknown status from a metric value.
+
+        Args:
+            value: Metric value, or None if unavailable
+            threshold: Threshold for pass/fail
+            higher_is_better: If True, value >= threshold is pass;
+                if False, value <= threshold is pass
+
+        Returns:
+            "pass", "fail", or "unknown"
+        """
+        if value is None:
+            return "unknown"
+        if higher_is_better:
+            return "pass" if value >= threshold else "fail"
+        return "pass" if value <= threshold else "fail"
+
+    def collect_mutation_from_cache(self, cache_path: Path) -> None:
+        """Read mutation score directly from .mutmut-cache SQLite database.
+
+        Args:
+            cache_path: Path to .mutmut-cache file
+        """
+        if not cache_path.exists():
+            self._set_mutation_unknown()
+            return
+
+        # Verify file looks like a SQLite database before connecting
+        try:
+            header = cache_path.read_bytes()[:16]
+        except OSError:
+            self._set_mutation_unknown()
+            return
+
+        if not header.startswith(b"SQLite format 3"):
+            self._set_mutation_unknown()
+            return
+
+        conn = sqlite3.connect(str(cache_path))
+        try:
+            cursor = conn.execute("SELECT status, COUNT(*) FROM Mutant GROUP BY status")
+            counts = dict(cursor.fetchall())
+            cursor.close()
+        except (sqlite3.Error, KeyError):
+            self._set_mutation_unknown()
+            return
+        finally:
+            conn.close()
+        self._apply_mutation_counts(counts)
+
+    def _apply_mutation_counts(self, counts: dict[str, int]) -> None:
+        """Apply mutation counts from cache to metrics.
+
+        Args:
+            counts: Dictionary of status -> count from mutmut cache
+        """
+        killed = counts.get("ok_killed", 0)
+        survived = counts.get("bad_survived", 0)
+        timeout = counts.get("bad_timeout", 0)
+        total = killed + survived + timeout
+
+        if total > 0:
+            score = round((killed / total) * 100, 1)
+            self.metrics["mutation_score"] = score
+            self.metrics["mutation_status"] = (
+                "pass" if score >= self.thresholds["mutation_score"] else "fail"
+            )
+        else:
+            self._set_mutation_unknown()
+
+    def collect_from_script(
+        self, script_path: str, scripts_dir: Path
+    ) -> dict[str, Any] | None:
+        """Run a quality script with --metrics and parse JSON output.
+
+        Args:
+            script_path: Script filename (e.g., "lint.sh")
+            scripts_dir: Directory containing the scripts
+
+        Returns:
+            Parsed JSON dict from script stdout, or None on failure.
+        """
+        full_path = scripts_dir / script_path
+        if not full_path.exists():
+            return None
+
+        try:
+            result = subprocess.run(  # noqa: S603 — script_path is a hardcoded internal filename, validated by exists() above
+                [str(full_path), "--metrics"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        else:
+            try:
+                parsed: dict[str, Any] = json.loads(result.stdout.strip())
+            except json.JSONDecodeError:
+                return None
+            else:
+                return parsed
+
+    def collect_lint_metrics(self, scripts_dir: Path) -> None:
+        """Collect lint metrics via lint.sh --metrics.
+
+        Args:
+            scripts_dir: Directory containing quality scripts
+        """
+        data = self.collect_from_script("lint.sh", scripts_dir)
+        if data is not None:
+            self.metrics["lint_violations"] = data.get("violations", 0)
+            self.metrics["lint_status"] = data.get("status", "unknown")
+        else:
+            self.metrics["lint_violations"] = None
+            self.metrics["lint_status"] = "unknown"
+
+    def collect_typecheck_metrics(self, scripts_dir: Path) -> None:
+        """Collect type checking metrics via typecheck.sh --metrics.
+
+        Args:
+            scripts_dir: Directory containing quality scripts
+        """
+        data = self.collect_from_script("typecheck.sh", scripts_dir)
+        if data is not None:
+            self.metrics["type_errors"] = data.get("errors", 0)
+            self.metrics["typecheck_status"] = data.get("status", "unknown")
+        else:
+            self.metrics["type_errors"] = None
+            self.metrics["typecheck_status"] = "unknown"
+
+    def collect_test_metrics(self, scripts_dir: Path) -> None:
+        """Collect test count metrics via test.sh --metrics.
+
+        Args:
+            scripts_dir: Directory containing quality scripts
+        """
+        data = self.collect_from_script("test.sh", scripts_dir)
+        if data is not None:
+            self.metrics["tests_total"] = data.get("tests_total", 0)
+            self.metrics["tests_passed"] = data.get("tests_passed", 0)
+            self.metrics["tests_failed"] = data.get("tests_failed", 0)
+            self.metrics["tests_skipped"] = data.get("tests_skipped", 0)
+            self.metrics["tests_status"] = data.get(
+                "status", "pass" if data.get("tests_failed", 0) == 0 else "fail"
+            )
+        else:
+            self.metrics["tests_total"] = None
+            self.metrics["tests_passed"] = None
+            self.metrics["tests_failed"] = None
+            self.metrics["tests_skipped"] = None
+            self.metrics["tests_status"] = "unknown"
+
+    def collect_complexity_from_script(self, scripts_dir: Path) -> None:
+        """Collect complexity metrics via complexity.sh --metrics.
+
+        Args:
+            scripts_dir: Directory containing quality scripts
+        """
+        data = self.collect_from_script("complexity.sh", scripts_dir)
+        if data is not None:
+            cc_avg = data.get("cyclomatic_avg")
+            mi_avg = data.get("maintainability_avg")
+
+            self.metrics["complexity_avg"] = cc_avg
+            self.metrics["complexity_status"] = self._compute_status(
+                cc_avg, self.thresholds["complexity"], higher_is_better=False
+            )
+            self.metrics["maintainability_avg"] = mi_avg
+            self.metrics["maintainability_status"] = self._compute_status(
+                mi_avg, self.thresholds.get("maintainability", 20)
+            )
+        else:
+            self.metrics["complexity_avg"] = None
+            self.metrics["complexity_status"] = "unknown"
+            self.metrics["maintainability_avg"] = None
+            self.metrics["maintainability_status"] = "unknown"
 
     def generate_json(self, output_file: Path) -> None:
         """Write metrics to JSON file.
@@ -205,11 +394,156 @@ class MetricsCollector:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text(json.dumps(metrics_data, indent=2))
         print(f"✓ Generated {output_file}")
-        print(json.dumps(metrics_data, indent=2))
 
 
-def main() -> int:
-    """Collect metrics and generate metrics.json."""
+def _default_thresholds() -> dict[str, int | float]:
+    """Return default quality thresholds aligned with SGSG standards."""
+    return {
+        "coverage": 90,
+        "branch_coverage": 85,
+        "mutation_score": 80,
+        "complexity": 10,
+        "docs_coverage": 95,
+        "security_issues": 0,
+        "maintainability": 20,
+        "lint_violations": 0,
+        "type_errors": 0,
+        "tests_total": 0,
+    }
+
+
+def _collect_script_mode(
+    collector: MetricsCollector,
+    args: argparse.Namespace,
+    thresholds: dict[str, int | float],
+) -> None:
+    """Collect metrics using script mode (--metrics flag on each script).
+
+    Args:
+        collector: MetricsCollector instance
+        args: Parsed CLI arguments
+        thresholds: Quality thresholds
+    """
+    scripts_dir = args.scripts_dir
+
+    # Coverage via script
+    cov_data = collector.collect_from_script("coverage.sh", scripts_dir)
+    if cov_data is not None:
+        cov_pct = cov_data.get("coverage_pct")
+        if cov_pct is not None:
+            collector.metrics["coverage"] = cov_pct
+            collector.metrics["coverage_status"] = (
+                "pass" if cov_pct >= thresholds["coverage"] else "fail"
+            )
+        else:
+            collector.metrics["coverage"] = None
+            collector.metrics["coverage_status"] = "unknown"
+        branch_pct = cov_data.get("branch_coverage_pct")
+        if branch_pct is not None:
+            collector.metrics["branch_coverage"] = branch_pct
+            collector.metrics["branch_coverage_status"] = (
+                "pass" if branch_pct >= thresholds["branch_coverage"] else "fail"
+            )
+        else:
+            collector.metrics["branch_coverage"] = None
+            collector.metrics["branch_coverage_status"] = "unknown"
+    else:
+        collector.metrics["coverage"] = None
+        collector.metrics["coverage_status"] = "unknown"
+        collector.metrics["branch_coverage"] = None
+        collector.metrics["branch_coverage_status"] = "unknown"
+
+    # Complexity + Maintainability via script
+    collector.collect_complexity_from_script(scripts_dir)
+
+    # Docs coverage via file (interrogate doesn't have a script yet)
+    try:
+        collector.collect_docs_coverage(args.docs_file)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Warning: Could not parse docs coverage ({type(e).__name__}): {e}")
+        collector.metrics["docs_coverage"] = None
+        collector.metrics["docs_status"] = "unknown"
+
+    # Security via script
+    sec_data = collector.collect_from_script("security.sh", scripts_dir)
+    if sec_data is not None:
+        collector.metrics["security_issues"] = sec_data.get("bandit_issues", 0)
+        collector.metrics["security_status"] = sec_data.get("status", "unknown")
+    else:
+        collector.metrics["security_issues"] = None
+        collector.metrics["security_status"] = "unknown"
+
+    # Mutation score: read SQLite cache directly (not mutation.sh --metrics)
+    # because running mutmut is expensive; the cache already has results.
+    _collect_mutation(collector, args)
+
+    # New metrics only available in script mode
+    collector.collect_lint_metrics(scripts_dir)
+    collector.collect_typecheck_metrics(scripts_dir)
+    collector.collect_test_metrics(scripts_dir)
+
+
+def _collect_file_mode(
+    collector: MetricsCollector,
+    args: argparse.Namespace,
+) -> None:
+    """Collect metrics from report files (backward compatible mode).
+
+    Args:
+        collector: MetricsCollector instance
+        args: Parsed CLI arguments
+    """
+    try:
+        collector.collect_coverage(args.coverage_file)
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+        print(f"Warning: Could not parse coverage ({type(e).__name__}): {e}")
+
+    try:
+        collector.collect_complexity(args.complexity_file)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Warning: Could not parse complexity ({type(e).__name__}): {e}")
+        collector.metrics["complexity_avg"] = None
+        collector.metrics["complexity_status"] = "unknown"
+
+    try:
+        collector.collect_docs_coverage(args.docs_file)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Warning: Could not parse docs coverage ({type(e).__name__}): {e}")
+        collector.metrics["docs_coverage"] = None
+        collector.metrics["docs_status"] = "unknown"
+
+    try:
+        collector.collect_security(args.security_file)
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+        print(f"Warning: Could not parse security ({type(e).__name__}): {e}")
+        collector.metrics["security_issues"] = None
+        collector.metrics["security_status"] = "unknown"
+
+    _collect_mutation(collector, args)
+
+
+def _collect_mutation(
+    collector: MetricsCollector,
+    args: argparse.Namespace,
+) -> None:
+    """Collect mutation score from explicit arg or cache.
+
+    Args:
+        collector: MetricsCollector instance
+        args: Parsed CLI arguments
+    """
+    if args.mutation_score is not None:
+        collector.add_mutation_score(args.mutation_score)
+    else:
+        collector.collect_mutation_from_cache(Path(".mutmut-cache"))
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """Build CLI argument parser.
+
+    Returns:
+        Configured ArgumentParser.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--project-name",
@@ -249,60 +583,37 @@ def main() -> int:
     parser.add_argument(
         "--mutation-score",
         type=float,
-        default=85.0,
-        help="Mutation score placeholder (default: 85.0)",
+        default=None,
+        help="Mutation score override (omit to read from cache or script)",
     )
+    parser.add_argument(
+        "--metrics-mode",
+        choices=["file", "script"],
+        default="file",
+        help="Collection mode: 'file' reads report files, "
+        "'script' runs scripts with --metrics (default: file)",
+    )
+    parser.add_argument(
+        "--scripts-dir",
+        type=Path,
+        default=Path("scripts"),
+        help="Directory containing quality scripts (default: scripts/)",
+    )
+    return parser
 
-    args = parser.parse_args()
 
-    # Default thresholds (align with SGSG standards)
-    thresholds = {
-        "coverage": 90,
-        "branch_coverage": 85,
-        "mutation_score": 80,
-        "complexity": 10,
-        "docs_coverage": 95,
-        "security_issues": 0,
-    }
-
+def main() -> int:
+    """Collect metrics and generate metrics.json."""
+    args = _build_parser().parse_args()
+    thresholds = _default_thresholds()
     collector = MetricsCollector(args.project_name, thresholds)
 
-    # Collect metrics with error handling
-    try:
-        collector.collect_coverage(args.coverage_file)
-    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
-        print(f"Warning: Could not parse coverage ({type(e).__name__}): {e}")
+    if args.metrics_mode == "script":
+        _collect_script_mode(collector, args, thresholds)
+    else:
+        _collect_file_mode(collector, args)
 
-    try:
-        collector.collect_complexity(args.complexity_file)
-    except (FileNotFoundError, ValueError) as e:
-        print(f"Warning: Could not parse complexity ({type(e).__name__}): {e}")
-        # Set null value so dashboard knows metric exists but has no data
-        collector.metrics["complexity_avg"] = None
-        collector.metrics["complexity_status"] = "unknown"
-
-    try:
-        collector.collect_docs_coverage(args.docs_file)
-    except (FileNotFoundError, ValueError) as e:
-        print(f"Warning: Could not parse docs coverage ({type(e).__name__}): {e}")
-        # Set null value so dashboard knows metric exists but has no data
-        collector.metrics["docs_coverage"] = None
-        collector.metrics["docs_status"] = "unknown"
-
-    try:
-        collector.collect_security(args.security_file)
-    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
-        print(f"Warning: Could not parse security ({type(e).__name__}): {e}")
-        # Default to passing if file not found
-        collector.metrics["security_issues"] = 0
-        collector.metrics["security_status"] = "pass"
-
-    # Add mutation score (placeholder for periodic runs)
-    collector.add_mutation_score(args.mutation_score)
-
-    # Generate output
     collector.generate_json(args.output)
-
     return 0
 
 

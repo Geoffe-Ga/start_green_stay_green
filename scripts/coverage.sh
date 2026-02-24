@@ -10,6 +10,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 HTML=false
 VERBOSE=false
+METRICS_OUTPUT=false
 START_TIME=$(date +%s)
 
 # Source common utilities
@@ -19,6 +20,10 @@ source "$SCRIPT_DIR/common.sh"
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --metrics)
+            METRICS_OUTPUT=true
+            shift
+            ;;
         --html)
             HTML=true
             shift
@@ -39,6 +44,7 @@ Generate coverage reports using coverage/pytest-cov.
 
 OPTIONS:
     --html      Generate HTML coverage report
+    --metrics   Output machine-readable JSON metrics to stdout
     --verbose   Show detailed output
     --version   Show version and exit
     --help      Display this help message
@@ -72,6 +78,32 @@ fi
 # Ensure venv is available and set up cleanup
 setup_cleanup_trap
 ensure_venv || exit 2
+
+# Machine-readable metrics mode
+if $METRICS_OUTPUT; then
+    pytest -m "not integration and not e2e" \
+        --cov=start_green_stay_green \
+        --cov-branch \
+        --cov-report=json \
+        -q --tb=no tests/ >/dev/null 2>&1 || true
+
+    if [ -f coverage.json ]; then
+        python3 -c "
+import json
+data = json.load(open('coverage.json'))
+totals = data['totals']
+cov = round(totals['percent_covered'], 2)
+branches = totals.get('num_branches', 0)
+covered = totals.get('covered_branches', 0)
+branch_cov = round((covered / branches) * 100, 2) if branches > 0 else None
+result = {'coverage_pct': cov, 'branch_coverage_pct': branch_cov}  # status computed by collect_metrics.py
+print(json.dumps(result))
+"
+    else
+        echo '{"coverage_pct": null, "branch_coverage_pct": null, "status": "unknown"}'
+    fi
+    exit 0
+fi
 
 echo "=== Generating Coverage Report ==="
 

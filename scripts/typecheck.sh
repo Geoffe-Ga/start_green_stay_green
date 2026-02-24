@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 VERBOSE=false
+METRICS_OUTPUT=false
 START_TIME=$(date +%s)
 
 # Source common utilities
@@ -18,6 +19,10 @@ source "$SCRIPT_DIR/common.sh"
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --metrics)
+            METRICS_OUTPUT=true
+            shift
+            ;;
         --verbose)
             VERBOSE=true
             shift
@@ -33,6 +38,7 @@ Usage: $(basename "$0") [OPTIONS]
 Run type checking using MyPy.
 
 OPTIONS:
+    --metrics   Output machine-readable JSON metrics to stdout and exit
     --verbose   Show detailed output
     --version   Show version and exit
     --help      Display this help message
@@ -65,6 +71,18 @@ fi
 # Ensure venv is available and set up cleanup
 setup_cleanup_trap
 ensure_venv || exit 2
+
+# Machine-readable metrics mode
+if $METRICS_OUTPUT; then
+    MYPY_OUT=$(mypy . 2>&1 || true)
+    ERRORS=$(echo "$MYPY_OUT" | grep -c ": error:" 2>/dev/null || echo "0")
+    if [ "$ERRORS" = "0" ]; then
+        echo '{"errors": 0, "status": "pass"}'
+    else
+        echo "{\"errors\": $ERRORS, \"status\": \"fail\"}"
+    fi
+    exit 0
+fi
 
 echo "=== Type Checking (MyPy) ==="
 
