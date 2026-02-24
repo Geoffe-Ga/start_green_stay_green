@@ -39,10 +39,10 @@ This project follows security best practices:
 
 ## Security Scanning Configuration
 
-See `.safety-policy.yml` for vulnerability ignore policy. All ignored
+Dependency vulnerabilities are scanned using `pip-audit`. Any known
 vulnerabilities are documented with:
 - CVE/vulnerability ID
-- Justification for ignoring
+- Justification for suppression (if applicable)
 - Expiration date for review
 - Tracking issue reference
 

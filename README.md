@@ -455,7 +455,7 @@ All generated projects include GitHub Actions workflows that run:
 
 - Tests on Python 3.11, 3.12, 3.13
 - Code quality checks (ruff, pylint, mypy)
-- Security scanning (bandit, safety)
+- Security scanning (bandit, pip-audit)
 - Coverage reporting with badge updates
 - Mutation testing on main branch merges
 - AI code review with Claude

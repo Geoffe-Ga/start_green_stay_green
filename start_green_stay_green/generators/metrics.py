@@ -198,7 +198,7 @@ STANDARD_METRICS = {
     "security_vulnerabilities": MetricConfig(
         name="Security Vulnerabilities",
         threshold="0 critical/high",
-        tool="safety / npm audit",
+        tool="pip-audit / npm audit",
         badge_available=True,
         ci_enforced=True,
     ),
@@ -212,7 +212,7 @@ LANGUAGE_TOOLS: dict[str, dict[str, str]] = {
         "mutation": "mutmut",
         "complexity": "radon",
         "documentation": "interrogate",
-        "security": "safety",
+        "security": "pip-audit",
         "dependency_check": "pip-audit",
     },
     "typescript": {

@@ -654,7 +654,7 @@ credentials.json
    This runs (in order):
    - Formatting checks (ruff format, black)
    - Linting (ruff, pylint, mypy)
-   - Security checks (bandit, safety)
+   - Security checks (bandit, pip-audit)
    - Tests with coverage
    - Docstring coverage (interrogate)
    - Code quality metrics
@@ -1009,7 +1009,7 @@ pytest tests/
 Runs in order:
 1. Formatting checks (ruff, black, isort)
 2. Linting (ruff, pylint, mypy)
-3. Security scanning (bandit, safety)
+3. Security scanning (bandit, pip-audit)
 4. Complexity analysis (radon, xenon)
 5. Unit tests with coverage
 6. Coverage report validation (90% minimum)

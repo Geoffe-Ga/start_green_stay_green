@@ -1054,18 +1054,13 @@ if $VERBOSE; then
 fi
 bandit -r __PACKAGE_NAME__/ || { echo "✗ Bandit found issues" >&2; exit 1; }
 
-echo "=== Security Checks (Safety) ==="
+echo "=== Security Checks (pip-audit) ==="
 
-# Run Safety with policy file
+# Run pip-audit for dependency vulnerability scanning
 if $VERBOSE; then
-    echo "Running Safety dependency checker..."
+    echo "Running pip-audit dependency checker..."
 fi
-if [ -f "$PROJECT_ROOT/.safety-policy.yml" ]; then
-    safety check --policy-file "$PROJECT_ROOT/.safety-policy.yml" || \\
-        { echo "✗ Safety found issues" >&2; exit 1; }
-else
-    safety check || { echo "✗ Safety found issues" >&2; exit 1; }
-fi
+pip-audit || { echo "✗ pip-audit found issues" >&2; exit 1; }
 
 if $FULL; then
     echo "=== Comprehensive Security Scan ==="

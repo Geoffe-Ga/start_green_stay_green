@@ -27,7 +27,7 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         "test_framework": "pytest",
         "linters": ["ruff", "pylint", "mypy"],
         "formatters": ["black", "ruff"],
-        "security_tools": ["bandit", "safety"],
+        "security_tools": ["bandit", "pip-audit"],
         "supported_versions": ["3.11", "3.12", "3.13"],
         "package_manager": "pip",
     },

@@ -61,7 +61,7 @@ The Metrics Dashboard Generator creates comprehensive quality metrics tracking c
    - Badge: No
 
 10. **Security Vulnerabilities** (0 critical/high)
-    - Tool: safety / npm audit
+    - Tool: pip-audit / npm audit
     - CI Enforced: Yes
     - Badge: Yes
 
@@ -146,7 +146,7 @@ artifacts = generator.write_all(Path("output"))
 
 ## Supported Languages
 
-- **Python**: pytest-cov, mutmut, radon, interrogate, safety
+- **Python**: pytest-cov, mutmut, radon, interrogate, pip-audit
 - **TypeScript**: jest, stryker, eslint, typedoc, npm audit
 - **JavaScript**: jest, stryker, eslint, jsdoc, npm audit
 - **Go**: go test -cover, go-mutesting, gocyclo, godoc, gosec
@@ -270,7 +270,7 @@ jobs:
         run: interrogate --fail-under=95
 
       - name: Security Check
-        run: safety check
+        run: pip-audit
 ```
 
 ## Implementation Details

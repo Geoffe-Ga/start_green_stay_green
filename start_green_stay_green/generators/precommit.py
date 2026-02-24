@@ -105,10 +105,10 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
                 ],
             },
             {
-                "repo": "https://github.com/Lucas-C/pre-commit-hooks-safety",
-                "rev": "v1.3.3",
+                "repo": "https://github.com/pypa/pip-audit",
+                "rev": "v2.7.3",
                 "hooks": [
-                    {"id": "python-safety-dependencies-check"},
+                    {"id": "pip-audit"},
                 ],
             },
             {
