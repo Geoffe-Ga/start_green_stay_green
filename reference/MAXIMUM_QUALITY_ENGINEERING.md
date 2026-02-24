@@ -106,7 +106,7 @@ pip install --break-system-packages \
     black \
     isort \
     bandit \
-    safety \
+    pip-audit \
     vulture \
     radon \
     xenon \
@@ -960,8 +960,8 @@ jobs:
       - name: Run Bandit (security)
         run: bandit -r src/ -c pyproject.toml
 
-      - name: Run Safety (dependency security)
-        run: safety check
+      - name: Run pip-audit (dependency security)
+        run: pip-audit
 
       - name: Run Vulture (dead code)
         run: vulture src/ --min-confidence 80
@@ -1861,7 +1861,7 @@ Track and enforce these metrics:
 | Technical Debt Ratio | ≤5% | sonarqube |
 | Documentation Coverage | ≥95% | interrogate |
 | Dependency Freshness | ≤30 days | npm-check-updates |
-| Security Vulnerabilities | 0 critical/high | safety / npm audit |
+| Security Vulnerabilities | 0 critical/high | pip-audit / npm audit |
 
 ### 9.2 Quality Dashboard Configuration
 

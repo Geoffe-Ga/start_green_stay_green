@@ -841,7 +841,7 @@ Generate quality metrics tracking configuration per MAXIMUM_QUALITY_ENGINEERING.
 | Technical Debt Ratio | ≤5% | sonarqube |
 | Documentation Coverage | ≥95% | interrogate |
 | Dependency Freshness | ≤30 days | npm-check-updates |
-| Security Vulnerabilities | 0 critical/high | safety / npm audit |
+| Security Vulnerabilities | 0 critical/high | pip-audit / npm audit |
 
 **Dependencies**:
 - Issue 2.1 (AI Orchestrator Core)

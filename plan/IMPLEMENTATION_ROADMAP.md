@@ -49,7 +49,7 @@ This document outlines the strategic approach to completing the Start Green Stay
 - ✅ CI pipeline with all checks
 - ✅ Scripts for formatting, linting, testing
 - ✅ Coverage tracking (97%+)
-- ✅ Security scanning (bandit, safety, detect-secrets)
+- ✅ Security scanning (bandit, pip-audit, detect-secrets)
 - ✅ 3-Gate Workflow System (local, CI, code review)
 - ✅ Mutation testing moved to periodic quality check (not continuous)
 

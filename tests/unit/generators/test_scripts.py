@@ -242,8 +242,8 @@ class TestScriptsGeneratorPythonGeneration:
             assert "Auto-fix" in content
             assert "--fix" in content
 
-    def test_python_security_script_contains_bandit_safety(self) -> None:
-        """Test Python security.sh mentions Bandit and Safety."""
+    def test_python_security_script_contains_bandit_pip_audit(self) -> None:
+        """Test Python security.sh mentions Bandit and pip-audit."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
                 language="python",
@@ -254,7 +254,7 @@ class TestScriptsGeneratorPythonGeneration:
 
             content = scripts["security.sh"].read_text()
             assert "Bandit" in content
-            assert "Safety" in content
+            assert "pip-audit" in content
 
     def test_python_complexity_script_contains_radon_xenon(self) -> None:
         """Test Python complexity.sh mentions Radon and Xenon."""

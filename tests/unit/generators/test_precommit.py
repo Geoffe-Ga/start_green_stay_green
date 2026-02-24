@@ -1049,15 +1049,15 @@ class TestMutationKillers:
         repo = LANGUAGE_CONFIGS["python"]["hooks"][5]
         assert repo["rev"] == "1.7.7"
 
-    def test_python_safety_repo_url_exact(self) -> None:
-        """Test Python safety repo URL is exact."""
+    def test_python_pip_audit_repo_url_exact(self) -> None:
+        """Test Python pip-audit repo URL is exact."""
         repo = LANGUAGE_CONFIGS["python"]["hooks"][6]
-        assert repo["repo"] == "https://github.com/Lucas-C/pre-commit-hooks-safety"
+        assert repo["repo"] == "https://github.com/pypa/pip-audit"
 
-    def test_python_safety_rev_exact(self) -> None:
-        """Test Python safety rev is exact."""
+    def test_python_pip_audit_rev_exact(self) -> None:
+        """Test Python pip-audit rev is exact."""
         repo = LANGUAGE_CONFIGS["python"]["hooks"][6]
-        assert repo["rev"] == "v1.3.3"
+        assert repo["rev"] == "v2.7.3"
 
     def test_python_conventional_commit_repo_url_exact(self) -> None:
         """Test Python conventional commit repo URL is exact."""
@@ -1305,10 +1305,10 @@ class TestMutationKillers:
         hooks = LANGUAGE_CONFIGS["python"]["hooks"][5]["hooks"]
         assert hooks[0]["additional_dependencies"] == ["bandit[toml]"]
 
-    def test_python_safety_hook_id_exact(self) -> None:
-        """Test safety hook ID is exact."""
+    def test_python_pip_audit_hook_id_exact(self) -> None:
+        """Test pip-audit hook ID is exact."""
         hooks = LANGUAGE_CONFIGS["python"]["hooks"][6]["hooks"]
-        assert hooks[0]["id"] == "python-safety-dependencies-check"
+        assert hooks[0]["id"] == "pip-audit"
 
     def test_python_conventional_pre_commit_hook_id_exact(self) -> None:
         """Test conventional-pre-commit hook ID is exact."""
@@ -1758,7 +1758,7 @@ class TestLanguageConfigsStructureValidation:
             "https://github.com/PyCQA/isort",
             "https://github.com/pre-commit/mirrors-mypy",
             "https://github.com/PyCQA/bandit",
-            "https://github.com/Lucas-C/pre-commit-hooks-safety",
+            "https://github.com/pypa/pip-audit",
             "https://github.com/compilerla/conventional-pre-commit",
             "https://github.com/shellcheck-py/shellcheck-py",
             "https://github.com/asottile/pyupgrade",

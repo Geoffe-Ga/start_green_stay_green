@@ -152,7 +152,7 @@ gh pr checks --watch
 
 3. ✅ Security scanning
    - bandit (no high-severity issues)
-   - safety (dependency vulnerabilities)
+   - pip-audit (dependency vulnerabilities)
 
 4. ✅ Documentation
    - interrogate (docstring coverage)

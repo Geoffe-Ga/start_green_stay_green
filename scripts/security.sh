@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/security.sh - Run security checks with Bandit and Safety
+# scripts/security.sh - Run security checks with Bandit and pip-audit
 # Usage: ./scripts/security.sh [--full] [--verbose] [--version] [--help]
 
 set -euo pipefail
@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
             cat << EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Run security checks using Bandit and Safety.
+Run security checks using Bandit and pip-audit.
 
 OPTIONS:
     --full      Run comprehensive security scan
@@ -86,23 +86,32 @@ bandit -r start_green_stay_green/ 2>/tmp/bandit-stderr.txt || {
     exit 1
 }
 
-echo "=== Security Checks (Safety) ==="
+echo "=== Security Checks (pip-audit) ==="
 
-# Run Safety with policy file
+# Run pip-audit for dependency vulnerability scanning
 if $VERBOSE; then
-    echo "Running Safety dependency checker..."
+    echo "Running pip-audit dependency checker..."
 fi
-if [ -f "$PROJECT_ROOT/.safety-policy.yml" ]; then
-    safety check --policy-file "$PROJECT_ROOT/.safety-policy.yml" 2>/tmp/safety-stderr.txt || {
-        echo "✗ Safety found issues" >&2
-        exit 1
-    }
-else
-    safety check 2>/tmp/safety-stderr.txt || {
-        echo "✗ Safety found issues" >&2
-        exit 1
-    }
+
+# Build ignore flags for known transitive dependency vulnerabilities
+# that cannot be fixed (no fix available or deprecated transitive deps).
+# Each entry should have a corresponding tracking issue.
+PIP_AUDIT_ARGS=()
+if [ -f "$PROJECT_ROOT/.pip-audit-known-vulnerabilities" ]; then
+    while IFS= read -r line; do
+        # Strip inline comments and trim whitespace
+        vuln_id="${line%%#*}"
+        vuln_id="${vuln_id%"${vuln_id##*[![:space:]]}"}"
+        # Skip empty lines
+        [[ -z "$vuln_id" ]] && continue
+        PIP_AUDIT_ARGS+=(--ignore-vuln "$vuln_id")
+    done < "$PROJECT_ROOT/.pip-audit-known-vulnerabilities"
 fi
+
+pip-audit "${PIP_AUDIT_ARGS[@]}" 2>/tmp/pip-audit-stderr.txt || {
+    echo "✗ pip-audit found issues" >&2
+    exit 1
+}
 
 if $FULL; then
     echo "=== Comprehensive Security Scan ==="

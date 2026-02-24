@@ -209,7 +209,7 @@ def stay_green_workflow():
 │ │ ./scripts/check-all.sh                                       │ │
 │ │  • Formatting (ruff, black, isort)                          │ │
 │ │  • Linting (ruff, pylint, mypy)                            │ │
-│ │  • Security (bandit, safety)                               │ │
+│ │  • Security (bandit, pip-audit)                             │ │
 │ │  • Complexity (≤10, grade A)                               │ │
 │ │  • Tests + Coverage (90%+)                                 │ │
 │ └──────────────────────────────────────────────────────────────┘ │
@@ -287,7 +287,7 @@ def stay_green_workflow():
 | **Complexity Grade** | A (1-5) | Gate 1, Gate 2 | xenon |
 | **Pylint Score** | ≥ 9.0 | Gate 1, Gate 2 | pylint |
 | **Type Checking** | Strict, 0 errors | Gate 1, Gate 2 | mypy |
-| **Security Issues** | 0 | Gate 1, Gate 2 | bandit, safety |
+| **Security Issues** | 0 | Gate 1, Gate 2 | bandit, pip-audit |
 | **Mutation Score** | ≥ 80% (periodic) | Recommended for critical code | mutmut |
 | **Claude Review** | LGTM | Gate 3 | AI review |
 

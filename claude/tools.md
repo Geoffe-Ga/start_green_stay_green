@@ -80,7 +80,7 @@ The scripts below are used by pre-commit hooks and CI pipelines. They can be run
 Runs the same checks as pre-commit (minus git hooks):
 1. Formatting checks (ruff, black, isort)
 2. Linting (ruff, pylint, mypy)
-3. Security scanning (bandit, safety)
+3. Security scanning (bandit, pip-audit)
 4. Complexity analysis (radon, xenon)
 5. Unit tests with coverage
 6. Coverage report validation (90% minimum)

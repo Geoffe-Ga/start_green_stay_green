@@ -40,11 +40,11 @@ repos:
         args: [-c, pyproject.toml]
         additional_dependencies: ["bandit[toml]"]
 
-  # Safety - Dependency vulnerability check
-  - repo: https://github.com/Lucas-C/pre-commit-hooks-safety
-    rev: v1.3.3
+  # pip-audit - Dependency vulnerability check
+  - repo: https://github.com/pypa/pip-audit
+    rev: v2.7.3
     hooks:
-      - id: python-safety-dependencies-check
+      - id: pip-audit
 
   # Conventional commits
   - repo: https://github.com/compilerla/conventional-pre-commit

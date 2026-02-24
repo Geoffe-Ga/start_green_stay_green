@@ -979,7 +979,7 @@ jobs:
 
     def test_python_security_tools_exact(self) -> None:
         """Test Python security_tools list is exact."""
-        assert LANGUAGE_CONFIGS["python"]["security_tools"] == ["bandit", "safety"]
+        assert LANGUAGE_CONFIGS["python"]["security_tools"] == ["bandit", "pip-audit"]
 
     def test_python_supported_versions_exact(self) -> None:
         """Test Python supported_versions list is exact."""

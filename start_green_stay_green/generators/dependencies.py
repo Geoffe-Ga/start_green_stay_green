@@ -209,7 +209,7 @@ mypy>=1.5.0
 
 # Security
 bandit>=1.7.5
-safety>=2.3.0
+pip-audit>=2.7.0
 
 # Complexity analysis
 radon>=6.0.0
@@ -262,7 +262,7 @@ dev = [
     "isort>=5.12.0",
     "mypy>=1.5.0",
     "bandit>=1.7.5",
-    "safety>=3.0.0",
+    "pip-audit>=2.7.0",
     "radon>=6.0.0",
     "mutmut>=2.4.0",
     "pre-commit>=3.4.0",

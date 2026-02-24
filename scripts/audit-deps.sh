@@ -67,11 +67,27 @@ fi
 
 echo "=== Dependency Audit ==="
 
-# Check for vulnerabilities using Safety
+# Check for vulnerabilities using pip-audit
 if $VERBOSE; then
     echo "Checking for known vulnerabilities..."
 fi
-safety check || { echo "✗ Vulnerabilities found" >&2; exit 1; }
+
+# Build ignore flags for known transitive dependency vulnerabilities
+# that cannot be fixed (no fix available or deprecated transitive deps).
+# Each entry should have a corresponding tracking issue.
+PIP_AUDIT_ARGS=()
+if [ -f "$PROJECT_ROOT/.pip-audit-known-vulnerabilities" ]; then
+    while IFS= read -r line; do
+        # Strip inline comments and trim whitespace
+        vuln_id="${line%%#*}"
+        vuln_id="${vuln_id%"${vuln_id##*[![:space:]]}"}"
+        # Skip empty lines
+        [[ -z "$vuln_id" ]] && continue
+        PIP_AUDIT_ARGS+=(--ignore-vuln "$vuln_id")
+    done < "$PROJECT_ROOT/.pip-audit-known-vulnerabilities"
+fi
+
+pip-audit "${PIP_AUDIT_ARGS[@]}" || { echo "✗ Vulnerabilities found" >&2; exit 1; }
 
 # Check for outdated packages
 if $OUTDATED || $VERBOSE; then

@@ -5,18 +5,125 @@ Tests the complete end-to-end initialization workflow including:
 - Generator orchestration
 - File creation
 - Output validation
+
+All tests use mocked AI orchestrator to avoid calling the real Anthropic API.
+See Issue #196 for details.
 """
 
-import os
+from collections.abc import Generator
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
 
 from start_green_stay_green.cli import app
 
-# Check if API key is available for AI-powered generator tests
-HAS_API_KEY = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"))
+
+@pytest.fixture(autouse=True)
+def _block_orchestrator_init() -> Generator[None, None, None]:
+    """Block real Anthropic API calls for all tests in this module.
+
+    Patches _initialize_orchestrator to return None so no real API calls
+    are made. Tests that need AI-generated output use additional stub
+    patches on individual generation steps.
+
+    Addresses Issue #196: API key from keyring, env vars, or CLI args
+    could cause real API calls during testing.
+    """
+    with patch(
+        "start_green_stay_green.cli._initialize_orchestrator", return_value=None
+    ):
+        yield
+
+
+def _stub_ci_step(project_path: Path, _language: str, _orchestrator: object) -> None:
+    """Stub CI generation step that writes minimal valid workflow files.
+
+    Args:
+        project_path: Target project directory.
+        _language: Programming language (unused in stub).
+        _orchestrator: Mock orchestrator (unused in stub).
+    """
+    workflows_dir = project_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    ci_content = "name: CI\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
+    (workflows_dir / "ci.yml").write_text(ci_content)
+
+
+def _stub_review_step(project_path: Path, _orchestrator: object) -> None:
+    """Stub review generation step that writes a minimal code-review workflow.
+
+    Args:
+        project_path: Target project directory.
+        _orchestrator: Mock orchestrator (unused in stub).
+    """
+    workflows_dir = project_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    review_content = "name: Code Review\non:\n  pull_request:\n"
+    (workflows_dir / "code-review.yml").write_text(review_content)
+
+
+def _stub_claude_md_step(
+    project_path: Path,
+    project_name: str,
+    language: str,
+    _orchestrator: object,
+) -> None:
+    """Stub CLAUDE.md generation step that writes minimal content.
+
+    Args:
+        project_path: Target project directory.
+        project_name: Name of the project.
+        language: Programming language.
+        _orchestrator: Mock orchestrator (unused in stub).
+    """
+    (project_path / "CLAUDE.md").write_text(
+        f"# Claude Code Project Context: {project_name}\n\nGenerated for {language}.\n"
+    )
+
+
+def _stub_architecture_step(
+    project_path: Path,
+    project_name: str,
+    _language: str,
+    _orchestrator: object,
+) -> None:
+    """Stub architecture generation step that writes minimal rule files.
+
+    Args:
+        project_path: Target project directory.
+        project_name: Name of the project.
+        _language: Programming language (unused in stub).
+        _orchestrator: Mock orchestrator (unused in stub).
+    """
+    arch_dir = project_path / "plans" / "architecture"
+    arch_dir.mkdir(parents=True, exist_ok=True)
+    linter_cfg = f"[importlinter]\nroot_package = {project_name}\n"
+    (arch_dir / ".importlinter").write_text(linter_cfg)
+    (arch_dir / "README.md").write_text(f"# Architecture Rules for {project_name}\n")
+    run_check = arch_dir / "run-check.sh"
+    run_check.write_text("#!/usr/bin/env bash\necho 'Architecture check passed'\n")
+    run_check.chmod(0o755)
+
+
+def _stub_subagents_step(
+    project_path: Path,
+    project_name: str,
+    _language: str,
+    _orchestrator: object,
+) -> None:
+    """Stub subagents generation step that creates the subagents directory.
+
+    Args:
+        project_path: Target project directory.
+        project_name: Name of the project.
+        _language: Programming language (unused in stub).
+        _orchestrator: Mock orchestrator (unused in stub).
+    """
+    subagents_dir = project_path / ".claude" / "subagents"
+    subagents_dir.mkdir(parents=True, exist_ok=True)
+    (subagents_dir / "README.md").write_text(f"# Subagents for {project_name}\n")
 
 
 class TestInitFlowIntegration:
@@ -172,11 +279,13 @@ class TestInitFlowIntegration:
         assert "repos:" in content
         assert "hooks:" in content
 
-    @pytest.mark.skipif(
-        not HAS_API_KEY, reason="Requires API key for AI-powered generators"
-    )
+    @patch("start_green_stay_green.cli._generate_review_step", _stub_review_step)
+    @patch("start_green_stay_green.cli._generate_ci_step", _stub_ci_step)
     def test_init_generates_github_workflows(self, tmp_path: Path) -> None:
-        """Test init creates GitHub Actions workflows."""
+        """Test init creates GitHub Actions workflows.
+
+        Uses stub generators to avoid calling real Anthropic API (#196).
+        """
         runner = CliRunner()
         runner.invoke(
             app,
@@ -204,11 +313,12 @@ class TestInitFlowIntegration:
             workflow_path = workflows_dir / workflow_name
             assert workflow_path.exists(), f"Missing workflow: {workflow_name}"
 
-    @pytest.mark.skipif(
-        not HAS_API_KEY, reason="Requires API key for AI-powered generators"
-    )
+    @patch("start_green_stay_green.cli._generate_claude_md_step", _stub_claude_md_step)
     def test_init_generates_claude_md(self, tmp_path: Path) -> None:
-        """Test init creates CLAUDE.md file."""
+        """Test init creates CLAUDE.md file.
+
+        Uses stub generator to avoid calling real Anthropic API (#196).
+        """
         runner = CliRunner()
         runner.invoke(
             app,
@@ -230,9 +340,8 @@ class TestInitFlowIntegration:
         assert claude_md.exists()
 
         content = claude_md.read_text()
-        # Verify exact expected header format (not just any markdown header)
         assert "# Claude Code Project Context" in content
-        assert len(content) > 100
+        assert len(content) > 10
 
     def test_init_generates_skills_directory(self, tmp_path: Path) -> None:
         """Test init creates .claude/skills directory with skill files.
@@ -279,11 +388,15 @@ class TestInitFlowIntegration:
             content = skill_file.read_text()
             assert len(content) > 100, f"Skill {skill} has insufficient content"
 
-    @pytest.mark.skipif(
-        not HAS_API_KEY, reason="Requires API key for AI-powered generators"
+    @patch(
+        "start_green_stay_green.cli._generate_subagents_step",
+        _stub_subagents_step,
     )
     def test_init_generates_subagents_directory(self, tmp_path: Path) -> None:
-        """Test init creates .claude/subagents directory."""
+        """Test init creates .claude/subagents directory.
+
+        Uses stub generator to avoid calling real Anthropic API (#196).
+        """
         runner = CliRunner()
         runner.invoke(
             app,
@@ -305,11 +418,15 @@ class TestInitFlowIntegration:
         assert subagents_dir.exists()
         assert subagents_dir.is_dir()
 
-    @pytest.mark.skipif(
-        not HAS_API_KEY, reason="Requires API key for AI-powered generators"
+    @patch(
+        "start_green_stay_green.cli._generate_architecture_step",
+        _stub_architecture_step,
     )
     def test_init_generates_architecture_rules(self, tmp_path: Path) -> None:
-        """Test init creates architecture enforcement rules."""
+        """Test init creates architecture enforcement rules.
+
+        Uses stub generator to avoid calling real Anthropic API (#196).
+        """
         runner = CliRunner()
         runner.invoke(
             app,
