@@ -127,7 +127,6 @@ if $METRICS_OUTPUT; then
 import re, json, sys
 text = sys.stdin.read()
 # Match summary: '123 passed, 4 failed, 5 skipped in 12.34s'
-passed = len(re.findall(r'(\d+) passed', text))
 failed_m = re.search(r'(\d+) failed', text)
 skipped_m = re.search(r'(\d+) skipped', text)
 passed_m = re.search(r'(\d+) passed', text)

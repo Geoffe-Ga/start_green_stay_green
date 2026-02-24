@@ -56,6 +56,7 @@ OPTIONS:
     --check     Check only, fail if issues found (default mode)
     --verbose   Show detailed output
     --json      Output results in JSON format
+    --metrics   Output machine-readable JSON metrics to stdout
     --version   Show version and exit
     --help      Display this help message
 

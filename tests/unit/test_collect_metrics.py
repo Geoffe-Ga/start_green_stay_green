@@ -776,6 +776,10 @@ class TestMainScriptMode:
 
             assert result == 0
             assert output.exists()
+            data = json.loads(output.read_text())
+            # Security failure should report "unknown", not "pass"
+            assert data["metrics"]["security_status"] == "unknown"
+            assert data["metrics"]["security_issues"] is None
 
     def test_main_file_mode_backward_compat(self) -> None:
         """Test that file mode remains backward compatible."""

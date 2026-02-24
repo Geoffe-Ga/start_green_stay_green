@@ -438,10 +438,11 @@ def _collect_script_mode(
         collector.metrics["security_issues"] = sec_data.get("bandit_issues", 0)
         collector.metrics["security_status"] = sec_data.get("status", "unknown")
     else:
-        collector.metrics["security_issues"] = 0
-        collector.metrics["security_status"] = "pass"
+        collector.metrics["security_issues"] = None
+        collector.metrics["security_status"] = "unknown"
 
-    # Mutation score: explicit override > cache
+    # Mutation score: read SQLite cache directly (not mutation.sh --metrics)
+    # because running mutmut is expensive; the cache already has results.
     _collect_mutation(collector, args)
 
     # New metrics only available in script mode
@@ -483,8 +484,8 @@ def _collect_file_mode(
         collector.collect_security(args.security_file)
     except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
         print(f"Warning: Could not parse security ({type(e).__name__}): {e}")
-        collector.metrics["security_issues"] = 0
-        collector.metrics["security_status"] = "pass"
+        collector.metrics["security_issues"] = None
+        collector.metrics["security_status"] = "unknown"
 
     _collect_mutation(collector, args)
 
