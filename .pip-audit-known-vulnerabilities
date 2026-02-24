@@ -4,5 +4,5 @@
 #
 # Review periodically and remove entries when fixes become available.
 
-PYSEC-2022-42969  # py 1.11.0 - transitive dep of interrogate, deprecated
-CVE-2025-14009    # nltk - transitive dep, no fix available yet
+PYSEC-2022-42969  # py 1.11.0 - transitive dep of interrogate, deprecated - #203
+CVE-2025-14009    # nltk - transitive dep, no fix available yet - #203

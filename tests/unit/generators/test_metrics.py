@@ -1607,3 +1607,39 @@ class TestDashboardJavaScript:
         """Test JavaScript has null check for test count."""
         dashboard = self._get_dashboard()
         assert "tests_total === null" in dashboard
+
+
+class TestDashboardSync:
+    """Test that docs/dashboard.html stays in sync with the template."""
+
+    def test_deployed_dashboard_card_count_matches_template(self) -> None:
+        """Verify docs/dashboard.html has the same card count as the template."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="start-green-stay-green",
+            enable_dashboard=True,
+        )
+        generator = MetricsGenerator(None, config)
+        template = generator._generate_dashboard_template()
+        assert template is not None
+
+        dashboard_path = Path(__file__).resolve().parents[3] / "docs" / "dashboard.html"
+        assert (
+            dashboard_path.exists()
+        ), f"docs/dashboard.html not found at {dashboard_path}"
+
+        deployed = dashboard_path.read_text()
+
+        template_cards = template.count('class="metric-card"')
+        deployed_cards = deployed.count('class="metric-card"')
+        assert deployed_cards == template_cards, (
+            f"docs/dashboard.html has {deployed_cards} cards but template has "
+            f"{template_cards}. Regenerate with: python -c "
+            f'"from start_green_stay_green.generators.metrics import '
+            f"MetricsGenerator, MetricsGenerationConfig; "
+            f"c = MetricsGenerationConfig(language='python', "
+            f"project_name='start-green-stay-green'); "
+            f"g = MetricsGenerator(None, c); "
+            f"open('docs/dashboard.html', 'w').write("
+            f'g._generate_dashboard_template())"'
+        )

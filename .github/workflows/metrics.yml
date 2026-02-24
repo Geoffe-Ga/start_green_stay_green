@@ -19,23 +19,46 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Install dependencies
+      - name: Install dependencies in .venv
         run: |
+          python -m venv .venv
+          . .venv/bin/activate
           pip install -e .
           pip install -r requirements-dev.txt
 
       - name: Check documentation coverage
         run: |
+          . .venv/bin/activate
           interrogate -v start_green_stay_green/ > docs-report.txt 2>&1 || true
 
       - name: Generate metrics.json via script mode
         run: |
+          . .venv/bin/activate
           python scripts/collect_metrics.py \
             --project-name start-green-stay-green \
             --output docs/metrics.json \
             --metrics-mode script \
             --scripts-dir scripts/ \
             --docs-file docs-report.txt
+
+      - name: Regenerate dashboard.html from template
+        run: |
+          . .venv/bin/activate
+          python -c "
+          from start_green_stay_green.generators.metrics import (
+              MetricsGenerator,
+              MetricsGenerationConfig,
+          )
+          config = MetricsGenerationConfig(
+              language='python',
+              project_name='start-green-stay-green',
+          )
+          gen = MetricsGenerator(None, config)
+          html = gen._generate_dashboard_template()
+          with open('docs/dashboard.html', 'w') as f:
+              f.write(html)
+          print('Regenerated docs/dashboard.html')
+          "
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
