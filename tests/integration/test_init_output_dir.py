@@ -6,29 +6,12 @@ See Issue #196.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 
-
-def _get_env_without_api_keys() -> dict[str, str]:
-    """Return a copy of os.environ with Anthropic API keys removed.
-
-    Prevents subprocess-based tests from calling the real Anthropic API
-    via environment variables. Also sets SGSG_SKIP_KEYRING=1 to prevent
-    keyring lookups.
-
-    Returns:
-        Environment dict with API keys removed.
-    """
-    env = os.environ.copy()
-    env.pop("ANTHROPIC_API_KEY", None)
-    env.pop("CLAUDE_API_KEY", None)
-    # Force keyring to use a null backend so it returns no stored keys
-    env["PYTHON_KEYRING_BACKEND"] = "keyring.backends.null.Keyring"
-    return env
+from tests.conftest import get_env_without_api_keys
 
 
 def test_init_with_output_dir_creates_files() -> None:
@@ -55,7 +38,7 @@ def test_init_with_output_dir_creates_files() -> None:
             capture_output=True,
             text=True,
             check=False,
-            env=_get_env_without_api_keys(),
+            env=get_env_without_api_keys(),
         )
 
         # Check command succeeded
@@ -119,7 +102,7 @@ def test_init_output_dir_resolves_correctly() -> None:
             capture_output=True,
             text=True,
             check=False,
-            env=_get_env_without_api_keys(),
+            env=get_env_without_api_keys(),
         )
 
         assert result.returncode == 0

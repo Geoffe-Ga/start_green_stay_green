@@ -14,12 +14,13 @@ backend to prevent real Anthropic API calls. See Issue #196.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import subprocess
 import tempfile
 
 import pytest
+
+from tests.conftest import get_env_without_api_keys
 
 # Languages fully supported in the CLI pipeline (all generators)
 CLI_SUPPORTED_LANGUAGES = ("python", "typescript", "go", "rust")
@@ -58,22 +59,6 @@ EXPECTED_KEY_FILES: dict[str, list[str]] = {
 }
 
 
-def _get_env_without_api_keys() -> dict[str, str]:
-    """Return a copy of os.environ with Anthropic API keys removed.
-
-    Prevents subprocess-based tests from calling the real Anthropic API.
-    Uses null keyring backend to prevent keyring lookups.
-
-    Returns:
-        Environment dict with API keys removed and null keyring backend.
-    """
-    env = os.environ.copy()
-    env.pop("ANTHROPIC_API_KEY", None)
-    env.pop("CLAUDE_API_KEY", None)
-    env["PYTHON_KEYRING_BACKEND"] = "keyring.backends.null.Keyring"
-    return env
-
-
 class TestLanguageE2E:
     """E2E tests for sgsg init with each supported language."""
 
@@ -96,7 +81,7 @@ class TestLanguageE2E:
                 capture_output=True,
                 text=True,
                 check=False,
-                env=_get_env_without_api_keys(),
+                env=get_env_without_api_keys(),
             )
 
             assert (
@@ -130,7 +115,7 @@ class TestLanguageE2E:
                 capture_output=True,
                 text=True,
                 check=False,
-                env=_get_env_without_api_keys(),
+                env=get_env_without_api_keys(),
             )
 
             assert (
@@ -155,7 +140,7 @@ class TestLanguageE2E:
                 capture_output=True,
                 text=True,
                 check=False,
-                env=_get_env_without_api_keys(),
+                env=get_env_without_api_keys(),
             )
 
             assert result.returncode == 0, f"sgsg init failed: {result.stdout}"

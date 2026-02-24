@@ -341,7 +341,8 @@ class TestInitFlowIntegration:
 
         content = claude_md.read_text()
         assert "# Claude Code Project Context" in content
-        assert len(content) > 10
+        assert "test-claude-md-project" in content
+        assert len(content) > 50
 
     def test_init_generates_skills_directory(self, tmp_path: Path) -> None:
         """Test init creates .claude/skills directory with skill files.
