@@ -5,14 +5,36 @@ This module provides:
 - Common test fixtures
 - Test isolation enforcement
 - Language parametrization fixtures for multi-language testing
+- API key isolation helpers for subprocess-based tests
 """
 
 from collections.abc import Generator
+import os
 from pathlib import Path
 
 import pytest
 
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
+
+
+def get_env_without_api_keys() -> dict[str, str]:
+    """Return a copy of os.environ with Anthropic API keys removed.
+
+    Prevents subprocess-based tests from calling the real Anthropic API.
+    Uses null keyring backend to prevent keyring lookups.
+
+    This is the canonical helper for API key isolation in subprocess tests.
+    See Issue #196.
+
+    Returns:
+        Environment dict with API keys removed and null keyring backend.
+    """
+    env = os.environ.copy()
+    env.pop("ANTHROPIC_API_KEY", None)
+    env.pop("CLAUDE_API_KEY", None)
+    env["PYTHON_KEYRING_BACKEND"] = "keyring.backends.null.Keyring"
+    return env
+
 
 # Expected file extensions per language
 LANGUAGE_EXTENSIONS: dict[str, str] = {
