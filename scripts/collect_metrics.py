@@ -192,6 +192,30 @@ class MetricsCollector:
         self.metrics["mutation_score"] = None
         self.metrics["mutation_status"] = "unknown"
 
+    @staticmethod
+    def _compute_status(
+        value: float | None,
+        threshold: float,
+        *,
+        higher_is_better: bool = True,
+    ) -> str:
+        """Compute pass/fail/unknown status from a metric value.
+
+        Args:
+            value: Metric value, or None if unavailable
+            threshold: Threshold for pass/fail
+            higher_is_better: If True, value >= threshold is pass;
+                if False, value <= threshold is pass
+
+        Returns:
+            "pass", "fail", or "unknown"
+        """
+        if value is None:
+            return "unknown"
+        if higher_is_better:
+            return "pass" if value >= threshold else "fail"
+        return "pass" if value <= threshold else "fail"
+
     def collect_mutation_from_cache(self, cache_path: Path) -> None:
         """Read mutation score directly from .mutmut-cache SQLite database.
 
@@ -319,11 +343,14 @@ class MetricsCollector:
             self.metrics["tests_passed"] = data.get("tests_passed", 0)
             self.metrics["tests_failed"] = data.get("tests_failed", 0)
             self.metrics["tests_skipped"] = data.get("tests_skipped", 0)
-            self.metrics["tests_status"] = (
-                "pass" if data.get("tests_failed", 0) == 0 else "fail"
+            self.metrics["tests_status"] = data.get(
+                "status", "pass" if data.get("tests_failed", 0) == 0 else "fail"
             )
         else:
             self.metrics["tests_total"] = None
+            self.metrics["tests_passed"] = None
+            self.metrics["tests_failed"] = None
+            self.metrics["tests_skipped"] = None
             self.metrics["tests_status"] = "unknown"
 
     def collect_complexity_from_script(self, scripts_dir: Path) -> None:
@@ -338,17 +365,12 @@ class MetricsCollector:
             mi_avg = data.get("maintainability_avg")
 
             self.metrics["complexity_avg"] = cc_avg
-            self.metrics["complexity_status"] = (
-                "pass"
-                if cc_avg is not None and cc_avg <= self.thresholds["complexity"]
-                else ("fail" if cc_avg is not None else "unknown")
+            self.metrics["complexity_status"] = self._compute_status(
+                cc_avg, self.thresholds["complexity"], higher_is_better=False
             )
             self.metrics["maintainability_avg"] = mi_avg
-            self.metrics["maintainability_status"] = (
-                "pass"
-                if mi_avg is not None
-                and mi_avg >= self.thresholds.get("maintainability", 20)
-                else ("fail" if mi_avg is not None else "unknown")
+            self.metrics["maintainability_status"] = self._compute_status(
+                mi_avg, self.thresholds.get("maintainability", 20)
             )
         else:
             self.metrics["complexity_avg"] = None
@@ -372,7 +394,6 @@ class MetricsCollector:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text(json.dumps(metrics_data, indent=2))
         print(f"✓ Generated {output_file}")
-        print(json.dumps(metrics_data, indent=2))
 
 
 def _default_thresholds() -> dict[str, int | float]:
@@ -414,12 +435,23 @@ def _collect_script_mode(
             collector.metrics["coverage_status"] = (
                 "pass" if cov_pct >= thresholds["coverage"] else "fail"
             )
+        else:
+            collector.metrics["coverage"] = None
+            collector.metrics["coverage_status"] = "unknown"
         branch_pct = cov_data.get("branch_coverage_pct")
         if branch_pct is not None:
             collector.metrics["branch_coverage"] = branch_pct
             collector.metrics["branch_coverage_status"] = (
                 "pass" if branch_pct >= thresholds["branch_coverage"] else "fail"
             )
+        else:
+            collector.metrics["branch_coverage"] = None
+            collector.metrics["branch_coverage_status"] = "unknown"
+    else:
+        collector.metrics["coverage"] = None
+        collector.metrics["coverage_status"] = "unknown"
+        collector.metrics["branch_coverage"] = None
+        collector.metrics["branch_coverage_status"] = "unknown"
 
     # Complexity + Maintainability via script
     collector.collect_complexity_from_script(scripts_dir)

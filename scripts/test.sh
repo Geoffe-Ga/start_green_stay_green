@@ -139,13 +139,25 @@ total_skipped = int(skipped_m.group(1)) if skipped_m else 0
 total = total_passed + total_failed + total_skipped
 duration = float(duration_m.group(1)) if duration_m else 0.0
 
-print(json.dumps({
-    'tests_total': total,
-    'tests_passed': total_passed,
-    'tests_failed': total_failed,
-    'tests_skipped': total_skipped,
-    'duration_seconds': duration,
-}))
+# Distinguish zero collected tests (broken suite) from zero failures
+if total == 0 and not passed_m and not failed_m:
+    print(json.dumps({
+        'tests_total': 0,
+        'tests_passed': 0,
+        'tests_failed': 0,
+        'tests_skipped': 0,
+        'duration_seconds': 0.0,
+        'status': 'unknown',
+    }))
+else:
+    print(json.dumps({
+        'tests_total': total,
+        'tests_passed': total_passed,
+        'tests_failed': total_failed,
+        'tests_skipped': total_skipped,
+        'duration_seconds': duration,
+        'status': 'fail' if total_failed > 0 else 'pass',
+    }))
 " <<< "$TEST_OUT"
     exit 0
 fi
