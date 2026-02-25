@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-24T23:26:11.481049+00:00",
+  "timestamp": "2026-02-25T00:22:58.915707+00:00",
   "project": "start-green-stay-green",
   "thresholds": {
     "coverage": 90,
@@ -14,13 +14,13 @@
     "tests_total": 0
   },
   "metrics": {
-    "coverage": 94.92,
+    "coverage": 94.93,
     "coverage_status": "pass",
     "branch_coverage": 90.53,
     "branch_coverage_status": "pass",
     "complexity_avg": null,
     "complexity_status": "unknown",
-    "maintainability_avg": 77.15,
+    "maintainability_avg": 77.12,
     "maintainability_status": "pass",
     "docs_coverage": null,
     "docs_status": "unknown",
