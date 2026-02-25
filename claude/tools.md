@@ -102,6 +102,19 @@ pre-commit run --all-files
 # This takes several minutes - runs automatically in CI
 ```
 
+**`./scripts/pr-status.sh`** - Monitor PR merge-readiness (CI + Claude review)
+
+```bash
+# Subcommand-based CLI for PR monitoring
+./scripts/pr-status.sh list                    # List recent CI runs
+./scripts/pr-status.sh list --branch feat/foo  # Filter by branch
+./scripts/pr-status.sh view 12345              # View run #12345
+./scripts/pr-status.sh watch 12345 12346       # Watch two runs
+./scripts/pr-status.sh checks 74               # Show PR #74 checks
+./scripts/pr-status.sh status 74               # Full PR verdict (CI + Claude review)
+./scripts/pr-status.sh --version               # Show version
+```
+
 **Other Available Scripts** (used by pre-commit hooks):
 
 - **`./scripts/format.sh`** - Auto-format code (use `pre-commit run --all-files` instead)

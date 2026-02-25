@@ -695,11 +695,11 @@ class TestMutationKillers:
             assert "clippy" in content
 
     def test_generated_scripts_exact_count_python(self) -> None:
-        """Test Python generator creates EXACTLY 9 scripts.
+        """Test Python generator creates EXACTLY 12 scripts.
 
         Kills mutations in script count logic.
         Scripts: check-all, format, lint, test, fix-all, security, complexity,
-        mutation, analyze_mutations.py
+        mutation, analyze_mutations.py, typecheck, coverage, pr-status
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
@@ -709,9 +709,9 @@ class TestMutationKillers:
             generator = ScriptsGenerator(Path(tmpdir), config)
             scripts = generator.generate()
 
-            assert len(scripts) == 11
-            assert len(scripts) > 10
-            assert len(scripts) < 12
+            assert len(scripts) == 12
+            assert len(scripts) > 11
+            assert len(scripts) < 13
 
     def test_generated_scripts_exact_count_typescript(self) -> None:
         """Test TypeScript generator creates EXACTLY 6 scripts."""
@@ -723,9 +723,9 @@ class TestMutationKillers:
             generator = ScriptsGenerator(Path(tmpdir), config)
             scripts = generator.generate()
 
-            assert len(scripts) == 6
-            assert len(scripts) > 5
-            assert len(scripts) < 7
+            assert len(scripts) == 7
+            assert len(scripts) > 6
+            assert len(scripts) < 8
 
     def test_script_file_executable_permission_exact(self) -> None:
         """Test generated scripts have EXACT executable permission (0o755).
@@ -1328,6 +1328,18 @@ class TestTypeScriptTypecheckScript:
             content = scripts["check-all.sh"].read_text()
             assert "typecheck.sh" in content
 
+    def test_pr_status_script_generated_for_typescript(self) -> None:
+        """Test pr-status.sh is included in TypeScript generated scripts."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="typescript",
+                package_name="my_app",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            assert "pr-status.sh" in scripts
+
     def test_typescript_test_script_handles_empty_jest_args(self) -> None:
         """Test TypeScript test.sh uses safe empty-array expansion for JEST_ARGS."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1341,3 +1353,150 @@ class TestTypeScriptTypecheckScript:
             content = scripts["test.sh"].read_text()
             # Should use safe expansion pattern, not bare "${JEST_ARGS[@]}"
             assert '${JEST_ARGS[@]+"${JEST_ARGS[@]}"}' in content
+
+
+class TestPrStatusScript:
+    """Test pr-status.sh script generation (language-agnostic)."""
+
+    def test_pr_status_script_generated_for_python(self) -> None:
+        """Test pr-status.sh is included in Python generated scripts."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            assert "pr-status.sh" in scripts
+            assert scripts["pr-status.sh"].exists()
+
+    def test_pr_status_script_generated_for_all_languages(self) -> None:
+        """Test pr-status.sh is generated for all supported languages."""
+        languages = ["python", "typescript", "go", "rust"]
+        for lang in languages:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                config = ScriptConfig(
+                    language=lang,
+                    package_name="test_pkg",
+                )
+                generator = ScriptsGenerator(Path(tmpdir), config)
+                scripts = generator.generate()
+
+                assert "pr-status.sh" in scripts, f"Missing for {lang}"
+
+    def test_pr_status_script_has_subcommands(self) -> None:
+        """Test pr-status.sh contains all subcommand case patterns."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["pr-status.sh"].read_text()
+            assert "list)" in content
+            assert "view)" in content
+            assert "watch)" in content
+            assert "checks)" in content
+            assert "status)" in content
+
+    def test_pr_status_script_is_executable(self) -> None:
+        """Test pr-status.sh has executable permissions."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            script_path = scripts["pr-status.sh"]
+            assert script_path.stat().st_mode & 0o111
+
+    def test_pr_status_script_has_version_flag(self) -> None:
+        """Test pr-status.sh supports --version flag."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["pr-status.sh"].read_text()
+            assert "--version)" in content
+            assert "VERSION=" in content
+
+    def test_pr_status_script_has_bash_safety(self) -> None:
+        """Test pr-status.sh has set -euo pipefail."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["pr-status.sh"].read_text()
+            assert "set -euo pipefail" in content
+            assert "#!/usr/bin/env bash" in content
+
+    def test_pr_status_script_has_help_text(self) -> None:
+        """Test pr-status.sh has comprehensive help output."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["pr-status.sh"].read_text()
+            assert "SUBCOMMANDS:" in content
+            assert "EXAMPLES:" in content
+            assert "EXIT CODES:" in content
+            assert "--help" in content
+
+    def test_pr_status_script_has_claude_review_parsing(self) -> None:
+        """Test pr-status.sh status subcommand parses Claude review verdicts."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["pr-status.sh"].read_text()
+            assert "LGTM" in content
+            assert "CHANGES_REQUESTED" in content
+            assert "Verdict:" in content
+            assert "READY TO MERGE" in content
+
+    def test_pr_status_script_defaults_to_ci_yml_workflow(self) -> None:
+        """Test pr-status.sh defaults to ci.yml for workflow filename."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["pr-status.sh"].read_text()
+            assert 'workflow="ci.yml"' in content
+
+    def test_pr_status_script_interpolates_package_name(self) -> None:
+        """Test pr-status.sh includes the project package name."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_special_project",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["pr-status.sh"].read_text()
+            assert "my_special_project" in content

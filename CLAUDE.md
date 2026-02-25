@@ -248,6 +248,7 @@ When delegating work to subagents, provide:
 - `scripts/security.sh`: Security scanning
 - `scripts/mutation.sh`: Run mutation tests
 - `scripts/complexity.sh`: Analyze code complexity
+- `scripts/pr-status.sh`: Monitor PR merge-readiness (CI + Claude review)
 
 ---
 
