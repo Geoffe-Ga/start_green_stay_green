@@ -2,6 +2,11 @@
 # scripts/common.sh - Common utilities for quality scripts
 # Source this file in other scripts to get venv handling
 
+# Disable macOS Keychain prompts from pip/pip-audit.
+# Python's keyring library defaults to macOS Keychain, which triggers
+# 3 separate GUI dialog boxes per pre-commit run when pip accesses PyPI.
+export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring
+
 # Ensure venv with required dependencies
 # Usage: ensure_venv
 # Sets global variable: TEMP_VENV_CREATED=true if venv was created
