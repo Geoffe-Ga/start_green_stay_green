@@ -715,17 +715,6 @@ class MetricsGenerator(BaseGenerator):
             </div>
 
             <div class="metric-card">
-                <div class="metric-name">Mutation Score</div>
-                <div class="metric-value" id="mutation-value">--</div>
-                <div class="metric-threshold">
-                    Threshold: ≥{self.config.mutation_threshold}%
-                </div>
-                <div class="metric-status status-pass" id="mutation-status">
-                    PASSING
-                </div>
-            </div>
-
-            <div class="metric-card">
                 <div class="metric-name">Cyclomatic Complexity</div>
                 <div class="metric-value" id="complexity-value">--</div>
                 <div class="metric-threshold">
@@ -734,15 +723,6 @@ class MetricsGenerator(BaseGenerator):
                 <div class="metric-status status-pass" id="complexity-status">
                     PASSING
                 </div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-name">Documentation Coverage</div>
-                <div class="metric-value" id="docs-value">--</div>
-                <div class="metric-threshold">
-                    Threshold: ≥{self.config.doc_coverage_threshold}%
-                </div>
-                <div class="metric-status status-pass" id="docs-status">PASSING</div>
             </div>
 
             <div class="metric-card">
@@ -850,17 +830,6 @@ class MetricsGenerator(BaseGenerator):
                 }}
             }}
 
-            // Mutation Score
-            if (metrics.mutation_score !== undefined) {{
-                if (metrics.mutation_score === null) {{
-                    document.getElementById('mutation-value').textContent = 'N/A';
-                    updateStatus('mutation', 'NO DATA', false);
-                }} else {{
-                    updateMetric('mutation', metrics.mutation_score, '%',
-                        metrics.mutation_score >= thresholds.mutation_score);
-                }}
-            }}
-
             // Complexity
             if (metrics.complexity_avg !== undefined) {{
                 if (metrics.complexity_avg === null) {{
@@ -869,17 +838,6 @@ class MetricsGenerator(BaseGenerator):
                 }} else {{
                     updateMetric('complexity', metrics.complexity_avg, '',
                         metrics.complexity_avg <= thresholds.complexity);
-                }}
-            }}
-
-            // Documentation
-            if (metrics.docs_coverage !== undefined) {{
-                if (metrics.docs_coverage === null) {{
-                    document.getElementById('docs-value').textContent = 'N/A';
-                    updateStatus('docs', 'NO DATA', false);
-                }} else {{
-                    updateMetric('docs', metrics.docs_coverage, '%',
-                        metrics.docs_coverage >= thresholds.docs_coverage);
                 }}
             }}
 
