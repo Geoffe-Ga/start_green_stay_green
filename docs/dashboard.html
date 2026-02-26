@@ -84,6 +84,10 @@
             background: #da3633;
             color: #fff;
         }
+        .status-unknown {
+            background: #484f58;
+            color: #c9d1d9;
+        }
         .footer {
             text-align: center;
             margin-top: 3rem;
@@ -237,7 +241,7 @@
             if (metrics.coverage !== undefined) {
                 if (metrics.coverage === null) {
                     document.getElementById('coverage-value').textContent = 'N/A';
-                    updateStatus('coverage', 'NO DATA', false);
+                    updateStatus('coverage', 'N/A', false);
                 } else {
                     updateMetric('coverage', metrics.coverage, '%',
                         metrics.coverage >= thresholds.coverage);
@@ -248,7 +252,7 @@
             if (metrics.branch_coverage !== undefined) {
                 if (metrics.branch_coverage === null) {
                     document.getElementById('branch-value').textContent = 'N/A';
-                    updateStatus('branch', 'NO DATA', false);
+                    updateStatus('branch', 'N/A', false);
                 } else {
                     updateMetric('branch', metrics.branch_coverage, '%',
                         metrics.branch_coverage >= thresholds.branch_coverage);
@@ -259,7 +263,7 @@
             if (metrics.mutation_score !== undefined) {
                 if (metrics.mutation_score === null) {
                     document.getElementById('mutation-value').textContent = 'N/A';
-                    updateStatus('mutation', 'NO DATA', false);
+                    updateStatus('mutation', 'N/A', false);
                 } else {
                     updateMetric('mutation', metrics.mutation_score, '%',
                         metrics.mutation_score >= thresholds.mutation_score);
@@ -270,7 +274,7 @@
             if (metrics.complexity_avg !== undefined) {
                 if (metrics.complexity_avg === null) {
                     document.getElementById('complexity-value').textContent = 'N/A';
-                    updateStatus('complexity', 'NO DATA', false);
+                    updateStatus('complexity', 'N/A', false);
                 } else {
                     updateMetric('complexity', metrics.complexity_avg, '',
                         metrics.complexity_avg <= thresholds.complexity);
@@ -281,7 +285,7 @@
             if (metrics.docs_coverage !== undefined) {
                 if (metrics.docs_coverage === null) {
                     document.getElementById('docs-value').textContent = 'N/A';
-                    updateStatus('docs', 'NO DATA', false);
+                    updateStatus('docs', 'N/A', false);
                 } else {
                     updateMetric('docs', metrics.docs_coverage, '%',
                         metrics.docs_coverage >= thresholds.docs_coverage);
@@ -292,7 +296,7 @@
             if (metrics.security_issues !== undefined) {
                 if (metrics.security_issues === null) {
                     document.getElementById('security-value').textContent = 'N/A';
-                    updateStatus('security', 'NO DATA', false);
+                    updateStatus('security', 'N/A', false);
                 } else {
                     const elem = document.getElementById('security-value');
                     elem.textContent = metrics.security_issues;
@@ -307,7 +311,7 @@
                 if (metrics.maintainability_avg === null) {
                     const mv = document.getElementById('maintainability-value');
                     mv.textContent = 'N/A';
-                    updateStatus('maintainability', 'NO DATA', false);
+                    updateStatus('maintainability', 'N/A', false);
                 } else {
                     const t = thresholds.maintainability || 20;
                     updateMetric('maintainability',
@@ -320,7 +324,7 @@
             if (metrics.lint_violations !== undefined) {
                 if (metrics.lint_violations === null) {
                     document.getElementById('lint-value').textContent = 'N/A';
-                    updateStatus('lint', 'NO DATA', false);
+                    updateStatus('lint', 'N/A', false);
                 } else {
                     const elem = document.getElementById('lint-value');
                     elem.textContent = metrics.lint_violations;
@@ -334,7 +338,7 @@
             if (metrics.type_errors !== undefined) {
                 if (metrics.type_errors === null) {
                     document.getElementById('typecheck-value').textContent = 'N/A';
-                    updateStatus('typecheck', 'NO DATA', false);
+                    updateStatus('typecheck', 'N/A', false);
                 } else {
                     const elem = document.getElementById('typecheck-value');
                     elem.textContent = metrics.type_errors;
@@ -348,7 +352,7 @@
             if (metrics.tests_total !== undefined) {
                 if (metrics.tests_total === null) {
                     document.getElementById('tests-value').textContent = 'N/A';
-                    updateStatus('tests', 'NO DATA', false);
+                    updateStatus('tests', 'N/A', false);
                 } else {
                     const elem = document.getElementById('tests-value');
                     const failed = metrics.tests_failed || 0;
@@ -369,8 +373,14 @@
 
         function updateStatus(name, text, passing) {
             const elem = document.getElementById(`${name}-status`);
+            if (!elem) return;
             elem.textContent = text;
-            const statusClass = passing ? 'status-pass' : 'status-fail';
+            let statusClass;
+            if (text === 'N/A') {
+                statusClass = 'status-unknown';
+            } else {
+                statusClass = passing ? 'status-pass' : 'status-fail';
+            }
             elem.className = 'metric-status ' + statusClass;
         }
 

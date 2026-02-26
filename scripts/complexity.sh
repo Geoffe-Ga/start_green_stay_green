@@ -87,7 +87,7 @@ ensure_venv || exit 2
 
 # Machine-readable metrics mode
 if $METRICS_OUTPUT; then
-    CC_OUT=$(radon cc -s -a start_green_stay_green/ 2>&1)
+    CC_OUT=$(radon cc -s -a -n A start_green_stay_green/ 2>&1)
     CC_AVG=$(echo "$CC_OUT" | grep -oE 'Average complexity: [A-Z] \(([0-9.]+)\)' | grep -oE '[0-9.]+' || echo "null")
 
     MI_OUT=$(radon mi -s start_green_stay_green/ 2>&1)

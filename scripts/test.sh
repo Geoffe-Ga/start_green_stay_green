@@ -122,7 +122,7 @@ ensure_venv || exit 2
 
 # Machine-readable metrics mode
 if $METRICS_OUTPUT; then
-    TEST_OUT=$(pytest -m "not integration and not e2e" -q --tb=no tests/ 2>&1 || true)
+    TEST_OUT=$(pytest -m "not integration and not e2e" -q --tb=no --color=no -o "addopts=" tests/ 2>&1 || true)
     # Parse pytest summary line like "X passed, Y failed, Z skipped in N.NNs"
     python3 -c "
 import re, json, sys

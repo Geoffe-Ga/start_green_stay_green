@@ -17,6 +17,24 @@ import pytest
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 
 
+def pytest_configure(
+    config: pytest.Config,  # noqa: ARG001 — required by pytest hook interface
+) -> None:
+    """Disable macOS Keychain access for all tests.
+
+    Python's keyring library (a project dependency) defaults to macOS Keychain,
+    which triggers GUI dialog boxes during test runs. Setting the null backend
+    prevents any OS keyring access.
+
+    This runs during pytest configuration, before collection or imports of
+    test modules, ensuring no keyring access occurs at any point.
+
+    Args:
+        config: Pytest configuration object.
+    """
+    os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.null.Keyring"
+
+
 def get_env_without_api_keys() -> dict[str, str]:
     """Return a copy of os.environ with Anthropic API keys removed.
 
