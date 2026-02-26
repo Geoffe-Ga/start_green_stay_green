@@ -75,8 +75,8 @@ ensure_venv || exit 2
 # Machine-readable metrics mode
 if $METRICS_OUTPUT; then
     MYPY_OUT=$(mypy . 2>&1 || true)
-    ERRORS=$(echo "$MYPY_OUT" | grep -c ": error:" 2>/dev/null || echo "0")
-    if [ "$ERRORS" = "0" ]; then
+    ERRORS=$(echo "$MYPY_OUT" | grep -c ": error:" 2>/dev/null) || ERRORS=0
+    if [ "$ERRORS" -eq 0 ]; then
         echo '{"errors": 0, "status": "pass"}'
     else
         echo "{\"errors\": $ERRORS, \"status\": \"fail\"}"
