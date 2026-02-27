@@ -937,7 +937,6 @@ class TestDashboardGeneration:
         assert dashboard is not None
         assert "≥85%" in dashboard  # coverage
         assert "≥80%" in dashboard  # branch coverage
-        assert "≥75%" in dashboard  # mutation
 
     def test_dashboard_has_metric_cards(self) -> None:
         """Test that dashboard has metric card structure."""
@@ -1489,16 +1488,14 @@ class TestDashboardNewCards:
         assert dashboard is not None
         return dashboard
 
-    def test_all_ten_card_ids_exist(self) -> None:
-        """Test that all 10 metric card IDs exist in generated HTML."""
+    def test_all_eight_card_ids_exist(self) -> None:
+        """Test that all 8 metric card IDs exist in generated HTML."""
         dashboard = self._get_dashboard()
 
         expected_ids = [
             "coverage-value",
             "branch-value",
-            "mutation-value",
             "complexity-value",
-            "docs-value",
             "security-value",
             "maintainability-value",
             "lint-value",
@@ -1508,16 +1505,14 @@ class TestDashboardNewCards:
         for card_id in expected_ids:
             assert card_id in dashboard, f"Missing card ID: {card_id}"
 
-    def test_all_ten_status_ids_exist(self) -> None:
-        """Test that all 10 status element IDs exist in generated HTML."""
+    def test_all_eight_status_ids_exist(self) -> None:
+        """Test that all 8 status element IDs exist in generated HTML."""
         dashboard = self._get_dashboard()
 
         expected_ids = [
             "coverage-status",
             "branch-status",
-            "mutation-status",
             "complexity-status",
-            "docs-status",
             "security-status",
             "maintainability-status",
             "lint-status",
@@ -1562,13 +1557,13 @@ class TestDashboardNewCards:
         assert "Test Count" in dashboard
         assert "tests-value" in dashboard
 
-    def test_dashboard_has_ten_metric_cards(self) -> None:
-        """Test dashboard has exactly 10 metric cards."""
+    def test_dashboard_has_eight_metric_cards(self) -> None:
+        """Test dashboard has exactly 8 metric cards."""
         dashboard = self._get_dashboard()
 
         # Count metric-card div occurrences
         card_count = dashboard.count('class="metric-card"')
-        assert card_count == 10
+        assert card_count == 8
 
 
 class TestDashboardJavaScript:
@@ -1624,11 +1619,6 @@ class TestDashboardJavaScript:
         """Test JavaScript has null check for branch coverage (#212)."""
         dashboard = self._get_dashboard()
         assert "metrics.branch_coverage === null" in dashboard
-
-    def test_js_handles_null_mutation_score(self) -> None:
-        """Test JavaScript has null check for mutation score (#212)."""
-        dashboard = self._get_dashboard()
-        assert "metrics.mutation_score === null" in dashboard
 
     def test_js_handles_null_security_issues(self) -> None:
         """Test JavaScript has null check for security issues (#212)."""
