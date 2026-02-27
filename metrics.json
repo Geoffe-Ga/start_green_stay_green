@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-26T19:29:22.402659+00:00",
+  "timestamp": "2026-02-27T00:30:57.049543+00:00",
   "project": "start-green-stay-green",
   "thresholds": {
     "coverage": 90,
@@ -20,7 +20,7 @@
     "branch_coverage_status": "pass",
     "complexity_avg": 1.9162011173184357,
     "complexity_status": "pass",
-    "maintainability_avg": 77.12,
+    "maintainability_avg": 77.13,
     "maintainability_status": "pass",
     "docs_coverage": null,
     "docs_status": "unknown",
@@ -32,8 +32,8 @@
     "lint_status": "pass",
     "type_errors": 0,
     "typecheck_status": "pass",
-    "tests_total": 1333,
-    "tests_passed": 1333,
+    "tests_total": 1332,
+    "tests_passed": 1332,
     "tests_failed": 0,
     "tests_skipped": 0,
     "tests_status": "pass"
