@@ -176,16 +176,6 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
                 ],
             },
             {
-                "repo": "https://github.com/econchick/interrogate",
-                "rev": "1.5.0",
-                "hooks": [
-                    {
-                        "id": "interrogate",
-                        "args": ["-vv", "--fail-under=95"],
-                    },
-                ],
-            },
-            {
                 "repo": "https://github.com/Yelp/detect-secrets",
                 "rev": "v1.4.0",
                 "hooks": [

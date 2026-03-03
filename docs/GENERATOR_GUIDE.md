@@ -93,7 +93,7 @@ output_path.write_text(yaml_content)
 - Type checking (mypy)
 - Security (bandit, pip-audit)
 - Testing (pytest)
-- Docstring coverage (interrogate)
+- Docstring coverage (pydocstyle / ruff D rules)
 - Complexity analysis (radon)
 
 ### ScriptsGenerator

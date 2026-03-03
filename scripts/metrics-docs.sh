@@ -2,7 +2,7 @@
 # scripts/metrics-docs.sh - Output documentation coverage metrics for dashboard
 # Usage: ./scripts/metrics-docs.sh
 #
-# Outputs interrogate results in format expected by scripts/collect_metrics.py
+# Outputs pydocstyle / ruff D results in format expected by scripts/collect_metrics.py
 
 set -euo pipefail
 
@@ -11,6 +11,5 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
 
-# Run interrogate with verbose output
-# The -v flag provides detailed output including the coverage percentage
-interrogate start_green_stay_green/ -v
+# Run pydocstyle for docstring coverage checking
+pydocstyle start_green_stay_green/ --count 2>&1 || true

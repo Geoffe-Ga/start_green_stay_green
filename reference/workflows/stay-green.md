@@ -281,7 +281,7 @@ def stay_green_workflow():
 | Metric | Threshold | Gate | Tool |
 |--------|-----------|------|------|
 | **Code Coverage** | ≥ 90% | Gate 1, Gate 2 | pytest --cov |
-| **Docstring Coverage** | ≥ 95% | Gate 1, Gate 2 | interrogate |
+| **Docstring Coverage** | ≥ 95% | Gate 1, Gate 2 | pydocstyle / ruff D rules |
 | **Cyclomatic Complexity** | ≤ 10 per function | Gate 1, Gate 2 | radon cc |
 | **Maintainability Index** | ≥ 20 | Gate 1, Gate 2 | radon mi |
 | **Complexity Grade** | A (1-5) | Gate 1, Gate 2 | xenon |

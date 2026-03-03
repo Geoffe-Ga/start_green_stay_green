@@ -971,7 +971,7 @@ class TestMutationKillers:
         Kills mutations in LANGUAGE_CONFIGS.
         """
         python_hooks = LANGUAGE_CONFIGS["python"]["hooks"]
-        assert len(python_hooks) == 16
+        assert len(python_hooks) == 15
 
     def test_language_config_typescript_exact_hooks_count(self) -> None:
         """Test TypeScript has exact expected hook count."""
@@ -1129,24 +1129,14 @@ class TestMutationKillers:
         repo = LANGUAGE_CONFIGS["python"]["hooks"][13]
         assert repo["rev"] == "v2.10"
 
-    def test_python_interrogate_repo_url_exact(self) -> None:
-        """Test Python interrogate repo URL is exact."""
-        repo = LANGUAGE_CONFIGS["python"]["hooks"][14]
-        assert repo["repo"] == "https://github.com/econchick/interrogate"
-
-    def test_python_interrogate_rev_exact(self) -> None:
-        """Test Python interrogate rev is exact."""
-        repo = LANGUAGE_CONFIGS["python"]["hooks"][14]
-        assert repo["rev"] == "1.5.0"
-
     def test_python_detect_secrets_repo_url_exact(self) -> None:
         """Test Python detect-secrets repo URL is exact."""
-        repo = LANGUAGE_CONFIGS["python"]["hooks"][15]
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][14]
         assert repo["repo"] == "https://github.com/Yelp/detect-secrets"
 
     def test_python_detect_secrets_rev_exact(self) -> None:
         """Test Python detect-secrets rev is exact."""
-        repo = LANGUAGE_CONFIGS["python"]["hooks"][15]
+        repo = LANGUAGE_CONFIGS["python"]["hooks"][14]
         assert repo["rev"] == "v1.4.0"
 
     # Python Hook IDs - Exact Tests
@@ -1372,24 +1362,14 @@ class TestMutationKillers:
         hooks = LANGUAGE_CONFIGS["python"]["hooks"][13]["hooks"]
         assert hooks[0]["args"] == ["start_green_stay_green/", "--min-confidence", "80"]
 
-    def test_python_interrogate_hook_id_exact(self) -> None:
-        """Test interrogate hook ID is exact."""
-        hooks = LANGUAGE_CONFIGS["python"]["hooks"][14]["hooks"]
-        assert hooks[0]["id"] == "interrogate"
-
-    def test_python_interrogate_args_exact(self) -> None:
-        """Test interrogate args are exact."""
-        hooks = LANGUAGE_CONFIGS["python"]["hooks"][14]["hooks"]
-        assert hooks[0]["args"] == ["-vv", "--fail-under=95"]
-
     def test_python_detect_secrets_hook_id_exact(self) -> None:
         """Test detect-secrets hook ID is exact."""
-        hooks = LANGUAGE_CONFIGS["python"]["hooks"][15]["hooks"]
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][14]["hooks"]
         assert hooks[0]["id"] == "detect-secrets"
 
     def test_python_detect_secrets_args_exact(self) -> None:
         """Test detect-secrets args are exact."""
-        hooks = LANGUAGE_CONFIGS["python"]["hooks"][15]["hooks"]
+        hooks = LANGUAGE_CONFIGS["python"]["hooks"][14]["hooks"]
         assert hooks[0]["args"] == ["--baseline", ".secrets.baseline"]
 
     def test_python_default_language_version_key_exact(self) -> None:
@@ -1715,8 +1695,8 @@ class TestLanguageConfigsStructureValidation:
         assert len(first_repo["hooks"]) == 16
 
     def test_python_repos_exact_count(self) -> None:
-        """Test Python has exactly 16 repository configurations."""
-        assert len(LANGUAGE_CONFIGS["python"]["hooks"]) == 16
+        """Test Python has exactly 15 repository configurations."""
+        assert len(LANGUAGE_CONFIGS["python"]["hooks"]) == 15
 
     def test_typescript_repos_exact_count(self) -> None:
         """Test TypeScript has exactly 4 repository configurations."""
@@ -1766,7 +1746,6 @@ class TestLanguageConfigsStructureValidation:
             "https://github.com/guilatrova/tryceratops",
             "https://github.com/dosisod/refurb",
             "https://github.com/jendrikseipp/vulture",
-            "https://github.com/econchick/interrogate",
             "https://github.com/Yelp/detect-secrets",
         ]
         python_repos = LANGUAGE_CONFIGS["python"]["hooks"]

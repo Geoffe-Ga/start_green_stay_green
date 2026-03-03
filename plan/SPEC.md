@@ -839,7 +839,7 @@ Generate quality metrics tracking configuration per MAXIMUM_QUALITY_ENGINEERING.
 | Cognitive Complexity | ≤15 | sonarqube |
 | Maintainability Index | ≥20 | radon |
 | Technical Debt Ratio | ≤5% | sonarqube |
-| Documentation Coverage | ≥95% | interrogate |
+| Documentation Coverage | ≥95% | pydocstyle / ruff D rules |
 | Dependency Freshness | ≤30 days | npm-check-updates |
 | Security Vulnerabilities | 0 critical/high | pip-audit / npm audit |
 

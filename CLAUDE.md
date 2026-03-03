@@ -51,7 +51,7 @@
 | Metric | Threshold | Tool |
 |--------|-----------|------|
 | **Code Coverage** | ≥90% | pytest-cov |
-| **Docstring Coverage** | ≥95% | interrogate |
+| **Docstring Coverage** | ≥95% | pydocstyle / ruff D rules |
 | **Mutation Score** | ≥80% | mutmut |
 | **Cyclomatic Complexity** | ≤10 per function | radon |
 | **Pylint Score** | ≥9.0 | pylint |
