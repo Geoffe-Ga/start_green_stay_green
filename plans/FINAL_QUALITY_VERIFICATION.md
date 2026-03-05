@@ -177,7 +177,7 @@ cd /Users/geoffgallinger/Projects/sgsg-worktrees/tool-auditor
 pre-commit run --all-files
 ```
 
-**Expected**: All 32 hooks pass ✅
+**Expected**: All 31 hooks pass ✅
 
 **If failures**:
 - Auto-fixable issues (formatting, whitespace) will be fixed automatically

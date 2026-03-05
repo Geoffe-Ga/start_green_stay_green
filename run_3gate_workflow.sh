@@ -53,7 +53,7 @@ echo ""
 
 # Run pre-commit checks
 echo -e "${BLUE}Running pre-commit on all files...${NC}"
-echo "This will run all 32 hooks (formatting, linting, tests, coverage, etc.)"
+echo "This will run all 31 hooks (formatting, linting, tests, coverage, etc.)"
 echo ""
 
 if pre-commit run --all-files; then

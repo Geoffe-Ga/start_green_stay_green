@@ -22,11 +22,11 @@ This workflow enforces iterative quality improvement through sequential gates, p
 
 **Actions**:
 ```bash
-# Run ALL 32 quality hooks
+# Run ALL 31 quality hooks
 pre-commit run --all-files
 ```
 
-**Checks** (32 hooks total):
+**Checks** (31 hooks total):
 - Git checks (large files, merge conflicts, etc.)
 - Formatting (ruff, black, isort)
 - Linting (ruff, pylint)
