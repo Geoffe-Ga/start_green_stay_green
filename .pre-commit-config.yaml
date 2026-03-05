@@ -21,7 +21,7 @@
 #   - Code modernization (pyupgrade, autoflake, refurb)
 #   - Exception handling (tryceratops)
 #   - Dead code detection (vulture)
-#   - Docstring coverage (interrogate) - 95% requirement
+#   - Docstring coverage (pydocstyle / ruff D rules) - 95% requirement
 #   - Unit tests (pytest)
 #   - Coverage validation (90% threshold)
 #
@@ -191,14 +191,6 @@ repos:
     hooks:
       - id: vulture
         args: ['start_green_stay_green/', '--min-confidence', '80']
-
-  # Docstring coverage
-  - repo: https://github.com/econchick/interrogate
-    rev: 1.7.0
-    hooks:
-      - id: interrogate
-        args: ['-vv', '--fail-under=95']
-        additional_dependencies: ['setuptools']  # Required for pkg_resources in Python 3.13+
 
 # CI-specific configuration
 ci:

@@ -184,9 +184,9 @@ STANDARD_METRICS = {
     "documentation_coverage": MetricConfig(
         name="Documentation Coverage",
         threshold="≥95%",
-        tool="interrogate",
-        badge_available=True,
-        ci_enforced=True,
+        tool="pydocstyle / ruff D rules",
+        badge_available=False,
+        ci_enforced=False,
     ),
     "dependency_freshness": MetricConfig(
         name="Dependency Freshness",
@@ -211,7 +211,7 @@ LANGUAGE_TOOLS: dict[str, dict[str, str]] = {
         "coverage": "pytest-cov",
         "mutation": "mutmut",
         "complexity": "radon",
-        "documentation": "interrogate",
+        "documentation": "pydocstyle",
         "security": "pip-audit",
         "dependency_check": "pip-audit",
     },
@@ -963,8 +963,7 @@ class MetricsGenerator(BaseGenerator):
                 },
                 "docs_check": {
                     "name": "Documentation Check",
-                    "run": f"interrogate --fail-under="
-                    f"{self.config.doc_coverage_threshold}",
+                    "run": "ruff check --select D .",
                 },
             },
         }

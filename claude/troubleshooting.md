@@ -337,7 +337,7 @@ mypy start_green_stay_green/
 **The Fix**:
 ```bash
 # Use pre-commit for comprehensive quality checks
-pre-commit run --all-files  # Runs ALL 32 hooks with correct config
+pre-commit run --all-files  # Runs ALL 31 hooks with correct config
 ```
 
 **Why It Happens**: Muscle memory from other projects, not knowing about pre-commit

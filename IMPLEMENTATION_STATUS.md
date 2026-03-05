@@ -265,7 +265,7 @@ The auditor can detect these common conflicts:
 Steps:
 1. ⏳ Run pre-commit hooks
 2. ⏳ Fix any formatting/linting issues
-3. ⏳ Ensure all 32 hooks pass
+3. ⏳ Ensure all 31 hooks pass
 
 ### Gate 2: CI Pipeline ⏸️ PENDING
 

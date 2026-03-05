@@ -4,7 +4,7 @@
 This script aggregates metrics from:
 - pytest coverage reports (coverage.json)
 - radon complexity analysis (complexity-report.txt)
-- interrogate documentation coverage (docs-report.txt)
+- pydocstyle / ruff D rules documentation coverage (docs-report.txt)
 - bandit security scanning (security-report.json)
 - quality scripts via --metrics flag (script mode)
 
@@ -117,7 +117,7 @@ class MetricsCollector:
         )
 
     def collect_docs_coverage(self, docs_file: Path) -> None:
-        """Parse documentation coverage from interrogate report.
+        """Parse documentation coverage from docs report.
 
         Args:
             docs_file: Path to docs-report.txt file
@@ -456,7 +456,7 @@ def _collect_script_mode(
     # Complexity + Maintainability via script
     collector.collect_complexity_from_script(scripts_dir)
 
-    # Docs coverage via file (interrogate doesn't have a script yet)
+    # Docs coverage via file
     try:
         collector.collect_docs_coverage(args.docs_file)
     except (FileNotFoundError, ValueError) as e:

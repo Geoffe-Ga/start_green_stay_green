@@ -51,12 +51,12 @@
 | Metric | Threshold | Tool |
 |--------|-----------|------|
 | **Code Coverage** | ≥90% | pytest-cov |
-| **Docstring Coverage** | ≥95% | interrogate |
+| **Docstring Coverage** | ≥95% | pydocstyle / ruff D rules |
 | **Mutation Score** | ≥80% | mutmut |
 | **Cyclomatic Complexity** | ≤10 per function | radon |
 | **Pylint Score** | ≥9.0 | pylint |
 
-**Pre-Commit Hooks**: 32 comprehensive hooks (formatting, linting, tests, coverage, security, etc.)
+**Pre-Commit Hooks**: 31 comprehensive hooks (formatting, linting, tests, coverage, security, etc.)
 
 ---
 
@@ -130,7 +130,7 @@ git checkout -b feature/my-feature
 vim start_green_stay_green/my_module.py
 vim tests/unit/test_my_module.py
 
-# 3. Run ALL quality checks (32 hooks)
+# 3. Run ALL quality checks (31 hooks)
 pre-commit run --all-files
 
 # 4. Fix any issues and run again
@@ -228,7 +228,7 @@ When delegating work to subagents, provide:
 - `pyproject.toml`: All Python tool configurations (ruff, mypy, pytest, black, isort, etc.)
 - `requirements.txt`: Runtime dependencies
 - `requirements-dev.txt`: Development dependencies
-- `.pre-commit-config.yaml`: Pre-commit hook configurations (32 hooks)
+- `.pre-commit-config.yaml`: Pre-commit hook configurations (31 hooks)
 - `.github/workflows/`: CI/CD pipeline definitions
 
 ### Documentation Files

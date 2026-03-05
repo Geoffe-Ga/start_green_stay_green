@@ -116,7 +116,7 @@ gh pr checks --watch
 
 ## Expected Quality Gate Results
 
-### Gate 1: Pre-Commit Hooks (32 hooks)
+### Gate 1: Pre-Commit Hooks (31 hooks)
 
 **Auto-Fixed by Hooks**:
 - ✅ Trailing whitespace
