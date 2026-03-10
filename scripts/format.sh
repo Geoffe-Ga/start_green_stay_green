@@ -82,8 +82,12 @@ if $VERBOSE; then
     set -x
 fi
 
+# Create temp files for stderr capture
+TMP_ISORT_STDERR=$(mktemp)
+TMP_BLACK_STDERR=$(mktemp)
+trap 'rm -f "$TMP_ISORT_STDERR" "$TMP_BLACK_STDERR"; cleanup_venv' EXIT
+
 # Ensure venv is available and set up cleanup
-setup_cleanup_trap
 ensure_venv || exit 2
 
 if ! $JSON_OUTPUT; then
@@ -106,7 +110,7 @@ FORMAT_START=$(date +%s)
 if $VERBOSE && ! $JSON_OUTPUT; then
     echo "Running isort..."
 fi
-isort $MODE . 2>/tmp/isort-stderr.txt || {
+isort ${MODE:+"$MODE"} . 2>"$TMP_ISORT_STDERR" || {
     if ! $JSON_OUTPUT; then
         echo "✗ isort failed" >&2
     fi
@@ -117,7 +121,7 @@ isort $MODE . 2>/tmp/isort-stderr.txt || {
 if $VERBOSE && ! $JSON_OUTPUT; then
     echo "Running Black..."
 fi
-black $MODE . 2>/tmp/black-stderr.txt || {
+black ${MODE:+"$MODE"} . 2>"$TMP_BLACK_STDERR" || {
     if ! $JSON_OUTPUT; then
         echo "✗ Black failed" >&2
     fi

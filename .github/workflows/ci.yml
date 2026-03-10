@@ -8,6 +8,9 @@ on:
   schedule:
     - cron: '0 0 * * *'  # Daily security scan
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -292,16 +295,16 @@ jobs:
           echo "color=${COLOR}" >> $GITHUB_OUTPUT
 
       - name: Generate badge JSON
+        env:
+          COVERAGE_VALUE: ${{ steps.coverage.outputs.coverage }}
+          COVERAGE_COLOR: ${{ steps.coverage.outputs.color }}
         run: |
           mkdir -p badges
-          cat > badges/coverage.json << 'EOF'
-          {
-            "schemaVersion": 1,
-            "label": "coverage",
-            "message": "${{ steps.coverage.outputs.coverage }}%",
-            "color": "${{ steps.coverage.outputs.color }}"
-          }
-          EOF
+          jq -n \
+            --arg msg "${COVERAGE_VALUE}%" \
+            --arg color "$COVERAGE_COLOR" \
+            '{schemaVersion: 1, label: "coverage", message: $msg, color: $color}' \
+            > badges/coverage.json
           cat > badges/tests.json << 'EOF'
           {
             "schemaVersion": 1,
@@ -338,11 +341,15 @@ jobs:
       - name: Comment PR with coverage
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        env:
+          COVERAGE_VALUE: ${{ steps.coverage.outputs.coverage }}
+          COVERAGE_STATUS: ${{ steps.coverage.outputs.status }}
+          COVERAGE_THRESHOLD_VALUE: ${{ env.COVERAGE_THRESHOLD }}
         with:
           script: |
-            const coverage = "${{ steps.coverage.outputs.coverage }}";
-            const status = "${{ steps.coverage.outputs.status }}";
-            const threshold = "${{ env.COVERAGE_THRESHOLD }}";
+            const coverage = process.env.COVERAGE_VALUE;
+            const status = process.env.COVERAGE_STATUS;
+            const threshold = process.env.COVERAGE_THRESHOLD_VALUE;
 
             // Determine pass/fail emoji
             const passEmoji = coverage >= threshold ? "✅" : "⚠️";

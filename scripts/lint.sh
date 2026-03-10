@@ -87,8 +87,11 @@ if $VERBOSE; then
     set -x
 fi
 
+# Create temp file for stderr capture
+TMP_RUFF_STDERR=$(mktemp)
+trap 'rm -f "$TMP_RUFF_STDERR"; cleanup_venv' EXIT
+
 # Ensure venv is available and set up cleanup
-setup_cleanup_trap
 ensure_venv || exit 2
 
 # Machine-readable metrics mode
@@ -112,13 +115,13 @@ if $FIX; then
     if $VERBOSE && ! $JSON_OUTPUT; then
         echo "Fixing linting issues..."
     fi
-    ruff check . --fix 2>/tmp/ruff-stderr.txt
+    ruff check . --fix 2>"$TMP_RUFF_STDERR"
     EXIT_CODE=$?
 else
     if $VERBOSE && ! $JSON_OUTPUT; then
         echo "Checking for linting issues..."
     fi
-    ruff check . 2>/tmp/ruff-stderr.txt
+    ruff check . 2>"$TMP_RUFF_STDERR"
     EXIT_CODE=$?
 fi
 

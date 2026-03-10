@@ -87,9 +87,15 @@ if $VERBOSE; then
 fi
 
 # Load optional Codex-specific environment overrides.
+# Security: only source if file is owner-readable only (not world/group writable).
 if [ -f ".env.codex" ]; then
-    # shellcheck disable=SC1091
-    source ".env.codex"
+    PERMS=$(stat -f '%Lp' ".env.codex" 2>/dev/null || stat -c '%a' ".env.codex" 2>/dev/null)
+    if [ "$PERMS" = "600" ] || [ "$PERMS" = "400" ]; then
+        # shellcheck disable=SC1091
+        source ".env.codex"
+    else
+        echo "Warning: .env.codex has insecure permissions ($PERMS), skipping. Use chmod 600." >&2
+    fi
 fi
 
 if ! $NO_VENV; then

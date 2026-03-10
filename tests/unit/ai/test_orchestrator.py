@@ -168,7 +168,7 @@ class TestAIOrchestrator:
     def test_orchestrator_initialization_with_valid_api_key(self) -> None:
         """Test AIOrchestrator initializes with valid API key."""
         orchestrator = AIOrchestrator(api_key="test-api-key-123")
-        assert orchestrator.api_key == "test-api-key-123"
+        assert orchestrator._api_key == "test-api-key-123"
         assert orchestrator.model == ModelConfig.SONNET
 
     def test_orchestrator_initialization_with_custom_model(self) -> None:
@@ -198,14 +198,11 @@ class TestAIOrchestrator:
         test_key = "test-api-key-with-special-chars-123!@#"
         orchestrator = AIOrchestrator(api_key=test_key)
         # Verify exact key is stored (not truncated or modified)
-        assert orchestrator.api_key == test_key
-        # Verify it's a string type
-        assert isinstance(orchestrator.api_key, str)
-        # Verify length is preserved
-        assert len(orchestrator.api_key) == len(test_key)
-        # Verify special characters are preserved
-        assert "!" in orchestrator.api_key
-        assert "@" in orchestrator.api_key
+        assert orchestrator._api_key == test_key
+        assert isinstance(orchestrator._api_key, str)
+        assert len(orchestrator._api_key) == len(test_key)
+        assert "!" in orchestrator._api_key
+        assert "@" in orchestrator._api_key
 
     def test_orchestrator_initialization_with_retry_parameters(self) -> None:
         """Test AIOrchestrator accepts retry configuration."""
@@ -877,13 +874,14 @@ class TestMutationKillers:
             output_format="toml",
         )
 
-        # Verify API was called with correctly formatted prompt
+        # Verify API was called with system/user prompt separation
         call_kwargs = mock_client.messages.create.call_args.kwargs
+        expected_system = "Generate toml output. " "Follow the instructions precisely."
+        assert call_kwargs["system"] == expected_system
         messages = call_kwargs["messages"]
         assert len(messages) == 1
         assert messages[0]["role"] == "user"
-        expected_content = "Generate toml output:\n\nCreate config"
-        assert messages[0]["content"] == expected_content
+        assert messages[0]["content"] == "Create config"
 
     def test_init_api_key_empty_exact_error_message(self) -> None:
         """Test exact error message for empty API key.

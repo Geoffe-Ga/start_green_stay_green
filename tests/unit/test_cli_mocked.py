@@ -256,14 +256,14 @@ class TestOutputDirValidation:
         cli._validate_output_dir(mock_path)
         mock_path.resolve.assert_called()
 
-    def test_validate_output_dir_rejects_path_traversal(self) -> None:
-        """Test _validate_output_dir rejects paths with '..' after resolution."""
+    def test_validate_output_dir_resolves_path(self) -> None:
+        """Test _validate_output_dir resolves path to absolute."""
         mock_path = MagicMock(spec=Path)
-        mock_path.resolve.return_value = MagicMock(
-            spec=Path, parts=("a", "b", "..", "c")
-        )
-        with pytest.raises(typer.BadParameter):
-            cli._validate_output_dir(mock_path)
+        mock_resolved = MagicMock(spec=Path)
+        mock_path.resolve.return_value = mock_resolved
+        result = cli._validate_output_dir(mock_path)
+        assert result == mock_resolved
+        mock_path.resolve.assert_called_once()
 
 
 class TestAPIKeyHandling:

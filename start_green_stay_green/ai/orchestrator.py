@@ -123,7 +123,7 @@ class AIOrchestrator:
         self._validate_api_key(api_key)
         self._validate_retry_params(max_retries, retry_delay)
 
-        self.api_key = api_key
+        self._api_key = api_key
         self.model = model
         self.max_retries = max_retries
         self.retry_delay = retry_delay
@@ -213,10 +213,14 @@ class AIOrchestrator:
         response = client.messages.create(
             model=self.model,
             max_tokens=4096,
+            system=(
+                f"Generate {output_format} output. "
+                "Follow the instructions precisely."
+            ),
             messages=[
                 {
                     "role": "user",
-                    "content": f"Generate {output_format} output:\n\n{prompt}",
+                    "content": prompt,
                 },
             ],
         )
@@ -296,5 +300,5 @@ class AIOrchestrator:
         self._validate_output_format(output_format)
 
         # Use context manager to ensure httpx client is properly closed
-        with Anthropic(api_key=self.api_key) as client:
+        with Anthropic(api_key=self._api_key) as client:
             return self._retry_with_backoff(client, prompt, output_format)

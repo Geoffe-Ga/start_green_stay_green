@@ -13,7 +13,7 @@ Example:
     ...     store_api_key_in_keyring,
     ... )
     >>> # Store API key (one-time setup)
-    >>> success = store_api_key_in_keyring("sk-ant-api-key-123")
+    >>> success = store_api_key_in_keyring("<your-api-key>")
     >>> # Retrieve API key
     >>> api_key = get_api_key_from_keyring()
     >>> if api_key:
@@ -98,7 +98,7 @@ def store_api_key_in_keyring(  # pragma: allowlist secret
         True if stored successfully, False otherwise.
 
     Example:
-        >>> api_key = "sk-ant-api-key-123456"  # pragma: allowlist secret
+        >>> api_key = "<your-api-key>"
         >>> if store_api_key_in_keyring(api_key):
         ...     print("API key stored successfully")
         ... else:

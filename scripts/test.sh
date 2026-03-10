@@ -116,8 +116,12 @@ if $VERBOSE; then
     set -x
 fi
 
+# Create temp files for stderr/report capture
+TMP_PYTEST_REPORT=$(mktemp)
+TMP_PYTEST_STDERR=$(mktemp)
+trap 'rm -f "$TMP_PYTEST_REPORT" "$TMP_PYTEST_STDERR"; cleanup_venv' EXIT
+
 # Ensure venv is available and set up cleanup
-setup_cleanup_trap
 ensure_venv || exit 2
 
 # Machine-readable metrics mode
@@ -250,7 +254,7 @@ fi
 
 # Add JSON output if requested
 if $JSON_OUTPUT; then
-    PYTEST_ARGS+=(--json-report --json-report-file=/tmp/pytest-report.json)
+    PYTEST_ARGS+=(--json-report --json-report-file="$TMP_PYTEST_REPORT")
 fi
 
 # Run tests
@@ -261,7 +265,7 @@ if $VERBOSE; then
     fi
 fi
 
-pytest "${PYTEST_ARGS[@]}" tests/ 2>/tmp/pytest-stderr.txt || {
+pytest "${PYTEST_ARGS[@]}" tests/ 2>"$TMP_PYTEST_STDERR" || {
     TEST_END=$(date +%s)
     TEST_TIME=$((TEST_END - TEST_START))
     END_TIME=$(date +%s)
@@ -272,9 +276,9 @@ pytest "${PYTEST_ARGS[@]}" tests/ 2>/tmp/pytest-stderr.txt || {
     else
         echo "✗ Tests failed" >&2
         # Output stderr to help debug the failure
-        if [ -f /tmp/pytest-stderr.txt ]; then
+        if [ -f "$TMP_PYTEST_STDERR" ]; then
             echo "=== Pytest stderr output ===" >&2
-            cat /tmp/pytest-stderr.txt >&2
+            cat "$TMP_PYTEST_STDERR" >&2
         fi
     fi
     exit 1
