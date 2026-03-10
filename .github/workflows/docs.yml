@@ -45,7 +45,7 @@ jobs:
           pip install pdoc>=14.0.0
 
       - name: Generate API documentation
-        run: ./scripts/docs.sh --clean --verbose
+        run: ./scripts/docs.sh --verbose
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4
