@@ -95,7 +95,7 @@ jobs:
           name: api-docs
           path: docs/api
 
-      - uses: actions/configure-pages@v4
+      - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v2
         with:
