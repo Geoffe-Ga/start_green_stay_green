@@ -23,6 +23,7 @@ wheels/
 
 # Virtual environments
 .env
+.env.codex
 .venv
 env/
 venv/

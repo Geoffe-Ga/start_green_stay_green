@@ -6,6 +6,7 @@ Supports Python, TypeScript, Go, Rust, and other languages with appropriate tool
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,8 @@ class ScriptsGenerator:
         self.config = config
         self._validate_config()
 
+    _SAFE_PACKAGE_NAME_RE = re.compile(r"^[a-zA-Z0-9_]+$")
+
     def _validate_config(self) -> None:
         """Validate configuration and ensure output directory exists.
 
@@ -73,6 +76,10 @@ class ScriptsGenerator:
 
         if not self.config.package_name:
             msg = "Package name cannot be empty"
+            raise ValueError(msg)
+
+        if not self._SAFE_PACKAGE_NAME_RE.match(self.config.package_name):
+            msg = "Package name must contain only letters, digits, and underscores"
             raise ValueError(msg)
 
         # Ensure output directory exists

@@ -75,8 +75,13 @@ if $VERBOSE; then
     set -x
 fi
 
+# Create temp files for stderr capture
+TMP_BANDIT_STDERR=$(mktemp)
+TMP_PIP_AUDIT_STDERR=$(mktemp)
+TMP_DETECT_SECRETS_STDERR=$(mktemp)
+trap 'rm -f "$TMP_BANDIT_STDERR" "$TMP_PIP_AUDIT_STDERR" "$TMP_DETECT_SECRETS_STDERR"; cleanup_venv' EXIT
+
 # Ensure venv is available and set up cleanup
-setup_cleanup_trap
 ensure_venv || exit 2
 
 # Machine-readable metrics mode
@@ -105,7 +110,7 @@ SEC_START=$(date +%s)
 if $VERBOSE; then
     echo "Running Bandit security scanner..."
 fi
-bandit -r start_green_stay_green/ 2>/tmp/bandit-stderr.txt || {
+bandit -r start_green_stay_green/ 2>"$TMP_BANDIT_STDERR" || {
     echo "✗ Bandit found issues" >&2
     exit 1
 }
@@ -132,7 +137,7 @@ if [ -f "$PROJECT_ROOT/.pip-audit-known-vulnerabilities" ]; then
     done < "$PROJECT_ROOT/.pip-audit-known-vulnerabilities"
 fi
 
-pip-audit "${PIP_AUDIT_ARGS[@]}" 2>/tmp/pip-audit-stderr.txt || {
+pip-audit "${PIP_AUDIT_ARGS[@]}" 2>"$TMP_PIP_AUDIT_STDERR" || {
     echo "✗ pip-audit found issues" >&2
     exit 1
 }
@@ -145,7 +150,7 @@ if $FULL; then
         if $VERBOSE; then
             echo "Running detect-secrets scan..."
         fi
-        detect-secrets scan . 2>/tmp/detect-secrets-stderr.txt || true
+        detect-secrets scan . 2>"$TMP_DETECT_SECRETS_STDERR" || true
     fi
 fi
 

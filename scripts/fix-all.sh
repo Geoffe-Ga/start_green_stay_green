@@ -72,7 +72,7 @@ run_fix() {
     local args=("$@")
 
     echo "Running: $fix_name"
-    if "$SCRIPT_DIR/$script" --fix "${args[@]}" $VERBOSE_FLAG; then
+    if "$SCRIPT_DIR/$script" --fix "${args[@]}" ${VERBOSE_FLAG:+"$VERBOSE_FLAG"}; then
         echo "✓ $fix_name completed"
     else
         FAILED_FIXES+=("$fix_name")

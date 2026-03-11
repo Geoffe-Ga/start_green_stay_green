@@ -75,8 +75,11 @@ if $VERBOSE; then
     set -x
 fi
 
+# Create temp file for stderr capture
+TMP_COVERAGE_STDERR=$(mktemp)
+trap 'rm -f "$TMP_COVERAGE_STDERR"; cleanup_venv' EXIT
+
 # Ensure venv is available and set up cleanup
-setup_cleanup_trap
 ensure_venv || exit 2
 
 # Machine-readable metrics mode
@@ -120,7 +123,7 @@ if $VERBOSE; then
 fi
 
 COV_START=$(date +%s)
-pytest -m "not integration and not e2e" "${COVERAGE_ARGS[@]}" tests/ 2>/tmp/coverage-stderr.txt || {
+pytest -m "not integration and not e2e" "${COVERAGE_ARGS[@]}" tests/ 2>"$TMP_COVERAGE_STDERR" || {
     echo "✗ Coverage generation failed" >&2
     exit 1
 }

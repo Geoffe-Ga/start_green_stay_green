@@ -185,12 +185,12 @@ echo "Running mutmut (this may take several minutes)..."
 MUTMUT_OUTPUT=$(mktemp)
 
 # Build mutmut command with optional paths
-MUTMUT_CMD="mutmut run"
+MUTMUT_CMD=(mutmut run)
 if [ -n "$PATHS_TO_MUTATE" ]; then
-    MUTMUT_CMD="$MUTMUT_CMD --paths-to-mutate=$PATHS_TO_MUTATE"
+    MUTMUT_CMD+=(--paths-to-mutate="$PATHS_TO_MUTATE")
 fi
 
-if $MUTMUT_CMD 2>&1 | tee "$MUTMUT_OUTPUT"; then
+if "${MUTMUT_CMD[@]}" 2>&1 | tee "$MUTMUT_OUTPUT"; then
     echo "✓ Mutmut run completed"
 else
     # mutmut returns non-zero if there are surviving mutants, which is expected

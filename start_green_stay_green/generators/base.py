@@ -153,7 +153,11 @@ class TemplateBasedGenerator(BaseGenerator):
             msg = "Template directory not configured for this generator"
             raise GenerationError(msg)
 
-        template_path = self.template_dir / template_name
+        template_path = (self.template_dir / template_name).resolve()
+        # Prevent path traversal out of template directory
+        if not str(template_path).startswith(str(self.template_dir.resolve())):
+            msg = f"Template path escapes template directory: {template_name}"
+            raise GenerationError(msg)
         if not template_path.exists():
             msg = f"Template not found: {template_path}"
             raise GenerationError(

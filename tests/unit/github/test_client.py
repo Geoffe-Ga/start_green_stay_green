@@ -73,7 +73,7 @@ class TestGitHubClientInitialization:
         with patch("httpx.Client"):
             client = GitHubClient("token123", "owner", "repo")
 
-            assert client.token == "token123"  # noqa: S105 # Test token
+            assert client._token == "token123"  # noqa: S105 # Test token
             assert client.owner == "owner"
             assert client.repo == "repo"
 

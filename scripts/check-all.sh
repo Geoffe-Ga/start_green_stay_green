@@ -76,6 +76,10 @@ done
 
 cd "$PROJECT_ROOT"
 
+# Create temp directory for parallel mode log files
+TMPDIR_PARALLEL=$(mktemp -d)
+trap 'rm -rf "$TMPDIR_PARALLEL"' EXIT
+
 # Set verbosity
 VERBOSE_FLAG=""
 if $VERBOSE; then
@@ -103,7 +107,7 @@ run_check() {
         echo "Running: $check_name"
     fi
 
-    if "$SCRIPT_DIR/$script" "${args[@]+"${args[@]}"}" $VERBOSE_FLAG; then
+    if "$SCRIPT_DIR/$script" "${args[@]+"${args[@]}"}" ${VERBOSE_FLAG:+"$VERBOSE_FLAG"}; then
         PASSED_CHECKS+=("$check_name")
         if ! $JSON_OUTPUT; then
             echo "✓ $check_name passed"
@@ -128,19 +132,19 @@ if $PARALLEL; then
     fi
 
     # Start all parallel checks in background
-    "$SCRIPT_DIR/lint.sh" --check $VERBOSE_FLAG >/tmp/lint.log 2>&1 &
+    "$SCRIPT_DIR/lint.sh" --check ${VERBOSE_FLAG:+"$VERBOSE_FLAG"} >"$TMPDIR_PARALLEL/lint.log" 2>&1 &
     LINT_PID=$!
 
-    "$SCRIPT_DIR/format.sh" --check $VERBOSE_FLAG >/tmp/format.log 2>&1 &
+    "$SCRIPT_DIR/format.sh" --check ${VERBOSE_FLAG:+"$VERBOSE_FLAG"} >"$TMPDIR_PARALLEL/format.log" 2>&1 &
     FORMAT_PID=$!
 
-    "$SCRIPT_DIR/typecheck.sh" $VERBOSE_FLAG >/tmp/typecheck.log 2>&1 &
+    "$SCRIPT_DIR/typecheck.sh" ${VERBOSE_FLAG:+"$VERBOSE_FLAG"} >"$TMPDIR_PARALLEL/typecheck.log" 2>&1 &
     TYPE_PID=$!
 
-    "$SCRIPT_DIR/security.sh" $VERBOSE_FLAG >/tmp/security.log 2>&1 &
+    "$SCRIPT_DIR/security.sh" ${VERBOSE_FLAG:+"$VERBOSE_FLAG"} >"$TMPDIR_PARALLEL/security.log" 2>&1 &
     SEC_PID=$!
 
-    "$SCRIPT_DIR/complexity.sh" $VERBOSE_FLAG >/tmp/complexity.log 2>&1 &
+    "$SCRIPT_DIR/complexity.sh" ${VERBOSE_FLAG:+"$VERBOSE_FLAG"} >"$TMPDIR_PARALLEL/complexity.log" 2>&1 &
     COMP_PID=$!
 
     # Wait for all parallel checks and collect results

@@ -6,11 +6,13 @@ on:
   workflow_dispatch:  # Allow manual trigger
 
 permissions:
-  contents: write  # For GitHub Pages deployment
+  contents: read
 
 jobs:
   generate-metrics:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # For GitHub Pages deployment
     env:
       VIRTUAL_ENV: ${{ github.workspace }}/.venv
     steps:

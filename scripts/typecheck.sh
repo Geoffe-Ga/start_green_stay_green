@@ -68,8 +68,11 @@ if $VERBOSE; then
     set -x
 fi
 
+# Create temp file for stderr capture
+TMP_MYPY_STDERR=$(mktemp)
+trap 'rm -f "$TMP_MYPY_STDERR"; cleanup_venv' EXIT
+
 # Ensure venv is available and set up cleanup
-setup_cleanup_trap
 ensure_venv || exit 2
 
 # Machine-readable metrics mode
@@ -90,7 +93,7 @@ TYPE_START=$(date +%s)
 if $VERBOSE; then
     echo "Running MyPy type checker..."
 fi
-mypy . 2>/tmp/mypy-stderr.txt || {
+mypy . 2>"$TMP_MYPY_STDERR" || {
     echo "✗ Type checking failed" >&2
     exit 1
 }

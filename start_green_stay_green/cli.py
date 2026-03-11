@@ -298,14 +298,7 @@ def _validate_output_dir(output_dir: Path | None) -> Path:
         return Path.cwd()
 
     # Resolve to absolute path to eliminate any .. sequences
-    resolved = output_dir.resolve()
-
-    # Double-check no traversal remains after resolution
-    if ".." in resolved.parts:
-        msg = "Output directory cannot contain '..' components"
-        raise typer.BadParameter(msg)
-
-    return resolved
+    return output_dir.resolve()
 
 
 def _load_config_data(config: Path | None) -> dict[str, str]:
@@ -356,7 +349,7 @@ def _validate_and_prepare_paths(
     # Determine project path
     project_path = target_output_dir / project_name
 
-    # Verify no escape after joining paths
+    # Path traversal guard: verify project stays within output directory
     if not str(project_path.resolve()).startswith(str(target_output_dir.resolve())):
         msg = "Project path escapes output directory"
         raise typer.BadParameter(msg)
@@ -463,6 +456,17 @@ def _prompt_for_api_key() -> str | None:
     return api_key
 
 
+def _warn_if_cli_api_key(source: str) -> None:
+    """Warn user if API key was provided via CLI argument."""
+    if source == "command line":
+        console.print(
+            "[yellow]Warning:[/yellow] --api-key is visible in the "
+            "process list. Use ANTHROPIC_API_KEY env var or keyring "
+            "instead.",
+            style="bold",
+        )
+
+
 def _get_api_key_with_source(
     api_key_arg: str | None,
     *,
@@ -481,6 +485,7 @@ def _get_api_key_with_source(
 
     for key, source in sources:
         if key:
+            _warn_if_cli_api_key(source)
             return key, source
 
     if not no_interactive:
@@ -989,7 +994,10 @@ def init(  # noqa: PLR0913
         str | None,
         typer.Option(
             "--api-key",
-            help="Claude API key for AI-powered features (optional).",
+            help=(
+                "[DEPRECATED] API key is visible in process list. "
+                "Use ANTHROPIC_API_KEY env var or keyring instead."
+            ),
             hide_input=True,
         ),
     ] = None,

@@ -137,7 +137,7 @@ class GitHubClient:
             GitHubError: If token is empty or invalid format
         """
         self._validate_init_params(token, owner, repo)
-        self.token = token
+        self._token = token
         self.owner = owner
         self.repo = repo
         self._client = self._create_http_client(token)
@@ -162,8 +162,11 @@ class GitHubClient:
             msg = "GitHub token is required and must be a string"
             raise GitHubError(msg)
 
+    # GitHub name rules: alphanumeric + hyphens, no leading/trailing hyphen
+    _GITHUB_NAME_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$")
+
     def _validate_owner(self, owner: str) -> None:
-        """Validate repository owner.
+        """Validate repository owner format.
 
         Raises:
             GitHubError: If owner is invalid
@@ -171,15 +174,21 @@ class GitHubClient:
         if not owner or not isinstance(owner, str):
             msg = "Repository owner is required"
             raise GitHubError(msg)
+        if not self._GITHUB_NAME_RE.match(owner):
+            msg = f"Invalid GitHub owner format: {owner!r}"
+            raise GitHubError(msg)
 
     def _validate_repo(self, repo: str) -> None:
-        """Validate repository name.
+        """Validate repository name format.
 
         Raises:
             GitHubError: If repo is invalid
         """
         if not repo or not isinstance(repo, str):
             msg = "Repository name is required"
+            raise GitHubError(msg)
+        if not self._GITHUB_NAME_RE.match(repo):
+            msg = f"Invalid GitHub repo format: {repo!r}"
             raise GitHubError(msg)
 
     def _create_http_client(self, token: str) -> httpx.Client:
@@ -253,6 +262,18 @@ class GitHubClient:
             # Handle both JSONDecodeError and other exceptions during parsing
             return {"raw_body": response.text}
 
+    @staticmethod
+    def _sanitize_error(raw_error: object) -> str:
+        """Truncate and strip control characters from error messages.
+
+        Args:
+            raw_error: Raw error value from GitHub API response
+
+        Returns:
+            Sanitized error string safe for logging/display
+        """
+        return "".join(c for c in str(raw_error)[:500] if c.isprintable())
+
     def _check_response_errors(
         self, response: httpx.Response, response_body: dict[str, Any]
     ) -> None:
@@ -283,8 +304,9 @@ class GitHubClient:
             )
 
         if response.status_code >= 400:  # noqa: PLR2004 # Standard HTTP status
-            error_msg = response_body.get("message", response.text)
-            msg = f"GitHub API error: {error_msg}"
+            raw_error = response_body.get("message", response.text)
+            sanitized = self._sanitize_error(raw_error)
+            msg = f"GitHub API error: {sanitized}"
             raise GitHubError(
                 msg,
                 status_code=response.status_code,
@@ -885,6 +907,21 @@ class GitHubClient:
         }
         return {k: v for k, v in params.items() if v is not None}
 
+    _SAFE_PATH_RE = re.compile(r"^[a-zA-Z0-9_./-]+$")
+    _SAFE_BRANCH_RE = re.compile(r"^[a-zA-Z0-9_./-]+$")
+
+    def _validate_file_path(self, path: str) -> None:
+        """Validate file path for safe URL interpolation."""
+        if not path or ".." in path or not self._SAFE_PATH_RE.match(path):
+            msg = f"Invalid file path: {path!r}"
+            raise GitHubError(msg)
+
+    def _validate_branch_name(self, branch: str) -> None:
+        """Validate branch name for safe URL interpolation."""
+        if not branch or not self._SAFE_BRANCH_RE.match(branch):
+            msg = f"Invalid branch name: {branch!r}"
+            raise GitHubError(msg)
+
     def create_or_update_file(
         self,
         path: str,
@@ -904,8 +941,10 @@ class GitHubClient:
             File operation data from GitHub API
 
         Raises:
-            GitHubError: If operation fails
+            GitHubError: If operation fails or params contain unsafe characters
         """
+        self._validate_file_path(path)
+        self._validate_branch_name(branch)
         encoded_content = base64.b64encode(content.encode()).decode()
 
         payload = {

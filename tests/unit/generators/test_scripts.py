@@ -554,17 +554,16 @@ class TestScriptsGeneratorErrorHandling:
 class TestScriptsGeneratorEdgeCases:
     """Test edge cases in script generation."""
 
-    def test_script_generation_with_special_package_names(self) -> None:
-        """Test script generation with special package names."""
-        special_names = [
-            "my-package",
+    def test_script_generation_with_valid_package_names(self) -> None:
+        """Test script generation with valid package names."""
+        valid_names = [
             "my_package",
             "MyPackage",
             "MYPACKAGE",
-            "my.package",
+            "pkg123",
         ]
 
-        for package_name in special_names:
+        for package_name in valid_names:
             with tempfile.TemporaryDirectory() as tmpdir:
                 config = ScriptConfig(
                     language="python",
@@ -573,6 +572,27 @@ class TestScriptsGeneratorEdgeCases:
                 generator = ScriptsGenerator(Path(tmpdir), config)
                 scripts = generator.generate()
                 assert scripts
+
+    def test_script_generation_rejects_unsafe_package_names(self) -> None:
+        """Test that package names with shell-unsafe chars are rejected."""
+        unsafe_names = [
+            "my-package",
+            "my.package",
+            "pkg;rm -rf",
+            "$(whoami)",
+        ]
+
+        for package_name in unsafe_names:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                config = ScriptConfig(
+                    language="python",
+                    package_name=package_name,
+                )
+                with pytest.raises(
+                    ValueError,
+                    match="Package name must contain only",
+                ):
+                    ScriptsGenerator(Path(tmpdir), config)
 
     def test_script_generation_with_existing_output_dir(self) -> None:
         """Test script generation overwrites existing output directory."""

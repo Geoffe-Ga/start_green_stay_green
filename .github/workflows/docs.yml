@@ -1,0 +1,125 @@
+name: Documentation
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'start_green_stay_green/**/*.py'
+      - 'docs/**'
+      - 'pdoc.toml'
+      - 'scripts/docs.sh'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'start_green_stay_green/**/*.py'
+      - 'docs/**'
+      - 'pdoc.toml'
+      - 'scripts/docs.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pdoc>=14.0.0
+
+      - name: Generate API documentation
+        run: ./scripts/docs.sh --verbose
+
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-docs
+          path: docs/api/
+          if-no-files-found: warn
+
+      - name: Comment PR with docs link
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = [
+              '## Documentation Updated',
+              '',
+              'Documentation has been generated for this PR. To view:',
+              '1. Download the `api-docs` artifact from the CI build',
+              '2. Open `start_green_stay_green/index.html` in your browser',
+              '',
+              'Or view the [main branch docs](https://start-green-stay-green.readthedocs.io) for the latest stable version.',
+            ].join('\n');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body,
+            });
+
+  deploy-pages:
+    name: Deploy Documentation
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [build-docs]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: api-docs
+          path: docs/api
+
+      - uses: actions/configure-pages@v4
+
+      - uses: actions/upload-pages-artifact@v2
+        with:
+          path: docs/api
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
+
+  readthedocs-webhook:
+    name: Trigger ReadTheDocs Build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger ReadTheDocs build
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          if [ -z "$RTD_TOKEN" ]; then
+            echo "ReadTheDocs token not configured, skipping webhook"
+            exit 0
+          fi
+
+          curl -X POST \
+            -H "Authorization: Token $RTD_TOKEN" \
+            https://readthedocs.org/api/v3/projects/start-green-stay-green/builds/ \
+            -d "commit=main" || echo "ReadTheDocs webhook failed (may not be configured)"
