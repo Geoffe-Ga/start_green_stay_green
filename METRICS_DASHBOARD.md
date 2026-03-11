@@ -51,7 +51,7 @@ The Metrics Dashboard Generator creates comprehensive quality metrics tracking c
    - Badge: Yes
 
 8. **Documentation Coverage** (≥95%)
-   - Tool: interrogate / typedoc
+   - Tool: pydocstyle / typedoc
    - CI Enforced: Yes
    - Badge: Yes
 
@@ -146,7 +146,7 @@ artifacts = generator.write_all(Path("output"))
 
 ## Supported Languages
 
-- **Python**: pytest-cov, mutmut, radon, interrogate, pip-audit
+- **Python**: pytest-cov, mutmut, radon, pydocstyle, pip-audit
 - **TypeScript**: jest, stryker, eslint, typedoc, npm audit
 - **JavaScript**: jest, stryker, eslint, jsdoc, npm audit
 - **Go**: go test -cover, go-mutesting, gocyclo, godoc, gosec
@@ -267,7 +267,7 @@ jobs:
         run: radon cc -n 10 .
 
       - name: Documentation Check
-        run: interrogate --fail-under=95
+        run: ruff check --select D .
 
       - name: Security Check
         run: pip-audit

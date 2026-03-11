@@ -55,7 +55,7 @@ my-web-app/
 All scripts are located in `./scripts/`:
 
 ```bash
-# Run all quality checks (32 hooks)
+# Run all quality checks (31 hooks)
 ./scripts/check-all.sh
 
 # Run tests with coverage
