@@ -63,7 +63,7 @@ jobs:
 
       - name: Upload job timing
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: job-timings-quality
           path: quality-job-timing.txt
@@ -153,7 +153,7 @@ jobs:
           verbose: true
 
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-${{ matrix.python-version }}
@@ -167,7 +167,7 @@ jobs:
 
       - name: Upload job timing
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: job-timings-test-py${{ matrix.python-version }}
           path: test-py${{ matrix.python-version }}-job-timing.txt
@@ -209,7 +209,7 @@ jobs:
 
       - name: Upload job timing
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: job-timings-security
           path: security-job-timing.txt
@@ -237,7 +237,7 @@ jobs:
 
       - name: Upload job timing
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: job-timings-dependency-review
           path: dependency-review-job-timing.txt
@@ -325,14 +325,14 @@ jobs:
           ls -la badges/
 
       - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: htmlcov/
           retention-days: 30
 
       - name: Upload badge artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-badges
           path: badges/
@@ -402,7 +402,7 @@ jobs:
 
       - name: Upload job timing
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: job-timings-coverage
           path: coverage-job-timing.txt
