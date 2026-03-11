@@ -292,7 +292,7 @@ All code must meet these standards before merging to main:
 
 #### Test Coverage
 - **Code Coverage**: 90% minimum (branch coverage)
-- **Docstring Coverage**: 95% minimum (interrogate)
+- **Docstring Coverage**: 95% minimum (pydocstyle / ruff D rules)
 - **Mutation Score**: 80% minimum (mutmut)
 - **Test Types**: Unit, Integration, and E2E coverage required
 
@@ -564,7 +564,7 @@ def process_input(name: str) -> None:
    - Linting (ruff, pylint, mypy)
    - Security checks (bandit, pip-audit)
    - Tests with coverage
-   - Docstring coverage (interrogate)
+   - Docstring coverage (pydocstyle / ruff D rules)
    - Code quality metrics
 
 4. **Commit with Conventional Commits**

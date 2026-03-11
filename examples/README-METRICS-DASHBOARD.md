@@ -12,7 +12,7 @@ This document explains how the metrics dashboard works in production SGSG projec
          │
          ├── pytest --cov → coverage.json
          ├── radon cc → complexity
-         ├── interrogate → docs coverage
+         ├── pydocstyle → docs coverage
          └── bandit → security scan
          │
          ▼

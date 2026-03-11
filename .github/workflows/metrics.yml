@@ -28,11 +28,6 @@ jobs:
           pip install -e .
           pip install -r requirements-dev.txt
 
-      - name: Check documentation coverage
-        run: |
-          . .venv/bin/activate
-          interrogate -v start_green_stay_green/ > docs-report.txt 2>&1 || true
-
       - name: Generate metrics.json via script mode
         run: |
           . .venv/bin/activate

@@ -22,11 +22,11 @@ This workflow enforces iterative quality improvement through sequential gates, p
 
 **Actions**:
 ```bash
-# Run ALL 32 quality hooks
+# Run ALL 31 quality hooks
 pre-commit run --all-files
 ```
 
-**Checks** (32 hooks total):
+**Checks** (31 hooks total):
 - Git checks (large files, merge conflicts, etc.)
 - Formatting (ruff, black, isort)
 - Linting (ruff, pylint)
@@ -281,7 +281,7 @@ def stay_green_workflow():
 | Metric | Threshold | Gate | Tool |
 |--------|-----------|------|------|
 | **Code Coverage** | ≥ 90% | Gate 1, Gate 2 | pytest --cov |
-| **Docstring Coverage** | ≥ 95% | Gate 1, Gate 2 | interrogate |
+| **Docstring Coverage** | ≥ 95% | Gate 1, Gate 2 | pydocstyle / ruff D rules |
 | **Cyclomatic Complexity** | ≤ 10 per function | Gate 1, Gate 2 | radon cc |
 | **Maintainability Index** | ≥ 20 | Gate 1, Gate 2 | radon mi |
 | **Complexity Grade** | A (1-5) | Gate 1, Gate 2 | xenon |

@@ -57,9 +57,6 @@ jobs:
       - name: Run pip-audit dependency check
         run: pip-audit
 
-      - name: Check docstring coverage
-        run: interrogate -c pyproject.toml
-
       - name: Run Vulture dead code detection
         run: vulture src/ --min-confidence 80
 

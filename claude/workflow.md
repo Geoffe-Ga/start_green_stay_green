@@ -88,7 +88,7 @@ Before creating/updating a PR:
    - Code modernization (pyupgrade, autoflake, refurb)
    - Exception handling (tryceratops)
    - Dead code detection (vulture)
-   - Docstring coverage (interrogate, 95% threshold)
+   - Docstring coverage (pydocstyle / ruff D rules, 95% threshold)
    - Shell linting (shellcheck)
 
 4. **Commit with Conventional Commits**

@@ -326,7 +326,7 @@ cd /Users/geoffgallinger/Projects/sgsg-worktrees/tool-auditor
 pre-commit run --all-files
 ```
 
-**Expected**: ✅ All 32 hooks PASS
+**Expected**: ✅ All 31 hooks PASS
 
 ---
 

@@ -67,7 +67,7 @@ pre-commit run --all-files
 - ✅ Consistent results across developers
 - ✅ Catches issues before CI runs
 - ✅ Auto-fixes many issues (formatting, trailing whitespace, etc.)
-- ✅ Impossible to forget a check - all 32 hooks run automatically
+- ✅ Impossible to forget a check - all 31 hooks run automatically
 
 #### Available Scripts (CI/Advanced Usage)
 

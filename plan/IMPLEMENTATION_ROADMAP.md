@@ -45,7 +45,7 @@ This document outlines the strategic approach to completing the Start Green Stay
 - ✅ Content Tuner (tuner.py - 81.7% mutation score)
 
 #### Quality Infrastructure (Phase 1)
-- ✅ Complete pre-commit hooks (32 hooks)
+- ✅ Complete pre-commit hooks (31 hooks)
 - ✅ CI pipeline with all checks
 - ✅ Scripts for formatting, linting, testing
 - ✅ Coverage tracking (97%+)
@@ -387,7 +387,7 @@ Detailed test implementation plan created:
 - [x] Test coverage ≥ 90% (currently 97%+)
 - [ ] Mutation score ≥ 80% (cli.py in progress)
 - [x] Pylint score ≥ 9.0
-- [x] All pre-commit hooks pass (32 hooks)
+- [x] All pre-commit hooks pass (31 hooks)
 - [x] Zero security vulnerabilities
 - [x] Documentation coverage ≥ 95%
 
@@ -499,7 +499,7 @@ Detailed test implementation plan created:
 ### Workflow Updates (January 2026)
 
 **3-Gate Workflow System**: The development workflow has been updated from 4 gates to 3 gates:
-1. **Gate 1**: Local pre-commit (32 hooks)
+1. **Gate 1**: Local pre-commit (31 hooks)
 2. **Gate 2**: CI pipeline green
 3. **Gate 3**: Code review LGTM
 

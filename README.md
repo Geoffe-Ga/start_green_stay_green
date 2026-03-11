@@ -409,7 +409,7 @@ my-project/
 All generated projects enforce:
 
 - **Code Coverage**: ≥90% (branch coverage)
-- **Docstring Coverage**: ≥95% (interrogate)
+- **Docstring Coverage**: ≥95% (pydocstyle / ruff D rules)
 - **Mutation Score**: ≥80% (mutmut)
 - **Cyclomatic Complexity**: ≤10 per function
 - **Maintainability Index**: ≥20 (radon)

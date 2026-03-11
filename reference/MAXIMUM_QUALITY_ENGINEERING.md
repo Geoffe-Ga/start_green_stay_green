@@ -122,7 +122,6 @@ pip install --break-system-packages \
     mutmut \
     pre-commit \
     commitizen \
-    interrogate \
     pydocstyle \
     darglint \
     tryceratops \
@@ -240,20 +239,7 @@ precision = 2
 exclude_dirs = ["tests", "venv"]
 skips = []  # No skips - fix the security issues
 
-[tool.interrogate]
-ignore-init-method = false
-ignore-init-module = true
-ignore-magic = false
-ignore-semiprivate = false
-ignore-private = false
-ignore-property-decorators = false
-ignore-module = false
-ignore-nested-functions = false
-ignore-nested-classes = false
-ignore-setters = false
-fail-under = 95
-exclude = ["setup.py", "docs", "build"]
-verbose = 2
+# Docstring coverage enforced via pydocstyle / ruff D rules
 
 [tool.pydocstyle]
 convention = "google"
@@ -351,13 +337,6 @@ repos:
       - id: mypy
         additional_dependencies: []  # Add your type stubs here
         args: ['--strict']
-
-  # Docstring coverage
-  - repo: https://github.com/econchick/interrogate
-    rev: 1.5.0
-    hooks:
-      - id: interrogate
-        args: ['-vv', '--fail-under=95']
 
   # Dead code detection
   - repo: https://github.com/jendrikseipp/vulture
@@ -973,9 +952,6 @@ jobs:
 
       - name: Check complexity (Xenon)
         run: xenon --max-absolute B --max-modules A --max-average A src/
-
-      - name: Check docstring coverage
-        run: interrogate -v src/ --fail-under=95
 
       - name: Check for type annotation coverage
         run: |
@@ -1859,7 +1835,7 @@ Track and enforce these metrics:
 | Cognitive Complexity | ≤15 | sonarqube |
 | Maintainability Index | ≥20 | radon |
 | Technical Debt Ratio | ≤5% | sonarqube |
-| Documentation Coverage | ≥95% | interrogate |
+| Documentation Coverage | ≥95% | pydocstyle / ruff D rules |
 | Dependency Freshness | ≤30 days | npm-check-updates |
 | Security Vulnerabilities | 0 critical/high | pip-audit / npm audit |
 

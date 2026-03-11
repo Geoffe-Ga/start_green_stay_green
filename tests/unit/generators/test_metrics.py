@@ -181,7 +181,7 @@ class TestLanguageTools:
         assert tools["coverage"] == "pytest-cov"
         assert tools["mutation"] == "mutmut"
         assert tools["complexity"] == "radon"
-        assert tools["documentation"] == "interrogate"
+        assert tools["documentation"] == "pydocstyle"
         assert tools["security"] == "pip-audit"
 
     def test_typescript_tools(self) -> None:
@@ -1420,7 +1420,7 @@ class TestMutationKillers:
         assert generator._get_tool_for_language("coverage") == "pytest-cov"
         assert generator._get_tool_for_language("mutation") == "mutmut"
         assert generator._get_tool_for_language("complexity") == "radon"
-        assert generator._get_tool_for_language("documentation") == "interrogate"
+        assert generator._get_tool_for_language("documentation") == "pydocstyle"
         assert generator._get_tool_for_language("security") == "pip-audit"
         assert generator._get_tool_for_language("dependency_check") == "pip-audit"
 

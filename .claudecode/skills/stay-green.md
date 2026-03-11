@@ -148,7 +148,7 @@ def implement_feature():
 | Check | Minimum | Tool |
 |-------|---------|------|
 | Coverage | 90% | pytest --cov |
-| Docstrings | 95% | interrogate |
+| Docstrings | 95% | pydocstyle / ruff D |
 | Complexity | ≤10 | radon, xenon |
 | Pylint | 9.0+ | pylint |
 | Mutation | 80% | mutmut |
