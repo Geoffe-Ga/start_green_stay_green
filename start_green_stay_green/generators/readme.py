@@ -9,10 +9,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from typing import TYPE_CHECKING
 
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+
+if TYPE_CHECKING:
+    from start_green_stay_green.utils.file_writer import FileWriter
 
 
 @dataclass(frozen=True)
@@ -67,18 +71,23 @@ class ReadmeGenerator(BaseGenerator):
         self,
         output_dir: Path,
         config: ReadmeConfig,
+        *,
+        file_writer: FileWriter | None = None,
     ) -> None:
         """Initialize the README Generator.
 
         Args:
             output_dir: Directory where README.md will be created
             config: ReadmeConfig with project settings
+            file_writer: Optional FileWriter for additive behavior.
+                If provided, existing files are skipped instead of overwritten.
 
         Raises:
             ValueError: If output_dir is invalid or language is unsupported
         """
         self.output_dir = Path(output_dir)
         self.config = config
+        self._file_writer = file_writer
         self._validate_config()
 
     def _validate_config(self) -> None:
@@ -101,6 +110,33 @@ class ReadmeGenerator(BaseGenerator):
 
         # Ensure output directory exists
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def _write_readme(self, readme_path: Path, content: str) -> Path:
+        """Write README.md to disk.
+
+        If a FileWriter is configured, delegates to it for existence checking.
+        Otherwise, writes directly (original behavior).
+
+        Args:
+            readme_path: Path where README.md will be written.
+            content: README content to write.
+
+        Returns:
+            Path to the written README.md.
+
+        Raises:
+            GenerationError: If file cannot be written.
+        """
+        if self._file_writer is not None:
+            self._file_writer.write_file(readme_path, content)
+            return readme_path
+
+        try:
+            readme_path.write_text(content)
+        except OSError as e:
+            msg = f"Failed to write README.md: {e}"
+            raise GenerationError(msg, cause=e) from e
+        return readme_path
 
     def generate(self) -> dict[str, Any]:
         """Generate README.md.
@@ -133,15 +169,7 @@ class ReadmeGenerator(BaseGenerator):
             Path to generated README.md
         """
         readme_path = self.output_dir / "README.md"
-        content = self._python_readme_content()
-
-        try:
-            readme_path.write_text(content)
-        except OSError as e:
-            msg = f"Failed to write README.md: {e}"
-            raise GenerationError(msg, cause=e) from e
-
-        return readme_path
+        return self._write_readme(readme_path, self._python_readme_content())
 
     def _python_readme_content(self) -> str:
         """Generate Python README.md content.
@@ -297,15 +325,7 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
             Path to generated README.md
         """
         readme_path = self.output_dir / "README.md"
-        content = self._typescript_readme_content()
-
-        try:
-            readme_path.write_text(content)
-        except OSError as e:
-            msg = f"Failed to write README.md: {e}"
-            raise GenerationError(msg, cause=e) from e
-
-        return readme_path
+        return self._write_readme(readme_path, self._typescript_readme_content())
 
     def _typescript_readme_content(self) -> str:
         """Generate TypeScript README.md content.
@@ -452,15 +472,7 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
             Path to generated README.md
         """
         readme_path = self.output_dir / "README.md"
-        content = self._go_readme_content()
-
-        try:
-            readme_path.write_text(content)
-        except OSError as e:
-            msg = f"Failed to write README.md: {e}"
-            raise GenerationError(msg, cause=e) from e
-
-        return readme_path
+        return self._write_readme(readme_path, self._go_readme_content())
 
     def _go_readme_content(self) -> str:
         """Generate Go README.md content.
@@ -606,15 +618,7 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
             Path to generated README.md
         """
         readme_path = self.output_dir / "README.md"
-        content = self._rust_readme_content()
-
-        try:
-            readme_path.write_text(content)
-        except OSError as e:
-            msg = f"Failed to write README.md: {e}"
-            raise GenerationError(msg, cause=e) from e
-
-        return readme_path
+        return self._write_readme(readme_path, self._rust_readme_content())
 
     def _rust_readme_content(self) -> str:
         """Generate Rust README.md content.
@@ -765,15 +769,7 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
             Path to generated README.md
         """
         readme_path = self.output_dir / "README.md"
-        content = self._java_readme_content()
-
-        try:
-            readme_path.write_text(content)
-        except OSError as e:
-            msg = f"Failed to write README.md: {e}"
-            raise GenerationError(msg, cause=e) from e
-
-        return readme_path
+        return self._write_readme(readme_path, self._java_readme_content())
 
     def _java_readme_content(self) -> str:
         """Generate Java README.md content.
@@ -922,15 +918,7 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
             Path to generated README.md
         """
         readme_path = self.output_dir / "README.md"
-        content = self._csharp_readme_content()
-
-        try:
-            readme_path.write_text(content)
-        except OSError as e:
-            msg = f"Failed to write README.md: {e}"
-            raise GenerationError(msg, cause=e) from e
-
-        return readme_path
+        return self._write_readme(readme_path, self._csharp_readme_content())
 
     def _csharp_readme_content(self) -> str:
         """Generate C# README.md content.
@@ -1076,15 +1064,7 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
             Path to generated README.md
         """
         readme_path = self.output_dir / "README.md"
-        content = self._ruby_readme_content()
-
-        try:
-            readme_path.write_text(content)
-        except OSError as e:
-            msg = f"Failed to write README.md: {e}"
-            raise GenerationError(msg, cause=e) from e
-
-        return readme_path
+        return self._write_readme(readme_path, self._ruby_readme_content())
 
     def _ruby_readme_content(self) -> str:
         """Generate Ruby README.md content.

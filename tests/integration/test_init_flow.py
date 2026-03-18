@@ -37,13 +37,19 @@ def _block_orchestrator_init() -> Generator[None, None, None]:
         yield
 
 
-def _stub_ci_step(project_path: Path, _language: str, _orchestrator: object) -> None:
+def _stub_ci_step(
+    project_path: Path,
+    _language: str,
+    _orchestrator: object,
+    _file_writer: object = None,
+) -> None:
     """Stub CI generation step that writes minimal valid workflow files.
 
     Args:
         project_path: Target project directory.
         _language: Programming language (unused in stub).
         _orchestrator: Mock orchestrator (unused in stub).
+        _file_writer: File writer (unused in stub).
     """
     workflows_dir = project_path / ".github" / "workflows"
     workflows_dir.mkdir(parents=True, exist_ok=True)
@@ -51,12 +57,17 @@ def _stub_ci_step(project_path: Path, _language: str, _orchestrator: object) -> 
     (workflows_dir / "ci.yml").write_text(ci_content)
 
 
-def _stub_review_step(project_path: Path, _orchestrator: object) -> None:
+def _stub_review_step(
+    project_path: Path,
+    _orchestrator: object,
+    _file_writer: object = None,
+) -> None:
     """Stub review generation step that writes a minimal code-review workflow.
 
     Args:
         project_path: Target project directory.
         _orchestrator: Mock orchestrator (unused in stub).
+        _file_writer: File writer (unused in stub).
     """
     workflows_dir = project_path / ".github" / "workflows"
     workflows_dir.mkdir(parents=True, exist_ok=True)
@@ -69,6 +80,7 @@ def _stub_claude_md_step(
     project_name: str,
     language: str,
     _orchestrator: object,
+    _file_writer: object = None,
 ) -> None:
     """Stub CLAUDE.md generation step that writes minimal content.
 
@@ -77,6 +89,7 @@ def _stub_claude_md_step(
         project_name: Name of the project.
         language: Programming language.
         _orchestrator: Mock orchestrator (unused in stub).
+        _file_writer: File writer (unused in stub).
     """
     (project_path / "CLAUDE.md").write_text(
         f"# Claude Code Project Context: {project_name}\n\nGenerated for {language}.\n"
@@ -112,6 +125,7 @@ def _stub_subagents_step(
     project_name: str,
     _language: str,
     _orchestrator: object,
+    _file_writer: object = None,
 ) -> None:
     """Stub subagents generation step that creates the subagents directory.
 
@@ -120,6 +134,7 @@ def _stub_subagents_step(
         project_name: Name of the project.
         _language: Programming language (unused in stub).
         _orchestrator: Mock orchestrator (unused in stub).
+        _file_writer: File writer (unused in stub).
     """
     subagents_dir = project_path / ".claude" / "subagents"
     subagents_dir.mkdir(parents=True, exist_ok=True)
