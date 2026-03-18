@@ -773,18 +773,27 @@ def _generate_architecture_step(
     project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
+    file_writer: FileWriter | None = None,
 ) -> None:
     """Generate architecture rules or skip if no orchestrator."""
-    if orchestrator:
-        with console.status("Generating architecture rules..."):
-            arch_generator = ArchitectureEnforcementGenerator(
-                orchestrator,
-                output_dir=project_path / "plans" / "architecture",
-            )
-            arch_generator.generate(language=language, project_name=project_name)
-        console.print("[green]✓[/green] Generated architecture rules")
-    else:
+    if not orchestrator:
         console.print("[yellow]⊘[/yellow] Skipped architecture rules (no API key)")
+        return
+
+    arch_dir = project_path / "plans" / "architecture"
+    # ArchitectureEnforcementGenerator writes files internally;
+    # skip the entire step if the output directory already has content.
+    if file_writer is not None and file_writer.skip_existing_dir(arch_dir):
+        console.print("[green]✓[/green] Architecture rules (preserved existing)")
+        return
+
+    with console.status("Generating architecture rules..."):
+        arch_generator = ArchitectureEnforcementGenerator(
+            orchestrator,
+            output_dir=arch_dir,
+        )
+        arch_generator.generate(language=language, project_name=project_name)
+    console.print("[green]✓[/green] Generated architecture rules")
 
 
 def _generate_subagents_step(
@@ -928,7 +937,9 @@ def _generate_with_orchestrator(
     _generate_claude_md_step(
         project_path, project_name, language, orchestrator, file_writer
     )
-    _generate_architecture_step(project_path, project_name, language, orchestrator)
+    _generate_architecture_step(
+        project_path, project_name, language, orchestrator, file_writer
+    )
     _generate_subagents_step(
         project_path, project_name, language, orchestrator, file_writer
     )

@@ -101,6 +101,7 @@ def _stub_architecture_step(
     project_name: str,
     _language: str,
     _orchestrator: object,
+    _file_writer: object = None,
 ) -> None:
     """Stub architecture generation step that writes minimal rule files.
 
@@ -109,6 +110,7 @@ def _stub_architecture_step(
         project_name: Name of the project.
         _language: Programming language (unused in stub).
         _orchestrator: Mock orchestrator (unused in stub).
+        _file_writer: File writer (unused in stub).
     """
     arch_dir = project_path / "plans" / "architecture"
     arch_dir.mkdir(parents=True, exist_ok=True)

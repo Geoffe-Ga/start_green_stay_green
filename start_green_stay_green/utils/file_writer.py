@@ -103,7 +103,7 @@ class FileWriter:
             return WriteResult.SKIPPED
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content)
+        file_path.write_text(content, encoding="utf-8")
         self.created += 1
         self._console.print(f"  [green]CREATE[/green] {rel}")
         return WriteResult.CREATED
@@ -153,6 +153,29 @@ class FileWriter:
 
             content = source_file.read_text()
             self.write_file(target_file, content)
+
+    def skip_existing_dir(self, directory: Path) -> bool:
+        """Skip all files in a directory if it already has content.
+
+        Used for generators that write files internally and can't be
+        individually controlled. If the directory exists and contains files,
+        marks them all as skipped and returns True.
+
+        Args:
+            directory: Directory to check.
+
+        Returns:
+            True if directory had existing files (skipped), False otherwise.
+        """
+        if not directory.exists() or not any(directory.iterdir()):
+            return False
+
+        for f in sorted(directory.rglob("*")):
+            if f.is_file():
+                self.skipped += 1
+                rel = self._relative_path(f)
+                self._console.print(f"  [yellow]SKIP[/yellow] {rel} (already exists)")
+        return True
 
     def summary(self) -> str:
         """Return a summary of write operations.
