@@ -950,13 +950,12 @@ def _generate_project_files(
     project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
-    *,
-    enable_live_dashboard: bool = False,
+    file_writer: FileWriter,
 ) -> None:
     """Generate all project files with progress indicators.
 
-    Creates a FileWriter to track file creation/skip stats across all
-    generators. Existing files are preserved (skipped) by default.
+    Uses the provided FileWriter for conflict resolution (skip, force,
+    or interactive mode).
 
     Args:
         project_path: Path where project will be created.
@@ -964,13 +963,11 @@ def _generate_project_files(
         language: Programming language.
         orchestrator: Optional AI orchestrator for AI-powered features.
             None indicates fallback to template mode.
-        enable_live_dashboard: Whether to generate live metrics dashboard.
+        file_writer: FileWriter instance for safe file operations.
 
     Raises:
         typer.Exit: If generation fails.
     """
-    file_writer = FileWriter(project_root=project_path, console=console)
-
     try:
         # Core project structure first
         _generate_structure_step(project_path, project_name, language, file_writer)
@@ -1000,31 +997,67 @@ def _generate_project_files(
                 "  Re-run with a valid API key to generate these artifacts.\n"
             )
 
-        # Generate live metrics dashboard if enabled
-        if enable_live_dashboard:
-            _generate_metrics_dashboard_step(project_path, project_name, language)
-
         # Print summary stats
         console.print(f"\n[bold]{file_writer.summary()}[/bold]")
-
-        console.print(
-            f"\n[green]✓[/green] Project generated successfully at: {project_path}"
-        )
-        console.print("\nTo get started, run:")
-        console.print(f"  cd {project_path}")
-        console.print("  pre-commit install")
-        console.print("  ./scripts/check-all.sh\n")
-        if enable_live_dashboard:
-            console.print(
-                "[green]✓[/green] Live metrics dashboard enabled "
-                "- configure GitHub Pages to deploy from /docs"
-            )
     except Exception as e:
         console.print(
             f"\n[red]Error:[/red] Generation failed: {e}",
             style="bold",
         )
         raise typer.Exit(code=1) from e
+
+
+def _finalize_init(
+    project_path: Path,
+    project_name: str,
+    language: str,
+    *,
+    enable_live_dashboard: bool = False,
+) -> None:
+    """Generate optional dashboard and print success message.
+
+    Args:
+        project_path: Path to the generated project.
+        project_name: Name of the project.
+        language: Programming language.
+        enable_live_dashboard: Whether to generate live metrics dashboard.
+    """
+    if enable_live_dashboard:
+        _generate_metrics_dashboard_step(project_path, project_name, language)
+
+    console.print(
+        f"\n[green]✓[/green] Project generated successfully at: {project_path}"
+    )
+    console.print("\nTo get started, run:")
+    console.print(f"  cd {project_path}")
+    console.print("  pre-commit install")
+    console.print("  ./scripts/check-all.sh\n")
+    if enable_live_dashboard:
+        console.print(
+            "[green]✓[/green] Live metrics dashboard enabled "
+            "- configure GitHub Pages to deploy from /docs"
+        )
+
+
+def _validate_conflict_flags(
+    force: bool,  # noqa: FBT001
+    interactive: bool,  # noqa: FBT001
+) -> None:
+    """Validate that --force and --interactive are mutually exclusive.
+
+    Args:
+        force: Whether --force was passed.
+        interactive: Whether --interactive was passed.
+
+    Raises:
+        typer.Exit: If both flags are set.
+    """
+    if force and interactive:
+        console.print(
+            "[red]Error:[/red] --force and --interactive are mutually exclusive.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -1061,6 +1094,21 @@ def init(  # noqa: PLR0913
         typer.Option(
             "--dry-run",
             help="Preview what would be generated without creating files.",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Overwrite all existing files without prompting.",
+        ),
+    ] = False,
+    interactive: Annotated[
+        bool,
+        typer.Option(
+            "--interactive",
+            help="Prompt per-file when conflicts exist (skip/overwrite/diff).",
         ),
     ] = False,
     no_interactive: Annotated[
@@ -1103,6 +1151,8 @@ def init(  # noqa: PLR0913
         language: Primary programming language.
         output_dir: Output directory (defaults to current directory).
         dry_run: Preview mode without file creation.
+        force: Overwrite all existing files without prompting.
+        interactive: Prompt per-file for conflict resolution.
         no_interactive: Non-interactive mode.
         api_key: Optional Claude API key for AI features.
         enable_live_dashboard: Generate live metrics dashboard with workflow.
@@ -1111,6 +1161,8 @@ def init(  # noqa: PLR0913
     Raises:
         typer.Exit: If validation fails or generation errors occur.
     """
+    _validate_conflict_flags(force, interactive)
+
     # Load configuration
     config_data = _load_config_data(config)
 
@@ -1167,12 +1219,27 @@ def init(  # noqa: PLR0913
     # Create project directory
     project_path.mkdir(parents=True, exist_ok=True)
 
+    # Create FileWriter with the chosen conflict resolution mode
+    file_writer = FileWriter(
+        project_root=project_path,
+        force=force,
+        interactive=interactive,
+        console=console,
+    )
+
     # Generate all project files (handles errors internally)
     _generate_project_files(
         project_path,
         resolved_project_name,
         resolved_language,
         orchestrator,
+        file_writer,
+    )
+
+    _finalize_init(
+        project_path,
+        resolved_project_name,
+        resolved_language,
         enable_live_dashboard=enable_live_dashboard,
     )
 

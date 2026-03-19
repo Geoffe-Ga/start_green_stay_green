@@ -554,11 +554,12 @@ class TestInitCommand:
             )
         assert exc_info.value.code == 1
 
+    @patch("start_green_stay_green.cli._generate_metrics_dashboard_step")
     @patch("start_green_stay_green.cli._generate_project_files")
-    def test_init_with_live_dashboard_passes_flag(
-        self, mock_generate: Mock, tmp_path: Path
+    def test_init_with_live_dashboard_calls_metrics_step(
+        self, mock_generate: Mock, mock_dashboard: Mock, tmp_path: Path
     ) -> None:
-        """Test init with enable_live_dashboard=True passes flag to generator."""
+        """Test init with enable_live_dashboard=True calls dashboard step."""
         mock_generate.return_value = None
         cli.init(
             project_name="test-project",
@@ -569,16 +570,15 @@ class TestInitCommand:
             no_interactive=True,
             enable_live_dashboard=True,
         )
-        # Verify enable_live_dashboard was passed to _generate_project_files
-        assert mock_generate.called
-        call_kwargs = mock_generate.call_args[1]
-        assert call_kwargs["enable_live_dashboard"] is True
+        mock_generate.assert_called()
+        mock_dashboard.assert_called_once()
 
+    @patch("start_green_stay_green.cli._generate_metrics_dashboard_step")
     @patch("start_green_stay_green.cli._generate_project_files")
-    def test_init_without_live_dashboard_defaults_false(
-        self, mock_generate: Mock, tmp_path: Path
+    def test_init_without_live_dashboard_skips_metrics_step(
+        self, mock_generate: Mock, mock_dashboard: Mock, tmp_path: Path
     ) -> None:
-        """Test init without enable_live_dashboard defaults to False."""
+        """Test init without enable_live_dashboard skips dashboard step."""
         mock_generate.return_value = None
         cli.init(
             project_name="test-project",
@@ -588,10 +588,8 @@ class TestInitCommand:
             dry_run=False,
             no_interactive=True,
         )
-        # Verify enable_live_dashboard defaults to False
-        assert mock_generate.called
-        call_kwargs = mock_generate.call_args[1]
-        assert call_kwargs.get("enable_live_dashboard", False) is False
+        mock_generate.assert_called()
+        mock_dashboard.assert_not_called()
 
     @patch("start_green_stay_green.cli._load_config_data")
     @patch("start_green_stay_green.cli._validate_and_prepare_paths")
@@ -1230,11 +1228,13 @@ class TestGenerateProjectFiles:
         mock_orchestrator = MagicMock()
         mock_path = MagicMock(spec=Path)
 
+        mock_writer = MagicMock()
         cli._generate_project_files(
             mock_path,
             "my-project",
             "python",
             mock_orchestrator,
+            mock_writer,
         )
 
         # Verify generation steps were called
@@ -1251,12 +1251,14 @@ class TestGenerateProjectFiles:
     ) -> None:
         """Test _generate_project_files generates without orchestrator."""
         mock_path = MagicMock(spec=Path)
+        mock_writer = MagicMock()
 
         cli._generate_project_files(
             mock_path,
             "my-project",
             "python",
             None,
+            mock_writer,
         )
 
         # Verify generation steps were called
