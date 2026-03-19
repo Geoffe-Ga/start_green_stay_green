@@ -4,9 +4,15 @@ Generates quality control scripts adapted to target project languages and struct
 Supports Python, TypeScript, Go, Rust, and other languages with appropriate tooling.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from start_green_stay_green.utils.file_writer import FileWriter
 
 
 @dataclass(frozen=True)
@@ -48,18 +54,23 @@ class ScriptsGenerator:
         self,
         output_dir: Path,
         config: ScriptConfig,
+        *,
+        file_writer: FileWriter | None = None,
     ) -> None:
         """Initialize the Scripts Generator.
 
         Args:
             output_dir: Directory where scripts will be created
             config: ScriptConfig with language and tool settings
+            file_writer: Optional FileWriter for additive behavior.
+                If provided, existing files are skipped instead of overwritten.
 
         Raises:
             ValueError: If output_dir is invalid or language is unsupported
         """
         self.output_dir = Path(output_dir)
         self.config = config
+        self._file_writer = file_writer
         self._validate_config()
 
     _SAFE_PACKAGE_NAME_RE = re.compile(r"^[a-zA-Z0-9_]+$")
@@ -1089,9 +1100,7 @@ fi
 
 echo "✓ Security checks passed"
 exit 0
-""".replace(
-            "__PACKAGE_NAME__", self.config.package_name
-        )
+""".replace("__PACKAGE_NAME__", self.config.package_name)
 
     def _python_complexity_script(self) -> str:
         """Generate Python complexity.sh script."""
@@ -1183,9 +1192,7 @@ fi
 
 echo "✓ Complexity analysis completed"
 exit 0
-""".replace(
-            "__PACKAGE_NAME__", self.config.package_name
-        )
+""".replace("__PACKAGE_NAME__", self.config.package_name)
 
     def _python_mutation_script(self) -> str:
         """Generate Python mutation.sh script."""
@@ -3132,6 +3139,9 @@ esac
     def _write_script(self, filename: str, content: str) -> Path:
         """Write a script file and make it executable.
 
+        If a FileWriter is configured, delegates to it for existence checking.
+        Otherwise, writes directly (original behavior).
+
         Args:
             filename: Name of the script file
             content: Script content
@@ -3143,6 +3153,10 @@ esac
             OSError: If script cannot be written or made executable
         """
         script_path = self.output_dir / filename
+
+        if self._file_writer is not None:
+            self._file_writer.write_script(script_path, content)
+            return script_path
 
         # Write script content
         script_path.write_text(content, encoding="utf-8")

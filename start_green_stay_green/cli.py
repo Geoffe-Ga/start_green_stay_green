@@ -51,6 +51,7 @@ from start_green_stay_green.generators.tests_gen import TestsGenerator
 from start_green_stay_green.utils.async_bridge import run_async
 from start_green_stay_green.utils.credentials import get_api_key_from_keyring
 from start_green_stay_green.utils.credentials import store_api_key_in_keyring
+from start_green_stay_green.utils.file_writer import FileWriter
 
 # Version information
 __version__ = "1.0.0"
@@ -526,7 +527,10 @@ def _initialize_orchestrator(
         return None
 
 
-def _copy_reference_skills(target_dir: Path) -> None:
+def _copy_reference_skills(
+    target_dir: Path,
+    file_writer: FileWriter | None = None,
+) -> None:
     """Copy reference skills to target directory.
 
     This is a temporary implementation that directly copies reference skills
@@ -535,6 +539,7 @@ def _copy_reference_skills(target_dir: Path) -> None:
 
     Args:
         target_dir: Target directory for skills (.claude/skills/).
+        file_writer: Optional FileWriter for additive behavior.
 
     Raises:
         FileNotFoundError: If reference skills directory not found.
@@ -550,11 +555,17 @@ def _copy_reference_skills(target_dir: Path) -> None:
             raise FileNotFoundError(msg)
 
         target_skill_dir = target_dir / skill_name
-        shutil.copytree(source_dir, target_skill_dir, dirs_exist_ok=True)
+        if file_writer is not None:
+            file_writer.copy_tree(source_dir, target_skill_dir)
+        else:
+            shutil.copytree(source_dir, target_skill_dir, dirs_exist_ok=True)
 
 
 def _generate_structure_step(
-    project_path: Path, project_name: str, language: str
+    project_path: Path,
+    project_name: str,
+    language: str,
+    file_writer: FileWriter | None = None,
 ) -> None:
     """Generate source code structure."""
     with console.status("Generating source structure..."):
@@ -563,13 +574,16 @@ def _generate_structure_step(
             language=language,
             package_name=project_name.replace("-", "_"),
         )
-        generator = StructureGenerator(project_path, config)
+        generator = StructureGenerator(project_path, config, file_writer=file_writer)
         generator.generate()
     console.print("[green]✓[/green] Generated source structure")
 
 
 def _generate_dependencies_step(
-    project_path: Path, project_name: str, language: str
+    project_path: Path,
+    project_name: str,
+    language: str,
+    file_writer: FileWriter | None = None,
 ) -> None:
     """Generate dependencies files."""
     with console.status("Generating dependencies..."):
@@ -578,12 +592,17 @@ def _generate_dependencies_step(
             language=language,
             package_name=project_name.replace("-", "_"),
         )
-        generator = DependenciesGenerator(project_path, config)
+        generator = DependenciesGenerator(project_path, config, file_writer=file_writer)
         generator.generate()
     console.print("[green]✓[/green] Generated dependencies")
 
 
-def _generate_tests_step(project_path: Path, project_name: str, language: str) -> None:
+def _generate_tests_step(
+    project_path: Path,
+    project_name: str,
+    language: str,
+    file_writer: FileWriter | None = None,
+) -> None:
     """Generate tests directory."""
     with console.status("Generating tests..."):
         config = TestsConfig(
@@ -591,12 +610,17 @@ def _generate_tests_step(project_path: Path, project_name: str, language: str) -
             language=language,
             package_name=project_name.replace("-", "_"),
         )
-        generator = TestsGenerator(project_path, config)
+        generator = TestsGenerator(project_path, config, file_writer=file_writer)
         generator.generate()
     console.print("[green]✓[/green] Generated tests")
 
 
-def _generate_readme_step(project_path: Path, project_name: str, language: str) -> None:
+def _generate_readme_step(
+    project_path: Path,
+    project_name: str,
+    language: str,
+    file_writer: FileWriter | None = None,
+) -> None:
     """Generate README.md."""
     with console.status("Generating README..."):
         config = ReadmeConfig(
@@ -604,13 +628,16 @@ def _generate_readme_step(project_path: Path, project_name: str, language: str) 
             language=language,
             package_name=project_name.replace("-", "_"),
         )
-        generator = ReadmeGenerator(project_path, config)
+        generator = ReadmeGenerator(project_path, config, file_writer=file_writer)
         generator.generate()
     console.print("[green]✓[/green] Generated README")
 
 
 def _generate_scripts_step(
-    project_path: Path, project_name: str, language: str
+    project_path: Path,
+    project_name: str,
+    language: str,
+    file_writer: FileWriter | None = None,
 ) -> None:
     """Generate quality scripts."""
     with console.status("Generating scripts..."):
@@ -621,13 +648,17 @@ def _generate_scripts_step(
         scripts_generator = ScriptsGenerator(
             output_dir=project_path / "scripts",
             config=scripts_config,
+            file_writer=file_writer,
         )
         scripts_generator.generate()
     console.print("[green]✓[/green] Generated scripts")
 
 
 def _generate_precommit_step(
-    project_path: Path, project_name: str, language: str
+    project_path: Path,
+    project_name: str,
+    language: str,
+    file_writer: FileWriter | None = None,
 ) -> None:
     """Generate pre-commit configuration."""
     with console.status("Generating pre-commit config..."):
@@ -639,15 +670,21 @@ def _generate_precommit_step(
         precommit_generator = PreCommitGenerator(orchestrator=None)
         precommit_result = precommit_generator.generate(precommit_config)
         precommit_file = project_path / ".pre-commit-config.yaml"
-        precommit_file.write_text(precommit_result["content"])
+        if file_writer is not None:
+            file_writer.write_file(precommit_file, precommit_result["content"])
+        else:
+            precommit_file.write_text(precommit_result["content"])
     console.print("[green]✓[/green] Generated pre-commit config")
 
 
-def _generate_skills_step(project_path: Path) -> None:
+def _generate_skills_step(
+    project_path: Path,
+    file_writer: FileWriter | None = None,
+) -> None:
     """Generate Claude skills."""
     with console.status("Generating skills..."):
         skills_dir = project_path / ".claude" / "skills"
-        _copy_reference_skills(skills_dir)
+        _copy_reference_skills(skills_dir, file_writer=file_writer)
     console.print("[green]✓[/green] Generated skills")
 
 
@@ -655,6 +692,7 @@ def _generate_ci_step(
     project_path: Path,
     language: str,
     orchestrator: AIOrchestrator | None,
+    file_writer: FileWriter | None = None,
 ) -> None:
     """Generate CI pipeline or skip if no orchestrator."""
     if orchestrator:
@@ -663,7 +701,11 @@ def _generate_ci_step(
             workflow = ci_generator.generate_workflow()
             workflows_dir = project_path / ".github" / "workflows"
             workflows_dir.mkdir(parents=True, exist_ok=True)
-            (workflows_dir / "ci.yml").write_text(workflow.content)
+            ci_file = workflows_dir / "ci.yml"
+            if file_writer is not None:
+                file_writer.write_file(ci_file, workflow.content)
+            else:
+                ci_file.write_text(workflow.content)
         console.print("[green]✓[/green] Generated CI pipeline")
     else:
         console.print("[yellow]⊘[/yellow] Skipped CI (no API key)")
@@ -672,6 +714,7 @@ def _generate_ci_step(
 def _generate_review_step(
     project_path: Path,
     orchestrator: AIOrchestrator | None,
+    file_writer: FileWriter | None = None,
 ) -> None:
     """Generate GitHub Actions code review or skip if no orchestrator."""
     if orchestrator:
@@ -681,7 +724,10 @@ def _generate_review_step(
             workflows_dir = project_path / ".github" / "workflows"
             workflows_dir.mkdir(parents=True, exist_ok=True)
             workflow_file = workflows_dir / "code-review.yml"
-            workflow_file.write_text(review_result["workflow_content"])
+            if file_writer is not None:
+                file_writer.write_file(workflow_file, review_result["workflow_content"])
+            else:
+                workflow_file.write_text(review_result["workflow_content"])
         console.print("[green]✓[/green] Generated GitHub Actions review")
     else:
         console.print("[yellow]⊘[/yellow] Skipped code review (no API key)")
@@ -692,6 +738,7 @@ def _generate_claude_md_step(
     project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
+    file_writer: FileWriter | None = None,
 ) -> None:
     """Generate CLAUDE.md or skip if no orchestrator."""
     if orchestrator:
@@ -711,7 +758,11 @@ def _generate_claude_md_step(
                 "skills": REQUIRED_SKILLS.copy(),
             }
             claude_md_result = claude_md_generator.generate(project_config)
-            (project_path / "CLAUDE.md").write_text(claude_md_result.content)
+            claude_md_file = project_path / "CLAUDE.md"
+            if file_writer is not None:
+                file_writer.write_file(claude_md_file, claude_md_result.content)
+            else:
+                claude_md_file.write_text(claude_md_result.content)
         console.print("[green]✓[/green] Generated CLAUDE.md")
     else:
         console.print("[yellow]⊘[/yellow] Skipped CLAUDE.md (no API key)")
@@ -722,18 +773,27 @@ def _generate_architecture_step(
     project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
+    file_writer: FileWriter | None = None,
 ) -> None:
     """Generate architecture rules or skip if no orchestrator."""
-    if orchestrator:
-        with console.status("Generating architecture rules..."):
-            arch_generator = ArchitectureEnforcementGenerator(
-                orchestrator,
-                output_dir=project_path / "plans" / "architecture",
-            )
-            arch_generator.generate(language=language, project_name=project_name)
-        console.print("[green]✓[/green] Generated architecture rules")
-    else:
+    if not orchestrator:
         console.print("[yellow]⊘[/yellow] Skipped architecture rules (no API key)")
+        return
+
+    arch_dir = project_path / "plans" / "architecture"
+    # ArchitectureEnforcementGenerator writes files internally;
+    # skip the entire step if the output directory already has content.
+    if file_writer is not None and file_writer.skip_existing_dir(arch_dir):
+        console.print("[green]✓[/green] Architecture rules (preserved existing)")
+        return
+
+    with console.status("Generating architecture rules..."):
+        arch_generator = ArchitectureEnforcementGenerator(
+            orchestrator,
+            output_dir=arch_dir,
+        )
+        arch_generator.generate(language=language, project_name=project_name)
+    console.print("[green]✓[/green] Generated architecture rules")
 
 
 def _generate_subagents_step(
@@ -741,6 +801,7 @@ def _generate_subagents_step(
     project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
+    file_writer: FileWriter | None = None,
 ) -> None:
     """Generate subagents or skip if no orchestrator."""
     if orchestrator:
@@ -757,7 +818,11 @@ def _generate_subagents_step(
             subagents_output_dir = project_path / ".claude" / "agents"
             subagents_output_dir.mkdir(parents=True, exist_ok=True)
             for agent_name, result in results.items():
-                (subagents_output_dir / f"{agent_name}.md").write_text(result.content)
+                agent_file = subagents_output_dir / f"{agent_name}.md"
+                if file_writer is not None:
+                    file_writer.write_file(agent_file, result.content)
+                else:
+                    agent_file.write_text(result.content)
         console.print("[green]✓[/green] Generated subagents")
     else:
         console.print("[yellow]⊘[/yellow] Skipped subagents (no API key)")
@@ -864,13 +929,20 @@ def _generate_with_orchestrator(
     project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
+    file_writer: FileWriter | None = None,
 ) -> None:
     """Generate AI-powered artifacts (CI, CLAUDE.md, etc.) with progress indicators."""
-    _generate_ci_step(project_path, language, orchestrator)
-    _generate_review_step(project_path, orchestrator)
-    _generate_claude_md_step(project_path, project_name, language, orchestrator)
-    _generate_architecture_step(project_path, project_name, language, orchestrator)
-    _generate_subagents_step(project_path, project_name, language, orchestrator)
+    _generate_ci_step(project_path, language, orchestrator, file_writer)
+    _generate_review_step(project_path, orchestrator, file_writer)
+    _generate_claude_md_step(
+        project_path, project_name, language, orchestrator, file_writer
+    )
+    _generate_architecture_step(
+        project_path, project_name, language, orchestrator, file_writer
+    )
+    _generate_subagents_step(
+        project_path, project_name, language, orchestrator, file_writer
+    )
 
 
 def _generate_project_files(
@@ -883,6 +955,9 @@ def _generate_project_files(
 ) -> None:
     """Generate all project files with progress indicators.
 
+    Creates a FileWriter to track file creation/skip stats across all
+    generators. Existing files are preserved (skipped) by default.
+
     Args:
         project_path: Path where project will be created.
         project_name: Name of the project.
@@ -894,22 +969,24 @@ def _generate_project_files(
     Raises:
         typer.Exit: If generation fails.
     """
+    file_writer = FileWriter(project_root=project_path, console=console)
+
     try:
         # Core project structure first
-        _generate_structure_step(project_path, project_name, language)
-        _generate_dependencies_step(project_path, project_name, language)
-        _generate_tests_step(project_path, project_name, language)
-        _generate_readme_step(project_path, project_name, language)
+        _generate_structure_step(project_path, project_name, language, file_writer)
+        _generate_dependencies_step(project_path, project_name, language, file_writer)
+        _generate_tests_step(project_path, project_name, language, file_writer)
+        _generate_readme_step(project_path, project_name, language, file_writer)
 
         # Quality infrastructure
-        _generate_scripts_step(project_path, project_name, language)
-        _generate_precommit_step(project_path, project_name, language)
-        _generate_skills_step(project_path)
+        _generate_scripts_step(project_path, project_name, language, file_writer)
+        _generate_precommit_step(project_path, project_name, language, file_writer)
+        _generate_skills_step(project_path, file_writer)
 
         # AI-powered features (non-fatal: project is usable without AI content)
         try:
             _generate_with_orchestrator(
-                project_path, project_name, language, orchestrator
+                project_path, project_name, language, orchestrator, file_writer
             )
         except (AIGenerationError, OSError) as ai_err:
             console.print(
@@ -926,6 +1003,9 @@ def _generate_project_files(
         # Generate live metrics dashboard if enabled
         if enable_live_dashboard:
             _generate_metrics_dashboard_step(project_path, project_name, language)
+
+        # Print summary stats
+        console.print(f"\n[bold]{file_writer.summary()}[/bold]")
 
         console.print(
             f"\n[green]✓[/green] Project generated successfully at: {project_path}"
