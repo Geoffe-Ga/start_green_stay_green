@@ -50,18 +50,15 @@ class FileWriter:
         self,
         project_root: Path,
         *,
-        force: bool = False,
         console: Console | None = None,
     ) -> None:
         """Initialize FileWriter.
 
         Args:
             project_root: Root directory for relative path display.
-            force: If True, overwrite existing files without checking.
             console: Rich console for output. If None, creates a new one.
         """
         self._project_root = project_root
-        self._force = force
 
         if console is None:
             self._console = Console()
@@ -97,7 +94,7 @@ class FileWriter:
         """
         rel = self._relative_path(file_path)
 
-        if file_path.exists() and not self._force:
+        if file_path.exists():
             self.skipped += 1
             self._console.print(f"  [yellow]SKIP[/yellow] {rel} (already exists)")
             return WriteResult.SKIPPED
@@ -120,7 +117,7 @@ class FileWriter:
         """
         rel = self._relative_path(file_path)
 
-        if file_path.exists() and not self._force:
+        if file_path.exists():
             self.skipped += 1
             self._console.print(f"  [yellow]SKIP[/yellow] {rel} (already exists)")
             return WriteResult.SKIPPED
@@ -151,7 +148,7 @@ class FileWriter:
             relative = source_file.relative_to(source)
             target_file = target / relative
 
-            content = source_file.read_text()
+            content = source_file.read_text(encoding="utf-8")
             self.write_file(target_file, content)
 
     def skip_existing_dir(self, directory: Path) -> bool:

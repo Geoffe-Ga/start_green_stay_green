@@ -29,15 +29,10 @@ class TestFileWriterInit:
     """Test FileWriter initialization."""
 
     def test_default_init(self, tmp_path: Path) -> None:
-        """Test default FileWriter has force=False and zero stats."""
+        """Test default FileWriter has zero stats."""
         writer = FileWriter(project_root=tmp_path)
         assert writer.created == 0
         assert writer.skipped == 0
-
-    def test_force_flag(self, tmp_path: Path) -> None:
-        """Test FileWriter accepts force flag."""
-        writer = FileWriter(project_root=tmp_path, force=True)
-        assert writer.created == 0
 
     def test_custom_console(self, tmp_path: Path) -> None:
         """Test FileWriter accepts custom console."""
@@ -73,19 +68,6 @@ class TestWriteFile:
         assert file_path.read_text() == "original content"
         assert writer.created == 0
         assert writer.skipped == 1
-
-    def test_force_overwrites_existing_file(self, tmp_path: Path) -> None:
-        """Test write_file overwrites existing file when force=True."""
-        writer = FileWriter(project_root=tmp_path, force=True)
-        file_path = tmp_path / "existing.py"
-        file_path.write_text("original content")
-
-        result = writer.write_file(file_path, "new content")
-
-        assert result == WriteResult.CREATED
-        assert file_path.read_text() == "new content"
-        assert writer.created == 1
-        assert writer.skipped == 0
 
     def test_creates_parent_directories(self, tmp_path: Path) -> None:
         """Test write_file creates parent directories if needed."""
@@ -136,17 +118,6 @@ class TestWriteScript:
 
         assert result == WriteResult.SKIPPED
         assert script_path.read_text() == "#!/bin/bash\noriginal"
-
-    def test_force_overwrites_existing_script(self, tmp_path: Path) -> None:
-        """Test write_script overwrites existing script when force=True."""
-        writer = FileWriter(project_root=tmp_path, force=True)
-        script_path = tmp_path / "test.sh"
-        script_path.write_text("#!/bin/bash\noriginal")
-
-        result = writer.write_script(script_path, "#!/bin/bash\nnew")
-
-        assert result == WriteResult.CREATED
-        assert script_path.read_text() == "#!/bin/bash\nnew"
 
 
 class TestCopyTree:
@@ -201,23 +172,6 @@ class TestCopyTree:
         assert (target / "top.txt").read_text() == "top"
         assert (target / "sub" / "nested.txt").read_text() == "nested"
         assert writer.created == 2
-
-    def test_force_overwrites_in_copy_tree(self, tmp_path: Path) -> None:
-        """Test copy_tree with force=True overwrites existing files."""
-        source = tmp_path / "source"
-        source.mkdir()
-        (source / "file.txt").write_text("new")
-
-        target = tmp_path / "target"
-        target.mkdir()
-        (target / "file.txt").write_text("old")
-
-        writer = FileWriter(project_root=tmp_path, force=True)
-        writer.copy_tree(source, target)
-
-        assert (target / "file.txt").read_text() == "new"
-        assert writer.created == 1
-        assert writer.skipped == 0
 
 
 class TestSummary:
