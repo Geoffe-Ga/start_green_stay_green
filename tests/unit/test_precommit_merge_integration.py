@@ -58,6 +58,7 @@ class TestWritePrecommitConfig:
         content = precommit_file.read_text()
         assert "pre-commit/hooks" in content
         assert "psf/black" in content
+        assert writer.overwritten == 1
 
     def test_force_overwrites_existing(self, tmp_path: Path) -> None:
         """Test force mode overwrites instead of merging."""

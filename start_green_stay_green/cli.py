@@ -690,25 +690,27 @@ def _write_precommit_config(
         file_writer: Optional FileWriter for conflict resolution.
     """
     if file_writer is None:
-        precommit_file.write_text(generated_content)
+        precommit_file.write_text(generated_content, encoding="utf-8")
         return
 
     if not precommit_file.exists() or file_writer.is_force:
         file_writer.write_file(precommit_file, generated_content)
         return
 
-    _merge_and_write_precommit(precommit_file, generated_content)
+    _merge_and_write_precommit(precommit_file, generated_content, file_writer)
 
 
 def _merge_and_write_precommit(
     precommit_file: Path,
     generated_content: str,
+    file_writer: FileWriter,
 ) -> None:
     """Merge generated pre-commit config into existing file.
 
     Args:
         precommit_file: Path to existing .pre-commit-config.yaml.
         generated_content: Generated YAML content to merge.
+        file_writer: FileWriter for stats tracking.
     """
     existing_content = precommit_file.read_text(encoding="utf-8")
     try:
@@ -720,9 +722,11 @@ def _merge_and_write_precommit(
             f"  [yellow]WARN[/yellow] Cannot merge .pre-commit-config.yaml: {e}"
         )
         console.print("  [yellow]SKIP[/yellow] .pre-commit-config.yaml (kept existing)")
+        file_writer.skipped += 1
         return
 
     precommit_file.write_text(merged, encoding="utf-8")
+    file_writer.overwritten += 1
     console.print(
         f"  [blue]MERGE[/blue] .pre-commit-config.yaml "
         f"(added {added} repos, kept {kept} existing)"
