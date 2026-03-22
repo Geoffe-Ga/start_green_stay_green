@@ -14,6 +14,7 @@ import pytest
 
 from start_green_stay_green import cli as cli_mod
 from start_green_stay_green.cli import _generate_project_files
+from start_green_stay_green.cli import _resolve_language_param
 from start_green_stay_green.cli import _resolve_languages
 
 _STEP_NAMES = [
@@ -79,6 +80,30 @@ class TestResolveLanguages:
         assert result == ("python", "go")
 
 
+class TestCommaDelimitedLanguages:
+    """Test comma-separated language parsing (#261)."""
+
+    def test_comma_separated_split(self) -> None:
+        """Test 'python,go' is split into two languages."""
+        result = _resolve_language_param(["python,go"], {}, no_interactive=True)
+        assert result == ("python", "go")
+
+    def test_comma_with_spaces(self) -> None:
+        """Test 'python, go' with spaces is handled."""
+        result = _resolve_language_param(["python, go"], {}, no_interactive=True)
+        assert result == ("python", "go")
+
+    def test_mixed_comma_and_repeated(self) -> None:
+        """Test mixing comma-separated and repeated flags."""
+        result = _resolve_language_param(["python,go", "rust"], {}, no_interactive=True)
+        assert result == ("python", "go", "rust")
+
+    def test_single_language_no_comma(self) -> None:
+        """Test single language without comma still works."""
+        result = _resolve_language_param(["python"], {}, no_interactive=True)
+        assert result == ("python",)
+
+
 class TestMultiLanguageGeneration:
     """Test _generate_project_files with multiple languages."""
 
@@ -125,3 +150,31 @@ class TestMultiLanguageGeneration:
             calls = _get_mock("_generate_structure_step").call_args_list
             assert calls[0][0][2] == "python"
             assert calls[1][0][2] == "go"
+
+
+class TestMultiLanguageScriptsDir:
+    """Test multi-language scripts use subdirectories (#262)."""
+
+    def test_multi_language_scripts_get_subdirectories(self) -> None:
+        """Test scripts_step receives subdirectory for each language."""
+        with _patch_all_steps():
+            _generate_project_files(
+                MagicMock(), "my-project", ("python", "go"), None, MagicMock()
+            )
+
+            calls = _get_mock("_generate_scripts_step").call_args_list
+            assert len(calls) == 2
+            # Both get subdirectory=language for multi-language
+            assert calls[0].kwargs.get("subdirectory") == "python"
+            assert calls[1].kwargs.get("subdirectory") == "go"
+
+    def test_single_language_no_subdirectory(self) -> None:
+        """Test single language scripts go to scripts/ (no subdirectory)."""
+        with _patch_all_steps():
+            _generate_project_files(
+                MagicMock(), "my-project", ("python",), None, MagicMock()
+            )
+
+            calls = _get_mock("_generate_scripts_step").call_args_list
+            assert len(calls) == 1
+            assert calls[0].kwargs.get("subdirectory") is None
