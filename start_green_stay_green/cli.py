@@ -1004,19 +1004,21 @@ def _generate_with_orchestrator(
 def _generate_project_files(
     project_path: Path,
     project_name: str,
-    language: str,
+    languages: tuple[str, ...],
     orchestrator: AIOrchestrator | None,
     file_writer: FileWriter,
 ) -> None:
     """Generate all project files with progress indicators.
 
-    Uses the provided FileWriter for conflict resolution (skip, force,
-    or interactive mode).
+    For multi-language projects, per-language generators (structure, deps,
+    tests, scripts, precommit) run once per language. Shared generators
+    (skills, AI features) run once. Pre-commit configs are merged across
+    languages via the YAML merge utility.
 
     Args:
         project_path: Path where project will be created.
         project_name: Name of the project.
-        language: Programming language.
+        languages: Tuple of programming languages to generate for.
         orchestrator: Optional AI orchestrator for AI-powered features.
             None indicates fallback to template mode.
         file_writer: FileWriter instance for safe file operations.
@@ -1024,22 +1026,31 @@ def _generate_project_files(
     Raises:
         typer.Exit: If generation fails.
     """
-    try:
-        # Core project structure first
-        _generate_structure_step(project_path, project_name, language, file_writer)
-        _generate_dependencies_step(project_path, project_name, language, file_writer)
-        _generate_tests_step(project_path, project_name, language, file_writer)
-        _generate_readme_step(project_path, project_name, language, file_writer)
+    primary_language = languages[0]
 
-        # Quality infrastructure
-        _generate_scripts_step(project_path, project_name, language, file_writer)
-        _generate_precommit_step(project_path, project_name, language, file_writer)
+    try:
+        # Per-language generation
+        for language in languages:
+            _generate_structure_step(project_path, project_name, language, file_writer)
+            _generate_dependencies_step(
+                project_path, project_name, language, file_writer
+            )
+            _generate_tests_step(project_path, project_name, language, file_writer)
+            _generate_readme_step(project_path, project_name, language, file_writer)
+            _generate_scripts_step(project_path, project_name, language, file_writer)
+            _generate_precommit_step(project_path, project_name, language, file_writer)
+
+        # Shared steps (run once)
         _generate_skills_step(project_path, file_writer)
 
-        # AI-powered features (non-fatal: project is usable without AI content)
+        # AI-powered features use primary language
         try:
             _generate_with_orchestrator(
-                project_path, project_name, language, orchestrator, file_writer
+                project_path,
+                project_name,
+                primary_language,
+                orchestrator,
+                file_writer,
             )
         except (AIGenerationError, OSError) as ai_err:
             console.print(
@@ -1095,6 +1106,72 @@ def _finalize_init(
         )
 
 
+def _resolve_language_param(
+    language: list[str] | None,
+    config_data: dict[str, str],
+    *,
+    no_interactive: bool,
+) -> tuple[str, ...]:
+    """Resolve language parameter from CLI args, config, or prompt.
+
+    Args:
+        language: Language list from CLI (None if not provided).
+        config_data: Configuration data from file.
+        no_interactive: Whether interactive prompts are disabled.
+
+    Returns:
+        Validated tuple of language strings.
+
+    Raises:
+        typer.Exit: If languages are invalid or missing in non-interactive mode.
+    """
+    if language:
+        raw = tuple(language)
+    elif config_data.get("language"):
+        raw = (config_data["language"],)
+    elif no_interactive:
+        console.print(
+            "[red]Error:[/red] --language required in non-interactive mode.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+    else:
+        raw = (str(typer.prompt("Primary language")),)
+
+    try:
+        return _resolve_languages(raw)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}", style="bold")
+        raise typer.Exit(code=1) from e
+
+
+def _resolve_languages(languages: tuple[str, ...]) -> tuple[str, ...]:
+    """Validate and deduplicate language list.
+
+    Args:
+        languages: Tuple of language strings from CLI.
+
+    Returns:
+        Deduplicated tuple of validated language strings.
+
+    Raises:
+        ValueError: If any language is unsupported or list is empty.
+    """
+    if not languages:
+        msg = "At least one language must be specified"
+        raise ValueError(msg)
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for lang in languages:
+        validate_language(lang)
+        if lang not in seen:
+            seen.add(lang)
+            unique.append(lang)
+
+    return tuple(unique)
+
+
 def _validate_conflict_flags(
     force: bool,  # noqa: FBT001
     interactive: bool,  # noqa: FBT001
@@ -1127,12 +1204,13 @@ def init(  # noqa: PLR0913
         ),
     ] = None,
     language: Annotated[
-        str | None,
+        list[str] | None,
         typer.Option(
             "--language",
             "-l",
             help=(
-                "Primary programming language " f"({', '.join(SUPPORTED_LANGUAGES)})."
+                "Programming language(s). Repeat for multi-language projects: "
+                f"-l python -l typescript. ({', '.join(SUPPORTED_LANGUAGES)})"
             ),
         ),
     ] = None,
@@ -1230,20 +1308,9 @@ def init(  # noqa: PLR0913
         "Project name",
         no_interactive=no_interactive,
     )
-    resolved_language = _resolve_parameter(
-        language,
-        config_data,
-        "language",
-        "Primary language",
-        no_interactive=no_interactive,
+    resolved_languages = _resolve_language_param(
+        language, config_data, no_interactive=no_interactive
     )
-
-    # Validate language is supported
-    try:
-        validate_language(resolved_language)
-    except ValueError as e:
-        console.print(f"[red]Error:[/red] {e}", style="bold")
-        raise typer.Exit(code=1) from e
 
     # Validate project name and paths
     try:
@@ -1257,7 +1324,9 @@ def init(  # noqa: PLR0913
 
     # Handle dry-run mode (skip orchestrator initialization for preview)
     if dry_run:
-        _show_dry_run_preview(resolved_project_name, resolved_language, project_path)
+        _show_dry_run_preview(
+            resolved_project_name, ", ".join(resolved_languages), project_path
+        )
         return
 
     # Initialize optional AI orchestrator (after dry-run check)
@@ -1287,7 +1356,7 @@ def init(  # noqa: PLR0913
     _generate_project_files(
         project_path,
         resolved_project_name,
-        resolved_language,
+        resolved_languages,
         orchestrator,
         file_writer,
     )
@@ -1295,7 +1364,7 @@ def init(  # noqa: PLR0913
     _finalize_init(
         project_path,
         resolved_project_name,
-        resolved_language,
+        resolved_languages[0],
         enable_live_dashboard=enable_live_dashboard,
     )
 

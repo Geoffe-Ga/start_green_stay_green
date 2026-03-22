@@ -512,7 +512,7 @@ class TestInitCommand:
         cli.init(
             project_name="test-project",
             output_dir=mock_path,
-            language="python",
+            language=["python"],
             api_key=None,
             dry_run=True,
             no_interactive=True,
@@ -532,7 +532,7 @@ class TestInitCommand:
         cli.init(
             project_name="test-project",
             output_dir=mock_path,
-            language="python",
+            language=["python"],
             api_key=None,
             dry_run=False,
             no_interactive=True,
@@ -547,7 +547,7 @@ class TestInitCommand:
             cli.init(
                 project_name="invalid!",
                 output_dir=None,
-                language="python",
+                language=["python"],
                 api_key=None,
                 dry_run=False,
                 no_interactive=True,
@@ -564,7 +564,7 @@ class TestInitCommand:
         cli.init(
             project_name="test-project",
             output_dir=tmp_path,
-            language="python",
+            language=["python"],
             api_key=None,
             dry_run=False,
             no_interactive=True,
@@ -583,7 +583,7 @@ class TestInitCommand:
         cli.init(
             project_name="test-project",
             output_dir=tmp_path,
-            language="python",
+            language=["python"],
             api_key=None,
             dry_run=False,
             no_interactive=True,
@@ -604,7 +604,7 @@ class TestInitCommand:
         cli.init(
             project_name="test-project",
             output_dir=mock_path,
-            language="python",
+            language=["python"],
             api_key=None,
             config=mock_path,
             dry_run=True,
@@ -621,7 +621,7 @@ class TestInitCommand:
         cli.init(
             project_name="test-project",
             output_dir=mock_path,
-            language="python",
+            language=["python"],
             api_key=None,
             dry_run=True,
             no_interactive=True,
@@ -640,7 +640,7 @@ class TestLanguageValidation:
                 cli.init(
                     project_name="test-project",
                     output_dir=mock_path,
-                    language="brainfuck",
+                    language=["brainfuck"],
                     api_key=None,
                     dry_run=False,
                     no_interactive=True,
@@ -670,7 +670,7 @@ class TestLanguageValidation:
             cli.init(
                 project_name="test-project",
                 output_dir=mock_path,
-                language=lang,
+                language=[lang],
                 api_key=None,
                 dry_run=True,
                 no_interactive=True,
@@ -1232,7 +1232,7 @@ class TestGenerateProjectFiles:
         cli._generate_project_files(
             mock_path,
             "my-project",
-            "python",
+            ("python",),
             mock_orchestrator,
             mock_writer,
         )
@@ -1256,7 +1256,7 @@ class TestGenerateProjectFiles:
         cli._generate_project_files(
             mock_path,
             "my-project",
-            "python",
+            ("python",),
             None,
             mock_writer,
         )
