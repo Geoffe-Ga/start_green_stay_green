@@ -20,6 +20,7 @@ Start Green Stay Green is a meta-tool that scaffolds new software projects with 
 - **Multi-Language Support**: Python, TypeScript, Go, Rust, and more
 - **Architecture Enforcement**: Import-linter (Python) and dependency-cruiser (TypeScript)
 - **Complete CI/CD**: GitHub Actions workflows with quality gates
+- **Additive Init**: Safe to re-run in existing directories — preserves your files
 - **Developer Experience**: Rich console output, interactive prompts, dry-run mode
 
 ### What Gets Generated
@@ -126,8 +127,10 @@ start-green-stay-green init [OPTIONS]
 **Options:**
 
 - `--project-name, -n TEXT`: Name of the project to generate
-- `--language, -l TEXT`: Primary programming language (python, typescript, go, rust)
+- `--language, -l TEXT`: Programming language(s). Repeat for multi-language: `-l python -l typescript`
 - `--output-dir, -o PATH`: Output directory for generated project (default: current directory)
+- `--force, -f`: Overwrite all existing files without prompting
+- `--interactive`: Prompt per-file when conflicts exist (skip/overwrite/diff)
 - `--dry-run`: Preview what would be generated without creating files
 - `--no-interactive`: Run in non-interactive mode (requires all options)
 - `--config, --config-file PATH`: Path to configuration file (YAML or TOML)
@@ -141,11 +144,20 @@ start-green-stay-green init
 # Non-interactive with all options
 start-green-stay-green init -n my-app -l python --no-interactive
 
+# Multi-language project
+start-green-stay-green init -n fullstack-app -l python -l typescript
+
+# Re-run safely in existing project (skips existing files)
+start-green-stay-green init -n my-app -l python
+
+# Force overwrite everything
+start-green-stay-green init -n my-app -l python --force
+
+# Interactively choose per file
+start-green-stay-green init -n my-app -l python --interactive
+
 # Dry run to preview
 start-green-stay-green init -n my-app -l typescript --dry-run
-
-# With config file
-start-green-stay-green init --config project-config.yaml
 ```
 
 ### `version` - Display Version Information
@@ -533,16 +545,13 @@ All contributions must:
 - ✅ Skills generation (Claude Code slash commands)
 - ✅ Subagents generation (AI development profiles)
 - ✅ CLAUDE.md generation
-
-### In Progress
-
-- 🚧 Full generator orchestration (Issue #106)
-- 🚧 YAML/TOML config file parsing
-- 🚧 Claude API integration for code review (Issue #102)
+- ✅ Additive init — safe to re-run in existing directories (#250)
+- ✅ `--force` and `--interactive` conflict resolution (#252)
+- ✅ YAML-aware pre-commit config merging (#253)
+- ✅ Multi-language `--language` support (#254)
 
 ### Planned
 
-- 📋 Additional language support (Go, Rust, Swift)
 - 📋 Template customization
 - 📋 Plugin system for custom generators
 - 📋 Project upgrade command
