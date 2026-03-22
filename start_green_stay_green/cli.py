@@ -1036,11 +1036,11 @@ def _generate_project_files(
                 project_path, project_name, language, file_writer
             )
             _generate_tests_step(project_path, project_name, language, file_writer)
-            _generate_readme_step(project_path, project_name, language, file_writer)
             _generate_scripts_step(project_path, project_name, language, file_writer)
             _generate_precommit_step(project_path, project_name, language, file_writer)
 
-        # Shared steps (run once)
+        # Shared steps (run once, using primary language)
+        _generate_readme_step(project_path, project_name, primary_language, file_writer)
         _generate_skills_step(project_path, file_writer)
 
         # AI-powered features use primary language

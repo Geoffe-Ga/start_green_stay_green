@@ -98,6 +98,9 @@ class TestMultiLanguageGeneration:
             assert _get_mock("_generate_tests_step").call_count == 2
             assert _get_mock("_generate_scripts_step").call_count == 2
             assert _get_mock("_generate_precommit_step").call_count == 2
+
+            # Shared steps called once (not per-language)
+            _get_mock("_generate_readme_step").assert_called_once()
             _get_mock("_generate_skills_step").assert_called_once()
             _get_mock("_generate_with_orchestrator").assert_called_once()
 
