@@ -639,20 +639,34 @@ def _generate_scripts_step(
     project_name: str,
     language: str,
     file_writer: FileWriter | None = None,
+    subdirectory: str | None = None,
 ) -> None:
-    """Generate quality scripts."""
-    with console.status("Generating scripts..."):
+    """Generate quality scripts.
+
+    Args:
+        project_path: Project root directory.
+        project_name: Name of the project.
+        language: Programming language for scripts.
+        file_writer: Optional FileWriter for additive behavior.
+        subdirectory: If set, write to scripts/{subdirectory}/ instead
+            of scripts/. Used for multi-language projects.
+    """
+    scripts_dir = project_path / "scripts"
+    if subdirectory:
+        scripts_dir = scripts_dir / subdirectory
+
+    with console.status(f"Generating {language} scripts..."):
         scripts_config = ScriptConfig(
             language=language,
             package_name=project_name.replace("-", "_"),
         )
         scripts_generator = ScriptsGenerator(
-            output_dir=project_path / "scripts",
+            output_dir=scripts_dir,
             config=scripts_config,
             file_writer=file_writer,
         )
         scripts_generator.generate()
-    console.print("[green]✓[/green] Generated scripts")
+    console.print(f"[green]✓[/green] Generated {language} scripts")
 
 
 def _generate_precommit_step(
@@ -1028,6 +1042,8 @@ def _generate_project_files(
     """
     primary_language = languages[0]
 
+    multi_language = len(languages) > 1
+
     try:
         # Per-language generation
         for language in languages:
@@ -1036,7 +1052,13 @@ def _generate_project_files(
                 project_path, project_name, language, file_writer
             )
             _generate_tests_step(project_path, project_name, language, file_writer)
-            _generate_scripts_step(project_path, project_name, language, file_writer)
+            _generate_scripts_step(
+                project_path,
+                project_name,
+                language,
+                file_writer,
+                subdirectory=language if multi_language else None,
+            )
             _generate_precommit_step(project_path, project_name, language, file_writer)
 
         # Shared steps (run once, using primary language)
@@ -1106,6 +1128,20 @@ def _finalize_init(
         )
 
 
+def _split_language_values(language: list[str]) -> tuple[str, ...]:
+    """Split comma-separated language values into individual languages.
+
+    Args:
+        language: List of language strings, possibly comma-separated.
+
+    Returns:
+        Tuple of individual language strings, stripped of whitespace.
+    """
+    return tuple(
+        lang.strip() for item in language for lang in item.split(",") if lang.strip()
+    )
+
+
 def _resolve_language_param(
     language: list[str] | None,
     config_data: dict[str, str],
@@ -1126,7 +1162,7 @@ def _resolve_language_param(
         typer.Exit: If languages are invalid or missing in non-interactive mode.
     """
     if language:
-        raw = tuple(language)
+        raw = _split_language_values(language)
     elif config_data.get("language"):
         raw = (config_data["language"],)
     elif no_interactive:
