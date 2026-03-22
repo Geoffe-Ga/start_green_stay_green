@@ -673,20 +673,37 @@ def _generate_precommit_step(
         precommit_file = project_path / ".pre-commit-config.yaml"
         generated_content = precommit_result["content"]
 
-        if (
-            file_writer is not None
-            and precommit_file.exists()
-            and not file_writer.is_force
-        ):
-            _merge_precommit_file(precommit_file, generated_content)
-        elif file_writer is not None:
-            file_writer.write_file(precommit_file, generated_content)
-        else:
-            precommit_file.write_text(generated_content)
+        _write_precommit_config(precommit_file, generated_content, file_writer)
     console.print("[green]✓[/green] Generated pre-commit config")
 
 
-def _merge_precommit_file(precommit_file: Path, generated_content: str) -> None:
+def _write_precommit_config(
+    precommit_file: Path,
+    generated_content: str,
+    file_writer: FileWriter | None,
+) -> None:
+    """Write pre-commit config, merging with existing if appropriate.
+
+    Args:
+        precommit_file: Path to .pre-commit-config.yaml.
+        generated_content: Generated YAML content.
+        file_writer: Optional FileWriter for conflict resolution.
+    """
+    if file_writer is None:
+        precommit_file.write_text(generated_content)
+        return
+
+    if not precommit_file.exists() or file_writer.is_force:
+        file_writer.write_file(precommit_file, generated_content)
+        return
+
+    _merge_and_write_precommit(precommit_file, generated_content)
+
+
+def _merge_and_write_precommit(
+    precommit_file: Path,
+    generated_content: str,
+) -> None:
     """Merge generated pre-commit config into existing file.
 
     Args:
@@ -698,7 +715,7 @@ def _merge_precommit_file(precommit_file: Path, generated_content: str) -> None:
         merged, added, kept = merge_precommit_configs(
             existing_content, generated_content
         )
-    except ValueError as e:
+    except (ValueError, TypeError) as e:
         console.print(
             f"  [yellow]WARN[/yellow] Cannot merge .pre-commit-config.yaml: {e}"
         )

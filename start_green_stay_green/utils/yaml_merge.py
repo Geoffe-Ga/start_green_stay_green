@@ -113,8 +113,7 @@ def _safe_parse(yaml_str: str) -> dict[str, Any]:
         Parsed dictionary.
 
     Raises:
-        ValueError: If YAML is malformed.
-        TypeError: If YAML is not a mapping.
+        ValueError: If YAML is malformed or not a mapping.
     """
     try:
         result = yaml.safe_load(yaml_str)
