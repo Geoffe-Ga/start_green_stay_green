@@ -74,6 +74,11 @@ Start Green Stay Green is a meta-tool for generating quality-controlled, AI-read
 - Pre-commit hooks configuration
 - Comprehensive documentation
 
+**Additive Init**: `green init` is safe to re-run in existing directories.
+Existing files are preserved by default. Supports `--force`, `--interactive`
+conflict resolution, YAML-aware pre-commit merging, and multi-language
+`-l python -l typescript` projects.
+
 ---
 
 ## 🏗️ Architecture
