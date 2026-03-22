@@ -85,7 +85,6 @@ class FileWriter:
         self._project_root = project_root
         self._force = force
         self._interactive = interactive
-        self.is_force = force
 
         if console is None:
             self._console = Console()
@@ -95,6 +94,14 @@ class FileWriter:
         self.created = 0
         self.skipped = 0
         self.overwritten = 0
+
+    @property
+    def is_force(self) -> bool:
+        """Whether force mode is active.
+
+        Returns True after interactive "overwrite all" switches to force mode.
+        """
+        return self._force
 
     def _relative_path(self, file_path: Path) -> str:
         """Get path relative to project root for display.
