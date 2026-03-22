@@ -85,6 +85,7 @@ class FileWriter:
         self._project_root = project_root
         self._force = force
         self._interactive = interactive
+        self.is_force = force
 
         if console is None:
             self._console = Console()

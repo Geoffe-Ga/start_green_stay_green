@@ -52,6 +52,7 @@ from start_green_stay_green.utils.async_bridge import run_async
 from start_green_stay_green.utils.credentials import get_api_key_from_keyring
 from start_green_stay_green.utils.credentials import store_api_key_in_keyring
 from start_green_stay_green.utils.file_writer import FileWriter
+from start_green_stay_green.utils.yaml_merge import merge_precommit_configs
 
 # Version information
 __version__ = "1.0.0"
@@ -660,7 +661,7 @@ def _generate_precommit_step(
     language: str,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate pre-commit configuration."""
+    """Generate pre-commit configuration, merging with existing if present."""
     with console.status("Generating pre-commit config..."):
         precommit_config = GenerationConfig(
             project_name=project_name,
@@ -670,11 +671,45 @@ def _generate_precommit_step(
         precommit_generator = PreCommitGenerator(orchestrator=None)
         precommit_result = precommit_generator.generate(precommit_config)
         precommit_file = project_path / ".pre-commit-config.yaml"
-        if file_writer is not None:
-            file_writer.write_file(precommit_file, precommit_result["content"])
+        generated_content = precommit_result["content"]
+
+        if (
+            file_writer is not None
+            and precommit_file.exists()
+            and not file_writer.is_force
+        ):
+            _merge_precommit_file(precommit_file, generated_content)
+        elif file_writer is not None:
+            file_writer.write_file(precommit_file, generated_content)
         else:
-            precommit_file.write_text(precommit_result["content"])
+            precommit_file.write_text(generated_content)
     console.print("[green]✓[/green] Generated pre-commit config")
+
+
+def _merge_precommit_file(precommit_file: Path, generated_content: str) -> None:
+    """Merge generated pre-commit config into existing file.
+
+    Args:
+        precommit_file: Path to existing .pre-commit-config.yaml.
+        generated_content: Generated YAML content to merge.
+    """
+    existing_content = precommit_file.read_text(encoding="utf-8")
+    try:
+        merged, added, kept = merge_precommit_configs(
+            existing_content, generated_content
+        )
+    except ValueError as e:
+        console.print(
+            f"  [yellow]WARN[/yellow] Cannot merge .pre-commit-config.yaml: {e}"
+        )
+        console.print("  [yellow]SKIP[/yellow] .pre-commit-config.yaml (kept existing)")
+        return
+
+    precommit_file.write_text(merged, encoding="utf-8")
+    console.print(
+        f"  [blue]MERGE[/blue] .pre-commit-config.yaml "
+        f"(added {added} repos, kept {kept} existing)"
+    )
 
 
 def _generate_skills_step(
