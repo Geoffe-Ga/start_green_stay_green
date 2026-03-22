@@ -95,6 +95,14 @@ class FileWriter:
         self.skipped = 0
         self.overwritten = 0
 
+    @property
+    def is_force(self) -> bool:
+        """Whether force mode is active.
+
+        Returns True after interactive "overwrite all" switches to force mode.
+        """
+        return self._force
+
     def _relative_path(self, file_path: Path) -> str:
         """Get path relative to project root for display.
 
