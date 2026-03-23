@@ -657,6 +657,9 @@ def _scripts_dir_has_other_language(scripts_dir: Path, language: str) -> bool:
         "typescript": "jest",
         "go": "go test",
         "rust": "cargo test",
+        "java": "mvn test",
+        "csharp": "dotnet test",
+        "ruby": "rspec",
     }
     current_marker = language_markers.get(language, "")
     return current_marker != "" and current_marker not in content

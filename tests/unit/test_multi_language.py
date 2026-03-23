@@ -15,12 +15,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 import pytest
+from rich.console import Console
 
 from start_green_stay_green import cli as cli_mod
 from start_green_stay_green.cli import _generate_project_files
+from start_green_stay_green.cli import _generate_scripts_step
 from start_green_stay_green.cli import _resolve_language_param
 from start_green_stay_green.cli import _resolve_languages
 from start_green_stay_green.cli import _scripts_dir_has_other_language
+from start_green_stay_green.utils.file_writer import FileWriter
 
 _STEP_NAMES = [
     "_generate_with_orchestrator",
@@ -222,3 +225,43 @@ class TestSequentialLanguageDetection:
         scripts_dir.mkdir()
 
         assert not _scripts_dir_has_other_language(scripts_dir, "python")
+
+    def test_java_marker_detected(self, tmp_path: Path) -> None:
+        """Test Java scripts detected when adding Python."""
+        scripts_dir = tmp_path / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "test.sh").write_text("#!/bin/bash\nmvn test\n")
+
+        assert _scripts_dir_has_other_language(scripts_dir, "python")
+
+    def test_csharp_marker_detected(self, tmp_path: Path) -> None:
+        """Test C# scripts detected when adding Go."""
+        scripts_dir = tmp_path / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "test.sh").write_text("#!/bin/bash\ndotnet test\n")
+
+        assert _scripts_dir_has_other_language(scripts_dir, "go")
+
+    def test_ruby_marker_detected(self, tmp_path: Path) -> None:
+        """Test Ruby scripts detected when adding TypeScript."""
+        scripts_dir = tmp_path / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "test.sh").write_text("#!/bin/bash\nrspec spec/\n")
+
+        assert _scripts_dir_has_other_language(scripts_dir, "typescript")
+
+    def test_subdirectory_created_for_second_language(self, tmp_path: Path) -> None:
+        """Integration: sequential init creates scripts subdirectory."""
+        project = tmp_path / "myproject"
+        project.mkdir()
+        writer = FileWriter(project_root=project, console=Console(quiet=True))
+
+        # First language: scripts go to scripts/
+        _generate_scripts_step(project, "myproject", "go", writer)
+        assert (project / "scripts" / "test.sh").exists()
+        assert "go test" in (project / "scripts" / "test.sh").read_text()
+
+        # Second language: auto-detects and uses scripts/python/
+        _generate_scripts_step(project, "myproject", "python", writer)
+        assert (project / "scripts" / "python" / "test.sh").exists()
+        assert "pytest" in (project / "scripts" / "python" / "test.sh").read_text()
