@@ -634,6 +634,37 @@ def _generate_readme_step(
     console.print("[green]✓[/green] Generated README")
 
 
+def _scripts_dir_has_other_language(scripts_dir: Path, language: str) -> bool:
+    """Check if scripts/ already has scripts from a different language.
+
+    Detects this by checking for known language-specific script content
+    in existing test.sh or check-all.sh files.
+
+    Args:
+        scripts_dir: Path to scripts/ directory.
+        language: Current language being generated.
+
+    Returns:
+        True if scripts from a different language are present.
+    """
+    marker_file = scripts_dir / "test.sh"
+    if not marker_file.exists():
+        return False
+
+    content = marker_file.read_text(encoding="utf-8")
+    language_markers = {
+        "python": "pytest",
+        "typescript": "jest",
+        "go": "go test",
+        "rust": "cargo test",
+        "java": "mvn test",
+        "csharp": "dotnet test",
+        "ruby": "rspec",
+    }
+    current_marker = language_markers.get(language, "")
+    return current_marker != "" and current_marker not in content
+
+
 def _generate_scripts_step(
     project_path: Path,
     project_name: str,
@@ -642,6 +673,9 @@ def _generate_scripts_step(
     subdirectory: str | None = None,
 ) -> None:
     """Generate quality scripts.
+
+    If scripts/ already contains scripts from a different language,
+    automatically uses scripts/{language}/ subdirectory to avoid conflicts.
 
     Args:
         project_path: Project root directory.
@@ -654,6 +688,8 @@ def _generate_scripts_step(
     scripts_dir = project_path / "scripts"
     if subdirectory:
         scripts_dir = scripts_dir / subdirectory
+    elif _scripts_dir_has_other_language(scripts_dir, language):
+        scripts_dir = scripts_dir / language
 
     with console.status(f"Generating {language} scripts..."):
         scripts_config = ScriptConfig(
