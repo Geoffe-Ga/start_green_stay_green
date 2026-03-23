@@ -7,8 +7,12 @@ all specified languages, and that single language still works.
 from __future__ import annotations
 
 from typing import Any
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 from unittest.mock import patch
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 import pytest
 
@@ -16,6 +20,7 @@ from start_green_stay_green import cli as cli_mod
 from start_green_stay_green.cli import _generate_project_files
 from start_green_stay_green.cli import _resolve_language_param
 from start_green_stay_green.cli import _resolve_languages
+from start_green_stay_green.cli import _scripts_dir_has_other_language
 
 _STEP_NAMES = [
     "_generate_with_orchestrator",
@@ -178,3 +183,42 @@ class TestMultiLanguageScriptsDir:
             calls = _get_mock("_generate_scripts_step").call_args_list
             assert len(calls) == 1
             assert calls[0].kwargs.get("subdirectory") is None
+
+
+class TestSequentialLanguageDetection:
+    """Test auto-detection of other language scripts for sequential runs."""
+
+    def test_detects_go_scripts_when_adding_python(self, tmp_path: Path) -> None:
+        """Test Go test.sh is detected as different from Python."""
+        scripts_dir = tmp_path / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "test.sh").write_text("#!/bin/bash\ngo test ./...\n")
+
+        assert _scripts_dir_has_other_language(scripts_dir, "python")
+
+    def test_detects_python_scripts_when_adding_go(self, tmp_path: Path) -> None:
+        """Test Python test.sh is detected as different from Go."""
+        scripts_dir = tmp_path / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "test.sh").write_text("#!/bin/bash\npytest tests/\n")
+
+        assert _scripts_dir_has_other_language(scripts_dir, "go")
+
+    def test_same_language_returns_false(self, tmp_path: Path) -> None:
+        """Test same language scripts are not detected as different."""
+        scripts_dir = tmp_path / "scripts"
+        scripts_dir.mkdir()
+        (scripts_dir / "test.sh").write_text("#!/bin/bash\npytest tests/\n")
+
+        assert not _scripts_dir_has_other_language(scripts_dir, "python")
+
+    def test_no_scripts_dir_returns_false(self, tmp_path: Path) -> None:
+        """Test missing scripts dir returns False."""
+        assert not _scripts_dir_has_other_language(tmp_path / "scripts", "python")
+
+    def test_empty_scripts_dir_returns_false(self, tmp_path: Path) -> None:
+        """Test empty scripts dir returns False."""
+        scripts_dir = tmp_path / "scripts"
+        scripts_dir.mkdir()
+
+        assert not _scripts_dir_has_other_language(scripts_dir, "python")
