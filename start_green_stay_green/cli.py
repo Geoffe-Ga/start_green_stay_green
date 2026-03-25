@@ -14,6 +14,10 @@ import re
 import shutil
 import sys
 from typing import Annotated
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 from rich.console import Console
 from rich.panel import Panel
@@ -469,23 +473,36 @@ def _warn_if_cli_api_key(source: str) -> None:
         )
 
 
+def _lazy_api_key_sources(
+    api_key_arg: str | None,
+) -> Generator[tuple[str | None, str], None, None]:
+    """Yield API key sources lazily to avoid unnecessary keychain prompts.
+
+    Each source is only evaluated when iterated, so keyring is never
+    accessed if an earlier source provides the key.
+
+    Args:
+        api_key_arg: API key from command line argument.
+
+    Yields:
+        (key_or_none, source_name) tuples.
+    """
+    yield api_key_arg, "command line"
+    yield get_api_key_from_keyring(), "keyring"
+    yield os.getenv("ANTHROPIC_API_KEY"), "environment variable"
+
+
 def _get_api_key_with_source(
     api_key_arg: str | None,
     *,
     no_interactive: bool,
 ) -> tuple[str, str] | tuple[None, None]:
-    """Get API key and its source.
+    """Get API key from the first available source.
 
     Returns:
         (api_key, source) tuple, or (None, None) if not found.
     """
-    sources = [
-        (api_key_arg, "command line"),
-        (get_api_key_from_keyring(), "keyring"),
-        (os.getenv("ANTHROPIC_API_KEY"), "environment variable"),
-    ]
-
-    for key, source in sources:
+    for key, source in _lazy_api_key_sources(api_key_arg):
         if key:
             _warn_if_cli_api_key(source)
             return key, source
