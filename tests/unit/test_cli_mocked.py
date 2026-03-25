@@ -415,7 +415,7 @@ class TestGetAPIKeyWithSource:
     def test_get_api_key_with_source_uses_arg(self) -> None:
         """Test _get_api_key_with_source returns CLI arg without hitting keyring."""
         with patch(
-            "start_green_stay_green.cli.get_api_key_from_keyring", return_value=None
+            "start_green_stay_green.cli.get_api_key_from_keyring"
         ) as mock_keyring:
             key, source = cli._get_api_key_with_source("cli-key", no_interactive=True)
             assert key == "cli-key"
