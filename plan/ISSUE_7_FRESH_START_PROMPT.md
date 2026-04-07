@@ -3,7 +3,7 @@
 **Issue**: #7 - Implement AI generation orchestrator
 **Branch**: `feature/7-ai-orchestrator-v2`
 **Status**: Ready for implementation
-**RCA Reference**: `/plan/RCA_PR37_AI_ORCHESTRATOR_FAILURE.md`
+**RCA Reference**: `docs/rca/RCA_PR37_AI_ORCHESTRATOR_FAILURE.md`
 
 ---
 
