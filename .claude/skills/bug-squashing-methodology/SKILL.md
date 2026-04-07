@@ -21,7 +21,7 @@ Systematic process for fixing bugs: Document, Understand, Fix, Verify. Never ski
 
 ### Step 1: Root Cause Analysis (RCA)
 
-Create `RCA_ISSUE_XXX.md` with:
+Create `docs/rca/RCA_ISSUE_XXX.md` with:
 - **Problem Statement**: Error message, reproduction steps
 - **Root Cause**: Exact line/logic causing failure
 - **Analysis**: Why it happens, what was confused/wrong
