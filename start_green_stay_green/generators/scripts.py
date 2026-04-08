@@ -1100,7 +1100,9 @@ fi
 
 echo "✓ Security checks passed"
 exit 0
-""".replace("__PACKAGE_NAME__", self.config.package_name)
+""".replace(
+            "__PACKAGE_NAME__", self.config.package_name
+        )
 
     def _python_complexity_script(self) -> str:
         """Generate Python complexity.sh script."""
@@ -1192,7 +1194,9 @@ fi
 
 echo "✓ Complexity analysis completed"
 exit 0
-""".replace("__PACKAGE_NAME__", self.config.package_name)
+""".replace(
+            "__PACKAGE_NAME__", self.config.package_name
+        )
 
     def _python_mutation_script(self) -> str:
         """Generate Python mutation.sh script."""

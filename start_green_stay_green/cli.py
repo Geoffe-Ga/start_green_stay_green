@@ -1149,6 +1149,34 @@ def _generate_project_files(
         raise typer.Exit(code=1) from e
 
 
+def _get_setup_instructions(language: str, project_path: Path) -> list[str]:
+    """Return language-specific setup commands for a generated project.
+
+    Args:
+        language: Programming language (python, typescript, go, rust, etc.).
+        project_path: Path to the generated project directory.
+
+    Returns:
+        Ordered list of shell commands to set up and verify the project.
+    """
+    cd = f"cd {project_path}"
+    common_tail = ["pre-commit install", "./scripts/check-all.sh"]
+
+    lang_steps: dict[str, list[str]] = {
+        "python": [
+            "python -m venv .venv",
+            "source .venv/bin/activate",
+            "pip install -r requirements.txt -r requirements-dev.txt",
+        ],
+        "typescript": ["npm install"],
+        "go": ["go mod download"],
+        "rust": ["cargo build"],
+    }
+
+    middle = lang_steps.get(language, [])
+    return [cd, *middle, *common_tail]
+
+
 def _finalize_init(
     project_path: Path,
     project_name: str,
@@ -1171,9 +1199,9 @@ def _finalize_init(
         f"\n[green]✓[/green] Project generated successfully at: {project_path}"
     )
     console.print("\nTo get started, run:")
-    console.print(f"  cd {project_path}")
-    console.print("  pre-commit install")
-    console.print("  ./scripts/check-all.sh\n")
+    for cmd in _get_setup_instructions(language, project_path):
+        console.print(f"  {cmd}")
+    console.print()
     if enable_live_dashboard:
         console.print(
             "[green]✓[/green] Live metrics dashboard enabled "

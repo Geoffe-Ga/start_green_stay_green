@@ -110,7 +110,8 @@ class TestGitHubActionsReviewGeneratorWorkflowGeneration:
         template_dir = tmp_path / "templates"
         template_dir.mkdir()
         template_file = template_dir / "code_review.yml.j2"
-        template_file.write_text("""name: {{ workflow_name }}
+        template_file.write_text(
+            """name: {{ workflow_name }}
 "on":
   pull_request:
     types: [opened, synchronize]
@@ -120,7 +121,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-""")
+"""
+        )
 
         generator = GitHubActionsReviewGenerator(
             orchestrator,
@@ -150,7 +152,8 @@ jobs:
         template_dir = tmp_path / "templates"
         template_dir.mkdir()
         template_file = template_dir / "code_review.yml.j2"
-        template_file.write_text("""name: Code Review
+        template_file.write_text(
+            """name: Code Review
 "on":
   pull_request:
     types: [opened, synchronize, reopened]
@@ -159,7 +162,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-""")
+"""
+        )
 
         generator = GitHubActionsReviewGenerator(
             orchestrator,
@@ -184,7 +188,8 @@ jobs:
         template_dir = tmp_path / "templates"
         template_dir.mkdir()
         template_file = template_dir / "code_review.yml.j2"
-        template_file.write_text("""name: Code Review
+        template_file.write_text(
+            """name: Code Review
 "on":
   pull_request:
     types: [opened, synchronize]
@@ -197,7 +202,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run Review
         run: echo "Review with Claude"
-""")
+"""
+        )
 
         generator = GitHubActionsReviewGenerator(
             orchestrator,
@@ -220,7 +226,8 @@ jobs:
         template_dir = tmp_path / "templates"
         template_dir.mkdir()
         template_file = template_dir / "code_review.yml.j2"
-        template_file.write_text("""name: Code Review
+        template_file.write_text(
+            """name: Code Review
 "on":
   pull_request:
     types: [opened, synchronize]
@@ -240,7 +247,8 @@ jobs:
           # #### Medium (Block Merge)
           # #### Low (Create GitHub Issue for Future PR)
           echo "Review"
-""")
+"""
+        )
 
         generator = GitHubActionsReviewGenerator(
             orchestrator,
@@ -267,7 +275,8 @@ jobs:
         template_dir = tmp_path / "templates"
         template_dir.mkdir()
         template_file = template_dir / "code_review.yml.j2"
-        template_file.write_text("""name: Code Review
+        template_file.write_text(
+            """name: Code Review
 "on":
   pull_request:
     types: [opened, synchronize]
@@ -281,7 +290,8 @@ jobs:
           if [[ "$STATUS" == "CHANGES_REQUESTED" ]]; then
             exit 1  # Block merge
           fi
-""")
+"""
+        )
 
         generator = GitHubActionsReviewGenerator(
             orchestrator,
@@ -308,7 +318,8 @@ class TestGitHubActionsReviewGeneratorIssueCategorization:
         template_dir = tmp_path / "templates"
         template_dir.mkdir()
         template_file = template_dir / "code_review.yml.j2"
-        template_file.write_text("""name: Code Review
+        template_file.write_text(
+            """name: Code Review
 "on":
   pull_request:
     types: [opened, synchronize]
@@ -321,7 +332,8 @@ jobs:
           # Critical, High, Medium block merge
           # Low creates GitHub issue
           echo "Categorize"
-""")
+"""
+        )
 
         generator = GitHubActionsReviewGenerator(
             orchestrator,
@@ -346,7 +358,8 @@ jobs:
         template_dir = tmp_path / "templates"
         template_dir.mkdir()
         template_file = template_dir / "code_review.yml.j2"
-        template_file.write_text("""name: Code Review
+        template_file.write_text(
+            """name: Code Review
 "on":
   pull_request:
     types: [opened, synchronize]
@@ -357,7 +370,8 @@ jobs:
       - name: Create issues for Low
         run: |
           gh issue create --title "Low severity" --body "Details"
-""")
+"""
+        )
 
         generator = GitHubActionsReviewGenerator(
             orchestrator,
