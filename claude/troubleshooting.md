@@ -404,7 +404,27 @@ api_url = "https://..."  # noqa: E501  # Issue #42: API URL from spec
 
 ---
 
+### 4 Formatting Tool Version Drift (Issue #280)
 
+**Symptom**: `format-check` passes locally but fails in CI (or vice versa) with
+different Black formatting output.
+
+**Root Cause**: Black formatting is not backwards/forwards compatible between
+versions. If `requirements-dev.txt` uses a version range (e.g.,
+`>=26.3.1,<27.0.0`), local venvs may have a different Black version than CI.
+
+**Fix**: Black is pinned to an exact version (`==26.3.1`) in
+`requirements-dev.txt`. After pulling changes that update the Black pin:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+This ensures your local Black matches CI exactly.
+
+**Prevention**: Formatting tools that produce deterministic output (Black, isort)
+should always use exact version pins (`==`) in `requirements-dev.txt`. A test in
+`tests/unit/test_dev_dependency_pinning.py` enforces this.
 
 ---
 
