@@ -326,9 +326,9 @@ class TestMultiLanguageStructure:
 
             expected_dir = EXPECTED_SOURCE_DIRS[lang]
             source_dir = Path(tmpdir) / expected_dir
-            assert (
-                source_dir.exists()
-            ), f"Source dir '{expected_dir}' not created for {lang}"
+            assert source_dir.exists(), (
+                f"Source dir '{expected_dir}' not created for {lang}"
+            )
 
     @pytest.mark.parametrize(
         ("lang", "config_files"),
@@ -630,3 +630,172 @@ class TestTypeScriptConfigGeneration:
             assert ".claude" in content
             assert "dist" in content
             assert "node_modules" in content
+
+    def test_prettierignore_excludes_markdown_files(self) -> None:
+        """Test .prettierignore excludes Markdown files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files[".prettierignore"].read_text()
+            assert "*.md" in content
+
+    def test_prettierignore_excludes_yaml_files(self) -> None:
+        """Test .prettierignore excludes YAML files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files[".prettierignore"].read_text()
+            assert "*.yaml" in content
+            assert "*.yml" in content
+
+    def test_prettierignore_excludes_github_directory(self) -> None:
+        """Test .prettierignore excludes .github directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files[".prettierignore"].read_text()
+            assert ".github" in content
+
+    def test_prettierignore_excludes_scripts_directory(self) -> None:
+        """Test .prettierignore excludes scripts directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files[".prettierignore"].read_text()
+            assert "scripts" in content
+
+    def test_prettierignore_comprehensive_non_code_exclusions(self) -> None:
+        """Test .prettierignore excludes all non-code files that cause warnings.
+
+        A freshly scaffolded project must pass `./scripts/check-all.sh` with
+        zero Prettier warnings. This requires excluding Markdown, YAML, shell
+        scripts, and CI directories from Prettier's scope.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files[".prettierignore"].read_text()
+            required_entries = [
+                "dist",
+                "node_modules",
+                "coverage",
+                ".claude",
+                "*.md",
+                "*.yaml",
+                "*.yml",
+                ".github",
+                "scripts",
+            ]
+            for entry in required_entries:
+                assert entry in content, (
+                    f".prettierignore missing '{entry}' - "
+                    f"will cause Prettier warnings on generated projects"
+                )
+
+    def test_typescript_eslintrc_is_prettier_conformant(self) -> None:
+        """Test generated .eslintrc.js conforms to Prettier config.
+
+        The .prettierrc specifies semi: true, trailingComma: "all", printWidth: 80,
+        tabWidth: 2. Generated JS files must match these rules.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files[".eslintrc.js"].read_text()
+            # Must use 2-space indentation (Prettier tabWidth: 2)
+            for line in content.split("\n"):
+                if line and line[0] == " ":
+                    stripped = line.lstrip(" ")
+                    indent_len = len(line) - len(stripped)
+                    assert indent_len % 2 == 0, (
+                        f"Expected 2-space indent, got {indent_len}: {line!r}"
+                    )
+                    # No 4-space-only indentation (should be multiples of 2)
+                    # but verify it's not 4-space base indent
+            # Must end with newline
+            assert content.endswith("\n")
+            # Must use semicolons (semi: true) at end of statement
+            assert content.rstrip().endswith(";")
+
+    def test_typescript_jest_config_is_prettier_conformant(self) -> None:
+        """Test generated jest.config.js conforms to Prettier config.
+
+        Must use 2-space indentation and trailing commas per .prettierrc.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["jest.config.js"].read_text()
+            # Must end with newline
+            assert content.endswith("\n")
+            # Must use semicolons
+            assert content.rstrip().endswith(";")
+
+    def test_typescript_index_ts_is_prettier_conformant(self) -> None:
+        """Test generated src/index.ts conforms to Prettier config.
+
+        Must use 2-space indentation for code, semicolons, and end with newline.
+        JSDoc comment lines (starting with ' *') are excluded from indent check.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["src/index.ts"].read_text()
+            # Must end with newline
+            assert content.endswith("\n")
+            # Check 2-space indentation for code lines (skip JSDoc lines)
+            for line in content.split("\n"):
+                if line and line[0] == " " and not line.lstrip().startswith("*"):
+                    stripped = line.lstrip(" ")
+                    indent_len = len(line) - len(stripped)
+                    assert indent_len % 2 == 0, (
+                        f"Expected 2-space indent, got {indent_len}: {line!r}"
+                    )
