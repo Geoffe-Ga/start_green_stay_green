@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import sys
 from typing import Annotated
@@ -18,6 +19,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+    from collections.abc import Sequence
 
 from rich.console import Console
 from rich.panel import Panel
@@ -1149,38 +1151,48 @@ def _generate_project_files(
         raise typer.Exit(code=1) from e
 
 
-def _get_setup_instructions(language: str, project_path: Path) -> list[str]:
+_LANG_SETUP_STEPS: dict[str, list[str]] = {
+    "python": [
+        "python -m venv .venv",
+        "source .venv/bin/activate",
+        "pip install -r requirements.txt -r requirements-dev.txt",
+    ],
+    "typescript": ["npm install"],
+    "go": ["go mod download"],
+    "rust": ["cargo build"],
+}
+
+
+def _get_setup_instructions(languages: Sequence[str], project_path: Path) -> list[str]:
     """Return language-specific setup commands for a generated project.
 
+    For multi-language projects, language-specific steps are concatenated
+    in the order the languages appear. Shared steps (cd, pre-commit
+    install, check-all) are not duplicated.
+
     Args:
-        language: Programming language (python, typescript, go, rust, etc.).
+        languages: Ordered sequence of programming languages (python,
+            typescript, go, rust, etc.). May be empty for a sensible
+            default.
         project_path: Path to the generated project directory.
 
     Returns:
         Ordered list of shell commands to set up and verify the project.
     """
-    cd = f"cd {project_path}"
+    cd = f"cd {shlex.quote(str(project_path))}"
     common_tail = ["pre-commit install", "./scripts/check-all.sh"]
 
-    lang_steps: dict[str, list[str]] = {
-        "python": [
-            "python -m venv .venv",
-            "source .venv/bin/activate",
-            "pip install -r requirements.txt -r requirements-dev.txt",
-        ],
-        "typescript": ["npm install"],
-        "go": ["go mod download"],
-        "rust": ["cargo build"],
-    }
+    middle: list[str] = []
+    for lang in languages:
+        middle.extend(_LANG_SETUP_STEPS.get(lang, []))
 
-    middle = lang_steps.get(language, [])
     return [cd, *middle, *common_tail]
 
 
 def _finalize_init(
     project_path: Path,
     project_name: str,
-    language: str,
+    languages: Sequence[str],
     *,
     enable_live_dashboard: bool = False,
 ) -> None:
@@ -1189,17 +1201,20 @@ def _finalize_init(
     Args:
         project_path: Path to the generated project.
         project_name: Name of the project.
-        language: Programming language.
+        languages: Ordered sequence of programming languages for the
+            project. The first is treated as the primary language for
+            features that only support one (e.g. dashboard generation).
         enable_live_dashboard: Whether to generate live metrics dashboard.
     """
     if enable_live_dashboard:
-        _generate_metrics_dashboard_step(project_path, project_name, language)
+        primary_language = languages[0] if languages else ""
+        _generate_metrics_dashboard_step(project_path, project_name, primary_language)
 
     console.print(
         f"\n[green]✓[/green] Project generated successfully at: {project_path}"
     )
     console.print("\nTo get started, run:")
-    for cmd in _get_setup_instructions(language, project_path):
+    for cmd in _get_setup_instructions(languages, project_path):
         console.print(f"  {cmd}")
     console.print()
     if enable_live_dashboard:
@@ -1481,7 +1496,7 @@ def init(  # noqa: PLR0913
     _finalize_init(
         project_path,
         resolved_project_name,
-        resolved_languages[0],
+        resolved_languages,
         enable_live_dashboard=enable_live_dashboard,
     )
 
