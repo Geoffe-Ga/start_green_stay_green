@@ -130,7 +130,7 @@ PYEOF
 fi
 
 # Cleanup function to remove stale cache on interrupt
-# shellcheck disable=SC2329  # Function is used in trap below
+# shellcheck disable=SC2317,SC2329  # Function is used in trap below
 cleanup_mutation_cache() {
     if [ -f .mutmut-cache ]; then
         echo "Cleaning up mutation cache..." >&2
