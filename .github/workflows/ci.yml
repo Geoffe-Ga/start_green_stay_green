@@ -145,7 +145,7 @@ jobs:
           echo "Coverage: $COVERAGE%" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v6
         continue-on-error: true  # Don't fail CI if codecov has issues
         with:
           files: ./coverage.xml
