@@ -162,6 +162,23 @@ class TestGetSetupInstructions:
         # Either quoted or escaped
         assert "'" in cd_cmd or "\\" in cd_cmd or '"' in cd_cmd
 
+    def test_duplicate_languages_not_doubled(self) -> None:
+        """Duplicate languages in input should produce a single set of steps."""
+        instructions = _get_setup_instructions(
+            ("python", "python"), Path("/home/user/proj")
+        )
+        assert instructions.count("python -m venv .venv") == 1
+
+    def test_duplicate_languages_preserves_order(self) -> None:
+        """Deduplication should preserve the order of first occurrence."""
+        instructions = _get_setup_instructions(
+            ("typescript", "python", "typescript"), Path("/home/user/proj")
+        )
+        npm_idx = instructions.index("npm install")
+        venv_idx = instructions.index("python -m venv .venv")
+        assert npm_idx < venv_idx
+        assert instructions.count("npm install") == 1
+
     def test_empty_languages_tuple_has_sensible_default(self) -> None:
         """Empty languages tuple should still produce valid instructions."""
         instructions = _get_setup_instructions((), Path("/home/user/proj"))
