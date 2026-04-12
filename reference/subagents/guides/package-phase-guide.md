@@ -281,7 +281,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
 
       - name: Setup Mojo
         uses: modular/setup-mojo@v1
@@ -299,7 +299,7 @@ jobs:
           ./scripts/install_verify_utils.sh
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         with:
           name: packages
           path: dist/*.mojopkg
@@ -559,7 +559,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
       - name: Setup Mojo
         uses: modular/setup-mojo@v1
       - name: Run benchmarks
@@ -621,8 +621,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: 3.x
       - run: pip install mkdocs-material

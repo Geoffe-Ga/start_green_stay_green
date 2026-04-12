@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Select Xcode ${{ matrix.xcode-version }}
         run: sudo xcode-select -s /Applications/Xcode_${{ matrix.xcode-version }}.app
@@ -47,7 +47,7 @@ jobs:
             $(find ~/Library/Developer/Xcode/DerivedData -name "*.xctest") > coverage.lcov
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v6
         with:
           file: ./coverage.lcov
           fail_ci_if_error: true
@@ -58,7 +58,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Build for release
         run: swift build -c release

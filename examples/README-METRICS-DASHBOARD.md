@@ -87,7 +87,7 @@ The CI workflow runs quality checks and generates `metrics.json`:
 
 ```yaml
 - name: Deploy to GitHub Pages
-  uses: peaceiris/actions-gh-pages@v3
+  uses: peaceiris/actions-gh-pages@v4
   with:
     github_token: ${{ secrets.GITHUB_TOKEN }}
     publish_dir: .
@@ -99,7 +99,7 @@ Dashboard URL: `https://username.github.io/repo/dashboard.html`
 
 ```yaml
 - name: Upload metrics artifact
-  uses: actions/upload-artifact@v4
+  uses: actions/upload-artifact@v7
   with:
     name: quality-metrics
     path: metrics.json

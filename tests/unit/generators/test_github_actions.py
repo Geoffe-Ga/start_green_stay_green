@@ -119,7 +119,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 """)
 
         generator = GitHubActionsReviewGenerator(
@@ -158,7 +158,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 """)
 
         generator = GitHubActionsReviewGenerator(
@@ -194,7 +194,7 @@ jobs:
     env:
       CLAUDE_API_KEY: {% raw %}${{ secrets.CLAUDE_API_KEY }}{% endraw %}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Run Review
         run: echo "Review with Claude"
 """)
@@ -228,7 +228,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Review
         run: |
           # Response Format:
@@ -275,7 +275,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Block if issues
         run: |
           if [[ "$STATUS" == "CHANGES_REQUESTED" ]]; then

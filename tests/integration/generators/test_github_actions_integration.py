@@ -128,7 +128,7 @@ class TestGitHubActionsIntegration:
         for step in steps:
             if "uses" in step:
                 assert (
-                    "actions/checkout@v4" in step["uses"]
+                    "actions/checkout@v5" in step["uses"]
                     or "anthropics/claude-code-action@v1" in step["uses"]
                 )
 
