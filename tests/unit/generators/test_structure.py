@@ -326,9 +326,9 @@ class TestMultiLanguageStructure:
 
             expected_dir = EXPECTED_SOURCE_DIRS[lang]
             source_dir = Path(tmpdir) / expected_dir
-            assert source_dir.exists(), (
-                f"Source dir '{expected_dir}' not created for {lang}"
-            )
+            assert (
+                source_dir.exists()
+            ), f"Source dir '{expected_dir}' not created for {lang}"
 
     @pytest.mark.parametrize(
         ("lang", "config_files"),
@@ -743,9 +743,9 @@ class TestTypeScriptConfigGeneration:
                 if line and line[0] == " ":
                     stripped = line.lstrip(" ")
                     indent_len = len(line) - len(stripped)
-                    assert indent_len % 2 == 0, (
-                        f"Expected 2-space indent, got {indent_len}: {line!r}"
-                    )
+                    assert (
+                        indent_len % 2 == 0
+                    ), f"Expected 2-space indent, got {indent_len}: {line!r}"
                     # No 4-space-only indentation (should be multiples of 2)
                     # but verify it's not 4-space base indent
             # Must end with newline
@@ -796,6 +796,6 @@ class TestTypeScriptConfigGeneration:
                 if line and line[0] == " " and not line.lstrip().startswith("*"):
                     stripped = line.lstrip(" ")
                     indent_len = len(line) - len(stripped)
-                    assert indent_len % 2 == 0, (
-                        f"Expected 2-space indent, got {indent_len}: {line!r}"
-                    )
+                    assert (
+                        indent_len % 2 == 0
+                    ), f"Expected 2-space indent, got {indent_len}: {line!r}"

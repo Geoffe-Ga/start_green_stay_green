@@ -350,9 +350,9 @@ class TestScriptsGeneratorTypeScriptGeneration:
                 has_write = "--write" in stripped
                 if "prettier" in stripped and (has_check or has_write):
                     # Should not end with just "." as the target
-                    assert not stripped.endswith(" ."), (
-                        f"format.sh must not run Prettier on entire tree: {stripped}"
-                    )
+                    assert not stripped.endswith(
+                        " ."
+                    ), f"format.sh must not run Prettier on entire tree: {stripped}"
 
     def test_typescript_lint_script_uses_eslint(self) -> None:
         """Test TypeScript lint.sh uses ESLint."""
