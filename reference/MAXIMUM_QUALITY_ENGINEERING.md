@@ -347,7 +347,7 @@ repos:
 
   # Upgrade syntax
   - repo: https://github.com/asottile/pyupgrade
-    rev: v3.15.0
+    rev: v3.21.2
     hooks:
       - id: pyupgrade
         args: ['--py311-plus']
@@ -373,7 +373,7 @@ repos:
 
   # Modern Python suggestions
   - repo: https://github.com/dosisod/refurb
-    rev: v1.26.0
+    rev: v2.3.1
     hooks:
       - id: refurb
 
