@@ -1087,7 +1087,7 @@ class TestMutationKillers:
     def test_python_pyupgrade_rev_exact(self) -> None:
         """Test Python pyupgrade rev is exact."""
         repo = LANGUAGE_CONFIGS["python"]["hooks"][9]
-        assert repo["rev"] == "v3.15.0"
+        assert repo["rev"] == "v3.21.2"
 
     def test_python_autoflake_repo_url_exact(self) -> None:
         """Test Python autoflake repo URL is exact."""
@@ -1117,7 +1117,7 @@ class TestMutationKillers:
     def test_python_refurb_rev_exact(self) -> None:
         """Test Python refurb rev is exact."""
         repo = LANGUAGE_CONFIGS["python"]["hooks"][12]
-        assert repo["rev"] == "v1.26.0"
+        assert repo["rev"] == "v2.3.1"
 
     def test_python_vulture_repo_url_exact(self) -> None:
         """Test Python vulture repo URL is exact."""

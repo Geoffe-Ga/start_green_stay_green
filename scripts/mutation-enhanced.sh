@@ -129,7 +129,7 @@ ensure_mutation_venv() {
 }
 
 # Cleanup mutation venv
-# shellcheck disable=SC2329  # Function called via trap, not directly
+# shellcheck disable=SC2317,SC2329  # Function called via trap, not directly
 cleanup_mutation_venv() {
     if [ "${MUTATION_VENV_CREATED:-false}" = "true" ] && [ -n "${MUTATION_VENV_DIR:-}" ]; then
         if [ "${VERBOSE:-false}" = "true" ]; then

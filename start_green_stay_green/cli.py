@@ -477,7 +477,7 @@ def _warn_if_cli_api_key(source: str) -> None:
 
 def _lazy_api_key_sources(
     api_key_arg: str | None,
-) -> Generator[tuple[str | None, str], None, None]:
+) -> Generator[tuple[str | None, str]]:
     """Yield API key sources lazily to avoid unnecessary keychain prompts.
 
     Each source is only evaluated when iterated, so keyring is never
