@@ -305,6 +305,55 @@ class TestScriptsGeneratorTypeScriptGeneration:
             assert "prettier" in content
             assert "Prettier" in content
 
+    def test_typescript_format_script_restricts_prettier_to_source_globs(
+        self,
+    ) -> None:
+        """Test TypeScript format.sh restricts Prettier to source file globs.
+
+        Instead of running `npx prettier --check .` on the entire tree,
+        format.sh must target specific file patterns to avoid formatting
+        non-code files like Markdown, YAML, and shell scripts.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="typescript",
+                package_name="my_app",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["format.sh"].read_text()
+            # Must include source globs for TS/JS files
+            assert "src/**" in content
+            assert "tests/**" in content
+            # Must include root config file patterns
+            assert "*.{js,json}" in content or (
+                "*.js" in content and "*.json" in content
+            )
+
+    def test_typescript_format_script_does_not_format_entire_tree(self) -> None:
+        """Test format.sh does not use bare '.' target with Prettier."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="typescript",
+                package_name="my_app",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["format.sh"].read_text()
+            # The bare `. ` or `.\n` patterns indicate formatting everything
+            lines = content.split("\n")
+            for line in lines:
+                stripped = line.strip()
+                has_check = "--check" in stripped
+                has_write = "--write" in stripped
+                if "prettier" in stripped and (has_check or has_write):
+                    # Should not end with just "." as the target
+                    assert not stripped.endswith(
+                        " ."
+                    ), f"format.sh must not run Prettier on entire tree: {stripped}"
+
     def test_typescript_lint_script_uses_eslint(self) -> None:
         """Test TypeScript lint.sh uses ESLint."""
         with tempfile.TemporaryDirectory() as tmpdir:

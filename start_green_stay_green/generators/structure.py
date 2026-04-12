@@ -358,6 +358,11 @@ main();
 node_modules
 coverage
 .claude
+*.md
+*.yaml
+*.yml
+.github
+scripts
 """
 
     def _typescript_prettierrc(self) -> str:
