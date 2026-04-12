@@ -78,7 +78,7 @@ dev = [
     "commitizen>=3.13.0",
 
     # Documentation
-    "pdoc>=14.0.0",
+    "pdoc>=16.0.0",
     "sphinx>=7.2.0",
     "sphinx-rtd-theme>=2.0.0",
 
