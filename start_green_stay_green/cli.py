@@ -1183,7 +1183,7 @@ def _get_setup_instructions(languages: Sequence[str], project_path: Path) -> lis
     common_tail = ["pre-commit install", "./scripts/check-all.sh"]
 
     middle: list[str] = []
-    for lang in languages:
+    for lang in dict.fromkeys(languages):
         middle.extend(_LANG_SETUP_STEPS.get(lang, []))
 
     return [cd, *middle, *common_tail]
