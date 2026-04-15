@@ -340,7 +340,7 @@ jobs:
 
       - name: Comment PR with coverage
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           COVERAGE_VALUE: ${{ steps.coverage.outputs.coverage }}
           COVERAGE_STATUS: ${{ steps.coverage.outputs.status }}
