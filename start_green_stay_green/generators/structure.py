@@ -289,7 +289,7 @@ if __name__ == "__main__":
  */
 
 function main(): void {{
-    console.log("Hello from {self.config.project_name}!");
+  console.log("Hello from {self.config.project_name}!");
 }}
 
 main();
@@ -361,8 +361,8 @@ coverage
 *.md
 *.yaml
 *.yml
-.github
-scripts
+.github/
+scripts/
 """
 
     def _typescript_prettierrc(self) -> str:

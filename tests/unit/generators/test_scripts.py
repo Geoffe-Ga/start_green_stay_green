@@ -332,7 +332,12 @@ class TestScriptsGeneratorTypeScriptGeneration:
             )
 
     def test_typescript_format_script_does_not_format_entire_tree(self) -> None:
-        """Test format.sh does not use bare '.' target with Prettier."""
+        """Test format.sh does not use bare '.' target with Prettier.
+
+        Regression guard: the original bug ran `prettier --check .` and
+        `prettier --write .`, formatting the entire tree. The fix must ensure
+        Prettier targets specific globs via a variable like ${PRETTIER_GLOBS[@]}.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
                 language="typescript",
@@ -342,17 +347,18 @@ class TestScriptsGeneratorTypeScriptGeneration:
             scripts = generator.generate()
 
             content = scripts["format.sh"].read_text()
-            # The bare `. ` or `.\n` patterns indicate formatting everything
-            lines = content.split("\n")
-            for line in lines:
-                stripped = line.strip()
-                has_check = "--check" in stripped
-                has_write = "--write" in stripped
-                if "prettier" in stripped and (has_check or has_write):
-                    # Should not end with just "." as the target
-                    assert not stripped.endswith(
-                        " ."
-                    ), f"format.sh must not run Prettier on entire tree: {stripped}"
+            # Positive assertion: restricted globs must be passed via variable.
+            assert 'prettier --check "${PRETTIER_GLOBS[@]}"' in content, (
+                "format.sh must invoke Prettier with the restricted "
+                "PRETTIER_GLOBS array, not a bare directory"
+            )
+            assert 'prettier --write "${PRETTIER_GLOBS[@]}"' in content, (
+                "format.sh must invoke Prettier --write with the restricted "
+                "PRETTIER_GLOBS array, not a bare directory"
+            )
+            # Negative assertion: the buggy bare-dot patterns must not recur.
+            assert "prettier --check ." not in content
+            assert "prettier --write ." not in content
 
     def test_typescript_lint_script_uses_eslint(self) -> None:
         """Test TypeScript lint.sh uses ESLint."""
