@@ -8,12 +8,12 @@
 ## Quick Navigation
 
 **Core Documentation**:
-- 📋 **[Critical Principles](claude/principles.md)** - Non-negotiable rules (READ FIRST)
-- 🎯 **[Quality Standards](claude/quality-standards.md)** - Requirements and enforcement
-- 🔄 **[Development Workflow](claude/workflow.md)** - Stay Green process
-- 🧪 **[Testing Strategy](claude/testing.md)** - Test patterns and coverage
-- 🛠️ **[Tool Usage](claude/tools.md)** - Scripts, patterns, and code standards
-- 🚨 **[Troubleshooting](claude/troubleshooting.md)** - Common mistakes and fixes
+- 📋 **[Critical Principles](.claude/docs/principles.md)** - Non-negotiable rules (READ FIRST)
+- 🎯 **[Quality Standards](.claude/docs/quality-standards.md)** - Requirements and enforcement
+- 🔄 **[Development Workflow](.claude/docs/workflow.md)** - Stay Green process
+- 🧪 **[Testing Strategy](.claude/docs/testing.md)** - Test patterns and coverage
+- 🛠️ **[Tool Usage](.claude/docs/tools.md)** - Scripts, patterns, and code standards
+- 🚨 **[Troubleshooting](.claude/docs/troubleshooting.md)** - Common mistakes and fixes
 
 **Additional Resources**:
 - [Stay Green Workflow (Detailed)](reference/workflows/stay-green.md)
@@ -25,7 +25,7 @@
 
 ## 📋 Critical Principles (Quick Reference)
 
-**For detailed explanation, see [claude/principles.md](claude/principles.md)**
+**For detailed explanation, see [.claude/docs/principles.md](.claude/docs/principles.md)**
 
 1. **Run `pre-commit run --all-files` before every commit** - Single comprehensive quality gate
 2. **Never duplicate content (DRY)** - Always reference canonical source
@@ -46,7 +46,7 @@
 
 ## 🎯 Quality Standards (Quick Reference)
 
-**For complete standards, see [claude/quality-standards.md](claude/quality-standards.md)**
+**For complete standards, see [.claude/docs/quality-standards.md](.claude/docs/quality-standards.md)**
 
 | Metric | Threshold | Tool |
 |--------|-----------|------|
@@ -119,13 +119,13 @@ start_green_stay_green/
     └── mutation.sh              # Mutation testing
 ```
 
-**For detailed architecture, see [claude/workflow.md](claude/workflow.md)**
+**For detailed architecture, see [.claude/docs/workflow.md](.claude/docs/workflow.md)**
 
 ---
 
 ## 🔄 Development Workflow (Quick Start)
 
-**For complete workflow, see [claude/workflow.md](claude/workflow.md) and [reference/workflows/stay-green.md](reference/workflows/stay-green.md)**
+**For complete workflow, see [.claude/docs/workflow.md](.claude/docs/workflow.md) and [reference/workflows/stay-green.md](reference/workflows/stay-green.md)**
 
 ```bash
 # 1. Create feature branch
@@ -162,7 +162,7 @@ gh pr create --fill
 
 ## 🛠️ Tool Usage (Quick Reference)
 
-**For complete patterns, see [claude/tools.md](claude/tools.md)**
+**For complete patterns, see [.claude/docs/tools.md](.claude/docs/tools.md)**
 
 **Primary Command** (local development):
 ```bash
@@ -183,7 +183,7 @@ pre-commit run --all-files  # Runs ALL 32 quality hooks
 
 ## 🚨 Common Mistakes (Quick Reference)
 
-**For detailed examples, see [claude/troubleshooting.md](claude/troubleshooting.md)**
+**For detailed examples, see [.claude/docs/troubleshooting.md](.claude/docs/troubleshooting.md)**
 
 1. **Skipping local quality checks** (35%) - Always run `pre-commit run --all-files` before committing
 2. **Lowering quality thresholds** (25%) - Write more tests, don't lower standards
@@ -238,7 +238,7 @@ When delegating work to subagents, provide:
 
 ### Documentation Files
 - `CLAUDE.md`: This file - Project context index
-- `claude/*.md`: Modular documentation (principles, quality, workflow, testing, tools, troubleshooting)
+- `.claude/docs/*.md`: Modular documentation (principles, quality, workflow, testing, tools, troubleshooting)
 - `reference/workflows/stay-green.md`: Complete Stay Green workflow documentation
 - `plan/SPEC.md`: Complete project specification
 - `reference/MAXIMUM_QUALITY_ENGINEERING.md`: Quality framework

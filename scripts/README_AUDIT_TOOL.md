@@ -293,7 +293,7 @@ pip install anthropic pyyaml toml
 - **Issue**: [#132 - Tool Configuration Auditor](https://github.com/start-green-stay-green/issues/132)
 - **Claude API**: [Anthropic Documentation](https://docs.anthropic.com)
 - **Stay Green Workflow**: [reference/workflows/stay-green.md](../reference/workflows/stay-green.md)
-- **Quality Standards**: [claude/quality-standards.md](../claude/quality-standards.md)
+- **Quality Standards**: [.claude/docs/quality-standards.md](../.claude/docs/quality-standards.md)
 
 ## Contributing
 

@@ -1,6 +1,6 @@
 # Development Workflow
 
-**Navigation**: [← Back to CLAUDE.md](../CLAUDE.md) | [← Quality Standards](quality-standards.md) | [Testing →](testing.md)
+**Navigation**: [← Back to CLAUDE.md](../../CLAUDE.md) | [← Quality Standards](quality-standards.md) | [Testing →](testing.md)
 
 ---
 
@@ -118,4 +118,4 @@ Before creating/updating a PR:
 
 ---
 
-**Navigation**: [← Back to CLAUDE.md](../CLAUDE.md) | [← Quality Standards](quality-standards.md) | [Testing →](testing.md)
+**Navigation**: [← Back to CLAUDE.md](../../CLAUDE.md) | [← Quality Standards](quality-standards.md) | [Testing →](testing.md)

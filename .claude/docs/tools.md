@@ -1,6 +1,6 @@
 # Tool Usage & Code Standards
 
-**Navigation**: [← Back to CLAUDE.md](../CLAUDE.md) | [← Testing](testing.md) | [Troubleshooting →](troubleshooting.md)
+**Navigation**: [← Back to CLAUDE.md](../../CLAUDE.md) | [← Testing](testing.md) | [Troubleshooting →](troubleshooting.md)
 
 ---
 
@@ -533,4 +533,4 @@ def calculate_complexity(
 
 ---
 
-**Navigation**: [← Back to CLAUDE.md](../CLAUDE.md) | [← Testing](testing.md) | [Troubleshooting →](troubleshooting.md)
+**Navigation**: [← Back to CLAUDE.md](../../CLAUDE.md) | [← Testing](testing.md) | [Troubleshooting →](troubleshooting.md)
