@@ -1731,17 +1731,27 @@ fi
 
 echo "=== Formatting (Prettier) ==="
 
+PRETTIER_GLOBS=(
+    "src/**/*.{ts,tsx}"
+    "tests/**/*.{ts,tsx}"
+    "*.{js,json}"
+)
+
 if $CHECK; then
     if $VERBOSE; then
         echo "Checking formatting..."
     fi
-    npx prettier --check . || { echo "✗ Formatting check failed" >&2; exit 1; }
+    npx prettier --check "${PRETTIER_GLOBS[@]}" || {
+        echo "✗ Formatting check failed" >&2; exit 1;
+    }
     echo "✓ Code formatting check passed"
 else
     if $VERBOSE; then
         echo "Formatting code..."
     fi
-    npx prettier --write . || { echo "✗ Formatting failed" >&2; exit 1; }
+    npx prettier --write "${PRETTIER_GLOBS[@]}" || {
+        echo "✗ Formatting failed" >&2; exit 1;
+    }
     echo "✓ Code formatted successfully"
 fi
 exit 0

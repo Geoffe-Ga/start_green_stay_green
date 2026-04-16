@@ -289,6 +289,36 @@ class TestMultiLanguageTests:
             content = files["tests/index.test.ts"].read_text()
             assert "describe" in content or "test" in content
 
+    def test_typescript_test_uses_double_quotes(self) -> None:
+        """Test TypeScript test file uses double quotes (Prettier default).
+
+        Prettier's default `singleQuote` is false. Since the generated
+        `.prettierrc` does not override this, `tests/index.test.ts` must use
+        double-quoted strings; otherwise `npx prettier --check` (now scoped
+        to include tests/**/*.{ts,tsx}) will fail on a freshly generated
+        project. Issue #193.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["tests/index.test.ts"].read_text()
+            # No line outside comments should contain a pair of single quotes.
+            for line in content.split("\n"):
+                stripped = line.lstrip()
+                if stripped.startswith(("*", "//")):
+                    continue
+                # Pairs of single quotes indicate string-literal use
+                assert line.count("'") < 2, (
+                    f"tests/index.test.ts uses single-quoted strings, "
+                    f"Prettier default requires double quotes: {line!r}"
+                )
+
     def test_go_test_has_test_function(self) -> None:
         """Test Go test file has Test function."""
         with tempfile.TemporaryDirectory() as tmpdir:

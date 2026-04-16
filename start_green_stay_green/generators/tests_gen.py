@@ -245,11 +245,11 @@ def test_main_runs() -> None:
  * Tests for {self.config.project_name} main entry point
  */
 
-describe('main', () => {{
-  it('should run without error', () => {{
+describe("main", () => {{
+  it("should run without error", () => {{
     // Import main to ensure it executes
     expect(() => {{
-      require('../src/index');
+      require("../src/index");
     }}).not.toThrow();
   }});
 }});

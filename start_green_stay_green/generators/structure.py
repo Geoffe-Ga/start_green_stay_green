@@ -289,7 +289,7 @@ if __name__ == "__main__":
  */
 
 function main(): void {{
-    console.log("Hello from {self.config.project_name}!");
+  console.log("Hello from {self.config.project_name}!");
 }}
 
 main();
@@ -358,6 +358,11 @@ main();
 node_modules
 coverage
 .claude
+*.md
+*.yaml
+*.yml
+.github/
+scripts/
 """
 
     def _typescript_prettierrc(self) -> str:
