@@ -65,11 +65,8 @@ def test_init_with_output_dir_creates_files() -> None:
             file_path = project_path / expected_file
             assert file_path.exists(), f"Expected file not created: {expected_file}"
 
-        # Check that skills directory exists (path may be .claude/ or .claudecode/)
-        skills_created = (project_path / ".claude" / "skills").exists() or (
-            project_path / ".claudecode" / "skills"
-        ).exists()
-        assert skills_created, "Skills directory not created"
+        skills_dir = project_path / ".claude" / "skills"
+        assert skills_dir.exists(), "Skills directory not created"
 
         # Verify pre-commit config has content
         precommit_config = project_path / ".pre-commit-config.yaml"

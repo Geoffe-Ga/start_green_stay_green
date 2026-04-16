@@ -1,6 +1,6 @@
 # Testing Strategy
 
-**Navigation**: [← Back to CLAUDE.md](../CLAUDE.md) | [← Workflow](workflow.md) | [Tools →](tools.md)
+**Navigation**: [← Back to CLAUDE.md](../../CLAUDE.md) | [← Workflow](workflow.md) | [Tools →](tools.md)
 
 ---
 
@@ -256,4 +256,4 @@ mutmut show <id>
 
 ---
 
-**Navigation**: [← Back to CLAUDE.md](../CLAUDE.md) | [← Workflow](workflow.md) | [Tools →](tools.md)
+**Navigation**: [← Back to CLAUDE.md](../../CLAUDE.md) | [← Workflow](workflow.md) | [Tools →](tools.md)

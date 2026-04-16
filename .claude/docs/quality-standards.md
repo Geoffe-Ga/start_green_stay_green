@@ -1,6 +1,6 @@
 # Quality Standards
 
-**Navigation**: [← Back to CLAUDE.md](../CLAUDE.md) | [← Principles](principles.md) | [Workflow →](workflow.md)
+**Navigation**: [← Back to CLAUDE.md](../../CLAUDE.md) | [← Principles](principles.md) | [Workflow →](workflow.md)
 
 ---
 
@@ -299,4 +299,4 @@ credentials.json
 
 ---
 
-**Navigation**: [← Back to CLAUDE.md](../CLAUDE.md) | [← Principles](principles.md) | [Workflow →](workflow.md)
+**Navigation**: [← Back to CLAUDE.md](../../CLAUDE.md) | [← Principles](principles.md) | [Workflow →](workflow.md)

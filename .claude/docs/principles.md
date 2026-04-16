@@ -1,6 +1,6 @@
 # Critical Principles
 
-**Navigation**: [← Back to CLAUDE.md](../CLAUDE.md) | [Quality Standards →](quality-standards.md)
+**Navigation**: [← Back to CLAUDE.md](../../CLAUDE.md) | [Quality Standards →](quality-standards.md)
 
 ---
 
@@ -143,4 +143,4 @@ See [Troubleshooting](troubleshooting.md) for complete checklist.
 
 ---
 
-**Navigation**: [← Back to CLAUDE.md](../CLAUDE.md) | [Quality Standards →](quality-standards.md)
+**Navigation**: [← Back to CLAUDE.md](../../CLAUDE.md) | [Quality Standards →](quality-standards.md)

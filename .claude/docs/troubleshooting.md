@@ -1,6 +1,6 @@
 # Common Pitfalls & Troubleshooting
 
-**Navigation**: [← Back to CLAUDE.md](../CLAUDE.md) | [← Tools](tools.md)
+**Navigation**: [← Back to CLAUDE.md](../../CLAUDE.md) | [← Tools](tools.md)
 
 ---
 
@@ -428,4 +428,4 @@ should always use exact version pins (`==`) in `requirements-dev.txt`. A test in
 
 ---
 
-**Navigation**: [← Back to CLAUDE.md](../CLAUDE.md) | [← Tools](tools.md)
+**Navigation**: [← Back to CLAUDE.md](../../CLAUDE.md) | [← Tools](tools.md)
