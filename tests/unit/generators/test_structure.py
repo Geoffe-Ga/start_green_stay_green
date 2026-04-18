@@ -753,10 +753,11 @@ class TestTypeScriptConfigGeneration:
     def test_typescript_index_ts_is_prettier_conformant(self) -> None:
         """Test generated src/index.ts conforms to Prettier config.
 
-        Must use 2-space indentation for code, and end with newline. JSDoc
-        comment lines (starting with ' *') are excluded from indent check.
-        This is a necessary (not sufficient) condition; a true Prettier run
-        would be an e2e test beyond this unit suite.
+        Must use 2-space indentation for code, double-quoted strings, and
+        end with newline. JSDoc comment lines (starting with ' *') are
+        excluded from indent check. This is a necessary (not sufficient)
+        condition; a true Prettier run would be an e2e test beyond this
+        unit suite.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = StructureConfig(
@@ -770,3 +771,13 @@ class TestTypeScriptConfigGeneration:
             content = files["src/index.ts"].read_text()
             assert content.endswith("\n")
             self._assert_two_space_indent(content, "src/index.ts")
+            # Prettier default: double-quoted strings (singleQuote not in
+            # .prettierrc). These are template-locked regression guards.
+            for line in content.split("\n"):
+                stripped = line.lstrip()
+                if stripped.startswith(("*", "//")):
+                    continue
+                assert line.count("'") < 2, (
+                    f"src/index.ts must use double quotes (Prettier default), "
+                    f"found single-quoted string: {line!r}"
+                )
