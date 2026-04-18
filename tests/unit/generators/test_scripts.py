@@ -347,13 +347,17 @@ class TestScriptsGeneratorTypeScriptGeneration:
 
             content = scripts["format.sh"].read_text()
 
-            # Positive: format.sh must use the scoped globs array
+            # Positive: format.sh must declare AND use the scoped globs
+            # array in both --check and --write code paths.
             assert (
                 "PRETTIER_GLOBS=(" in content
             ), "format.sh must declare a PRETTIER_GLOBS array scoped to source"
             assert (
-                '"${PRETTIER_GLOBS[@]}"' in content
-            ), 'format.sh must invoke Prettier with "${PRETTIER_GLOBS[@]}"'
+                'prettier --check "${PRETTIER_GLOBS[@]}"' in content
+            ), "format.sh --check must invoke Prettier with PRETTIER_GLOBS"
+            assert (
+                'prettier --write "${PRETTIER_GLOBS[@]}"' in content
+            ), "format.sh --write must invoke Prettier with PRETTIER_GLOBS"
 
             # Negative: the original bug forms must not reappear in any shape
             forbidden_patterns = (
