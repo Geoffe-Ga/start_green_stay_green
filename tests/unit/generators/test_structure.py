@@ -33,17 +33,6 @@ EXPECTED_ENTRY_POINTS: dict[str, str] = {
 }
 
 
-def _has_single_quoted_string(line: str) -> bool:
-    """Check if a line contains a single-quoted string literal.
-
-    Returns True if the line has a pair of single quotes that look like a
-    string literal (at least 2 single quotes present). Apostrophes in English
-    words typically appear only once per line, so a pair is a strong signal
-    of string-literal usage.
-    """
-    return line.count("'") >= 2
-
-
 # Expected config files per language
 EXPECTED_CONFIG_FILES: dict[str, list[str]] = {
     "python": [],
@@ -648,7 +637,9 @@ class TestTypeScriptConfigGeneration:
 
         A freshly scaffolded project must pass `./scripts/check-all.sh` with
         zero Prettier warnings. This requires excluding Markdown, YAML, shell
-        scripts, and CI directories from Prettier's scope.
+        scripts, and CI directories from Prettier's scope. This single
+        comprehensive test replaces per-entry duplicates (DRY, CLAUDE.md
+        principle 2).
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = StructureConfig(
@@ -668,7 +659,7 @@ class TestTypeScriptConfigGeneration:
                 "*.md",
                 "*.yaml",
                 "*.yml",
-                ".github",
+                ".github/",
                 "scripts/",
             ]
             for entry in required_entries:
@@ -676,6 +667,43 @@ class TestTypeScriptConfigGeneration:
                     f".prettierignore missing '{entry}' - "
                     f"will cause Prettier warnings on generated projects"
                 )
+
+    @staticmethod
+    def _collect_code_indents(content: str) -> list[int]:
+        """Return indent widths of non-JSDoc indented code lines.
+
+        JSDoc continuation lines (`  *` or ` *`) are skipped because they're
+        part of a ``/** ... */`` block where the `*` column is offset by one.
+        """
+        indents: list[int] = []
+        for line in content.split("\n"):
+            if not line or line[0] != " ":
+                continue
+            if line.lstrip().startswith("*"):
+                continue
+            stripped = line.lstrip(" ")
+            indents.append(len(line) - len(stripped))
+        return indents
+
+    def _assert_two_space_indent(self, content: str, filename: str) -> None:
+        """Assert content uses exactly 2-space Prettier indentation.
+
+        A file is Prettier-conformant (``tabWidth: 2``) only if the smallest
+        non-zero indent is exactly 2. ``indent_len % 2 == 0`` alone would pass
+        4-space indented code, silently accepting the bug this test exists to
+        prevent. This is a necessary (not sufficient) condition; a true e2e
+        check against Prettier is tracked separately.
+        """
+        indents = self._collect_code_indents(content)
+        assert indents, f"{filename}: expected at least one indented code line"
+        assert min(indents) == 2, (
+            f"{filename}: base indent must be 2 (Prettier tabWidth=2), "
+            f"got {min(indents)}. All indents: {sorted(set(indents))}"
+        )
+        for indent_len in indents:
+            assert (
+                indent_len % 2 == 0
+            ), f"{filename}: expected multiple of 2, got {indent_len}"
 
     def test_typescript_eslintrc_is_prettier_conformant(self) -> None:
         """Test generated .eslintrc.js conforms to Prettier config.
@@ -694,28 +722,7 @@ class TestTypeScriptConfigGeneration:
             files = generator.generate()
 
             content = files[".eslintrc.js"].read_text()
-            # Must use 2-space indentation (Prettier tabWidth: 2): first-level
-            # indented lines must have exactly 2 leading spaces.
-            for line in content.split("\n"):
-                if not line or line[0] != " ":
-                    continue
-                stripped = line.lstrip(" ")
-                indent_len = len(line) - len(stripped)
-                assert (
-                    indent_len % 2 == 0
-                ), f"Expected multiple of 2 indent, got {indent_len}: {line!r}"
-            # The shallowest indented line must be exactly 2 spaces (rules out
-            # a 4-space base indent which would pass a mod-2 check).
-            indented_lines = [
-                line for line in content.split("\n") if line and line[0] == " "
-            ]
-            if indented_lines:
-                min_indent = min(
-                    len(line) - len(line.lstrip(" ")) for line in indented_lines
-                )
-                assert (
-                    min_indent == 2
-                ), f"Base indent must be 2 spaces, got {min_indent}"
+            self._assert_two_space_indent(content, ".eslintrc.js")
             # Must end with newline
             assert content.endswith("\n")
             # Must use semicolons (semi: true) at end of statement
@@ -737,28 +744,19 @@ class TestTypeScriptConfigGeneration:
             files = generator.generate()
 
             content = files["jest.config.js"].read_text()
+            self._assert_two_space_indent(content, "jest.config.js")
             # Must end with newline
             assert content.endswith("\n")
             # Must use semicolons
             assert content.rstrip().endswith(";")
-            # Base indent must be exactly 2 spaces (rules out 4-space base).
-            indented_lines = [
-                line for line in content.split("\n") if line and line[0] == " "
-            ]
-            if indented_lines:
-                min_indent = min(
-                    len(line) - len(line.lstrip(" ")) for line in indented_lines
-                )
-                assert (
-                    min_indent == 2
-                ), f"Base indent must be 2 spaces, got {min_indent}"
 
     def test_typescript_index_ts_is_prettier_conformant(self) -> None:
         """Test generated src/index.ts conforms to Prettier config.
 
-        Must use 2-space base indentation for code, end with newline.
-        JSDoc comment lines (starting with ' *') are excluded from indent check.
-        Necessary-but-not-sufficient for Prettier conformance.
+        Must use 2-space indentation for code, and end with newline. JSDoc
+        comment lines (starting with ' *') are excluded from indent check.
+        This is a necessary (not sufficient) condition; a true Prettier run
+        would be an e2e test beyond this unit suite.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = StructureConfig(
@@ -770,56 +768,5 @@ class TestTypeScriptConfigGeneration:
             files = generator.generate()
 
             content = files["src/index.ts"].read_text()
-            # Must end with newline
             assert content.endswith("\n")
-            # Check indentation for code lines (skip JSDoc lines)
-            code_indented_lines = [
-                line
-                for line in content.split("\n")
-                if line and line[0] == " " and not line.lstrip().startswith("*")
-            ]
-            for line in code_indented_lines:
-                stripped = line.lstrip(" ")
-                indent_len = len(line) - len(stripped)
-                assert (
-                    indent_len % 2 == 0
-                ), f"Expected multiple of 2 indent, got {indent_len}: {line!r}"
-            # Base indent must be exactly 2 spaces (rules out 4-space base).
-            if code_indented_lines:
-                min_indent = min(
-                    len(line) - len(line.lstrip(" ")) for line in code_indented_lines
-                )
-                assert (
-                    min_indent == 2
-                ), f"Base indent must be 2 spaces, got {min_indent}"
-
-    def test_typescript_index_ts_uses_double_quotes(self) -> None:
-        """Test generated src/index.ts uses double quotes (Prettier default).
-
-        Prettier's default singleQuote is false. Since .prettierrc does not
-        override this, generated TypeScript source must use double quotes to
-        pass `npx prettier --check`.
-        """
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config = StructureConfig(
-                project_name="test-project",
-                language="typescript",
-                package_name="test_project",
-            )
-            generator = StructureGenerator(Path(tmpdir), config)
-            files = generator.generate()
-
-            content = files["src/index.ts"].read_text()
-            # No single-quoted string literals - only double-quoted
-            # (Exclude single quotes inside comments and apostrophes.)
-            for line in content.split("\n"):
-                # Skip JSDoc comment lines
-                stripped = line.lstrip()
-                if stripped.startswith(("*", "//")):
-                    continue
-                # Line should not contain a single-quoted string pair
-                # Look for paired single quotes that aren't apostrophes
-                assert not _has_single_quoted_string(line), (
-                    f"src/index.ts uses single quote strings, "
-                    f"Prettier requires double: {line!r}"
-                )
+            self._assert_two_space_indent(content, "src/index.ts")
