@@ -289,14 +289,14 @@ class TestMultiLanguageTests:
             content = files["tests/index.test.ts"].read_text()
             assert "describe" in content or "test" in content
 
-    def test_typescript_test_uses_double_quotes(self) -> None:
-        """Test TypeScript test file uses double quotes (Prettier default).
+    def test_typescript_test_is_prettier_conformant(self) -> None:
+        """Test generated tests/index.test.ts conforms to Prettier defaults.
 
-        Prettier's default `singleQuote` is false. Since the generated
-        `.prettierrc` does not override this, `tests/index.test.ts` must use
-        double-quoted strings; otherwise `npx prettier --check` (now scoped
-        to include tests/**/*.{ts,tsx}) will fail on a freshly generated
-        project. Issue #193.
+        Prettier defaults to double quotes when ``singleQuote`` is absent from
+        ``.prettierrc``. Single-quoted string literals in the generated test
+        file would re-introduce the regression from issue #193 (Prettier
+        warnings on freshly scaffolded TS projects). This is a necessary
+        (not sufficient) conformance check.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = Config(
@@ -308,16 +308,18 @@ class TestMultiLanguageTests:
             files = generator.generate()
 
             content = files["tests/index.test.ts"].read_text()
-            # No line outside comments should contain a pair of single quotes.
-            for line in content.split("\n"):
-                stripped = line.lstrip()
-                if stripped.startswith(("*", "//")):
-                    continue
-                # Pairs of single quotes indicate string-literal use
-                assert line.count("'") < 2, (
-                    f"tests/index.test.ts uses single-quoted strings, "
-                    f"Prettier default requires double quotes: {line!r}"
-                )
+            # Prettier default: double-quoted string literals
+            assert "'main'" not in content, (
+                "tests/index.test.ts must use double quotes to match "
+                "Prettier defaults (singleQuote is not set in .prettierrc)"
+            )
+            assert "'should run without error'" not in content
+            assert "'../src/index'" not in content
+            assert '"main"' in content
+            assert '"should run without error"' in content
+            assert '"../src/index"' in content
+            # Must end with newline
+            assert content.endswith("\n")
 
     def test_go_test_has_test_function(self) -> None:
         """Test Go test file has Test function."""
