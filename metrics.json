@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-04-16T19:39:09.658704+00:00",
+  "timestamp": "2026-04-19T17:04:10.319603+00:00",
   "project": "start-green-stay-green",
   "thresholds": {
     "coverage": 90,
@@ -32,8 +32,8 @@
     "lint_status": "pass",
     "type_errors": 0,
     "typecheck_status": "pass",
-    "tests_total": 1448,
-    "tests_passed": 1448,
+    "tests_total": 1447,
+    "tests_passed": 1447,
     "tests_failed": 0,
     "tests_skipped": 0,
     "tests_status": "pass"
