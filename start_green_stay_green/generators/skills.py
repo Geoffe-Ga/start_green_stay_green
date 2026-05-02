@@ -2,6 +2,15 @@
 
 Copies skills from reference directory and tunes them for target repository
 using ContentTuner to adapt content while preserving structure.
+
+Skills live in two parallel directories on disk by design:
+- ``reference/skills/`` is the source of truth this generator reads from
+  when seeding generated projects.
+- ``.claude/skills/`` is what Claude Code loads for sgsg's own session.
+
+The trees are kept in lockstep (both updated in the same commit). They are
+not deduplicated because the two consumers are independent: removing one
+breaks either the generator or local sgsg sessions.
 """
 
 from __future__ import annotations

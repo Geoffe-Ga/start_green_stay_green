@@ -142,8 +142,13 @@ class TestSkillsQuality:
                 len(content) > 1000
             ), f"{skill} too short ({len(content)} chars, need >1000)"
 
-    def test_skills_have_code_examples(self, skills_dir: Path) -> None:
-        """Test skills contain at least one fenced block in SKILL.md or references/."""
+    def test_skills_have_fenced_code_block_in_tree(self, skills_dir: Path) -> None:
+        """Test each skill tree has a fenced block in SKILL.md or references/.
+
+        The check spans the whole skill directory because prose-focused
+        skills (e.g. user-facing-error-messages) keep their fenced examples
+        in references/ rather than in SKILL.md itself.
+        """
         for skill in REQUIRED_SKILLS:
             skill_dir = skills_dir / skill
             candidates = [
