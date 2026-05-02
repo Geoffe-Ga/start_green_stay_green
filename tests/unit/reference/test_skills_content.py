@@ -143,13 +143,28 @@ class TestSkillsQuality:
             ), f"{skill} too short ({len(content)} chars, need >1000)"
 
     def test_skills_have_code_examples(self, skills_dir: Path) -> None:
-        """Test skills contain code examples (fenced blocks or inline code)."""
+        """Test skills contain at least one fenced block in SKILL.md or references/."""
         for skill in REQUIRED_SKILLS:
-            skill_path = skills_dir / skill / "SKILL.md"
-            content = skill_path.read_text()
+            skill_dir = skills_dir / skill
+            candidates = [
+                skill_dir / "SKILL.md",
+                *(skill_dir / "references").glob("*.md"),
+            ]
+            has_fenced_block = any(
+                "```" in path.read_text() for path in candidates if path.is_file()
+            )
 
-            has_fenced_blocks = "```" in content
-            has_inline_code = "`" in content
-            has_code_examples = has_fenced_blocks or has_inline_code
+            msg = f"{skill} missing fenced code block in SKILL.md or references/"
+            assert has_fenced_block, msg
 
-            assert has_code_examples, f"{skill} missing code examples"
+    def test_skills_references_files_non_empty(self, skills_dir: Path) -> None:
+        """Test that any references/ files alongside a SKILL.md are non-empty."""
+        for skill in REQUIRED_SKILLS:
+            references_dir = skills_dir / skill / "references"
+            if not references_dir.is_dir():
+                continue
+            for path in sorted(references_dir.iterdir()):
+                if not path.is_file():
+                    continue
+                msg = f"{skill}: empty reference file {path.name}"
+                assert path.stat().st_size > 0, msg
