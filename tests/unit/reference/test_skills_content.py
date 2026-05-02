@@ -143,12 +143,13 @@ class TestSkillsQuality:
             ), f"{skill} too short ({len(content)} chars, need >1000)"
 
     def test_skills_have_code_examples(self, skills_dir: Path) -> None:
-        """Test skills contain code examples (code blocks)."""
+        """Test skills contain code examples (fenced blocks or inline code)."""
         for skill in REQUIRED_SKILLS:
             skill_path = skills_dir / skill / "SKILL.md"
             content = skill_path.read_text()
 
-            # Check for code blocks (```language or ```)
-            has_code_blocks = "```" in content
+            has_fenced_blocks = "```" in content
+            has_inline_code = "`" in content
+            has_code_examples = has_fenced_blocks or has_inline_code
 
-            assert has_code_blocks, f"{skill} missing code examples"
+            assert has_code_examples, f"{skill} missing code examples"

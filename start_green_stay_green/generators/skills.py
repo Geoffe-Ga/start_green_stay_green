@@ -26,12 +26,14 @@ REFERENCE_SKILLS_DIR = Path(__file__).parent.parent.parent / "reference" / "skil
 
 # Required skills that must be present (directory names)
 REQUIRED_SKILLS = [
+    "address-feedback",
     "architectural-decisions",
     "backlog-grooming",
     "bug-squashing-methodology",
     "ci-debugging",
     "comprehensive-pr-review",
     "concurrency",
+    "cve-remediation",
     "documentation",
     "error-handling",
     "file-naming-conventions",
@@ -45,6 +47,7 @@ REQUIRED_SKILLS = [
     "stay-green",
     "testing",
     "tracer-code",
+    "user-facing-error-messages",
     "vibe",
 ]
 
