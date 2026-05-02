@@ -6,3 +6,4 @@
 
 CVE-2025-14009    # nltk - transitive dep, no fix available yet - #203
 CVE-2026-4539     # pygments 2.19.2 - no fix version available yet - #265
+CVE-2026-3219     # pip 26.0.1 - latest version, no fix available yet
