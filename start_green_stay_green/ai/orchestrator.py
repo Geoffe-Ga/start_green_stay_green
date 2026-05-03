@@ -22,6 +22,8 @@ from start_green_stay_green.utils.timing import get_active_report
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from start_green_stay_green.utils.timing import TimingReport
+
 
 class GenerationError(Exception):
     """Raised when AI generation fails.
@@ -319,7 +321,7 @@ class AIOrchestrator:
 
     @staticmethod
     def _record_call(
-        report: object | None,
+        report: TimingReport | None,
         start: float,
         retries: int,
         result: GenerationResult | None,
@@ -327,14 +329,14 @@ class AIOrchestrator:
         """Record a completed call (success or failure) on the active report."""
         if report is None:
             return
-        record = APICallRecord(
-            latency_s=time.perf_counter() - start,
-            retries=retries,
-            input_tokens=result.token_usage.input_tokens if result else 0,
-            output_tokens=result.token_usage.output_tokens if result else 0,
+        report.record_api_call(
+            APICallRecord(
+                latency_s=time.perf_counter() - start,
+                retries=retries,
+                input_tokens=result.token_usage.input_tokens if result else 0,
+                output_tokens=result.token_usage.output_tokens if result else 0,
+            )
         )
-        # Type narrows via duck-typing — get_active_report returns TimingReport | None.
-        report.record_api_call(record)  # type: ignore[attr-defined]
 
     def generate(
         self,

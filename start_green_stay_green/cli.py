@@ -16,9 +16,12 @@ import shlex
 import shutil
 import sys
 from typing import Annotated
+from typing import Any
 from typing import TYPE_CHECKING
+from typing import TypeVar
 
 if TYPE_CHECKING:
+    from collections.abc import Coroutine
     from collections.abc import Generator
     from collections.abc import Sequence
 
@@ -71,6 +74,9 @@ __version__ = "1.0.0"
 
 # Constants
 MAX_PROJECT_NAME_LENGTH = 100
+
+# Generic return type for the orchestrator-close coroutine wrapper.
+_R = TypeVar("_R")
 
 # Create Typer app with rich markup enabled
 app = typer.Typer(
@@ -613,11 +619,14 @@ def _copy_reference_subagents(
             msg = f"Reference subagent not found: {source_file}"
             raise FileNotFoundError(msg)
         target_path = target_dir / f"{agent_name}.md"
-        content = source_path.read_text()
+        # Pin UTF-8 explicitly: agent prose contains characters
+        # (✓, ⊘, em-dashes) that would corrupt under a non-UTF-8 locale
+        # default on Windows.
+        content = source_path.read_text(encoding="utf-8")
         if file_writer is not None:
             file_writer.write_file(target_path, content)
         else:
-            target_path.write_text(content)
+            target_path.write_text(content, encoding="utf-8")
 
 
 @contextmanager
@@ -641,6 +650,24 @@ def _maybe_collect_timing(
         timing_json.parent.mkdir(parents=True, exist_ok=True)
         report.write_json(timing_json)
         set_active_report(None)
+
+
+async def _run_with_orchestrator_close(
+    orchestrator: AIOrchestrator,
+    coro: Coroutine[Any, Any, _R],
+) -> _R:
+    """Await ``coro`` and release the orchestrator's async client on exit.
+
+    ``AIOrchestrator`` lazily allocates an :class:`AsyncAnthropic` (and
+    therefore an httpx pool) when ``generate_async`` is first invoked.
+    Without an explicit ``aclose`` the pool would leak across calls in
+    long-lived contexts. ``aclose`` is idempotent, so this is safe even
+    when the async client was never created.
+    """
+    try:
+        return await coro
+    finally:
+        await orchestrator.aclose()
 
 
 def _generate_structure_step(
@@ -975,8 +1002,13 @@ def _generate_architecture_step(
     key availability; only Python and TypeScript projects produce output.
     """
     if language not in {"python", "typescript"}:
-        # The generator only supports these two; silently skip rather
-        # than raise — other languages are valid project targets.
+        # The generator only supports these two; surface a dim info line
+        # so users understand why no architecture rules were generated
+        # for, e.g., a Go or Rust project rather than seeing silence.
+        console.print(
+            f"[dim]Architecture rules unavailable for {language} "
+            "(supported: python, typescript)[/dim]"
+        )
         return
 
     arch_dir = project_path / "plans" / "architecture"
@@ -1020,15 +1052,21 @@ def _generate_subagents_step(
             f"Language: {language}, "
             f"Type: quality-control-tool"
         )
+        # ``_run_with_orchestrator_close`` guarantees the lazily-created
+        # ``AsyncAnthropic`` client is released on the way out, even if
+        # one of the parallel tunings raises.
         results = run_async(
-            subagents_generator.generate_all_agents(project_config_for_agents)
+            _run_with_orchestrator_close(
+                orchestrator,
+                subagents_generator.generate_all_agents(project_config_for_agents),
+            )
         )
         for agent_name, result in results.items():
             agent_file = subagents_output_dir / f"{agent_name}.md"
             if file_writer is not None:
                 file_writer.write_file(agent_file, result.content)
             else:
-                agent_file.write_text(result.content)
+                agent_file.write_text(result.content, encoding="utf-8")
     console.print("[green]✓[/green] Generated subagents")
 
 

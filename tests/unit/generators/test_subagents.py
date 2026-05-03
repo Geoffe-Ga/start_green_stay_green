@@ -619,12 +619,17 @@ class TestSubagentsParallelism:
 
         results = await generator.generate_all_agents("test-context")
 
-        # Every agent generated, and the maximum concurrent in-flight
-        # was at least 2 (it should be all 8 with the default semaphore).
+        # The latch only releases ``gate`` once ``active_calls`` reaches
+        # ``len(REQUIRED_AGENTS)``, so the gather can only return if every
+        # agent was in-flight at the same instant. Asserting the strict
+        # equality (rather than a weaker ``>= 2`` lower bound) makes the
+        # invariant explicit and would catch a regression where the
+        # semaphore was tightened or the gather was serialized.
         assert set(results) == set(REQUIRED_AGENTS)
-        assert (
-            max_active >= 2
-        ), f"Expected concurrent dispatch but max_active={max_active}"
+        assert max_active == len(REQUIRED_AGENTS), (
+            f"Expected all {len(REQUIRED_AGENTS)} agents in-flight at once, "
+            f"got max_active={max_active}"
+        )
 
     @pytest.mark.asyncio
     async def test_generate_all_agents_respects_semaphore(

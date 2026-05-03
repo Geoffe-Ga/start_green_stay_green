@@ -1216,9 +1216,20 @@ class TestGenerateSteps:
         mock_orchestrator = MagicMock()
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
-        mock_run_async.return_value = {}
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        # ``_generate_subagents_step`` now wraps the gather in
+        # ``_run_with_orchestrator_close``, which returns a coroutine.
+        # The mocked ``run_async`` never awaits it, so we must close it
+        # explicitly to avoid the "coroutine was never awaited" warning.
+        def _consume(coro: object) -> dict[str, object]:
+            close = getattr(coro, "close", None)
+            if callable(close):
+                close()
+            return {}
+
+        mock_run_async.side_effect = _consume
 
         with patch("start_green_stay_green.cli.console"):
             cli._generate_subagents_step(

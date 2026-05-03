@@ -9,13 +9,15 @@ import asyncio
 from dataclasses import dataclass
 import inspect
 import logging
-from typing import Any
 from typing import TYPE_CHECKING
+from typing import TypeVar
+from typing import cast
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable
     from collections.abc import Callable
     from collections.abc import Sequence
 
@@ -25,12 +27,16 @@ logger = logging.getLogger(__name__)
 # Constants for response parsing
 _CHANGES_SECTION_PARTS = 2
 
+# Generic over the result type so callers get a precise return type back
+# instead of a blanket ``Any``.
+_T = TypeVar("_T")
+
 
 async def _await_or_offload(
-    call: Callable[..., Any],
-    *args: Any,  # noqa: ANN401 — pass-through wrapper
-    **kwargs: Any,  # noqa: ANN401 — pass-through wrapper
-) -> Any:  # noqa: ANN401 — pass-through wrapper
+    call: Callable[..., _T | Awaitable[_T]],
+    *args: object,
+    **kwargs: object,
+) -> _T:
     """Invoke ``call`` and return its result, awaitable or otherwise.
 
     Three cases must be handled correctly so concurrent tunings actually
@@ -48,11 +54,14 @@ async def _await_or_offload(
     if asyncio.iscoroutinefunction(call):
         result = call(*args, **kwargs)
         if inspect.isawaitable(result):
-            return await result
+            return await cast("Awaitable[_T]", result)
         # Autospec MagicMock falls through to here.
-        return result
-    # Real sync orchestrator: actually do the work off-thread.
-    return await asyncio.to_thread(call, *args, **kwargs)
+        return cast("_T", result)
+    # Real sync orchestrator: actually do the work off-thread. ``cast``
+    # on the function narrows ``T | Awaitable[T]`` to ``T`` for the
+    # signature ``asyncio.to_thread`` expects.
+    sync_call = cast("Callable[..., _T]", call)
+    return await asyncio.to_thread(sync_call, *args, **kwargs)
 
 
 @dataclass(frozen=True)

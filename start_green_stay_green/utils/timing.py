@@ -92,14 +92,27 @@ class TimingReport:
     def end_step(self, record: StepTiming, duration_s: float) -> None:
         """Mark a step as complete with the given duration.
 
+        Pops everything from the active stack down to and including
+        ``record``. This makes the collector resilient to out-of-order
+        completion: if a child step's ``__exit__`` is skipped (e.g. its
+        ``begin_step`` succeeded but the surrounding context manager
+        bailed before ``end_step``), the parent will still be popped
+        when its own ``end_step`` runs, instead of leaving a stale
+        entry that would mis-attribute later API calls.
+
         Args:
             record: The record returned by ``begin_step``.
             duration_s: Wall-clock duration in seconds.
         """
         with self._lock:
             record.duration_s = duration_s
-            if self._stack and self._stack[-1] is record:
-                self._stack.pop()
+            # Pop down to ``record`` (inclusive) if it's in the stack;
+            # otherwise leave the stack alone so other in-flight steps
+            # are unaffected.
+            for index in range(len(self._stack) - 1, -1, -1):
+                if self._stack[index] is record:
+                    del self._stack[index:]
+                    return
 
     def record_api_call(self, call: APICallRecord) -> None:
         """Record a single API call; attribute it to the active step (if any).

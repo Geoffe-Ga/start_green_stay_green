@@ -11,6 +11,7 @@ See Issue #196 for details.
 """
 
 from collections.abc import Generator
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -537,3 +538,45 @@ class TestFullIntegrationFlow:
         project_path = output_dir / "test-custom-dir"
         assert project_path.exists()
         assert project_path.is_dir()
+
+    def test_init_writes_timing_json_report(self, tmp_path: Path) -> None:
+        """End-to-end: --timing-json writes a structured JSON report."""
+        output_dir = tmp_path / "out"
+        timing_path = tmp_path / "reports" / "timing.json"
+        runner = CliRunner()
+
+        result = runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "timing-smoke",
+                "--language",
+                "python",
+                "--output-dir",
+                str(output_dir),
+                "--timing-json",
+                str(timing_path),
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        assert timing_path.exists(), "timing JSON report not written"
+
+        report = json.loads(timing_path.read_text(encoding="utf-8"))
+
+        # Top-level keys are present and well-typed.
+        assert isinstance(report["wall_clock_s"], (int, float))
+        assert isinstance(report["api_calls"], int)
+        assert isinstance(report["api_seconds"], (int, float))
+        assert isinstance(report["steps"], list)
+        assert report["tokens"] == {"input": 0, "output": 0, "cache_read": 0}
+
+        # In offline mode no API calls are made; every deterministic
+        # step is recorded with zero attributed API calls.
+        assert report["api_calls"] == 0
+        step_names = {step["name"] for step in report["steps"]}
+        # Sanity: at least the always-on steps must have been timed.
+        for required in ("structure", "ci", "claude_md", "subagents"):
+            assert required in step_names
