@@ -1,17 +1,24 @@
 """CI pipeline generator for target projects.
 
 Generates GitHub Actions workflows customized to target project language
-and framework. Integrates reference CI configurations and quality standards
-from MAXIMUM_QUALITY_ENGINEERING.md.
+and framework.
+
+Default path: render the deterministic, version-controlled YAML templates
+in ``reference/ci/<language>.yml`` through Jinja2, substituting the
+project name. The optional Claude-powered path is reserved for the
+``green enhance`` flow (Phase 3 of the optimization roadmap) and only
+runs when an :class:`AIOrchestrator` is provided.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import io
+from pathlib import Path
 from typing import Any
 from typing import TYPE_CHECKING
 
+from jinja2 import Environment
 import yaml
 
 from start_green_stay_green.generators.base import BaseGenerator
@@ -20,6 +27,13 @@ from start_green_stay_green.utils.yaml_utils import strip_markdown_fences
 if TYPE_CHECKING:
     from start_green_stay_green.ai.orchestrator import AIOrchestrator
     from start_green_stay_green.ai.orchestrator import GenerationResult
+
+
+# Reference CI templates ship with the package. Each ``<language>.yml`` is
+# a deterministic baseline that ``green init`` renders without calling
+# Claude. The directory is resolved relative to the package root rather
+# than CWD so the generator works whether installed or run in-tree.
+REFERENCE_CI_DIR = Path(__file__).parent.parent.parent / "reference" / "ci"
 
 # Supported languages and their configurations
 LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
@@ -118,18 +132,25 @@ class CIGenerator(BaseGenerator):
 
     def __init__(
         self,
-        orchestrator: AIOrchestrator,
-        language: str,
+        orchestrator: AIOrchestrator | None = None,
+        language: str = "python",
         *,
         framework: str | None = None,
+        reference_dir: Path | None = None,
     ) -> None:
         """Initialize CI Generator.
 
         Args:
-            orchestrator: AIOrchestrator instance for generation.
+            orchestrator: Optional AIOrchestrator for the legacy
+                Claude-generated path. Default :data:`None` selects the
+                deterministic template-based path
+                (``generate_workflow_from_template``).
             language: Target language (python, typescript, go, rust, java,
                 csharp, ruby).
             framework: Optional framework (e.g., FastAPI, Express, Gin).
+            reference_dir: Directory containing ``<language>.yml``
+                reference templates. Defaults to ``reference/ci/`` shipped
+                with the package.
 
         Raises:
             ValueError: If language is not supported.
@@ -147,21 +168,27 @@ class CIGenerator(BaseGenerator):
         config = LANGUAGE_CONFIGS[language]
         self.test_framework = config["test_framework"]
         self.supported_versions = config["supported_versions"]
+        self.reference_dir = reference_dir or REFERENCE_CI_DIR
 
     def generate_workflow(self) -> CIWorkflow:
-        """Generate customized CI workflow.
+        """Generate a customized CI workflow.
 
-        Creates a complete GitHub Actions workflow file adapted to the target
-        language and framework. Includes quality checks, testing matrix, coverage
-        analysis, and optional mutation testing.
+        By default this renders the deterministic ``reference/ci/<language>.yml``
+        baseline through Jinja2 (no API call). If an
+        :class:`AIOrchestrator` was passed at construction time the legacy
+        Claude-generated path is used instead, preserving backward
+        compatibility for callers that rely on AI tuning.
 
         Returns:
             CIWorkflow with generated YAML content and validation status.
 
         Raises:
-            GenerationError: If AI generation fails or output is invalid.
-            ValueError: If validation fails.
+            GenerationError: If AI generation fails (orchestrator path).
+            ValueError: If validation fails or template missing.
         """
+        if self.orchestrator is None:
+            return self.generate_workflow_from_template()
+
         # Build context for AI generation
         language_config = LANGUAGE_CONFIGS[self.language]
         context = self._build_generation_context(language_config)
@@ -171,6 +198,66 @@ class CIGenerator(BaseGenerator):
 
         # Validate generated workflow
         return self._validate_and_parse(result.content)
+
+    def generate_workflow_from_template(
+        self,
+        *,
+        project_name: str | None = None,
+    ) -> CIWorkflow:
+        """Render the deterministic CI template for the configured language.
+
+        Reads ``reference/ci/<language>.yml`` and runs it through Jinja2 so
+        callers can substitute the project name (or any future
+        placeholders). The reference templates are valid YAML even before
+        rendering — Jinja syntax is only used for ``{{ project_name }}``
+        and similar substitutions, so files without placeholders are
+        returned essentially verbatim.
+
+        Args:
+            project_name: Optional project name to substitute in the
+                workflow header. Falls back to the language-specific
+                default present in the reference template.
+
+        Returns:
+            ``CIWorkflow`` with the rendered, validated YAML.
+
+        Raises:
+            FileNotFoundError: If no reference template exists for the
+                language.
+            ValueError: If the rendered YAML fails structural validation.
+        """
+        template_path = self.reference_dir / f"{self.language}.yml"
+        if not template_path.exists():
+            msg = (
+                f"No reference CI template for language '{self.language}': "
+                f"expected {template_path}"
+            )
+            raise FileNotFoundError(msg)
+
+        raw = template_path.read_text()
+
+        # The reference YAMLs already contain GitHub Actions ``${{ }}``
+        # expressions, which collide with Jinja2's default delimiters.
+        # Use custom delimiters (``<<%`` / ``%>>``) so existing templates
+        # render unchanged unless a maintainer opts in to a placeholder.
+        # autoescape stays off because the rendered output is YAML, not
+        # HTML — the Jinja XSS warning does not apply.
+        env = Environment(
+            variable_start_string="<<%",
+            variable_end_string="%>>",
+            block_start_string="<%",
+            block_end_string="%>",
+            comment_start_string="<#",
+            comment_end_string="#>",
+            autoescape=False,  # noqa: S701 — YAML output
+            keep_trailing_newline=True,
+        )
+        rendered = env.from_string(raw).render(
+            project_name=project_name,
+            language=self.language,
+        )
+
+        return self._validate_and_parse(rendered)
 
     def _build_generation_context(
         self,

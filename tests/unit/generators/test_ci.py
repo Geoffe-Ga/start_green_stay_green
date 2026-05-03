@@ -9,6 +9,7 @@ Comprehensive tests for CI pipeline generation covering:
 - Static utility methods
 """
 
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -1230,3 +1231,78 @@ jobs:
             versions = config["supported_versions"]
             assert isinstance(versions, list), f"{lang} versions not a list"
             assert len(versions) > 0, f"{lang} versions is empty"
+
+
+class TestCIGeneratorTemplatePath:
+    """Tests for the deterministic, no-API template path (Phase 1)."""
+
+    @pytest.mark.parametrize(
+        "language",
+        ["python", "typescript", "go", "rust"],
+    )
+    def test_generate_from_template_for_supported_language(
+        self, language: str
+    ) -> None:
+        """Each canonical language renders without an orchestrator."""
+        generator = CIGenerator(language=language)
+
+        workflow = generator.generate_workflow_from_template()
+
+        assert workflow.is_valid
+        assert workflow.language == language
+        assert workflow.content
+        # Reference templates ship a 'quality' job; validation should pass.
+        assert "quality" in workflow.content
+
+    def test_generate_workflow_uses_template_when_no_orchestrator(self) -> None:
+        """Calling generate_workflow() with no orchestrator picks the template path."""
+        generator = CIGenerator(language="python")
+
+        workflow = generator.generate_workflow()
+
+        assert workflow.is_valid
+        # Output should match what generate_workflow_from_template returns.
+        from_template = generator.generate_workflow_from_template()
+        assert workflow.content == from_template.content
+
+    def test_generate_workflow_falls_back_to_ai_when_orchestrator_provided(
+        self,
+    ) -> None:
+        """When an orchestrator is supplied the legacy AI path is taken."""
+        # Build a minimal valid workflow YAML for the AI mock to return.
+        valid_yaml = (
+            "name: Test\n"
+            "on: [push]\n"
+            "jobs:\n"
+            "  quality:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: echo hi\n"
+        )
+        mock_orchestrator = Mock(spec=AIOrchestrator)
+        mock_orchestrator.generate.return_value = GenerationResult(
+            content=valid_yaml,
+            format="yaml",
+            token_usage=TokenUsage(input_tokens=10, output_tokens=20),
+            model=ModelConfig.SONNET,
+            message_id="msg_test",
+        )
+
+        generator = CIGenerator(mock_orchestrator, "python")
+        workflow = generator.generate_workflow()
+
+        assert workflow.is_valid
+        mock_orchestrator.generate.assert_called_once()
+
+    def test_generate_from_template_raises_for_missing_template(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing reference template raises FileNotFoundError."""
+        # Point reference_dir at an empty directory.
+        generator = CIGenerator(
+            language="python",
+            reference_dir=tmp_path,
+        )
+
+        with pytest.raises(FileNotFoundError, match="reference CI template"):
+            generator.generate_workflow_from_template()

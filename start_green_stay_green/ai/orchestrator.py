@@ -5,13 +5,18 @@ Coordinates AI-powered generation tasks using Claude API.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import time
 from typing import Final
 from typing import Literal
 
 from anthropic import Anthropic
+from anthropic import AsyncAnthropic
 from anthropic.types import TextBlock
+
+from start_green_stay_green.utils.timing import APICallRecord
+from start_green_stay_green.utils.timing import get_active_report
 
 
 class GenerationError(Exception):
@@ -127,6 +132,10 @@ class AIOrchestrator:
         self.model = model
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        # Lazily-created long-lived async client. Reusing one client across
+        # all calls in an init run lets us share the underlying httpx pool,
+        # which matters once Phase 2 fans out subagent tunings concurrently.
+        self._async_client: AsyncAnthropic | None = None
 
     @staticmethod
     def _validate_api_key(api_key: str) -> None:
@@ -262,28 +271,56 @@ class AIOrchestrator:
             GenerationError: If all retries exhausted.
         """
         last_error: Exception | None = None
+        report = get_active_report()
+        call_started = time.perf_counter()
+        retries = 0
 
         for attempt in range(self.max_retries + 1):
             try:
-                return self._call_api(client, prompt, output_format)
+                result = self._call_api(client, prompt, output_format)
             except GenerationError:
+                self._record_call(report, call_started, retries, None)
                 raise
             except Exception as e:  # noqa: BLE001
                 last_error = e
                 if attempt < self.max_retries:
+                    retries += 1
                     delay = self.retry_delay * (2**attempt)
                     time.sleep(delay)
                     continue
+            else:
+                self._record_call(report, call_started, retries, result)
+                return result
 
+        self._record_call(report, call_started, retries, None)
         msg = "Failed to generate content"
         raise GenerationError(msg, cause=last_error) from last_error
+
+    @staticmethod
+    def _record_call(
+        report: object | None,
+        start: float,
+        retries: int,
+        result: GenerationResult | None,
+    ) -> None:
+        """Record a completed call (success or failure) on the active report."""
+        if report is None:
+            return
+        record = APICallRecord(
+            latency_s=time.perf_counter() - start,
+            retries=retries,
+            input_tokens=result.token_usage.input_tokens if result else 0,
+            output_tokens=result.token_usage.output_tokens if result else 0,
+        )
+        # Type narrows via duck-typing — get_active_report returns TimingReport | None.
+        report.record_api_call(record)  # type: ignore[attr-defined]
 
     def generate(
         self,
         prompt: str,
         output_format: Literal["yaml", "toml", "markdown", "bash"],
     ) -> GenerationResult:
-        """Generate content using Claude API.
+        """Generate content using Claude API (synchronous).
 
         Args:
             prompt: Prompt describing what to generate.
@@ -302,3 +339,108 @@ class AIOrchestrator:
         # Use context manager to ensure httpx client is properly closed
         with Anthropic(api_key=self._api_key) as client:
             return self._retry_with_backoff(client, prompt, output_format)
+
+    def _get_async_client(self) -> AsyncAnthropic:
+        """Return the cached ``AsyncAnthropic`` client, creating it once."""
+        if self._async_client is None:
+            self._async_client = AsyncAnthropic(api_key=self._api_key)
+        return self._async_client
+
+    async def _call_api_async(
+        self,
+        client: AsyncAnthropic,
+        prompt: str,
+        output_format: str,
+    ) -> GenerationResult:
+        """Async counterpart of :meth:`_call_api`."""
+        response = await client.messages.create(
+            model=self.model,
+            max_tokens=4096,
+            system=(
+                f"Generate {output_format} output. "
+                "Follow the instructions precisely."
+            ),
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+        )
+
+        first_block = response.content[0]
+        if not isinstance(first_block, TextBlock):
+            msg = "Expected TextBlock in response"
+            raise GenerationError(msg)
+
+        return GenerationResult(
+            content=first_block.text,
+            format=output_format,
+            token_usage=TokenUsage(
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+            ),
+            model=response.model,
+            message_id=response.id,
+        )
+
+    async def _retry_with_backoff_async(
+        self,
+        client: AsyncAnthropic,
+        prompt: str,
+        output_format: str,
+    ) -> GenerationResult:
+        """Async retry loop matching the sync semantics of ``_retry_with_backoff``."""
+        last_error: Exception | None = None
+        report = get_active_report()
+        call_started = time.perf_counter()
+        retries = 0
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                result = await self._call_api_async(client, prompt, output_format)
+            except GenerationError:
+                self._record_call(report, call_started, retries, None)
+                raise
+            except Exception as e:  # noqa: BLE001
+                last_error = e
+                if attempt < self.max_retries:
+                    retries += 1
+                    delay = self.retry_delay * (2**attempt)
+                    await asyncio.sleep(delay)
+                    continue
+            else:
+                self._record_call(report, call_started, retries, result)
+                return result
+
+        self._record_call(report, call_started, retries, None)
+        msg = "Failed to generate content"
+        raise GenerationError(msg, cause=last_error) from last_error
+
+    async def generate_async(
+        self,
+        prompt: str,
+        output_format: Literal["yaml", "toml", "markdown", "bash"],
+    ) -> GenerationResult:
+        """Async equivalent of :meth:`generate`.
+
+        Reuses a single long-lived ``AsyncAnthropic`` client per
+        orchestrator instance so concurrent calls share the httpx
+        connection pool. Callers should ``await`` :meth:`aclose` when
+        the orchestrator is no longer needed.
+        """
+        self._validate_prompt(prompt)
+        self._validate_output_format(output_format)
+
+        client = self._get_async_client()
+        return await self._retry_with_backoff_async(client, prompt, output_format)
+
+    async def aclose(self) -> None:
+        """Release the cached async client, if any.
+
+        Idempotent. Safe to call from a finally block even when no async
+        calls were made.
+        """
+        if self._async_client is not None:
+            await self._async_client.close()
+            self._async_client = None

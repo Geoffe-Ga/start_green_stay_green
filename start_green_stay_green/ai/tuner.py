@@ -5,7 +5,9 @@ Uses Claude Sonnet to adapt copied content while preserving structure.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+import inspect
 import logging
 from typing import TYPE_CHECKING
 
@@ -20,6 +22,31 @@ logger = logging.getLogger(__name__)
 
 # Constants for response parsing
 _CHANGES_SECTION_PARTS = 2
+
+
+async def _await_or_offload(call, *args, **kwargs):  # type: ignore[no-untyped-def]  # noqa: ANN001, ANN202, ANN002, ANN003
+    """Invoke ``call`` and return its result, awaitable or otherwise.
+
+    Three cases must be handled correctly so concurrent tunings actually
+    overlap on real API calls without breaking the mock-based tests:
+
+    * **Real sync orchestrator** (``Anthropic`` client): offload to a
+      worker thread via :func:`asyncio.to_thread` so a hundreds-of-ms
+      HTTP round-trip does not block the event loop while siblings wait.
+    * **AsyncMock** in tests: returns a coroutine when called; we await
+      the returned awaitable directly.
+    * **``create_autospec`` MagicMock** in tests: ``iscoroutinefunction``
+      reports ``True`` for these even when the spec'd method is sync, so
+      a plain "is the result awaitable?" check is the correct dispatch.
+    """
+    if asyncio.iscoroutinefunction(call):
+        result = call(*args, **kwargs)
+        if inspect.isawaitable(result):
+            return await result
+        # Autospec MagicMock falls through to here.
+        return result
+    # Real sync orchestrator: actually do the work off-thread.
+    return await asyncio.to_thread(call, *args, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -245,7 +272,11 @@ CHANGES:
         )
 
         try:
-            result = self.orchestrator.generate(prompt, "markdown")
+            result = await _await_or_offload(
+                self.orchestrator.generate,
+                prompt,
+                "markdown",
+            )
         except GenerationError:
             logger.exception("Tuning failed")
             raise

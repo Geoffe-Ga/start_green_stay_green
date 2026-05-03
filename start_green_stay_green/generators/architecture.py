@@ -43,14 +43,16 @@ class ArchitectureEnforcementGenerator:
 
     def __init__(
         self,
-        orchestrator: AIOrchestrator,
+        orchestrator: AIOrchestrator | None = None,
         *,
         output_dir: Path | None = None,
     ) -> None:
         """Initialize Architecture Enforcement Generator.
 
         Args:
-            orchestrator: AI orchestrator for content generation.
+            orchestrator: Deprecated. The architecture generator is fully
+                deterministic; this parameter is retained for source
+                compatibility and ignored. New code should omit it.
             output_dir: Output directory for generated files.
                 Defaults to plans/architecture.
         """

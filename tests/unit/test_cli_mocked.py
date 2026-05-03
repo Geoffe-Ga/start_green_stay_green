@@ -1107,21 +1107,30 @@ class TestGenerateSteps:
 
         mock_ci_generator_class.assert_called_with(mock_orchestrator, "python")
 
-    def test_generate_ci_step_skips_without_orchestrator(
-        self,
+    @patch("start_green_stay_green.cli.CIGenerator")
+    def test_generate_ci_step_uses_template_without_orchestrator(
+        self, mock_ci_generator_class: Mock
     ) -> None:
-        """Test _generate_ci_step skips without orchestrator."""
+        """_generate_ci_step now runs the template path with no orchestrator."""
+        mock_generator = MagicMock()
+        mock_workflow = MagicMock()
+        mock_workflow.content = "workflow content"
+        mock_generator.generate_workflow.return_value = mock_workflow
+        mock_ci_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
             cli._generate_ci_step(mock_path, "python", None)
 
+        mock_ci_generator_class.assert_called_with(None, "python")
+        mock_generator.generate_workflow.assert_called_once()
+
     @patch("start_green_stay_green.cli.GitHubActionsReviewGenerator")
-    def test_generate_review_step_with_orchestrator(
+    def test_generate_review_step_runs_unconditionally(
         self, mock_generator_class: Mock
     ) -> None:
-        """Test _generate_review_step with orchestrator."""
-        mock_orchestrator = MagicMock()
+        """_generate_review_step now always renders the template."""
         mock_generator = MagicMock()
         mock_workflow = MagicMock()
         mock_workflow.content = "workflow content"
@@ -1131,18 +1140,29 @@ class TestGenerateSteps:
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_review_step(mock_path, mock_orchestrator)
+            cli._generate_review_step(mock_path, MagicMock())
 
-        mock_generator_class.assert_called_with(mock_orchestrator)
+        # Generator no longer takes an orchestrator argument.
+        mock_generator_class.assert_called_with()
+        mock_generator.generate.assert_called_once()
 
-    def test_generate_review_step_skips_without_orchestrator(
-        self,
+    @patch("start_green_stay_green.cli.GitHubActionsReviewGenerator")
+    def test_generate_review_step_runs_without_orchestrator(
+        self, mock_generator_class: Mock
     ) -> None:
-        """Test _generate_review_step skips without orchestrator."""
+        """_generate_review_step still runs when no orchestrator is given."""
+        mock_generator = MagicMock()
+        mock_workflow = MagicMock()
+        mock_workflow.content = "workflow content"
+        mock_generator.generate.return_value = mock_workflow
+        mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
             cli._generate_review_step(mock_path, None)
+
+        mock_generator.generate.assert_called_once()
 
     @patch("start_green_stay_green.cli.ClaudeMdGenerator")
     def test_generate_claude_md_step(self, mock_generator_class: Mock) -> None:
@@ -1168,19 +1188,19 @@ class TestGenerateSteps:
 
     @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
     def test_generate_architecture_step(self, mock_generator_class: Mock) -> None:
-        """Test _generate_architecture_step creates generator."""
-        mock_orchestrator = MagicMock()
+        """Test _generate_architecture_step creates generator without orchestrator."""
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
+            # Pass orchestrator=None — generator should still be invoked.
             cli._generate_architecture_step(
                 mock_path,
                 "my-project",
                 "python",
-                mock_orchestrator,
+                None,
             )
 
         mock_generator.generate.assert_called()

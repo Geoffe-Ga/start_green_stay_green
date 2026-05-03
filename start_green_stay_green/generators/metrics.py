@@ -267,18 +267,23 @@ class MetricsGenerator(BaseGenerator):
 
     def __init__(
         self,
-        orchestrator: AIOrchestrator | None,
-        config: MetricsGenerationConfig,
+        orchestrator: AIOrchestrator | None = None,
+        config: MetricsGenerationConfig | None = None,
     ) -> None:
         """Initialize MetricsGenerator.
 
         Args:
-            orchestrator: Optional AI orchestrator for generation.
+            orchestrator: Deprecated. The metrics generator is fully
+                deterministic; this parameter is retained for source
+                compatibility and ignored. New code should omit it.
             config: Configuration for metrics generation.
 
         Raises:
-            ValueError: If configuration is invalid.
+            ValueError: If configuration is missing or invalid.
         """
+        if config is None:
+            msg = "MetricsGenerator requires a MetricsGenerationConfig"
+            raise ValueError(msg)
         self.orchestrator = orchestrator
         self.config = config
         self._validate_config()
