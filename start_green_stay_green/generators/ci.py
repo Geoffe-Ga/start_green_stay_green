@@ -242,7 +242,7 @@ class CIGenerator(BaseGenerator):
         # render unchanged unless a maintainer opts in to a placeholder.
         # autoescape stays off because the rendered output is YAML, not
         # HTML — the Jinja XSS warning does not apply.
-        env = Environment(
+        env = Environment(  # nosec B701 — YAML output, no HTML/XSS surface
             variable_start_string="<<%",
             variable_end_string="%>>",
             block_start_string="<%",

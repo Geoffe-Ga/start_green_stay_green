@@ -211,7 +211,20 @@ Start with the H1 title and include all sections from the reference template.
             raise ValueError(msg)
 
     @staticmethod
+    def _baseline_substitutions(project_config: dict[str, Any]) -> dict[str, str]:
+        """Build the token → replacement map for ``_render_baseline``."""
+        scripts = project_config.get("scripts") or []
+        skills = project_config.get("skills") or []
+        return {
+            "{{PROJECT_NAME}}": str(project_config.get("project_name", "your-project")),
+            "{{LANGUAGE}}": str(project_config.get("language", "python")),
+            "{{SCRIPTS}}": "\n".join(f"- {s}" for s in scripts),
+            "{{SKILLS}}": "\n".join(f"- {s}" for s in skills),
+        }
+
+    @classmethod
     def _render_baseline(
+        cls,
         reference: str,
         project_config: dict[str, Any],
     ) -> str:
@@ -221,28 +234,9 @@ Start with the H1 title and include all sections from the reference template.
         ``{{PROJECT_NAME}}``. This is a deterministic, dependency-free
         substitution: unknown tokens are left intact so the resulting file
         is always inspectable for "what was the user supposed to fill in?".
-
-        Args:
-            reference: Raw reference template content.
-            project_config: Project configuration with at minimum
-                ``project_name`` and ``language``. Extra keys are ignored.
-
-        Returns:
-            Rendered baseline content.
         """
-        project_name = str(project_config.get("project_name", "your-project"))
-        language = str(project_config.get("language", "python"))
-        scripts = project_config.get("scripts", []) or []
-        skills = project_config.get("skills", []) or []
-
-        substitutions = {
-            "{{PROJECT_NAME}}": project_name,
-            "{{LANGUAGE}}": language,
-            "{{SCRIPTS}}": "\n".join(f"- {s}" for s in scripts),
-            "{{SKILLS}}": "\n".join(f"- {s}" for s in skills),
-        }
         rendered = reference
-        for token, value in substitutions.items():
+        for token, value in cls._baseline_substitutions(project_config).items():
             rendered = rendered.replace(token, value)
         return rendered
 

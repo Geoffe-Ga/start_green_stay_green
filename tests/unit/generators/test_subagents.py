@@ -615,16 +615,16 @@ class TestSubagentsParallelism:
         )
         # Replace the tuner's tune with the latch-instrumented stub.
         generator.tuner = AsyncMock()
-        generator.tuner.tune = slow_tune  # type: ignore[assignment]
+        generator.tuner.tune = slow_tune
 
         results = await generator.generate_all_agents("test-context")
 
         # Every agent generated, and the maximum concurrent in-flight
         # was at least 2 (it should be all 8 with the default semaphore).
         assert set(results) == set(REQUIRED_AGENTS)
-        assert max_active >= 2, (
-            f"Expected concurrent dispatch but max_active={max_active}"
-        )
+        assert (
+            max_active >= 2
+        ), f"Expected concurrent dispatch but max_active={max_active}"
 
     @pytest.mark.asyncio
     async def test_generate_all_agents_respects_semaphore(
@@ -671,7 +671,7 @@ class TestSubagentsParallelism:
             max_concurrency=2,
         )
         generator.tuner = AsyncMock()
-        generator.tuner.tune = staged_tune  # type: ignore[assignment]
+        generator.tuner.tune = staged_tune
 
         await generator.generate_all_agents("ctx")
         assert peak <= 2

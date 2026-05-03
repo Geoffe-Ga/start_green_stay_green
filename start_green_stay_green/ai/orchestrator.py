@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import time
 from typing import Final
 from typing import Literal
+from typing import TYPE_CHECKING
 
 from anthropic import Anthropic
 from anthropic import AsyncAnthropic
@@ -17,6 +18,9 @@ from anthropic.types import TextBlock
 
 from start_green_stay_green.utils.timing import APICallRecord
 from start_green_stay_green.utils.timing import get_active_report
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class GenerationError(Exception):
@@ -91,6 +95,14 @@ class GenerationResult:
     token_usage: TokenUsage
     model: str
     message_id: str
+
+
+@dataclass(frozen=True)
+class _AttemptOutcome:
+    """Internal helper: success result or captured retryable error."""
+
+    result: GenerationResult | None
+    error: Exception | None
 
 
 class AIOrchestrator:
@@ -257,44 +269,53 @@ class AIOrchestrator:
         prompt: str,
         output_format: str,
     ) -> GenerationResult:
-        """Retry API call with exponential backoff.
+        """Retry API call with exponential backoff (sync).
 
-        Args:
-            client: Anthropic API client.
-            prompt: Generation prompt.
-            output_format: Desired output format.
-
-        Returns:
-            GenerationResult on success.
-
-        Raises:
-            GenerationError: If all retries exhausted.
+        Telemetry is recorded by the call site once after the loop
+        terminates (success or exhaustion). Failure paths never miss a
+        recording because both branches end with ``_record_call``.
         """
-        last_error: Exception | None = None
         report = get_active_report()
         call_started = time.perf_counter()
-        retries = 0
 
-        for attempt in range(self.max_retries + 1):
-            try:
-                result = self._call_api(client, prompt, output_format)
-            except GenerationError:
-                self._record_call(report, call_started, retries, None)
-                raise
-            except Exception as e:  # noqa: BLE001
-                last_error = e
-                if attempt < self.max_retries:
-                    retries += 1
-                    delay = self.retry_delay * (2**attempt)
-                    time.sleep(delay)
-                    continue
-            else:
-                self._record_call(report, call_started, retries, result)
-                return result
+        for attempt, sleep_s in self._retry_schedule():
+            outcome = self._attempt_sync(client, prompt, output_format)
+            if outcome.result is not None:
+                self._record_call(report, call_started, attempt, outcome.result)
+                return outcome.result
+            if sleep_s is None:
+                self._record_call(report, call_started, attempt, None)
+                msg = "Failed to generate content"
+                raise GenerationError(msg, cause=outcome.error) from outcome.error
+            time.sleep(sleep_s)
 
-        self._record_call(report, call_started, retries, None)
+        # ``_retry_schedule`` always yields at least one entry, so this
+        # is unreachable; keep mypy/coverage happy.
         msg = "Failed to generate content"
-        raise GenerationError(msg, cause=last_error) from last_error
+        raise GenerationError(msg)
+
+    def _retry_schedule(self) -> Iterator[tuple[int, float | None]]:
+        """Yield ``(attempt_index, sleep_before_next_or_None)`` pairs."""
+        for attempt in range(self.max_retries + 1):
+            is_last = attempt == self.max_retries
+            yield attempt, None if is_last else self.retry_delay * (2**attempt)
+
+    def _attempt_sync(
+        self,
+        client: Anthropic,
+        prompt: str,
+        output_format: str,
+    ) -> _AttemptOutcome:
+        """Run one sync attempt; return the result or capture the error."""
+        try:
+            return _AttemptOutcome(
+                result=self._call_api(client, prompt, output_format),
+                error=None,
+            )
+        except GenerationError:
+            raise
+        except Exception as e:  # noqa: BLE001 — preserved for retry semantics
+            return _AttemptOutcome(result=None, error=e)
 
     @staticmethod
     def _record_call(
@@ -391,31 +412,39 @@ class AIOrchestrator:
         output_format: str,
     ) -> GenerationResult:
         """Async retry loop matching the sync semantics of ``_retry_with_backoff``."""
-        last_error: Exception | None = None
         report = get_active_report()
         call_started = time.perf_counter()
-        retries = 0
 
-        for attempt in range(self.max_retries + 1):
-            try:
-                result = await self._call_api_async(client, prompt, output_format)
-            except GenerationError:
-                self._record_call(report, call_started, retries, None)
-                raise
-            except Exception as e:  # noqa: BLE001
-                last_error = e
-                if attempt < self.max_retries:
-                    retries += 1
-                    delay = self.retry_delay * (2**attempt)
-                    await asyncio.sleep(delay)
-                    continue
-            else:
-                self._record_call(report, call_started, retries, result)
-                return result
+        for attempt, sleep_s in self._retry_schedule():
+            outcome = await self._attempt_async(client, prompt, output_format)
+            if outcome.result is not None:
+                self._record_call(report, call_started, attempt, outcome.result)
+                return outcome.result
+            if sleep_s is None:
+                self._record_call(report, call_started, attempt, None)
+                msg = "Failed to generate content"
+                raise GenerationError(msg, cause=outcome.error) from outcome.error
+            await asyncio.sleep(sleep_s)
 
-        self._record_call(report, call_started, retries, None)
         msg = "Failed to generate content"
-        raise GenerationError(msg, cause=last_error) from last_error
+        raise GenerationError(msg)
+
+    async def _attempt_async(
+        self,
+        client: AsyncAnthropic,
+        prompt: str,
+        output_format: str,
+    ) -> _AttemptOutcome:
+        """Run one async attempt; return the result or capture the error."""
+        try:
+            return _AttemptOutcome(
+                result=await self._call_api_async(client, prompt, output_format),
+                error=None,
+            )
+        except GenerationError:
+            raise
+        except Exception as e:  # noqa: BLE001 — preserved for retry semantics
+            return _AttemptOutcome(result=None, error=e)
 
     async def generate_async(
         self,

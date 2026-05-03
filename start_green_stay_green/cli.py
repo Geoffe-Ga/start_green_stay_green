@@ -5,6 +5,7 @@ Implements the command-line interface using Typer with rich output formatting.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import UTC
 from datetime import datetime
 import json
@@ -617,6 +618,29 @@ def _copy_reference_subagents(
             file_writer.write_file(target_path, content)
         else:
             target_path.write_text(content)
+
+
+@contextmanager
+def _maybe_collect_timing(
+    timing_json: Path | None,
+) -> Generator[None, None, None]:
+    """Optionally install a :class:`TimingReport` for the wrapped block.
+
+    When ``timing_json`` is ``None`` the manager is a no-op; otherwise a
+    fresh report is installed as the active collector for the duration of
+    the block and written to disk on exit (success or failure).
+    """
+    if timing_json is None:
+        yield
+        return
+    report = TimingReport()
+    set_active_report(report)
+    try:
+        yield
+    finally:
+        timing_json.parent.mkdir(parents=True, exist_ok=True)
+        report.write_json(timing_json)
+        set_active_report(None)
 
 
 def _generate_structure_step(
@@ -1550,17 +1574,7 @@ def init(  # noqa: PLR0913
         console=console,
     )
 
-    # Install a timing collector if the user asked for one. The collector is
-    # process-local; cleared in ``finally`` so back-to-back invocations stay
-    # isolated.
-    timing_report: TimingReport | None = (
-        TimingReport() if timing_json is not None else None
-    )
-    if timing_report is not None:
-        set_active_report(timing_report)
-
-    try:
-        # Generate all project files (handles errors internally)
+    with _maybe_collect_timing(timing_json):
         _generate_project_files(
             project_path,
             resolved_project_name,
@@ -1568,18 +1582,12 @@ def init(  # noqa: PLR0913
             orchestrator,
             file_writer,
         )
-
         _finalize_init(
             project_path,
             resolved_project_name,
             resolved_languages,
             enable_live_dashboard=enable_live_dashboard,
         )
-    finally:
-        if timing_report is not None and timing_json is not None:
-            timing_json.parent.mkdir(parents=True, exist_ok=True)
-            timing_report.write_json(timing_json)
-            set_active_report(None)
 
 
 def cli_main() -> None:

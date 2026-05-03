@@ -9,12 +9,14 @@ import asyncio
 from dataclasses import dataclass
 import inspect
 import logging
+from typing import Any
 from typing import TYPE_CHECKING
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from collections.abc import Sequence
 
 
@@ -24,7 +26,11 @@ logger = logging.getLogger(__name__)
 _CHANGES_SECTION_PARTS = 2
 
 
-async def _await_or_offload(call, *args, **kwargs):  # type: ignore[no-untyped-def]  # noqa: ANN001, ANN202, ANN002, ANN003
+async def _await_or_offload(
+    call: Callable[..., Any],
+    *args: Any,  # noqa: ANN401 — pass-through wrapper
+    **kwargs: Any,  # noqa: ANN401 — pass-through wrapper
+) -> Any:  # noqa: ANN401 — pass-through wrapper
     """Invoke ``call`` and return its result, awaitable or otherwise.
 
     Three cases must be handled correctly so concurrent tunings actually

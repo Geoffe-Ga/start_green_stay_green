@@ -1240,9 +1240,7 @@ class TestCIGeneratorTemplatePath:
         "language",
         ["python", "typescript", "go", "rust"],
     )
-    def test_generate_from_template_for_supported_language(
-        self, language: str
-    ) -> None:
+    def test_generate_from_template_for_supported_language(self, language: str) -> None:
         """Each canonical language renders without an orchestrator."""
         generator = CIGenerator(language=language)
 

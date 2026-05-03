@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 from start_green_stay_green.utils.timing import APICallRecord
@@ -19,7 +20,7 @@ from start_green_stay_green.utils.timing import step_timer
 
 
 @pytest.fixture(autouse=True)
-def _reset_active_report() -> None:
+def _reset_active_report() -> Iterator[None]:
     """Make sure tests cannot leak the active report into each other."""
     set_active_report(None)
     yield
@@ -97,8 +98,10 @@ class TestTimingReport:
 
         assert payload["api_calls"] == 1
         assert payload["tokens"] == {"input": 10, "output": 20, "cache_read": 0}
-        assert payload["steps"][0]["name"] == "ci"
-        assert payload["steps"][0]["api_calls"] == 1
+        steps = payload["steps"]
+        assert isinstance(steps, list)
+        assert steps[0]["name"] == "ci"
+        assert steps[0]["api_calls"] == 1
 
     def test_write_json_round_trip(self, tmp_path: Path) -> None:
         report = TimingReport()
