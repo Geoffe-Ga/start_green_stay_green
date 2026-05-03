@@ -26,8 +26,30 @@ CLAUDE.md, architecture rules, and subagents. The result:
 - **No API key** → complete project, ~3–5 s, all generators produce real output via
   templates.
 - **With API key** → same complete project + Claude polish layer, ~6–10 s wall-clock,
-  ~3–5 API calls (down from ~10), parallelized.
+  **~9 logical Claude calls dispatched concurrently** (1 CLAUDE.md tune + 8 subagent
+  tunes + N opt-in skill tunes), down from ~10 *sequential*. Wall-clock is bounded by
+  the slowest single call, not their sum.
 - **Zero "skipped" steps**. Claude becomes additive enhancement, never the only path.
+
+### Design principle: many small parallel calls, not one big call
+
+This roadmap **deliberately does not consolidate** subagent or skill tunings into a
+single multi-target prompt. Many small parallel calls are preferred because:
+
+1. **Failure isolation** — one bad subagent tune doesn't poison the other seven; the
+   failed task can be retried independently.
+2. **Surgical resume** — `green enhance` (Phase 3) can re-tune one agent on demand
+   without re-paying for the rest.
+3. **Better cache locality** — each per-agent prompt has a long, stable
+   `SOURCE_AGENT_CONTEXT` prefix that benefits from prompt caching across calls;
+   a single mega-prompt has no such repeated prefix to amortize.
+4. **Clearer telemetry** — per-agent latency, token usage, and changes are visible,
+   not hidden inside one giant tool-use array.
+5. **Quality** — small focused prompts produce higher-fidelity output than asking
+   one call to reason about 8+ heterogeneous targets at once.
+
+The cost of this choice is that **request count stays roughly flat (~10)**;
+the win is purely in latency (parallelism) and resilience.
 
 This roadmap is sequenced so each phase ships independently, lowers risk, and is
 readable by Claude Code agents using the 6-component prompt structure
@@ -529,6 +551,12 @@ prompt-loading path.
 **Why**: enables low-cost bulk runs (CI, demo environments, batch enhance)
 and is straight upside once Phases 1–4 land.
 
+**Note**: This phase preserves the *many small parallel calls* design
+principle. The Batches API submits N independent requests inside one
+submission; per-request results, failures, and token accounting are still
+returned per-request. We are not consolidating multiple subagents into a
+single multi-target prompt.
+
 #### Role
 You are a cost-aware AI infra engineer using the Anthropic Message Batches
 API and aggressive prompt caching for predictable bulk workloads.
@@ -682,8 +710,12 @@ hardware as the baseline:
       no `Skipped` messages, no warnings about missing AI artifacts.
 - [ ] Default `green init` wall-clock with key is **≤10 s** (down from
       ~30–40 s) on the baseline machine.
-- [ ] Default `green init` makes **≤3 distinct API requests** (was ~10),
-      using either parallel `asyncio.gather` or the Batches API.
+- [ ] Default `green init` dispatches its Claude calls **concurrently** via
+      `asyncio.gather` (bounded by `Semaphore(8)`); request count stays
+      ~9–10 by design (see *Design principle: many small parallel calls*),
+      but **wall-clock API time is bounded by the single slowest call**,
+      not their sum. Telemetry must show concurrent dispatch (all calls
+      in-flight before the first response returns).
 - [ ] All five `console.print("[yellow]⊘[/yellow] Skipped … (no API key)")`
       messages are gone from `cli.py`.
 - [ ] `MetricsGenerator`, `PreCommitGenerator`,
