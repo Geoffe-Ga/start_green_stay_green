@@ -177,7 +177,13 @@ class TimingReport:
         Args:
             path: Destination file path. Parent directories must exist.
         """
-        path.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True))
+        # Pin UTF-8 so the report is portable across locales (the report
+        # contains step names and any future free-form fields that may
+        # include non-ASCII characters).
+        path.write_text(
+            json.dumps(self.to_dict(), indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
 
 
 _active_report: TimingReport | None = None

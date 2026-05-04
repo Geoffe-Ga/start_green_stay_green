@@ -39,27 +39,47 @@ async def _await_or_offload(
 ) -> _T:
     """Invoke ``call`` and return its result, awaitable or otherwise.
 
-    Three cases must be handled correctly so concurrent tunings actually
-    overlap on real API calls without breaking the mock-based tests:
+    Production semantics
+    --------------------
+    The only production caller is :class:`ContentTuner`, which dispatches
+    :meth:`AIOrchestrator.generate` (synchronous, hundreds of ms of HTTP
+    work). The synchronous path offloads to a worker thread via
+    :func:`asyncio.to_thread` so concurrent tunings actually overlap
+    instead of serializing on the event loop. This is the only branch
+    that runs against a real orchestrator.
 
-    * **Real sync orchestrator** (``Anthropic`` client): offload to a
-      worker thread via :func:`asyncio.to_thread` so a hundreds-of-ms
-      HTTP round-trip does not block the event loop while siblings wait.
-    * **AsyncMock** in tests: returns a coroutine when called; we await
-      the returned awaitable directly.
-    * **``create_autospec`` MagicMock** in tests: ``iscoroutinefunction``
-      reports ``True`` for these even when the spec'd method is sync, so
-      a plain "is the result awaitable?" check is the correct dispatch.
+    Test compatibility
+    ------------------
+    ``ContentTuner`` is exercised heavily with :class:`unittest.mock`
+    doubles. Two mock styles produce different runtime shapes:
+
+    * :class:`AsyncMock` returns a coroutine when called; the helper
+      awaits it directly. (``iscoroutinefunction`` is ``True``.)
+    * :func:`unittest.mock.create_autospec` over a sync method returns
+      a plain :class:`MagicMock` whose ``iscoroutinefunction`` is also
+      reported ``True`` — even though the spec'd method is sync — and
+      whose call returns the configured ``return_value`` synchronously.
+      That second branch (``isawaitable(result)`` is False) exists
+      solely to keep that test idiom working.
+
+    The autospec accommodation is intentionally narrow and clearly
+    labeled rather than refactored away because rewriting every
+    affected ``ContentTuner`` test (~14 sites) would dwarf the value
+    of removing this single ``isawaitable`` check. A follow-up issue
+    is filed in plans/2026-05-03-claude-init-optimization-roadmap.md
+    (Phase 4 prompt cleanup) to migrate to a single test-double type
+    and delete the branch.
     """
     if asyncio.iscoroutinefunction(call):
         result = call(*args, **kwargs)
         if inspect.isawaitable(result):
             return await cast("Awaitable[_T]", result)
-        # Autospec MagicMock falls through to here.
+        # Test-only branch: ``create_autospec`` MagicMock — a sync mock
+        # that ``iscoroutinefunction`` mis-reports as async. Its call
+        # returns the configured value synchronously.
         return cast("_T", result)
-    # Real sync orchestrator: actually do the work off-thread. ``cast``
-    # on the function narrows ``T | Awaitable[T]`` to ``T`` for the
-    # signature ``asyncio.to_thread`` expects.
+    # Production path. Cast narrows ``T | Awaitable[T]`` to ``T`` for
+    # the signature :func:`asyncio.to_thread` expects.
     sync_call = cast("Callable[..., _T]", call)
     return await asyncio.to_thread(sync_call, *args, **kwargs)
 

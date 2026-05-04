@@ -930,7 +930,9 @@ def _generate_ci_step(
 
 def _generate_review_step(
     project_path: Path,
-    orchestrator: AIOrchestrator | None,  # noqa: ARG001 — preserved for source compat
+    orchestrator: (
+        AIOrchestrator | None
+    ),  # noqa: ARG001 — Phase 3 cleanup; see plans/2026-05-03-claude-init-optimization-roadmap.md
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate the GitHub Actions code review workflow.
@@ -992,7 +994,9 @@ def _generate_architecture_step(
     project_path: Path,
     project_name: str,
     language: str,
-    orchestrator: AIOrchestrator | None,  # noqa: ARG001 — preserved for source compat
+    orchestrator: (
+        AIOrchestrator | None
+    ),  # noqa: ARG001 — Phase 3 cleanup; see plans/2026-05-03-claude-init-optimization-roadmap.md
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate architecture rules.

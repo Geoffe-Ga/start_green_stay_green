@@ -276,13 +276,28 @@ class MetricsGenerator(BaseGenerator):
             orchestrator: Deprecated. The metrics generator is fully
                 deterministic; this parameter is retained for source
                 compatibility and ignored. New code should omit it.
-            config: Configuration for metrics generation.
+            config: Configuration for metrics generation. Required;
+                ``None`` is accepted only for source-compatibility with
+                the historical positional-orchestrator signature, and
+                will raise. The default will be removed in the Phase 3
+                cleanup of plans/2026-05-03-claude-init-optimization-
+                roadmap.md.
 
         Raises:
-            ValueError: If configuration is missing or invalid.
+            ValueError: If ``config`` is omitted (default ``None``) or
+                otherwise invalid.
         """
         if config is None:
-            msg = "MetricsGenerator requires a MetricsGenerationConfig"
+            # Defaulting to None is a transitional shim for callers that
+            # used to write ``MetricsGenerator(None, my_config)`` —
+            # removing the default entirely would break them. A future
+            # release will tighten the signature to ``config: ...``
+            # (no default).
+            msg = (
+                "MetricsGenerator requires a MetricsGenerationConfig; "
+                "passing config=None is a transitional shim that will "
+                "be removed when the orchestrator parameter is dropped"
+            )
             raise ValueError(msg)
         self.orchestrator = orchestrator
         self.config = config

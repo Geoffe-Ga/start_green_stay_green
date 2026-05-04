@@ -323,16 +323,29 @@ class AIOrchestrator:
     def _record_call(
         report: TimingReport | None,
         start: float,
-        retries: int,
+        attempt: int,
         result: GenerationResult | None,
     ) -> None:
-        """Record a completed call (success or failure) on the active report."""
+        """Record a completed call (success or failure) on the active report.
+
+        Args:
+            report: Active timing collector, or ``None`` when telemetry is off.
+            start: ``perf_counter`` value captured before the first attempt.
+            attempt: Zero-indexed attempt number from
+                :meth:`_retry_schedule`. ``attempt=0`` means the first
+                try succeeded with no retries; ``attempt=N`` means
+                ``N`` retries were used. Stored as ``retries`` on the
+                resulting :class:`APICallRecord` because that's the
+                telemetry consumer's preferred naming.
+            result: Successful :class:`GenerationResult`, or ``None``
+                when the call failed (so token counts default to 0).
+        """
         if report is None:
             return
         report.record_api_call(
             APICallRecord(
                 latency_s=time.perf_counter() - start,
-                retries=retries,
+                retries=attempt,
                 input_tokens=result.token_usage.input_tokens if result else 0,
                 output_tokens=result.token_usage.output_tokens if result else 0,
             )

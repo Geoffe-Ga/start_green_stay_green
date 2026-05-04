@@ -494,6 +494,14 @@ Restructure `green init` into Pass 1 (scaffold, no API needed) and Pass 2
 **Why**: the `PromptManager` infrastructure exists but is unused; inline
 prompts in generators duplicate boilerplate; the system prompt is generic.
 
+**Follow-up from Phase 2 review:** while migrating tuner prompts into
+`PromptManager`, also migrate `ContentTuner`'s tests away from
+`create_autospec(AIOrchestrator)` to a single canonical test double
+(e.g. an `AsyncMock` against a `Protocol`). That lets us delete the
+"autospec mis-reports iscoroutinefunction" branch in
+`ai/tuner.py:_await_or_offload`, which currently exists only to keep
+~14 legacy tests working.
+
 #### Role
 You are a prompt engineer applying the 6-component framework
 (`Role / Goal / Context / Format / Examples / Requirements`) to all

@@ -104,7 +104,7 @@ class ClaudeMdGenerator:
             FileNotFoundError: If CLAUDE.md reference file not found.
         """
         claude_md_path = self.reference_dir / "CLAUDE.md"
-        return claude_md_path.read_text()
+        return claude_md_path.read_text(encoding="utf-8")
 
     def _load_quality_reference(self) -> str:
         """Load MAXIMUM_QUALITY_ENGINEERING.md reference.
@@ -115,7 +115,7 @@ class ClaudeMdGenerator:
         Raises:
             FileNotFoundError: If quality reference file not found.
         """
-        return self.quality_ref_path.read_text()
+        return self.quality_ref_path.read_text(encoding="utf-8")
 
     def _build_generation_prompt(
         self,

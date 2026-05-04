@@ -234,7 +234,7 @@ class CIGenerator(BaseGenerator):
             )
             raise FileNotFoundError(msg)
 
-        raw = template_path.read_text()
+        raw = template_path.read_text(encoding="utf-8")
 
         # The reference YAMLs already contain GitHub Actions ``${{ }}``
         # expressions, which collide with Jinja2's default delimiters.

@@ -38,6 +38,7 @@ from typer.testing import CliRunner
 
 from start_green_stay_green import cli
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
+from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
 
 
 class TestVersionCommand:
@@ -1297,3 +1298,45 @@ class TestGenerateProjectFiles:
         mock_scripts.assert_called()
         mock_precommit.assert_called()
         mock_skills.assert_called()
+
+
+class TestCopyReferenceSubagents:
+    """Cover the no-API copy path's error handling."""
+
+    def test_raises_filenotfounderror_when_reference_missing(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing reference agent file surfaces a FileNotFoundError."""
+        target_dir = tmp_path / "agents"
+
+        # Patch REFERENCE_AGENTS_DIR to an empty directory so every
+        # required source_file is missing.
+        empty_ref_dir = tmp_path / "empty"
+        empty_ref_dir.mkdir()
+
+        with (
+            patch("start_green_stay_green.cli.REFERENCE_AGENTS_DIR", empty_ref_dir),
+            pytest.raises(FileNotFoundError, match="Reference subagent not found"),
+        ):
+            cli._copy_reference_subagents(target_dir)
+
+    def test_writes_utf8_encoded_content(self, tmp_path: Path) -> None:
+        """Copied agents are written with explicit UTF-8 encoding."""
+        # Build a fake reference dir with a single agent file.
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        # Cover every REQUIRED_AGENTS source_file with a UTF-8 sentinel.
+        sentinel = "# Agent: ✓ — non-ASCII\n"
+
+        for src in REQUIRED_AGENTS.values():
+            (ref_dir / src).write_text(sentinel, encoding="utf-8")
+
+        target_dir = tmp_path / "agents"
+        with patch("start_green_stay_green.cli.REFERENCE_AGENTS_DIR", ref_dir):
+            cli._copy_reference_subagents(target_dir)
+
+        # Round-trip through utf-8 decoding.
+        for agent_name in REQUIRED_AGENTS:
+            target = target_dir / f"{agent_name}.md"
+            assert target.exists()
+            assert target.read_text(encoding="utf-8") == sentinel
