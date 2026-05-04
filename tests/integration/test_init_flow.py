@@ -60,14 +60,12 @@ def _stub_ci_step(
 
 def _stub_review_step(
     project_path: Path,
-    _orchestrator: object,
     _file_writer: object = None,
 ) -> None:
     """Stub review generation step that writes a minimal code-review workflow.
 
     Args:
         project_path: Target project directory.
-        _orchestrator: Mock orchestrator (unused in stub).
         _file_writer: File writer (unused in stub).
     """
     workflows_dir = project_path / ".github" / "workflows"
@@ -101,7 +99,6 @@ def _stub_architecture_step(
     project_path: Path,
     project_name: str,
     _language: str,
-    _orchestrator: object,
     _file_writer: object = None,
 ) -> None:
     """Stub architecture generation step that writes minimal rule files.
@@ -110,7 +107,6 @@ def _stub_architecture_step(
         project_path: Target project directory.
         project_name: Name of the project.
         _language: Programming language (unused in stub).
-        _orchestrator: Mock orchestrator (unused in stub).
         _file_writer: File writer (unused in stub).
     """
     arch_dir = project_path / "plans" / "architecture"

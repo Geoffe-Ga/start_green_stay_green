@@ -267,38 +267,27 @@ class MetricsGenerator(BaseGenerator):
 
     def __init__(
         self,
-        orchestrator: AIOrchestrator | None = None,
-        config: MetricsGenerationConfig | None = None,
+        orchestrator: AIOrchestrator | None,
+        config: MetricsGenerationConfig,
     ) -> None:
         """Initialize MetricsGenerator.
 
         Args:
             orchestrator: Deprecated. The metrics generator is fully
                 deterministic; this parameter is retained for source
-                compatibility and ignored. New code should omit it.
+                compatibility (every existing caller passes either an
+                orchestrator or :data:`None` here as the first
+                positional arg) and is ignored. The parameter will be
+                removed in the Phase 3 cleanup of
+                plans/2026-05-03-claude-init-optimization-roadmap.md.
             config: Configuration for metrics generation. Required;
-                ``None`` is accepted only for source-compatibility with
-                the historical positional-orchestrator signature, and
-                will raise. The default will be removed in the Phase 3
-                cleanup of plans/2026-05-03-claude-init-optimization-
-                roadmap.md.
+                the type system enforces that callers pass a real
+                :class:`MetricsGenerationConfig`.
 
         Raises:
-            ValueError: If ``config`` is omitted (default ``None``) or
-                otherwise invalid.
+            ValueError: If ``config`` fails its own validation
+                (:meth:`_validate_config`).
         """
-        if config is None:
-            # Defaulting to None is a transitional shim for callers that
-            # used to write ``MetricsGenerator(None, my_config)`` —
-            # removing the default entirely would break them. A future
-            # release will tighten the signature to ``config: ...``
-            # (no default).
-            msg = (
-                "MetricsGenerator requires a MetricsGenerationConfig; "
-                "passing config=None is a transitional shim that will "
-                "be removed when the orchestrator parameter is dropped"
-            )
-            raise ValueError(msg)
         self.orchestrator = orchestrator
         self.config = config
         self._validate_config()

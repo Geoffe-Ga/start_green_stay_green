@@ -930,15 +930,14 @@ def _generate_ci_step(
 
 def _generate_review_step(
     project_path: Path,
-    orchestrator: (
-        AIOrchestrator | None
-    ),  # noqa: ARG001 — Phase 3 cleanup; see plans/2026-05-03-claude-init-optimization-roadmap.md
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate the GitHub Actions code review workflow.
 
-    The generator is fully template-based; the ``orchestrator`` argument
-    is kept only so the call site signature does not churn.
+    The generator is fully template-based — no orchestrator parameter
+    needed. (The orchestrator was previously passed but never used; it
+    has been dropped from this private helper, so the historical
+    ``orchestrator`` argument is gone entirely.)
     """
     with step_timer("review"), console.status("Generating GitHub Actions review..."):
         review_generator = GitHubActionsReviewGenerator()
@@ -949,7 +948,9 @@ def _generate_review_step(
         if file_writer is not None:
             file_writer.write_file(workflow_file, review_result["workflow_content"])
         else:
-            workflow_file.write_text(review_result["workflow_content"])
+            workflow_file.write_text(
+                review_result["workflow_content"], encoding="utf-8"
+            )
     console.print("[green]✓[/green] Generated GitHub Actions review")
 
 
@@ -994,9 +995,6 @@ def _generate_architecture_step(
     project_path: Path,
     project_name: str,
     language: str,
-    orchestrator: (
-        AIOrchestrator | None
-    ),  # noqa: ARG001 — Phase 3 cleanup; see plans/2026-05-03-claude-init-optimization-roadmap.md
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate architecture rules.
@@ -1004,6 +1002,8 @@ def _generate_architecture_step(
     Architecture configuration is fully deterministic (import-linter for
     Python, dependency-cruiser for TypeScript). Runs regardless of API
     key availability; only Python and TypeScript projects produce output.
+    The previous ``orchestrator`` argument was unused and has been
+    removed from this private helper.
     """
     if language not in {"python", "typescript"}:
         # The generator only supports these two; surface a dim info line
@@ -1179,13 +1179,11 @@ def _generate_with_orchestrator(
 ) -> None:
     """Generate AI-powered artifacts (CI, CLAUDE.md, etc.) with progress indicators."""
     _generate_ci_step(project_path, language, orchestrator, file_writer)
-    _generate_review_step(project_path, orchestrator, file_writer)
+    _generate_review_step(project_path, file_writer)
     _generate_claude_md_step(
         project_path, project_name, language, orchestrator, file_writer
     )
-    _generate_architecture_step(
-        project_path, project_name, language, orchestrator, file_writer
-    )
+    _generate_architecture_step(project_path, project_name, language, file_writer)
     _generate_subagents_step(
         project_path, project_name, language, orchestrator, file_writer
     )

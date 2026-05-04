@@ -1141,17 +1141,17 @@ class TestGenerateSteps:
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_review_step(mock_path, MagicMock())
+            cli._generate_review_step(mock_path)
 
         # Generator no longer takes an orchestrator argument.
         mock_generator_class.assert_called_with()
         mock_generator.generate.assert_called_once()
 
     @patch("start_green_stay_green.cli.GitHubActionsReviewGenerator")
-    def test_generate_review_step_runs_without_orchestrator(
+    def test_generate_review_step_uses_default_file_writer(
         self, mock_generator_class: Mock
     ) -> None:
-        """_generate_review_step still runs when no orchestrator is given."""
+        """_generate_review_step works with the default ``file_writer=None``."""
         mock_generator = MagicMock()
         mock_workflow = MagicMock()
         mock_workflow.content = "workflow content"
@@ -1161,7 +1161,8 @@ class TestGenerateSteps:
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_review_step(mock_path, None)
+            # No file_writer passed — exercises the ``write_text`` branch.
+            cli._generate_review_step(mock_path)
 
         mock_generator.generate.assert_called_once()
 
@@ -1189,20 +1190,16 @@ class TestGenerateSteps:
 
     @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
     def test_generate_architecture_step(self, mock_generator_class: Mock) -> None:
-        """Test _generate_architecture_step creates generator without orchestrator."""
+        """Test _generate_architecture_step creates generator deterministically."""
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            # Pass orchestrator=None — generator should still be invoked.
-            cli._generate_architecture_step(
-                mock_path,
-                "my-project",
-                "python",
-                None,
-            )
+            # The orchestrator parameter has been removed; this private
+            # helper now takes only the (path, name, language, writer).
+            cli._generate_architecture_step(mock_path, "my-project", "python")
 
         mock_generator.generate.assert_called()
 
@@ -1340,3 +1337,26 @@ class TestCopyReferenceSubagents:
             target = target_dir / f"{agent_name}.md"
             assert target.exists()
             assert target.read_text(encoding="utf-8") == sentinel
+
+    def test_uses_file_writer_when_provided(self, tmp_path: Path) -> None:
+        """The ``file_writer`` branch routes writes through the writer."""
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        sentinel = "# Agent body\n"
+        for src in REQUIRED_AGENTS.values():
+            (ref_dir / src).write_text(sentinel, encoding="utf-8")
+
+        target_dir = tmp_path / "agents"
+        # The FileWriter contract has ``write_file(path, content)``;
+        # use a Mock with that signature so the test asserts the
+        # public boundary, not implementation details.
+        mock_writer = MagicMock()
+
+        with patch("start_green_stay_green.cli.REFERENCE_AGENTS_DIR", ref_dir):
+            cli._copy_reference_subagents(target_dir, file_writer=mock_writer)
+
+        # All eight required agents flowed through the writer; no
+        # files were created via the direct ``write_text`` fallback.
+        assert mock_writer.write_file.call_count == len(REQUIRED_AGENTS)
+        for agent_name in REQUIRED_AGENTS:
+            assert not (target_dir / f"{agent_name}.md").exists()

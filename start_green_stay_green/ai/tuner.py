@@ -65,10 +65,9 @@ async def _await_or_offload(
     The autospec accommodation is intentionally narrow and clearly
     labeled rather than refactored away because rewriting every
     affected ``ContentTuner`` test (~14 sites) would dwarf the value
-    of removing this single ``isawaitable`` check. A follow-up issue
-    is filed in plans/2026-05-03-claude-init-optimization-roadmap.md
-    (Phase 4 prompt cleanup) to migrate to a single test-double type
-    and delete the branch.
+    of removing this single ``isawaitable`` check. Tracked in
+    issue #306 — the cleanup migrates the affected tests onto a
+    single canonical async double and deletes the test-only branch.
     """
     if asyncio.iscoroutinefunction(call):
         result = call(*args, **kwargs)

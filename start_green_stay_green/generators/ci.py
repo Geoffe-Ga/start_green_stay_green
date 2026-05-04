@@ -214,9 +214,17 @@ class CIGenerator(BaseGenerator):
         returned essentially verbatim.
 
         Args:
-            project_name: Optional project name to substitute in the
-                workflow header. Falls back to the language-specific
-                default present in the reference template.
+            project_name: Optional project name to substitute into any
+                ``<<% project_name %>>`` placeholders. The reference
+                templates currently ship *without* such placeholders,
+                so omitting this argument or passing ``None`` produces
+                output identical to the on-disk template — there is no
+                language-specific default to fall back to. If a
+                template is later updated to include a placeholder and
+                the caller does not pass a value, Jinja will substitute
+                the literal string ``"None"``; that is intentional so
+                the caller's mistake is loudly visible rather than
+                silently absorbed.
 
         Returns:
             ``CIWorkflow`` with the rendered, validated YAML.

@@ -8,15 +8,20 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-    from pathlib import Path
-
+from start_green_stay_green.cli import _maybe_collect_timing
 from start_green_stay_green.utils.timing import APICallRecord
 from start_green_stay_green.utils.timing import TimingReport
 from start_green_stay_green.utils.timing import get_active_report
 from start_green_stay_green.utils.timing import set_active_report
 from start_green_stay_green.utils.timing import step_timer
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
+
+
+class _BoomError(RuntimeError):
+    """Sentinel exception used by ``TestMaybeCollectTimingExceptionPath``."""
 
 
 @pytest.fixture(autouse=True)
@@ -165,3 +170,51 @@ class TestStepTimerContext:
 
         assert report.steps[0].name == "explodes"
         assert report.steps[0].duration_s >= 0
+
+
+class TestMaybeCollectTimingExceptionPath:
+    """The `_maybe_collect_timing` cm in cli.py must persist on exception."""
+
+    @staticmethod
+    def _explode_with_step(report_path: Path) -> None:
+        """Helper that records a step then raises, for the persistence test."""
+        with _maybe_collect_timing(report_path):
+            # Record at least one step before the failure so the
+            # written JSON has something to verify.
+            with step_timer("structure"):
+                pass
+            msg = "boom"
+            raise _BoomError(msg)
+
+    @staticmethod
+    def _explode_bare() -> None:
+        """Helper that raises inside a no-op _maybe_collect_timing block."""
+        with _maybe_collect_timing(None):
+            msg = "bare"
+            raise ValueError(msg)
+
+    def test_exception_inside_block_still_writes_report(self, tmp_path: Path) -> None:
+        """If the wrapped block raises, the partial timing report is still written."""
+        report_path = tmp_path / "reports" / "partial.json"
+
+        with pytest.raises(_BoomError, match="boom"):
+            self._explode_with_step(report_path)
+
+        # The finally block must have executed: report exists,
+        # active-report singleton is cleared.
+        assert report_path.exists(), "partial timing report not persisted"
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        assert isinstance(payload["steps"], list)
+        names = [s["name"] for s in payload["steps"]]
+        assert "structure" in names
+        assert get_active_report() is None
+
+    def test_no_path_is_a_no_op(self, tmp_path: Path) -> None:
+        """When timing_json is None the cm leaves no side effects."""
+        # No file is created; no report is installed; the exception
+        # propagates exactly like a plain block.
+        with pytest.raises(ValueError, match="bare"):
+            self._explode_bare()
+
+        assert list(tmp_path.iterdir()) == []
+        assert get_active_report() is None
