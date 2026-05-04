@@ -209,9 +209,11 @@ class CIGenerator(BaseGenerator):
         Reads ``reference/ci/<language>.yml`` and runs it through Jinja2 so
         callers can substitute the project name (or any future
         placeholders). The reference templates are valid YAML even before
-        rendering — Jinja syntax is only used for ``{{ project_name }}``
-        and similar substitutions, so files without placeholders are
-        returned essentially verbatim.
+        rendering — Jinja syntax uses the custom delimiters
+        ``<<% project_name %>>`` (see the ``Environment`` configuration
+        below) so existing GitHub Actions ``${{ … }}`` expressions in
+        the templates pass through verbatim. Files without placeholders
+        are returned essentially unchanged.
 
         Args:
             project_name: Optional project name to substitute into any

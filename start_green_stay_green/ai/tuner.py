@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-import inspect
 import logging
 from typing import TYPE_CHECKING
 from typing import TypeVar
@@ -39,46 +38,28 @@ async def _await_or_offload(
 ) -> _T:
     """Invoke ``call`` and return its result, awaitable or otherwise.
 
-    Production semantics
-    --------------------
-    The only production caller is :class:`ContentTuner`, which dispatches
-    :meth:`AIOrchestrator.generate` (synchronous, hundreds of ms of HTTP
-    work). The synchronous path offloads to a worker thread via
-    :func:`asyncio.to_thread` so concurrent tunings actually overlap
-    instead of serializing on the event loop. This is the only branch
-    that runs against a real orchestrator.
+    Two cases, both real:
 
-    Test compatibility
-    ------------------
-    ``ContentTuner`` is exercised heavily with :class:`unittest.mock`
-    doubles. Two mock styles produce different runtime shapes:
+    * **Async callable** (``asyncio.iscoroutinefunction`` is ``True``):
+      call it, await the resulting coroutine. This covers both real
+      :class:`anthropic.AsyncAnthropic` paths and :class:`AsyncMock`
+      doubles in tests.
+    * **Sync callable** (the default for :meth:`AIOrchestrator.generate`):
+      offload to a worker thread via :func:`asyncio.to_thread` so a
+      hundreds-of-ms HTTP round-trip does not block the event loop while
+      sibling tunings wait. Tests using ``MagicMock(spec=AIOrchestrator)``
+      land here too — :func:`asyncio.to_thread` happily runs the mock
+      and returns the configured value.
 
-    * :class:`AsyncMock` returns a coroutine when called; the helper
-      awaits it directly. (``iscoroutinefunction`` is ``True``.)
-    * :func:`unittest.mock.create_autospec` over a sync method returns
-      a plain :class:`MagicMock` whose ``iscoroutinefunction`` is also
-      reported ``True`` — even though the spec'd method is sync — and
-      whose call returns the configured ``return_value`` synchronously.
-      That second branch (``isawaitable(result)`` is False) exists
-      solely to keep that test idiom working.
-
-    The autospec accommodation is intentionally narrow and clearly
-    labeled rather than refactored away because rewriting every
-    affected ``ContentTuner`` test (~14 sites) would dwarf the value
-    of removing this single ``isawaitable`` check. Tracked in
-    issue #306 — the cleanup migrates the affected tests onto a
-    single canonical async double and deletes the test-only branch.
+    The previous "autospec MagicMock falls through" branch was removed
+    when the corresponding tests were migrated from
+    ``create_autospec(AIOrchestrator)`` to ``MagicMock(spec=...)``;
+    issue #306 closed.
     """
     if asyncio.iscoroutinefunction(call):
-        result = call(*args, **kwargs)
-        if inspect.isawaitable(result):
-            return await cast("Awaitable[_T]", result)
-        # Test-only branch: ``create_autospec`` MagicMock — a sync mock
-        # that ``iscoroutinefunction`` mis-reports as async. Its call
-        # returns the configured value synchronously.
-        return cast("_T", result)
-    # Production path. Cast narrows ``T | Awaitable[T]`` to ``T`` for
-    # the signature :func:`asyncio.to_thread` expects.
+        return await cast("Awaitable[_T]", call(*args, **kwargs))
+    # Sync path: cast narrows ``T | Awaitable[T]`` to ``T`` for the
+    # signature :func:`asyncio.to_thread` expects.
     sync_call = cast("Callable[..., _T]", call)
     return await asyncio.to_thread(sync_call, *args, **kwargs)
 

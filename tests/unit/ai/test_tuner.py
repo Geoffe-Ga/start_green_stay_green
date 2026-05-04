@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import create_autospec
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -93,7 +93,7 @@ class TestContentTunerInit:
 
     def test_content_tuner_init_with_orchestrator(self) -> None:
         """Test ContentTuner initializes with orchestrator."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
         assert tuner.orchestrator is orchestrator
@@ -101,7 +101,7 @@ class TestContentTunerInit:
 
     def test_content_tuner_init_with_dry_run(self) -> None:
         """Test ContentTuner initializes with dry_run mode."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator, dry_run=True)
 
         assert tuner.dry_run
@@ -144,7 +144,7 @@ class TestContentTunerPromptBuilding:
 
     def test_build_tuning_prompt_without_preserve_sections(self) -> None:
         """Test _build_tuning_prompt without preserve sections."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
         prompt = tuner._build_tuning_prompt(
@@ -161,7 +161,7 @@ class TestContentTunerPromptBuilding:
 
     def test_build_tuning_prompt_with_preserve_sections(self) -> None:
         """Test _build_tuning_prompt with preserve sections."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
         prompt = tuner._build_tuning_prompt(
@@ -175,7 +175,7 @@ class TestContentTunerPromptBuilding:
 
     def test_build_tuning_prompt_includes_requirements(self) -> None:
         """Test _build_tuning_prompt includes all requirements."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
         prompt = tuner._build_tuning_prompt(
@@ -196,7 +196,7 @@ class TestContentTunerResponseParsing:
 
     def test_parse_tuning_response_with_changes_section(self) -> None:
         """Test _parse_tuning_response extracts content and changes."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
         response = """# Adapted Content
@@ -219,7 +219,7 @@ CHANGES:
 
     def test_parse_tuning_response_with_asterisk_markers(self) -> None:
         """Test _parse_tuning_response handles asterisk markers."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
         response = """Content here
@@ -237,7 +237,7 @@ CHANGES:
 
     def test_parse_tuning_response_without_changes_section(self) -> None:
         """Test _parse_tuning_response when no CHANGES section."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
         response = "Just content without changes section"
@@ -249,7 +249,7 @@ CHANGES:
 
     def test_parse_tuning_response_with_empty_changes(self) -> None:
         """Test _parse_tuning_response with empty CHANGES section."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
         response = """Content
@@ -264,7 +264,7 @@ CHANGES:
 
     def test_parse_tuning_response_strips_whitespace(self) -> None:
         """Test _parse_tuning_response strips surrounding whitespace."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
         response = """
@@ -287,7 +287,7 @@ class TestContentTunerTuneAsync:
     @pytest.mark.asyncio
     async def test_tune_with_valid_inputs(self) -> None:
         """Test tune() with valid inputs."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         orchestrator.generate.return_value = GenerationResult(
             content="""# Django Project
 
@@ -320,7 +320,7 @@ CHANGES:
     @pytest.mark.asyncio
     async def test_tune_calls_orchestrator_generate(self) -> None:
         """Test tune() calls orchestrator.generate with correct args."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         orchestrator.generate.return_value = GenerationResult(
             content="Adapted\n\nCHANGES:\n- Change",
             format="markdown",
@@ -345,7 +345,7 @@ CHANGES:
     @pytest.mark.asyncio
     async def test_tune_with_empty_content_raises_error(self) -> None:
         """Test tune() raises ValueError for empty content."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
         with pytest.raises(ValueError, match="Content cannot be empty"):
@@ -358,7 +358,7 @@ CHANGES:
     @pytest.mark.asyncio
     async def test_tune_with_empty_source_context_raises_error(self) -> None:
         """Test tune() raises ValueError for empty source context."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
         with pytest.raises(ValueError, match="Source context cannot be empty"):
@@ -371,7 +371,7 @@ CHANGES:
     @pytest.mark.asyncio
     async def test_tune_with_empty_target_context_raises_error(self) -> None:
         """Test tune() raises ValueError for empty target context."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator)
 
         with pytest.raises(ValueError, match="Target context cannot be empty"):
@@ -384,7 +384,7 @@ CHANGES:
     @pytest.mark.asyncio
     async def test_tune_in_dry_run_mode(self) -> None:
         """Test tune() in dry-run mode returns original content."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator, dry_run=True)
 
         result = await tuner.tune(
@@ -405,7 +405,7 @@ CHANGES:
     @pytest.mark.asyncio
     async def test_tune_with_preserve_sections(self) -> None:
         """Test tune() passes preserve_sections to prompt builder."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         orchestrator.generate.return_value = GenerationResult(
             content="Adapted\n\nCHANGES:\n- Modified",
             format="markdown",
@@ -429,7 +429,7 @@ CHANGES:
     @pytest.mark.asyncio
     async def test_tune_handles_generation_error(self) -> None:
         """Test tune() propagates GenerationError from orchestrator."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         orchestrator.generate.side_effect = GenerationError("API error")
 
         tuner = ContentTuner(orchestrator)
@@ -444,7 +444,7 @@ CHANGES:
     @pytest.mark.asyncio
     async def test_tune_without_preserve_sections_works(self) -> None:
         """Test tune() works without preserve_sections (default None)."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         orchestrator.generate.return_value = GenerationResult(
             content="Result\n\nCHANGES:\n- Done",
             format="markdown",
@@ -470,7 +470,7 @@ class TestContentTunerLoggerBehavior:
     @pytest.mark.asyncio
     async def test_tune_logs_dry_run_mode(self, mocker: MockerFixture) -> None:
         """Test logger.info called for dry-run mode."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator, dry_run=True)
 
         mock_logger = mocker.patch("start_green_stay_green.ai.tuner.logger")
@@ -489,7 +489,7 @@ class TestContentTunerLoggerBehavior:
     @pytest.mark.asyncio
     async def test_tune_logs_tuning_start(self, mocker: MockerFixture) -> None:
         """Test logger.info called when tuning starts."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         orchestrator.generate.return_value = GenerationResult(
             content="Result\n\nCHANGES:\n- Done",
             format="markdown",
@@ -516,7 +516,7 @@ class TestContentTunerLoggerBehavior:
     @pytest.mark.asyncio
     async def test_tune_logs_exception_on_error(self, mocker: MockerFixture) -> None:
         """Test logger.exception called when tuning fails."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         orchestrator.generate.side_effect = GenerationError("API error")
         tuner = ContentTuner(orchestrator)
 
@@ -536,7 +536,7 @@ class TestContentTunerLoggerBehavior:
         self, mocker: MockerFixture
     ) -> None:
         """Test logger.info called with change count on success."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         orchestrator.generate.return_value = GenerationResult(
             content="Result\n\nCHANGES:\n- Change 1\n- Change 2\n- Change 3",
             format="markdown",
@@ -565,7 +565,7 @@ class TestContentTunerLoggerBehavior:
         self, mocker: MockerFixture
     ) -> None:
         """Test logger.debug called for each change."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         orchestrator.generate.return_value = GenerationResult(
             content="Result\n\nCHANGES:\n- First change\n- Second change",
             format="markdown",
@@ -591,7 +591,7 @@ class TestContentTunerLoggerBehavior:
     @pytest.mark.asyncio
     async def test_tune_dry_run_does_not_call_orchestrator(self) -> None:
         """Test dry-run mode skips orchestrator.generate call."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator, dry_run=True)
 
         result = await tuner.tune(
@@ -608,7 +608,7 @@ class TestContentTunerLoggerBehavior:
     @pytest.mark.asyncio
     async def test_tune_dry_run_returns_original_content_exactly(self) -> None:
         """Test dry-run returns exact original content unchanged."""
-        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator = MagicMock(spec=AIOrchestrator)
         tuner = ContentTuner(orchestrator, dry_run=True)
 
         original = "# Title\n\nContent with special chars: !@#$%"
