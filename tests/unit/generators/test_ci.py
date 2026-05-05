@@ -12,6 +12,7 @@ Comprehensive tests for CI pipeline generation covering:
 from pathlib import Path
 from unittest.mock import Mock
 
+from jinja2 import UndefinedError
 import pytest
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
@@ -1303,4 +1304,80 @@ class TestCIGeneratorTemplatePath:
         )
 
         with pytest.raises(FileNotFoundError, match="reference CI template"):
+            generator.generate_workflow_from_template()
+
+    def test_project_name_substituted_into_template(self, tmp_path: Path) -> None:
+        """A ``<<% project_name %>>`` placeholder renders with the real value."""
+        # Build a synthetic reference template that *does* use the
+        # placeholder. The real reference YAMLs do not yet (intentional —
+        # the API is forward-looking); this fixture proves the wiring
+        # works the moment a maintainer adds it.
+        reference_dir = tmp_path / "ref"
+        reference_dir.mkdir()
+        (reference_dir / "python.yml").write_text(
+            "name: CI for <<% project_name %>>\n"
+            "on: [push]\n"
+            "jobs:\n"
+            "  quality:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: echo <<% project_name %>>\n",
+            encoding="utf-8",
+        )
+
+        generator = CIGenerator(
+            language="python",
+            reference_dir=reference_dir,
+            project_name="my-cool-app",
+        )
+        workflow = generator.generate_workflow()
+
+        assert workflow.is_valid
+        assert "name: CI for my-cool-app" in workflow.content
+        assert "echo my-cool-app" in workflow.content
+        # The placeholder must be fully substituted.
+        assert "<<% project_name %>>" not in workflow.content
+
+    def test_project_name_none_renders_empty_string(self, tmp_path: Path) -> None:
+        """``project_name=None`` coerces to ``""`` rather than the string "None"."""
+        reference_dir = tmp_path / "ref"
+        reference_dir.mkdir()
+        (reference_dir / "python.yml").write_text(
+            "name: CI<<% project_name %>>\n"
+            "on: [push]\n"
+            "jobs:\n"
+            "  quality:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: echo hi\n",
+            encoding="utf-8",
+        )
+
+        generator = CIGenerator(
+            language="python",
+            reference_dir=reference_dir,
+        )
+        workflow = generator.generate_workflow_from_template()
+
+        assert workflow.is_valid
+        # ``None`` would have produced "name: CINone" — that's the bug
+        # the StrictUndefined+coercion change fixed.
+        assert "None" not in workflow.content
+        assert "name: CI\n" in workflow.content
+
+    def test_undeclared_placeholder_raises_strict_undefined(
+        self, tmp_path: Path
+    ) -> None:
+        """Adding a new placeholder without wiring it raises at render time."""
+        reference_dir = tmp_path / "ref"
+        reference_dir.mkdir()
+        (reference_dir / "python.yml").write_text(
+            "name: CI <<% missing_var %>>\n"
+            "jobs:\n  quality:\n    runs-on: ubuntu-latest\n"
+            "    steps:\n      - run: echo hi\n",
+            encoding="utf-8",
+        )
+
+        generator = CIGenerator(language="python", reference_dir=reference_dir)
+        with pytest.raises(UndefinedError):
             generator.generate_workflow_from_template()

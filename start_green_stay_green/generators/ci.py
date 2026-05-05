@@ -138,6 +138,7 @@ class CIGenerator(BaseGenerator):
         *,
         framework: str | None = None,
         reference_dir: Path | None = None,
+        project_name: str | None = None,
     ) -> None:
         """Initialize CI Generator.
 
@@ -152,6 +153,11 @@ class CIGenerator(BaseGenerator):
             reference_dir: Directory containing ``<language>.yml``
                 reference templates. Defaults to ``reference/ci/`` shipped
                 with the package.
+            project_name: Optional project name forwarded to
+                :meth:`generate_workflow_from_template` so any
+                ``<<% project_name %>>`` placeholder in the reference
+                template renders with the real value. ``None`` is
+                coerced to ``""`` at render time.
 
         Raises:
             ValueError: If language is not supported.
@@ -166,6 +172,7 @@ class CIGenerator(BaseGenerator):
 
         self.language = language
         self.framework = framework
+        self.project_name = project_name
         config = LANGUAGE_CONFIGS[language]
         self.test_framework = config["test_framework"]
         self.supported_versions = config["supported_versions"]
@@ -188,7 +195,9 @@ class CIGenerator(BaseGenerator):
             ValueError: If validation fails or template missing.
         """
         if self.orchestrator is None:
-            return self.generate_workflow_from_template()
+            return self.generate_workflow_from_template(
+                project_name=self.project_name,
+            )
 
         # Build context for AI generation
         language_config = LANGUAGE_CONFIGS[self.language]

@@ -1105,9 +1105,13 @@ class TestGenerateSteps:
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_ci_step(mock_path, "python", mock_orchestrator)
+            cli._generate_ci_step(mock_path, "my-project", "python", mock_orchestrator)
 
-        mock_ci_generator_class.assert_called_with(mock_orchestrator, "python")
+        # ``project_name`` is now threaded through so ``<<% project_name %>>``
+        # placeholders in the reference templates render with the real value.
+        mock_ci_generator_class.assert_called_with(
+            mock_orchestrator, "python", project_name="my-project"
+        )
 
     @patch("start_green_stay_green.cli.CIGenerator")
     def test_generate_ci_step_uses_template_without_orchestrator(
@@ -1123,9 +1127,11 @@ class TestGenerateSteps:
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_ci_step(mock_path, "python", None)
+            cli._generate_ci_step(mock_path, "no-orch-project", "python", None)
 
-        mock_ci_generator_class.assert_called_with(None, "python")
+        mock_ci_generator_class.assert_called_with(
+            None, "python", project_name="no-orch-project"
+        )
         mock_generator.generate_workflow.assert_called_once()
 
     @patch("start_green_stay_green.cli.GitHubActionsReviewGenerator")

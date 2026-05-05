@@ -192,6 +192,11 @@ class TimingReport:
         )
 
 
+# Process-global active report. Correct for both sequential ``green init``
+# and the Phase 2 ``asyncio.gather`` fan-out (every concurrent subagent
+# task should accumulate into the same report). Issue #307 tracks
+# migrating this to ``contextvars.ContextVar`` before Phase 3 / Phase 5
+# introduce per-task timing scopes that need independent reports.
 _active_report: TimingReport | None = None
 _active_lock = threading.Lock()
 

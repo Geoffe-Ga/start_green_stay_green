@@ -904,6 +904,7 @@ def _generate_skills_step(
 
 def _generate_ci_step(
     project_path: Path,
+    project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
     file_writer: FileWriter | None = None,
@@ -913,10 +914,16 @@ def _generate_ci_step(
     Always runs the deterministic template path so a project is never
     missing CI just because the user has no API key. ``orchestrator`` is
     only used to opt into the legacy AI-tuned path for backward
-    compatibility.
+    compatibility. ``project_name`` is forwarded to the template
+    renderer so any ``<<% project_name %>>`` placeholder lands with
+    the real value rather than the empty string.
     """
     with step_timer("ci"), console.status("Generating CI pipeline..."):
-        ci_generator = CIGenerator(orchestrator, language)
+        ci_generator = CIGenerator(
+            orchestrator,
+            language,
+            project_name=project_name,
+        )
         workflow = ci_generator.generate_workflow()
         workflows_dir = project_path / ".github" / "workflows"
         workflows_dir.mkdir(parents=True, exist_ok=True)
@@ -1181,7 +1188,7 @@ def _generate_with_orchestrator(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate AI-powered artifacts (CI, CLAUDE.md, etc.) with progress indicators."""
-    _generate_ci_step(project_path, language, orchestrator, file_writer)
+    _generate_ci_step(project_path, project_name, language, orchestrator, file_writer)
     _generate_review_step(project_path, file_writer)
     _generate_claude_md_step(
         project_path, project_name, language, orchestrator, file_writer

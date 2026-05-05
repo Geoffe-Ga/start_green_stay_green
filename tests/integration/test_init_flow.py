@@ -40,6 +40,7 @@ def _block_orchestrator_init() -> Generator[None, None, None]:
 
 def _stub_ci_step(
     project_path: Path,
+    _project_name: str,
     _language: str,
     _orchestrator: object,
     _file_writer: object = None,
@@ -48,6 +49,7 @@ def _stub_ci_step(
 
     Args:
         project_path: Target project directory.
+        _project_name: Project name (unused in stub).
         _language: Programming language (unused in stub).
         _orchestrator: Mock orchestrator (unused in stub).
         _file_writer: File writer (unused in stub).
