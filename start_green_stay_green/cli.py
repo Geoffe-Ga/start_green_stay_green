@@ -924,7 +924,7 @@ def _generate_ci_step(
         if file_writer is not None:
             file_writer.write_file(ci_file, workflow.content)
         else:
-            ci_file.write_text(workflow.content)
+            ci_file.write_text(workflow.content, encoding="utf-8")
     console.print("[green]✓[/green] Generated CI pipeline")
 
 
@@ -987,7 +987,7 @@ def _generate_claude_md_step(
         if file_writer is not None:
             file_writer.write_file(claude_md_file, claude_md_result.content)
         else:
-            claude_md_file.write_text(claude_md_result.content)
+            claude_md_file.write_text(claude_md_result.content, encoding="utf-8")
     console.print("[green]✓[/green] Generated CLAUDE.md")
 
 
@@ -1126,7 +1126,10 @@ def _generate_metrics_dashboard_step(
                 "security_status": "pass",
             },
         }
-        initial_metrics_path.write_text(json.dumps(initial_metrics, indent=2))
+        initial_metrics_path.write_text(
+            json.dumps(initial_metrics, indent=2),
+            encoding="utf-8",
+        )
 
         workflows_dir = project_path / ".github" / "workflows"
         workflows_dir.mkdir(parents=True, exist_ok=True)
@@ -1138,11 +1141,11 @@ def _generate_metrics_dashboard_step(
         if sgsg_workflow.exists():
             target_workflow = workflows_dir / "metrics.yml"
             shutil.copy(sgsg_workflow, target_workflow)
-            workflow_content = target_workflow.read_text()
+            workflow_content = target_workflow.read_text(encoding="utf-8")
             workflow_content = workflow_content.replace(
                 "start-green-stay-green", project_name
             )
-            target_workflow.write_text(workflow_content)
+            target_workflow.write_text(workflow_content, encoding="utf-8")
         else:
             missing_workflow = True
 

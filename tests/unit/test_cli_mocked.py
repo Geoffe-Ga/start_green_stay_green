@@ -26,6 +26,7 @@ def test_something(mock_path: Mock) -> None:
 ```
 """
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -1360,3 +1361,41 @@ class TestCopyReferenceSubagents:
         assert mock_writer.write_file.call_count == len(REQUIRED_AGENTS)
         for agent_name in REQUIRED_AGENTS:
             assert not (target_dir / f"{agent_name}.md").exists()
+
+
+class TestRunWithOrchestratorClose:
+    """``_run_with_orchestrator_close`` must release the async client.
+
+    The wrapper exists specifically so that a parallel-tuning failure
+    inside ``asyncio.gather`` cannot leak the lazily-created
+    :class:`AsyncAnthropic` connection pool. The two tests below pin
+    that contract: ``aclose`` is called on success, and on failure.
+    """
+
+    def test_aclose_called_on_success(self) -> None:
+        """When the wrapped coroutine returns normally, aclose runs."""
+        orchestrator = MagicMock()
+        orchestrator.aclose = MagicMock(return_value=asyncio.sleep(0))
+
+        async def _ok() -> str:
+            return "done"
+
+        result = asyncio.run(cli._run_with_orchestrator_close(orchestrator, _ok()))
+        assert result == "done"
+        orchestrator.aclose.assert_called_once()
+
+    def test_aclose_called_on_exception(self) -> None:
+        """When the wrapped coroutine raises, aclose still runs."""
+        orchestrator = MagicMock()
+        orchestrator.aclose = MagicMock(return_value=asyncio.sleep(0))
+
+        async def _boom() -> str:
+            msg = "tuning failed"
+            raise RuntimeError(msg)
+
+        with pytest.raises(RuntimeError, match="tuning failed"):
+            asyncio.run(cli._run_with_orchestrator_close(orchestrator, _boom()))
+
+        # Even though ``_boom`` raised, the finally block must have
+        # called aclose to release the httpx pool.
+        orchestrator.aclose.assert_called_once()

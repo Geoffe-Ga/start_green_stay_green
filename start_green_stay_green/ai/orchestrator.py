@@ -377,7 +377,16 @@ class AIOrchestrator:
             return self._retry_with_backoff(client, prompt, output_format)
 
     def _get_async_client(self) -> AsyncAnthropic:
-        """Return the cached ``AsyncAnthropic`` client, creating it once."""
+        """Return the cached ``AsyncAnthropic`` client, creating it once.
+
+        The check-then-set pattern is *not* thread-safe in the abstract,
+        but it is safe under asyncio: there is no ``await`` between the
+        ``is None`` check and the assignment, so no other coroutine can
+        run between them on the same event loop. This method is only
+        ever called from coroutines on a single event loop, never from
+        a thread pool, so adding a lock would be over-engineering. Do
+        *not* call this from ``ThreadPoolExecutor``.
+        """
         if self._async_client is None:
             self._async_client = AsyncAnthropic(api_key=self._api_key)
         return self._async_client

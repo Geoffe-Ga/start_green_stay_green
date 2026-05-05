@@ -19,6 +19,7 @@ from typing import Any
 from typing import TYPE_CHECKING
 
 from jinja2 import Environment
+from jinja2 import StrictUndefined
 import yaml
 
 from start_green_stay_green.generators.base import BaseGenerator
@@ -217,16 +218,9 @@ class CIGenerator(BaseGenerator):
 
         Args:
             project_name: Optional project name to substitute into any
-                ``<<% project_name %>>`` placeholders. The reference
-                templates currently ship *without* such placeholders,
-                so omitting this argument or passing ``None`` produces
-                output identical to the on-disk template — there is no
-                language-specific default to fall back to. If a
-                template is later updated to include a placeholder and
-                the caller does not pass a value, Jinja will substitute
-                the literal string ``"None"``; that is intentional so
-                the caller's mistake is loudly visible rather than
-                silently absorbed.
+                ``<<% project_name %>>`` placeholders. ``None`` is
+                coerced to ``""`` so the literal string ``"None"`` is
+                never baked into the rendered YAML.
 
         Returns:
             ``CIWorkflow`` with the rendered, validated YAML.
@@ -234,6 +228,10 @@ class CIGenerator(BaseGenerator):
         Raises:
             FileNotFoundError: If no reference template exists for the
                 language.
+            jinja2.UndefinedError: If a template references a
+                placeholder that has not been wired through this
+                method's ``render(...)`` kwargs (raised eagerly thanks
+                to ``StrictUndefined``).
             ValueError: If the rendered YAML fails structural validation.
         """
         template_path = self.reference_dir / f"{self.language}.yml"
@@ -261,9 +259,15 @@ class CIGenerator(BaseGenerator):
             comment_end_string="#>",
             autoescape=False,  # noqa: S701 — YAML output
             keep_trailing_newline=True,
+            undefined=StrictUndefined,
         )
+        # Coerce ``project_name=None`` to "" so a template that references
+        # the placeholder does not get the literal string "None" silently
+        # baked into the output. ``StrictUndefined`` makes any *other*
+        # placeholder added later but not passed here raise loudly at
+        # render time instead of silently emitting the empty string.
         rendered = env.from_string(raw).render(
-            project_name=project_name,
+            project_name=project_name or "",
             language=self.language,
         )
 

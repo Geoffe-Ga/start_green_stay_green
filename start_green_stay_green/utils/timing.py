@@ -71,8 +71,14 @@ class TimingReport:
     started_at: float = field(default_factory=time.perf_counter)
     steps: list[StepTiming] = field(default_factory=list)
     api_calls: list[APICallRecord] = field(default_factory=list)
-    _stack: list[StepTiming] = field(default_factory=list)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
+    # Internal bookkeeping fields are excluded from ``__repr__`` and
+    # ``__eq__``: ``threading.Lock`` has no meaningful equality so two
+    # otherwise-identical reports would compare unequal, and the stack
+    # is ephemeral state that should not appear in debug output.
+    _stack: list[StepTiming] = field(default_factory=list, repr=False, compare=False)
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, repr=False, compare=False
+    )
 
     def begin_step(self, name: str) -> StepTiming:
         """Push a new step onto the active stack and return its record.
