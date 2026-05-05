@@ -388,3 +388,60 @@ class TestClaudeMdGeneratorIntegration:
         prompt = call_args[0][0]
         assert "awesome-project" in prompt
         assert "rust" in prompt
+
+
+class TestClaudeMdGeneratorBaseline:
+    """Tests for the deterministic, no-API baseline path (Phase 1)."""
+
+    def test_baseline_renders_without_orchestrator(self) -> None:
+        """Baseline path works with no orchestrator at all."""
+        generator = ClaudeMdGenerator()  # No orchestrator.
+
+        result = generator.generate_baseline(
+            {
+                "project_name": "my-cool-app",
+                "language": "python",
+                "scripts": ["check-all.sh", "test.sh"],
+                "skills": ["testing", "security"],
+            }
+        )
+
+        assert result.token_usage_input == 0
+        assert result.token_usage_output == 0
+        # Project name was substituted into the H1.
+        assert "my-cool-app" in result.content
+        # No untouched ``{{PROJECT_NAME}}`` token leaks through for known keys.
+        assert "{{PROJECT_NAME}}" not in result.content
+
+    def test_baseline_used_when_orchestrator_is_none(self) -> None:
+        """generate() with orchestrator=None falls back to baseline."""
+        generator = ClaudeMdGenerator(orchestrator=None)
+
+        result = generator.generate(
+            {
+                "project_name": "fallback-test",
+                "language": "go",
+                "scripts": [],
+                "skills": [],
+            }
+        )
+
+        assert result.token_usage_input == 0
+        assert "fallback-test" in result.content
+
+    def test_baseline_renders_skills_and_scripts(self) -> None:
+        """Baseline substitutes scripts and skills if templates use them."""
+        generator = ClaudeMdGenerator()
+
+        result = generator.generate_baseline(
+            {
+                "project_name": "demo",
+                "language": "python",
+                "scripts": ["foo.sh", "bar.sh"],
+                "skills": ["alpha", "beta"],
+            }
+        )
+
+        # Reference template doesn't currently use {{SCRIPTS}}/{{SKILLS}}
+        # tokens, so we just assert the baseline renders without error.
+        assert "# Claude Code Project Context: demo" in result.content

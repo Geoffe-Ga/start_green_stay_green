@@ -5,6 +5,7 @@ Implements the command-line interface using Typer with rich output formatting.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import UTC
 from datetime import datetime
 import json
@@ -15,9 +16,12 @@ import shlex
 import shutil
 import sys
 from typing import Annotated
+from typing import Any
 from typing import TYPE_CHECKING
+from typing import TypeVar
 
 if TYPE_CHECKING:
+    from collections.abc import Coroutine
     from collections.abc import Generator
     from collections.abc import Sequence
 
@@ -51,6 +55,8 @@ from start_green_stay_green.generators.skills import REFERENCE_SKILLS_DIR
 from start_green_stay_green.generators.skills import REQUIRED_SKILLS
 from start_green_stay_green.generators.structure import StructureConfig
 from start_green_stay_green.generators.structure import StructureGenerator
+from start_green_stay_green.generators.subagents import REFERENCE_AGENTS_DIR
+from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
 from start_green_stay_green.generators.subagents import SubagentsGenerator
 from start_green_stay_green.generators.tests_gen import TestsConfig
 from start_green_stay_green.generators.tests_gen import TestsGenerator
@@ -58,6 +64,9 @@ from start_green_stay_green.utils.async_bridge import run_async
 from start_green_stay_green.utils.credentials import get_api_key_from_keyring
 from start_green_stay_green.utils.credentials import store_api_key_in_keyring
 from start_green_stay_green.utils.file_writer import FileWriter
+from start_green_stay_green.utils.timing import TimingReport
+from start_green_stay_green.utils.timing import set_active_report
+from start_green_stay_green.utils.timing import step_timer
 from start_green_stay_green.utils.yaml_merge import merge_precommit_configs
 
 # Version information
@@ -65,6 +74,9 @@ __version__ = "1.0.0"
 
 # Constants
 MAX_PROJECT_NAME_LENGTH = 100
+
+# Generic return type for the orchestrator-close coroutine wrapper.
+_R = TypeVar("_R")
 
 # Create Typer app with rich markup enabled
 app = typer.Typer(
@@ -581,6 +593,83 @@ def _copy_reference_skills(
             shutil.copytree(source_dir, target_skill_dir, dirs_exist_ok=True)
 
 
+def _copy_reference_subagents(
+    target_dir: Path,
+    file_writer: FileWriter | None = None,
+) -> None:
+    """Copy reference subagent profiles to ``target_dir`` verbatim.
+
+    Used by the no-API path of ``_generate_subagents_step``. Each
+    required agent in ``REQUIRED_AGENTS`` is copied from the source
+    file declared in the mapping to ``<agent_name>.md`` so the file
+    layout matches what the AI-tuned path produces.
+
+    Args:
+        target_dir: Destination ``.claude/agents`` directory.
+        file_writer: Optional ``FileWriter`` for additive behaviour
+            (handles --force / --interactive conflict resolution).
+
+    Raises:
+        FileNotFoundError: If a required reference agent is missing.
+    """
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for agent_name, source_file in REQUIRED_AGENTS.items():
+        source_path = REFERENCE_AGENTS_DIR / source_file
+        if not source_path.exists():
+            msg = f"Reference subagent not found: {source_file}"
+            raise FileNotFoundError(msg)
+        target_path = target_dir / f"{agent_name}.md"
+        # Pin UTF-8 explicitly: agent prose contains characters
+        # (✓, ⊘, em-dashes) that would corrupt under a non-UTF-8 locale
+        # default on Windows.
+        content = source_path.read_text(encoding="utf-8")
+        if file_writer is not None:
+            file_writer.write_file(target_path, content)
+        else:
+            target_path.write_text(content, encoding="utf-8")
+
+
+@contextmanager
+def _maybe_collect_timing(
+    timing_json: Path | None,
+) -> Generator[None, None, None]:
+    """Optionally install a :class:`TimingReport` for the wrapped block.
+
+    When ``timing_json`` is ``None`` the manager is a no-op; otherwise a
+    fresh report is installed as the active collector for the duration of
+    the block and written to disk on exit (success or failure).
+    """
+    if timing_json is None:
+        yield
+        return
+    report = TimingReport()
+    set_active_report(report)
+    try:
+        yield
+    finally:
+        timing_json.parent.mkdir(parents=True, exist_ok=True)
+        report.write_json(timing_json)
+        set_active_report(None)
+
+
+async def _run_with_orchestrator_close(
+    orchestrator: AIOrchestrator,
+    coro: Coroutine[Any, Any, _R],
+) -> _R:
+    """Await ``coro`` and release the orchestrator's async client on exit.
+
+    ``AIOrchestrator`` lazily allocates an :class:`AsyncAnthropic` (and
+    therefore an httpx pool) when ``generate_async`` is first invoked.
+    Without an explicit ``aclose`` the pool would leak across calls in
+    long-lived contexts. ``aclose`` is idempotent, so this is safe even
+    when the async client was never created.
+    """
+    try:
+        return await coro
+    finally:
+        await orchestrator.aclose()
+
+
 def _generate_structure_step(
     project_path: Path,
     project_name: str,
@@ -588,7 +677,7 @@ def _generate_structure_step(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate source code structure."""
-    with console.status("Generating source structure..."):
+    with step_timer("structure"), console.status("Generating source structure..."):
         config = StructureConfig(
             project_name=project_name,
             language=language,
@@ -606,7 +695,7 @@ def _generate_dependencies_step(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate dependencies files."""
-    with console.status("Generating dependencies..."):
+    with step_timer("dependencies"), console.status("Generating dependencies..."):
         config = DependencyConfig(
             project_name=project_name,
             language=language,
@@ -624,7 +713,7 @@ def _generate_tests_step(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate tests directory."""
-    with console.status("Generating tests..."):
+    with step_timer("tests"), console.status("Generating tests..."):
         config = TestsConfig(
             project_name=project_name,
             language=language,
@@ -642,7 +731,7 @@ def _generate_readme_step(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate README.md."""
-    with console.status("Generating README..."):
+    with step_timer("readme"), console.status("Generating README..."):
         config = ReadmeConfig(
             project_name=project_name,
             language=language,
@@ -710,7 +799,7 @@ def _generate_scripts_step(
     elif _scripts_dir_has_other_language(scripts_dir, language):
         scripts_dir = scripts_dir / language
 
-    with console.status(f"Generating {language} scripts..."):
+    with step_timer("scripts"), console.status(f"Generating {language} scripts..."):
         scripts_config = ScriptConfig(
             language=language,
             package_name=project_name.replace("-", "_"),
@@ -731,7 +820,7 @@ def _generate_precommit_step(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate pre-commit configuration, merging with existing if present."""
-    with console.status("Generating pre-commit config..."):
+    with step_timer("precommit"), console.status("Generating pre-commit config..."):
         precommit_config = GenerationConfig(
             project_name=project_name,
             language=language,
@@ -807,7 +896,7 @@ def _generate_skills_step(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate Claude skills."""
-    with console.status("Generating skills..."):
+    with step_timer("skills"), console.status("Generating skills..."):
         skills_dir = project_path / ".claude" / "skills"
         _copy_reference_skills(skills_dir, file_writer=file_writer)
     console.print("[green]✓[/green] Generated skills")
@@ -815,47 +904,61 @@ def _generate_skills_step(
 
 def _generate_ci_step(
     project_path: Path,
+    project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate CI pipeline or skip if no orchestrator."""
-    if orchestrator:
-        with console.status("Generating CI pipeline..."):
-            ci_generator = CIGenerator(orchestrator, language)
-            workflow = ci_generator.generate_workflow()
-            workflows_dir = project_path / ".github" / "workflows"
-            workflows_dir.mkdir(parents=True, exist_ok=True)
-            ci_file = workflows_dir / "ci.yml"
-            if file_writer is not None:
-                file_writer.write_file(ci_file, workflow.content)
-            else:
-                ci_file.write_text(workflow.content)
-        console.print("[green]✓[/green] Generated CI pipeline")
-    else:
-        console.print("[yellow]⊘[/yellow] Skipped CI (no API key)")
+    """Generate the CI pipeline.
+
+    Always runs the deterministic template path so a project is never
+    missing CI just because the user has no API key. ``orchestrator`` is
+    only used to opt into the legacy AI-tuned path for backward
+    compatibility. ``project_name`` is forwarded to the template
+    renderer so any ``<<% project_name %>>`` placeholder lands with
+    the real value rather than the empty string.
+    """
+    with step_timer("ci"), console.status("Generating CI pipeline..."):
+        ci_generator = CIGenerator(
+            orchestrator,
+            language,
+            project_name=project_name,
+        )
+        workflow = ci_generator.generate_workflow()
+        workflows_dir = project_path / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True, exist_ok=True)
+        ci_file = workflows_dir / "ci.yml"
+        if file_writer is not None:
+            file_writer.write_file(ci_file, workflow.content)
+        else:
+            ci_file.write_text(workflow.content, encoding="utf-8")
+    console.print("[green]✓[/green] Generated CI pipeline")
 
 
 def _generate_review_step(
     project_path: Path,
-    orchestrator: AIOrchestrator | None,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate GitHub Actions code review or skip if no orchestrator."""
-    if orchestrator:
-        with console.status("Generating GitHub Actions review..."):
-            review_generator = GitHubActionsReviewGenerator(orchestrator)
-            review_result = review_generator.generate()
-            workflows_dir = project_path / ".github" / "workflows"
-            workflows_dir.mkdir(parents=True, exist_ok=True)
-            workflow_file = workflows_dir / "code-review.yml"
-            if file_writer is not None:
-                file_writer.write_file(workflow_file, review_result["workflow_content"])
-            else:
-                workflow_file.write_text(review_result["workflow_content"])
-        console.print("[green]✓[/green] Generated GitHub Actions review")
-    else:
-        console.print("[yellow]⊘[/yellow] Skipped code review (no API key)")
+    """Generate the GitHub Actions code review workflow.
+
+    The generator is fully template-based — no orchestrator parameter
+    needed. (The orchestrator was previously passed but never used; it
+    has been dropped from this private helper, so the historical
+    ``orchestrator`` argument is gone entirely.)
+    """
+    with step_timer("review"), console.status("Generating GitHub Actions review..."):
+        review_generator = GitHubActionsReviewGenerator()
+        review_result = review_generator.generate()
+        workflows_dir = project_path / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True, exist_ok=True)
+        workflow_file = workflows_dir / "code-review.yml"
+        if file_writer is not None:
+            file_writer.write_file(workflow_file, review_result["workflow_content"])
+        else:
+            workflow_file.write_text(
+                review_result["workflow_content"], encoding="utf-8"
+            )
+    console.print("[green]✓[/green] Generated GitHub Actions review")
 
 
 def _generate_claude_md_step(
@@ -865,58 +968,67 @@ def _generate_claude_md_step(
     orchestrator: AIOrchestrator | None,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate CLAUDE.md or skip if no orchestrator."""
-    if orchestrator:
-        with console.status("Generating CLAUDE.md..."):
-            claude_md_generator = ClaudeMdGenerator(orchestrator)
-            project_config = {
-                "project_name": project_name,
-                "language": language,
-                "scripts": [
-                    "check-all.sh",
-                    "test.sh",
-                    "lint.sh",
-                    "format.sh",
-                    "security.sh",
-                    "mutation.sh",
-                ],
-                "skills": REQUIRED_SKILLS.copy(),
-            }
-            claude_md_result = claude_md_generator.generate(project_config)
-            claude_md_file = project_path / "CLAUDE.md"
-            if file_writer is not None:
-                file_writer.write_file(claude_md_file, claude_md_result.content)
-            else:
-                claude_md_file.write_text(claude_md_result.content)
-        console.print("[green]✓[/green] Generated CLAUDE.md")
-    else:
-        console.print("[yellow]⊘[/yellow] Skipped CLAUDE.md (no API key)")
+    """Generate CLAUDE.md.
+
+    Always runs: with no orchestrator the deterministic baseline is
+    rendered (Phase 1 of the optimization roadmap); with one, the legacy
+    AI-tuned generator is used.
+    """
+    with step_timer("claude_md"), console.status("Generating CLAUDE.md..."):
+        claude_md_generator = ClaudeMdGenerator(orchestrator)
+        project_config = {
+            "project_name": project_name,
+            "language": language,
+            "scripts": [
+                "check-all.sh",
+                "test.sh",
+                "lint.sh",
+                "format.sh",
+                "security.sh",
+                "mutation.sh",
+            ],
+            "skills": REQUIRED_SKILLS.copy(),
+        }
+        claude_md_result = claude_md_generator.generate(project_config)
+        claude_md_file = project_path / "CLAUDE.md"
+        if file_writer is not None:
+            file_writer.write_file(claude_md_file, claude_md_result.content)
+        else:
+            claude_md_file.write_text(claude_md_result.content, encoding="utf-8")
+    console.print("[green]✓[/green] Generated CLAUDE.md")
 
 
 def _generate_architecture_step(
     project_path: Path,
     project_name: str,
     language: str,
-    orchestrator: AIOrchestrator | None,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate architecture rules or skip if no orchestrator."""
-    if not orchestrator:
-        console.print("[yellow]⊘[/yellow] Skipped architecture rules (no API key)")
+    """Generate architecture rules.
+
+    Architecture configuration is fully deterministic (import-linter for
+    Python, dependency-cruiser for TypeScript). Runs regardless of API
+    key availability; only Python and TypeScript projects produce output.
+    The previous ``orchestrator`` argument was unused and has been
+    removed from this private helper.
+    """
+    if language not in {"python", "typescript"}:
+        # The generator only supports these two; surface a dim info line
+        # so users understand why no architecture rules were generated
+        # for, e.g., a Go or Rust project rather than seeing silence.
+        console.print(
+            f"[dim]Architecture rules unavailable for {language} "
+            "(supported: python, typescript)[/dim]"
+        )
         return
 
     arch_dir = project_path / "plans" / "architecture"
-    # ArchitectureEnforcementGenerator writes files internally;
-    # skip the entire step if the output directory already has content.
     if file_writer is not None and file_writer.skip_existing_dir(arch_dir):
         console.print("[green]✓[/green] Architecture rules (preserved existing)")
         return
 
-    with console.status("Generating architecture rules..."):
-        arch_generator = ArchitectureEnforcementGenerator(
-            orchestrator,
-            output_dir=arch_dir,
-        )
+    with step_timer("architecture"), console.status("Generating architecture rules..."):
+        arch_generator = ArchitectureEnforcementGenerator(output_dir=arch_dir)
         arch_generator.generate(language=language, project_name=project_name)
     console.print("[green]✓[/green] Generated architecture rules")
 
@@ -928,29 +1040,45 @@ def _generate_subagents_step(
     orchestrator: AIOrchestrator | None,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate subagents or skip if no orchestrator."""
-    if orchestrator:
-        with console.status("Generating subagents..."):
-            subagents_generator = SubagentsGenerator(orchestrator)
-            project_config_for_agents = (
-                f"Project: {project_name}, "
-                f"Language: {language}, "
-                f"Type: quality-control-tool"
+    """Generate subagents.
+
+    With an orchestrator: tunes each reference subagent for the target
+    project (currently in parallel, see Phase 2). Without an orchestrator:
+    falls back to copying the reference subagents verbatim so a project
+    is never missing its agent profiles.
+    """
+    subagents_output_dir = project_path / ".claude" / "agents"
+    subagents_output_dir.mkdir(parents=True, exist_ok=True)
+
+    if orchestrator is None:
+        with step_timer("subagents"), console.status("Copying reference subagents..."):
+            _copy_reference_subagents(subagents_output_dir, file_writer=file_writer)
+        console.print("[green]✓[/green] Copied reference subagents")
+        return
+
+    with step_timer("subagents"), console.status("Generating subagents..."):
+        subagents_generator = SubagentsGenerator(orchestrator)
+        project_config_for_agents = (
+            f"Project: {project_name}, "
+            f"Language: {language}, "
+            f"Type: quality-control-tool"
+        )
+        # ``_run_with_orchestrator_close`` guarantees the lazily-created
+        # ``AsyncAnthropic`` client is released on the way out, even if
+        # one of the parallel tunings raises.
+        results = run_async(
+            _run_with_orchestrator_close(
+                orchestrator,
+                subagents_generator.generate_all_agents(project_config_for_agents),
             )
-            results = run_async(
-                subagents_generator.generate_all_agents(project_config_for_agents)
-            )
-            subagents_output_dir = project_path / ".claude" / "agents"
-            subagents_output_dir.mkdir(parents=True, exist_ok=True)
-            for agent_name, result in results.items():
-                agent_file = subagents_output_dir / f"{agent_name}.md"
-                if file_writer is not None:
-                    file_writer.write_file(agent_file, result.content)
-                else:
-                    agent_file.write_text(result.content)
-        console.print("[green]✓[/green] Generated subagents")
-    else:
-        console.print("[yellow]⊘[/yellow] Skipped subagents (no API key)")
+        )
+        for agent_name, result in results.items():
+            agent_file = subagents_output_dir / f"{agent_name}.md"
+            if file_writer is not None:
+                file_writer.write_file(agent_file, result.content)
+            else:
+                agent_file.write_text(result.content, encoding="utf-8")
+    console.print("[green]✓[/green] Generated subagents")
 
 
 def _generate_metrics_dashboard_step(
@@ -959,7 +1087,7 @@ def _generate_metrics_dashboard_step(
     language: str,
 ) -> None:
     """Generate live metrics dashboard and workflow."""
-    with console.status("Generating metrics dashboard..."):
+    with step_timer("metrics"), console.status("Generating metrics dashboard..."):
         config = MetricsGenerationConfig(
             language=language,
             project_name=project_name,
@@ -1005,7 +1133,10 @@ def _generate_metrics_dashboard_step(
                 "security_status": "pass",
             },
         }
-        initial_metrics_path.write_text(json.dumps(initial_metrics, indent=2))
+        initial_metrics_path.write_text(
+            json.dumps(initial_metrics, indent=2),
+            encoding="utf-8",
+        )
 
         workflows_dir = project_path / ".github" / "workflows"
         workflows_dir.mkdir(parents=True, exist_ok=True)
@@ -1017,11 +1148,11 @@ def _generate_metrics_dashboard_step(
         if sgsg_workflow.exists():
             target_workflow = workflows_dir / "metrics.yml"
             shutil.copy(sgsg_workflow, target_workflow)
-            workflow_content = target_workflow.read_text()
+            workflow_content = target_workflow.read_text(encoding="utf-8")
             workflow_content = workflow_content.replace(
                 "start-green-stay-green", project_name
             )
-            target_workflow.write_text(workflow_content)
+            target_workflow.write_text(workflow_content, encoding="utf-8")
         else:
             missing_workflow = True
 
@@ -1057,14 +1188,12 @@ def _generate_with_orchestrator(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate AI-powered artifacts (CI, CLAUDE.md, etc.) with progress indicators."""
-    _generate_ci_step(project_path, language, orchestrator, file_writer)
-    _generate_review_step(project_path, orchestrator, file_writer)
+    _generate_ci_step(project_path, project_name, language, orchestrator, file_writer)
+    _generate_review_step(project_path, file_writer)
     _generate_claude_md_step(
         project_path, project_name, language, orchestrator, file_writer
     )
-    _generate_architecture_step(
-        project_path, project_name, language, orchestrator, file_writer
-    )
+    _generate_architecture_step(project_path, project_name, language, file_writer)
     _generate_subagents_step(
         project_path, project_name, language, orchestrator, file_writer
     )
@@ -1402,6 +1531,16 @@ def init(  # noqa: PLR0913
             help="Generate live metrics dashboard with auto-updating workflow.",
         ),
     ] = False,
+    timing_json: Annotated[
+        Path | None,
+        typer.Option(
+            "--timing-json",
+            help=(
+                "Write a structured timing/telemetry report to PATH "
+                "(JSON). No effect on default output."
+            ),
+        ),
+    ] = None,
     config: config_file_option = None,
 ) -> None:
     """Initialize a new project with quality controls.
@@ -1422,6 +1561,7 @@ def init(  # noqa: PLR0913
         no_interactive: Non-interactive mode.
         api_key: Optional Claude API key for AI features.
         enable_live_dashboard: Generate live metrics dashboard with workflow.
+        timing_json: Optional path to write a timing/telemetry JSON report.
         config: Configuration file path.
 
     Raises:
@@ -1484,21 +1624,20 @@ def init(  # noqa: PLR0913
         console=console,
     )
 
-    # Generate all project files (handles errors internally)
-    _generate_project_files(
-        project_path,
-        resolved_project_name,
-        resolved_languages,
-        orchestrator,
-        file_writer,
-    )
-
-    _finalize_init(
-        project_path,
-        resolved_project_name,
-        resolved_languages,
-        enable_live_dashboard=enable_live_dashboard,
-    )
+    with _maybe_collect_timing(timing_json):
+        _generate_project_files(
+            project_path,
+            resolved_project_name,
+            resolved_languages,
+            orchestrator,
+            file_writer,
+        )
+        _finalize_init(
+            project_path,
+            resolved_project_name,
+            resolved_languages,
+            enable_live_dashboard=enable_live_dashboard,
+        )
 
 
 def cli_main() -> None:

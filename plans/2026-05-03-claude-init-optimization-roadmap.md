@@ -3,7 +3,10 @@
 **Created**: 2026-05-03
 **Owner**: Performance / AI Orchestration
 **Branch**: `claude/optimize-green-init-performance-Lsf7Y`
-**Status**: Proposed — awaiting review
+**Status**: In progress — Phases 0, 1, and 2 (subagent parallelism) shipped on
+`claude/execute-optimization-roadmap-Fhfnu`. Remaining work: prompt caching
++ tool_use parsing (Phase 2c), the two-pass split + `green enhance`
+(Phase 3), prompt cleanup (Phase 4), batch mode (Phase 5), UX/docs (Phase 6).
 
 ---
 
@@ -490,6 +493,12 @@ Restructure `green init` into Pass 1 (scaffold, no API needed) and Pass 2
 
 **Why**: the `PromptManager` infrastructure exists but is unused; inline
 prompts in generators duplicate boilerplate; the system prompt is generic.
+
+(Phase 2's "test-only branch in `_await_or_offload`" follow-up was
+resolved in PR #305 itself: the affected `ContentTuner` tests were
+migrated from `create_autospec(AIOrchestrator)` to
+`MagicMock(spec=AIOrchestrator)` and the branch was deleted. Issue
+#306 is closed.)
 
 #### Role
 You are a prompt engineer applying the 6-component framework

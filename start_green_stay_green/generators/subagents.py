@@ -6,6 +6,7 @@ tuning them for the target project context, and preserving YAML frontmatter stru
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 import re
@@ -14,6 +15,10 @@ from typing import TYPE_CHECKING
 
 from start_green_stay_green.ai.tuner import ContentTuner
 from start_green_stay_green.generators.base import BaseGenerator
+
+# Bounded concurrency keeps us under Anthropic's per-tier rate limits even
+# when the user has eight subagents (or more, post-Phase 3) to tune.
+DEFAULT_MAX_CONCURRENCY = 8
 
 if TYPE_CHECKING:
     from start_green_stay_green.ai.orchestrator import AIOrchestrator
@@ -83,6 +88,7 @@ class SubagentsGenerator(BaseGenerator):
         *,
         reference_dir: Path | None = None,
         dry_run: bool = False,
+        max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
     ) -> None:
         """Initialize SubagentsGenerator.
 
@@ -91,11 +97,15 @@ class SubagentsGenerator(BaseGenerator):
             reference_dir: Directory containing reference agents.
                 Defaults to .claude/agents/ in project root.
             dry_run: If True, skip actual tuning (for testing).
+            max_concurrency: Upper bound on concurrent agent tunings.
+                ``asyncio.Semaphore`` enforces this so a slow network or
+                tight Anthropic rate limit does not produce burst-failures.
         """
         self.orchestrator = orchestrator
         self.tuner = ContentTuner(orchestrator, dry_run=dry_run)
         self.reference_dir = reference_dir or REFERENCE_AGENTS_DIR
         self.dry_run = dry_run
+        self.max_concurrency = max_concurrency
         self._validate_reference_dir()
 
     def _check_directory_exists(self) -> None:
@@ -268,19 +278,31 @@ class SubagentsGenerator(BaseGenerator):
         self,
         target_context: str,
     ) -> dict[str, SubagentGenerationResult]:
-        """Generate all required subagents for target project.
+        """Generate every required subagent concurrently.
+
+        Each agent is tuned in its own task; ``asyncio.gather`` waits for
+        all of them. A bounded ``Semaphore`` keeps the in-flight count at
+        or below ``self.max_concurrency`` so we don't trip the Anthropic
+        rate limiter.
 
         Args:
             target_context: Description of target project context.
 
         Returns:
-            Dictionary mapping agent names to generation results.
+            Dictionary mapping agent names to generation results, in the
+            order declared in :data:`REQUIRED_AGENTS`.
         """
-        results = {}
-        for agent_name in REQUIRED_AGENTS:
-            result = await self.generate_agent(agent_name, target_context)
-            results[agent_name] = result
-        return results
+        agent_names = list(REQUIRED_AGENTS)
+        semaphore = asyncio.Semaphore(self.max_concurrency)
+
+        async def _run_one(name: str) -> SubagentGenerationResult:
+            async with semaphore:
+                return await self.generate_agent(name, target_context)
+
+        results_list = await asyncio.gather(
+            *(_run_one(name) for name in agent_names),
+        )
+        return dict(zip(agent_names, results_list, strict=True))
 
     def generate(self) -> dict[str, Any]:
         """Generate subagents synchronously (not supported).

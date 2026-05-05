@@ -11,6 +11,7 @@ See Issue #196 for details.
 """
 
 from collections.abc import Generator
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -39,6 +40,7 @@ def _block_orchestrator_init() -> Generator[None, None, None]:
 
 def _stub_ci_step(
     project_path: Path,
+    _project_name: str,
     _language: str,
     _orchestrator: object,
     _file_writer: object = None,
@@ -47,6 +49,7 @@ def _stub_ci_step(
 
     Args:
         project_path: Target project directory.
+        _project_name: Project name (unused in stub).
         _language: Programming language (unused in stub).
         _orchestrator: Mock orchestrator (unused in stub).
         _file_writer: File writer (unused in stub).
@@ -59,14 +62,12 @@ def _stub_ci_step(
 
 def _stub_review_step(
     project_path: Path,
-    _orchestrator: object,
     _file_writer: object = None,
 ) -> None:
     """Stub review generation step that writes a minimal code-review workflow.
 
     Args:
         project_path: Target project directory.
-        _orchestrator: Mock orchestrator (unused in stub).
         _file_writer: File writer (unused in stub).
     """
     workflows_dir = project_path / ".github" / "workflows"
@@ -100,7 +101,6 @@ def _stub_architecture_step(
     project_path: Path,
     project_name: str,
     _language: str,
-    _orchestrator: object,
     _file_writer: object = None,
 ) -> None:
     """Stub architecture generation step that writes minimal rule files.
@@ -109,7 +109,6 @@ def _stub_architecture_step(
         project_path: Target project directory.
         project_name: Name of the project.
         _language: Programming language (unused in stub).
-        _orchestrator: Mock orchestrator (unused in stub).
         _file_writer: File writer (unused in stub).
     """
     arch_dir = project_path / "plans" / "architecture"
@@ -537,3 +536,45 @@ class TestFullIntegrationFlow:
         project_path = output_dir / "test-custom-dir"
         assert project_path.exists()
         assert project_path.is_dir()
+
+    def test_init_writes_timing_json_report(self, tmp_path: Path) -> None:
+        """End-to-end: --timing-json writes a structured JSON report."""
+        output_dir = tmp_path / "out"
+        timing_path = tmp_path / "reports" / "timing.json"
+        runner = CliRunner()
+
+        result = runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "timing-smoke",
+                "--language",
+                "python",
+                "--output-dir",
+                str(output_dir),
+                "--timing-json",
+                str(timing_path),
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        assert timing_path.exists(), "timing JSON report not written"
+
+        report = json.loads(timing_path.read_text(encoding="utf-8"))
+
+        # Top-level keys are present and well-typed.
+        assert isinstance(report["wall_clock_s"], (int, float))
+        assert isinstance(report["api_calls"], int)
+        assert isinstance(report["api_seconds"], (int, float))
+        assert isinstance(report["steps"], list)
+        assert report["tokens"] == {"input": 0, "output": 0, "cache_read": 0}
+
+        # In offline mode no API calls are made; every deterministic
+        # step is recorded with zero attributed API calls.
+        assert report["api_calls"] == 0
+        step_names = {step["name"] for step in report["steps"]}
+        # Sanity: at least the always-on steps must have been timed.
+        for required in ("structure", "ci", "claude_md", "subagents"):
+            assert required in step_names

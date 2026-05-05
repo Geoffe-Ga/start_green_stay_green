@@ -26,6 +26,7 @@ def test_something(mock_path: Mock) -> None:
 ```
 """
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -38,6 +39,7 @@ from typer.testing import CliRunner
 
 from start_green_stay_green import cli
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
+from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
 
 
 class TestVersionCommand:
@@ -1103,25 +1105,40 @@ class TestGenerateSteps:
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_ci_step(mock_path, "python", mock_orchestrator)
+            cli._generate_ci_step(mock_path, "my-project", "python", mock_orchestrator)
 
-        mock_ci_generator_class.assert_called_with(mock_orchestrator, "python")
+        # ``project_name`` is now threaded through so ``<<% project_name %>>``
+        # placeholders in the reference templates render with the real value.
+        mock_ci_generator_class.assert_called_with(
+            mock_orchestrator, "python", project_name="my-project"
+        )
 
-    def test_generate_ci_step_skips_without_orchestrator(
-        self,
+    @patch("start_green_stay_green.cli.CIGenerator")
+    def test_generate_ci_step_uses_template_without_orchestrator(
+        self, mock_ci_generator_class: Mock
     ) -> None:
-        """Test _generate_ci_step skips without orchestrator."""
+        """_generate_ci_step now runs the template path with no orchestrator."""
+        mock_generator = MagicMock()
+        mock_workflow = MagicMock()
+        mock_workflow.content = "workflow content"
+        mock_generator.generate_workflow.return_value = mock_workflow
+        mock_ci_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_ci_step(mock_path, "python", None)
+            cli._generate_ci_step(mock_path, "no-orch-project", "python", None)
+
+        mock_ci_generator_class.assert_called_with(
+            None, "python", project_name="no-orch-project"
+        )
+        mock_generator.generate_workflow.assert_called_once()
 
     @patch("start_green_stay_green.cli.GitHubActionsReviewGenerator")
-    def test_generate_review_step_with_orchestrator(
+    def test_generate_review_step_runs_unconditionally(
         self, mock_generator_class: Mock
     ) -> None:
-        """Test _generate_review_step with orchestrator."""
-        mock_orchestrator = MagicMock()
+        """_generate_review_step now always renders the template."""
         mock_generator = MagicMock()
         mock_workflow = MagicMock()
         mock_workflow.content = "workflow content"
@@ -1131,18 +1148,30 @@ class TestGenerateSteps:
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_review_step(mock_path, mock_orchestrator)
+            cli._generate_review_step(mock_path)
 
-        mock_generator_class.assert_called_with(mock_orchestrator)
+        # Generator no longer takes an orchestrator argument.
+        mock_generator_class.assert_called_with()
+        mock_generator.generate.assert_called_once()
 
-    def test_generate_review_step_skips_without_orchestrator(
-        self,
+    @patch("start_green_stay_green.cli.GitHubActionsReviewGenerator")
+    def test_generate_review_step_uses_default_file_writer(
+        self, mock_generator_class: Mock
     ) -> None:
-        """Test _generate_review_step skips without orchestrator."""
+        """_generate_review_step works with the default ``file_writer=None``."""
+        mock_generator = MagicMock()
+        mock_workflow = MagicMock()
+        mock_workflow.content = "workflow content"
+        mock_generator.generate.return_value = mock_workflow
+        mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_review_step(mock_path, None)
+            # No file_writer passed — exercises the ``write_text`` branch.
+            cli._generate_review_step(mock_path)
+
+        mock_generator.generate.assert_called_once()
 
     @patch("start_green_stay_green.cli.ClaudeMdGenerator")
     def test_generate_claude_md_step(self, mock_generator_class: Mock) -> None:
@@ -1168,20 +1197,16 @@ class TestGenerateSteps:
 
     @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
     def test_generate_architecture_step(self, mock_generator_class: Mock) -> None:
-        """Test _generate_architecture_step creates generator."""
-        mock_orchestrator = MagicMock()
+        """Test _generate_architecture_step creates generator deterministically."""
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_architecture_step(
-                mock_path,
-                "my-project",
-                "python",
-                mock_orchestrator,
-            )
+            # The orchestrator parameter has been removed; this private
+            # helper now takes only the (path, name, language, writer).
+            cli._generate_architecture_step(mock_path, "my-project", "python")
 
         mock_generator.generate.assert_called()
 
@@ -1196,9 +1221,20 @@ class TestGenerateSteps:
         mock_orchestrator = MagicMock()
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
-        mock_run_async.return_value = {}
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        # ``_generate_subagents_step`` now wraps the gather in
+        # ``_run_with_orchestrator_close``, which returns a coroutine.
+        # The mocked ``run_async`` never awaits it, so we must close it
+        # explicitly to avoid the "coroutine was never awaited" warning.
+        def _consume(coro: object) -> dict[str, object]:
+            close = getattr(coro, "close", None)
+            if callable(close):
+                close()
+            return {}
+
+        mock_run_async.side_effect = _consume
 
         with patch("start_green_stay_green.cli.console"):
             cli._generate_subagents_step(
@@ -1266,3 +1302,106 @@ class TestGenerateProjectFiles:
         mock_scripts.assert_called()
         mock_precommit.assert_called()
         mock_skills.assert_called()
+
+
+class TestCopyReferenceSubagents:
+    """Cover the no-API copy path's error handling."""
+
+    def test_raises_filenotfounderror_when_reference_missing(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing reference agent file surfaces a FileNotFoundError."""
+        target_dir = tmp_path / "agents"
+
+        # Patch REFERENCE_AGENTS_DIR to an empty directory so every
+        # required source_file is missing.
+        empty_ref_dir = tmp_path / "empty"
+        empty_ref_dir.mkdir()
+
+        with (
+            patch("start_green_stay_green.cli.REFERENCE_AGENTS_DIR", empty_ref_dir),
+            pytest.raises(FileNotFoundError, match="Reference subagent not found"),
+        ):
+            cli._copy_reference_subagents(target_dir)
+
+    def test_writes_utf8_encoded_content(self, tmp_path: Path) -> None:
+        """Copied agents are written with explicit UTF-8 encoding."""
+        # Build a fake reference dir with a single agent file.
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        # Cover every REQUIRED_AGENTS source_file with a UTF-8 sentinel.
+        sentinel = "# Agent: ✓ — non-ASCII\n"
+
+        for src in REQUIRED_AGENTS.values():
+            (ref_dir / src).write_text(sentinel, encoding="utf-8")
+
+        target_dir = tmp_path / "agents"
+        with patch("start_green_stay_green.cli.REFERENCE_AGENTS_DIR", ref_dir):
+            cli._copy_reference_subagents(target_dir)
+
+        # Round-trip through utf-8 decoding.
+        for agent_name in REQUIRED_AGENTS:
+            target = target_dir / f"{agent_name}.md"
+            assert target.exists()
+            assert target.read_text(encoding="utf-8") == sentinel
+
+    def test_uses_file_writer_when_provided(self, tmp_path: Path) -> None:
+        """The ``file_writer`` branch routes writes through the writer."""
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        sentinel = "# Agent body\n"
+        for src in REQUIRED_AGENTS.values():
+            (ref_dir / src).write_text(sentinel, encoding="utf-8")
+
+        target_dir = tmp_path / "agents"
+        # The FileWriter contract has ``write_file(path, content)``;
+        # use a Mock with that signature so the test asserts the
+        # public boundary, not implementation details.
+        mock_writer = MagicMock()
+
+        with patch("start_green_stay_green.cli.REFERENCE_AGENTS_DIR", ref_dir):
+            cli._copy_reference_subagents(target_dir, file_writer=mock_writer)
+
+        # All eight required agents flowed through the writer; no
+        # files were created via the direct ``write_text`` fallback.
+        assert mock_writer.write_file.call_count == len(REQUIRED_AGENTS)
+        for agent_name in REQUIRED_AGENTS:
+            assert not (target_dir / f"{agent_name}.md").exists()
+
+
+class TestRunWithOrchestratorClose:
+    """``_run_with_orchestrator_close`` must release the async client.
+
+    The wrapper exists specifically so that a parallel-tuning failure
+    inside ``asyncio.gather`` cannot leak the lazily-created
+    :class:`AsyncAnthropic` connection pool. The two tests below pin
+    that contract: ``aclose`` is called on success, and on failure.
+    """
+
+    def test_aclose_called_on_success(self) -> None:
+        """When the wrapped coroutine returns normally, aclose runs."""
+        orchestrator = MagicMock()
+        orchestrator.aclose = MagicMock(return_value=asyncio.sleep(0))
+
+        async def _ok() -> str:
+            return "done"
+
+        result = asyncio.run(cli._run_with_orchestrator_close(orchestrator, _ok()))
+        assert result == "done"
+        orchestrator.aclose.assert_called_once()
+
+    def test_aclose_called_on_exception(self) -> None:
+        """When the wrapped coroutine raises, aclose still runs."""
+        orchestrator = MagicMock()
+        orchestrator.aclose = MagicMock(return_value=asyncio.sleep(0))
+
+        async def _boom() -> str:
+            msg = "tuning failed"
+            raise RuntimeError(msg)
+
+        with pytest.raises(RuntimeError, match="tuning failed"):
+            asyncio.run(cli._run_with_orchestrator_close(orchestrator, _boom()))
+
+        # Even though ``_boom`` raised, the finally block must have
+        # called aclose to release the httpx pool.
+        orchestrator.aclose.assert_called_once()

@@ -11,6 +11,7 @@ Tests cover:
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
@@ -563,3 +564,119 @@ async def test_dry_run_mode(
     # Dry run should set tuned=False
     assert not result.tuned
     assert not result.changes
+
+
+class TestSubagentsParallelism:
+    """Verify generate_all_agents fans out concurrently (Phase 2)."""
+
+    @pytest.mark.asyncio
+    async def test_generate_all_agents_runs_in_parallel(
+        self,
+        tmp_path: Path,
+        mocker: MockerFixture,
+    ) -> None:
+        """All eight agent tunings dispatch before any single one returns."""
+        # Populate the reference dir with the eight required agent files.
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        for source_file in REQUIRED_AGENTS.values():
+            (agents_dir / source_file).write_text(SAMPLE_AGENT_CONTENT)
+
+        # Latch that records each call's start order, then waits until
+        # all sibling calls have started before allowing any to return.
+        # If the generator were sequential, only the first call would
+        # ever start.
+        active_calls = 0
+        max_active = 0
+        gate = asyncio.Event()
+
+        async def slow_tune(*_args: object, **_kwargs: object) -> object:
+            nonlocal active_calls, max_active
+            active_calls += 1
+            max_active = max(max_active, active_calls)
+            if active_calls >= len(REQUIRED_AGENTS):
+                gate.set()
+            await gate.wait()
+            active_calls -= 1
+            return mocker.Mock(
+                content="# tuned body",
+                changes=["change"],
+                dry_run=False,
+                token_usage_input=1,
+                token_usage_output=1,
+            )
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+            dry_run=False,
+        )
+        # Replace the tuner's tune with the latch-instrumented stub.
+        generator.tuner = AsyncMock()
+        generator.tuner.tune = slow_tune
+
+        results = await generator.generate_all_agents("test-context")
+
+        # The latch only releases ``gate`` once ``active_calls`` reaches
+        # ``len(REQUIRED_AGENTS)``, so the gather can only return if every
+        # agent was in-flight at the same instant. Asserting the strict
+        # equality (rather than a weaker ``>= 2`` lower bound) makes the
+        # invariant explicit and would catch a regression where the
+        # semaphore was tightened or the gather was serialized.
+        assert set(results) == set(REQUIRED_AGENTS)
+        assert max_active == len(REQUIRED_AGENTS), (
+            f"Expected all {len(REQUIRED_AGENTS)} agents in-flight at once, "
+            f"got max_active={max_active}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_generate_all_agents_respects_semaphore(
+        self,
+        tmp_path: Path,
+        mocker: MockerFixture,
+    ) -> None:
+        """The semaphore caps the number of in-flight tunings."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        for source_file in REQUIRED_AGENTS.values():
+            (agents_dir / source_file).write_text(SAMPLE_AGENT_CONTENT)
+
+        in_flight = 0
+        peak = 0
+        complete: list[asyncio.Event] = []
+
+        async def staged_tune(*_args: object, **_kwargs: object) -> object:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            ev = asyncio.Event()
+            complete.append(ev)
+            # Release one slot at a time once enough tasks queued up.
+            if len(complete) >= 2:
+                # Signal all stalled siblings to finish in order.
+                for waiter in complete:
+                    waiter.set()
+            await ev.wait()
+            in_flight -= 1
+            return mocker.Mock(
+                content="# t",
+                changes=[],
+                dry_run=False,
+                token_usage_input=1,
+                token_usage_output=1,
+            )
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+            dry_run=False,
+            max_concurrency=2,
+        )
+        generator.tuner = AsyncMock()
+        generator.tuner.tune = staged_tune
+
+        await generator.generate_all_agents("ctx")
+        assert peak <= 2

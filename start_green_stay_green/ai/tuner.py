@@ -5,14 +5,19 @@ Uses Claude Sonnet to adapt copied content while preserving structure.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import logging
 from typing import TYPE_CHECKING
+from typing import TypeVar
+from typing import cast
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable
+    from collections.abc import Callable
     from collections.abc import Sequence
 
 
@@ -20,6 +25,43 @@ logger = logging.getLogger(__name__)
 
 # Constants for response parsing
 _CHANGES_SECTION_PARTS = 2
+
+# Generic over the result type so callers get a precise return type back
+# instead of a blanket ``Any``.
+_T = TypeVar("_T")
+
+
+async def _await_or_offload(
+    call: Callable[..., _T | Awaitable[_T]],
+    *args: object,
+    **kwargs: object,
+) -> _T:
+    """Invoke ``call`` and return its result, awaitable or otherwise.
+
+    Two cases, both real:
+
+    * **Async callable** (``asyncio.iscoroutinefunction`` is ``True``):
+      call it, await the resulting coroutine. This covers both real
+      :class:`anthropic.AsyncAnthropic` paths and :class:`AsyncMock`
+      doubles in tests.
+    * **Sync callable** (the default for :meth:`AIOrchestrator.generate`):
+      offload to a worker thread via :func:`asyncio.to_thread` so a
+      hundreds-of-ms HTTP round-trip does not block the event loop while
+      sibling tunings wait. Tests using ``MagicMock(spec=AIOrchestrator)``
+      land here too — :func:`asyncio.to_thread` happily runs the mock
+      and returns the configured value.
+
+    The previous "autospec MagicMock falls through" branch was removed
+    when the corresponding tests were migrated from
+    ``create_autospec(AIOrchestrator)`` to ``MagicMock(spec=...)``;
+    issue #306 closed.
+    """
+    if asyncio.iscoroutinefunction(call):
+        return await cast("Awaitable[_T]", call(*args, **kwargs))
+    # Sync path: cast narrows ``T | Awaitable[T]`` to ``T`` for the
+    # signature :func:`asyncio.to_thread` expects.
+    sync_call = cast("Callable[..., _T]", call)
+    return await asyncio.to_thread(sync_call, *args, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -245,7 +287,11 @@ CHANGES:
         )
 
         try:
-            result = self.orchestrator.generate(prompt, "markdown")
+            result = await _await_or_offload(
+                self.orchestrator.generate,
+                prompt,
+                "markdown",
+            )
         except GenerationError:
             logger.exception("Tuning failed")
             raise
