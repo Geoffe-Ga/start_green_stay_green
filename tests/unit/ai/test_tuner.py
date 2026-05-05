@@ -336,11 +336,24 @@ CHANGES:
             target_context="Target",
         )
 
+        # ``MagicMock(spec=...)`` (chosen over ``create_autospec`` so
+        # ``asyncio.iscoroutinefunction`` returns False on the sync
+        # ``generate`` method) does not validate call signatures
+        # automatically. Assert the shape explicitly so a future
+        # refactor of ``AIOrchestrator.generate`` that changes its
+        # signature will be caught here.
         orchestrator.generate.assert_called_once()
-        call_args = orchestrator.generate.call_args
-        assert call_args[0][1] == "markdown"  # output_format
-        assert "Source" in call_args[0][0]  # prompt contains source context
-        assert "Target" in call_args[0][0]  # prompt contains target context
+        positional, keyword = orchestrator.generate.call_args
+        assert (
+            len(positional) == 2
+        ), f"expected (prompt, output_format) positionally, got {positional!r}"
+        prompt_arg, format_arg = positional
+        assert isinstance(prompt_arg, str)
+        assert format_arg == "markdown"
+        assert keyword == {}, f"no kwargs expected, got {keyword!r}"
+        # Prompt content sanity: contains both contexts.
+        assert "Source" in prompt_arg
+        assert "Target" in prompt_arg
 
     @pytest.mark.asyncio
     async def test_tune_with_empty_content_raises_error(self) -> None:
