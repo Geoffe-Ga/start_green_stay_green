@@ -3,10 +3,18 @@
 **Created**: 2026-05-03
 **Owner**: Performance / AI Orchestration
 **Branch**: `claude/optimize-green-init-performance-Lsf7Y`
-**Status**: In progress — Phases 0, 1, and 2 (subagent parallelism) shipped on
-`claude/execute-optimization-roadmap-Fhfnu`. Remaining work: prompt caching
-+ tool_use parsing (Phase 2c), the two-pass split + `green enhance`
-(Phase 3), prompt cleanup (Phase 4), batch mode (Phase 5), UX/docs (Phase 6).
+**Status**: In progress.
+
+Shipped:
+- Phases 0 (telemetry), 1 (de-AI generators), 2 (subagent parallelism) — PR #305
+  merged onto main as commit `acf4572`.
+- Phase 3a (two-pass split foundation: `--offline` / `--no-enhance` flags +
+  `_generate_pass2_polish` rename) — branch
+  `claude/execute-optimization-roadmap-Fhfnu`, commit `1abea59`.
+
+Remaining: prompt caching + `tool_use` parsing (2c), `green enhance` command
++ `.enhance-state.json` resume (3b), prompt cleanup (4), batch mode (5),
+UX/docs (6).
 
 ---
 
