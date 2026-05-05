@@ -38,6 +38,7 @@ import typer
 from typer.testing import CliRunner
 
 from start_green_stay_green import cli
+from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
 
@@ -1250,7 +1251,7 @@ class TestGenerateSteps:
 class TestGenerateProjectFiles:
     """Test project file generation."""
 
-    @patch("start_green_stay_green.cli._generate_with_orchestrator")
+    @patch("start_green_stay_green.cli._generate_pass2_polish")
     @patch("start_green_stay_green.cli._generate_scripts_step")
     @patch("start_green_stay_green.cli._generate_precommit_step")
     @patch("start_green_stay_green.cli._generate_skills_step")
@@ -1259,7 +1260,7 @@ class TestGenerateProjectFiles:
         mock_skills: Mock,
         mock_precommit: Mock,
         mock_scripts: Mock,
-        mock_generate_orch: Mock,
+        mock_pass2: Mock,
     ) -> None:
         """Test _generate_project_files generates all steps."""
         mock_orchestrator = MagicMock()
@@ -1278,7 +1279,7 @@ class TestGenerateProjectFiles:
         mock_scripts.assert_called()
         mock_precommit.assert_called()
         mock_skills.assert_called()
-        mock_generate_orch.assert_called()
+        mock_pass2.assert_called()
 
     @patch("start_green_stay_green.cli._generate_scripts_step")
     @patch("start_green_stay_green.cli._generate_precommit_step")
@@ -1405,3 +1406,127 @@ class TestRunWithOrchestratorClose:
         # Even though ``_boom`` raised, the finally block must have
         # called aclose to release the httpx pool.
         orchestrator.aclose.assert_called_once()
+
+
+class TestValidatePass2Flags:
+    """Tests for the ``--offline`` / ``--no-enhance`` / ``--api-key`` validator."""
+
+    def test_offline_alone_is_valid(self) -> None:
+        """``--offline`` without conflicting flags passes validation."""
+        cli._validate_pass2_flags(offline=True, no_enhance=False, api_key=None)
+
+    def test_no_enhance_alone_is_valid(self) -> None:
+        """``--no-enhance`` without conflicting flags passes validation."""
+        cli._validate_pass2_flags(offline=False, no_enhance=True, api_key=None)
+
+    def test_no_enhance_with_api_key_is_valid(self) -> None:
+        """``--no-enhance`` plus ``--api-key`` is the documented happy path.
+
+        The user has a key (cached for a future ``green enhance``) but
+        does not want Pass 2 to run on this init.
+        """
+        cli._validate_pass2_flags(offline=False, no_enhance=True, api_key="sk-real-key")
+
+    def test_offline_and_no_enhance_together_rejected(self) -> None:
+        """Combining ``--offline`` and ``--no-enhance`` is redundant — error out."""
+        with patch("start_green_stay_green.cli.console") as mock_console:
+            with pytest.raises(typer.Exit) as exc:
+                cli._validate_pass2_flags(offline=True, no_enhance=True, api_key=None)
+            assert exc.value.exit_code == 1
+            mock_console.print.assert_called_once()
+            msg = mock_console.print.call_args[0][0]
+            assert "redundant" in msg
+
+    def test_offline_with_api_key_rejected(self) -> None:
+        """``--offline`` with ``--api-key`` is contradictory — error out."""
+        with patch("start_green_stay_green.cli.console") as mock_console:
+            with pytest.raises(typer.Exit) as exc:
+                cli._validate_pass2_flags(
+                    offline=True, no_enhance=False, api_key="sk-real-key"
+                )
+            assert exc.value.exit_code == 1
+            mock_console.print.assert_called_once()
+            msg = mock_console.print.call_args[0][0]
+            assert "contradictory" in msg
+
+
+class TestOfflineAndNoEnhanceFlags:
+    """End-to-end behaviour of the two new init flags."""
+
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_offline_skips_orchestrator_initialization(
+        self, mock_init_orch: Mock, tmp_path: Path
+    ) -> None:
+        """``--offline`` short-circuits before ``_initialize_orchestrator``."""
+        runner = CliRunner()
+        runner.invoke(
+            cli.app,
+            [
+                "init",
+                "--project-name",
+                "offline-smoke",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--offline",
+                "--no-interactive",
+            ],
+        )
+
+        # The point of --offline: the API-key resolution helper is
+        # never called, so a missing keyring or no env var cannot cause
+        # surprise prompts or warnings.
+        mock_init_orch.assert_not_called()
+
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_no_enhance_resolves_key_but_drops_orchestrator(
+        self, mock_init_orch: Mock, tmp_path: Path
+    ) -> None:
+        """``--no-enhance`` calls ``_initialize_orchestrator`` and discards it."""
+        # Stand up a fake orchestrator so the helper "succeeds".
+        mock_init_orch.return_value = MagicMock(spec=AIOrchestrator)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "init",
+                "--project-name",
+                "no-enhance-smoke",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-enhance",
+                "--no-interactive",
+            ],
+        )
+
+        # Key was resolved (Pass 2 is skipped, but the key is "kept"
+        # for a future ``green enhance``).
+        assert result.exit_code == 0
+        mock_init_orch.assert_called_once()
+        # The on-screen hint about ``green enhance`` should fire.
+        assert "green enhance" in result.stdout
+
+    def test_offline_and_no_enhance_together_exits(self, tmp_path: Path) -> None:
+        """Validator surfaces conflict with exit code 1."""
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "init",
+                "--project-name",
+                "conflict",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--offline",
+                "--no-enhance",
+                "--no-interactive",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "redundant" in result.stdout

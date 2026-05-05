@@ -1180,14 +1180,28 @@ def _generate_metrics_dashboard_step(
         )
 
 
-def _generate_with_orchestrator(
+def _generate_pass2_polish(
     project_path: Path,
     project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate AI-powered artifacts (CI, CLAUDE.md, etc.) with progress indicators."""
+    """Run Pass 2 of the optimization roadmap's two-pass init model.
+
+    Generates the artifacts whose output is *enhanced* by an
+    :class:`AIOrchestrator` when one is available. After Phase 1 every
+    one of these has a deterministic baseline path too, so the function
+    runs unconditionally; the orchestrator is what flips each step
+    between "render template" and "AI-tune the template". When
+    ``orchestrator`` is ``None`` (``--offline`` / ``--no-enhance`` /
+    no API key), every step still runs and produces a complete project
+    via the deterministic path.
+
+    The roadmap (plans/2026-05-03-claude-init-optimization-roadmap.md)
+    calls this Pass 2 to distinguish it from Pass 1's per-language
+    scaffold steps.
+    """
     _generate_ci_step(project_path, project_name, language, orchestrator, file_writer)
     _generate_review_step(project_path, file_writer)
     _generate_claude_md_step(
@@ -1249,9 +1263,10 @@ def _generate_project_files(
         _generate_readme_step(project_path, project_name, primary_language, file_writer)
         _generate_skills_step(project_path, file_writer)
 
-        # AI-powered features use primary language
+        # Pass 2 of the two-pass init model: AI-tunable artifacts.
+        # Uses the primary language for cross-language projects.
         try:
-            _generate_with_orchestrator(
+            _generate_pass2_polish(
                 project_path,
                 project_name,
                 primary_language,
@@ -1454,6 +1469,100 @@ def _validate_conflict_flags(
         raise typer.Exit(code=1)
 
 
+def _resolve_pass2_orchestrator(
+    *,
+    api_key: str | None,
+    offline: bool,
+    no_enhance: bool,
+    no_interactive: bool,
+) -> AIOrchestrator | None:
+    """Decide whether Pass 2 should run, and return the orchestrator if so.
+
+    Encapsulates the three flags that interact to control Pass 2 of the
+    two-pass init model so the ``init`` command stays at complexity
+    grade A. The branches are deliberately mutually-exclusive (the
+    validator guarantees this) so each one returns directly:
+
+    * ``--offline`` → never resolve a key, never instantiate an
+      orchestrator. Returns ``None`` and prints a dim status line so
+      the user sees that Pass 1 alone is running.
+    * ``--no-enhance`` → resolve the key (so it lands in the keyring
+      / env / etc. for a future ``green enhance``) and then discard
+      the orchestrator so Pass 2 is skipped this run.
+    * Otherwise → resolve the key normally; if no key is available
+      print the legacy "AI features disabled" instructions.
+    """
+    if offline:
+        console.print(
+            "[dim]Running in offline mode — Pass 1 only (no API calls).[/dim]"
+        )
+        return None
+
+    orchestrator = _initialize_orchestrator(api_key, no_interactive=no_interactive)
+
+    if no_enhance:
+        if orchestrator is not None:
+            console.print(
+                "[dim]--no-enhance: skipping Pass 2; run `green enhance` "
+                "later to add AI polish.[/dim]"
+            )
+        return None
+
+    if orchestrator is None:
+        console.print("\n[yellow]![/yellow] AI features disabled")
+        console.print("  - Skills: Using reference templates (no customization)")
+        console.print("  - CI/Subagents/CLAUDE.md: Using default templates")
+        console.print("\n  To enable AI features:")
+        console.print("    1. Get API key: https://console.anthropic.com/")
+        console.print("    2. Run: sgsg init --api-key YOUR_KEY")
+        console.print("    3. Or: Set ANTHROPIC_API_KEY environment variable\n")
+    return orchestrator
+
+
+def _validate_pass2_flags(
+    *,
+    offline: bool,
+    no_enhance: bool,
+    api_key: str | None,
+) -> None:
+    """Validate the Pass 2 flag combinations introduced for the two-pass init.
+
+    The flags interact in three ways the user might trip on:
+
+    * ``--offline`` and ``--no-enhance`` are redundant when used together
+      (both skip Pass 2). It is an error to combine them — the user
+      almost certainly meant one or the other.
+    * ``--offline`` with ``--api-key`` is contradictory (the user is
+      both supplying a key and asking to never use it). Treated as an
+      error to surface the mistake loudly.
+    * ``--no-enhance`` with ``--api-key`` is fine — the key gets
+      cached / kept available for a future ``green enhance`` (Phase 3b),
+      it just is not used during this init.
+
+    Args:
+        offline: Whether ``--offline`` was passed.
+        no_enhance: Whether ``--no-enhance`` was passed.
+        api_key: Whether ``--api-key`` was passed (any non-empty value).
+
+    Raises:
+        typer.Exit: If a contradictory combination is detected.
+    """
+    if offline and no_enhance:
+        console.print(
+            "[red]Error:[/red] --offline and --no-enhance are redundant; "
+            "pass only one.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+    if offline and api_key:
+        console.print(
+            "[red]Error:[/red] --offline and --api-key are contradictory; "
+            "drop --offline or omit --api-key.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def init(  # noqa: PLR0913
     project_name: Annotated[
@@ -1524,6 +1633,30 @@ def init(  # noqa: PLR0913
             hide_input=True,
         ),
     ] = None,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help=(
+                "Run only Pass 1 of the two-pass init: produce a complete "
+                "project from deterministic templates. No API key is read, "
+                "no network is used, no AI tuning is attempted. Equivalent "
+                "to ``--no-enhance`` plus suppressing every API-key prompt."
+            ),
+        ),
+    ] = False,
+    no_enhance: Annotated[
+        bool,
+        typer.Option(
+            "--no-enhance",
+            help=(
+                "Skip Pass 2 of the two-pass init (the AI-tuned polish over "
+                "CLAUDE.md and subagents). Unlike ``--offline`` the API key "
+                "resolution still runs, so a follow-up ``green enhance`` "
+                "call (Phase 3b) can pick up where this one left off."
+            ),
+        ),
+    ] = False,
     enable_live_dashboard: Annotated[
         bool,
         typer.Option(
@@ -1560,6 +1693,10 @@ def init(  # noqa: PLR0913
         interactive: Prompt per-file for conflict resolution.
         no_interactive: Non-interactive mode.
         api_key: Optional Claude API key for AI features.
+        offline: Skip API-key resolution and Pass 2 entirely; produces
+            a complete project from deterministic templates only.
+        no_enhance: Skip Pass 2 (AI tuning) but still resolve the API
+            key for a future ``green enhance`` invocation.
         enable_live_dashboard: Generate live metrics dashboard with workflow.
         timing_json: Optional path to write a timing/telemetry JSON report.
         config: Configuration file path.
@@ -1568,6 +1705,7 @@ def init(  # noqa: PLR0913
         typer.Exit: If validation fails or generation errors occur.
     """
     _validate_conflict_flags(force, interactive)
+    _validate_pass2_flags(offline=offline, no_enhance=no_enhance, api_key=api_key)
 
     # Load configuration
     config_data = _load_config_data(config)
@@ -1601,17 +1739,12 @@ def init(  # noqa: PLR0913
         )
         return
 
-    # Initialize optional AI orchestrator (after dry-run check)
-    orchestrator = _initialize_orchestrator(api_key, no_interactive=no_interactive)
-
-    if orchestrator is None:
-        console.print("\n[yellow]![/yellow] AI features disabled")
-        console.print("  - Skills: Using reference templates (no customization)")
-        console.print("  - CI/Subagents/CLAUDE.md: Using default templates")
-        console.print("\n  To enable AI features:")
-        console.print("    1. Get API key: https://console.anthropic.com/")
-        console.print("    2. Run: sgsg init --api-key YOUR_KEY")
-        console.print("    3. Or: Set ANTHROPIC_API_KEY environment variable\n")
+    orchestrator = _resolve_pass2_orchestrator(
+        api_key=api_key,
+        offline=offline,
+        no_enhance=no_enhance,
+        no_interactive=no_interactive,
+    )
 
     # Create project directory
     project_path.mkdir(parents=True, exist_ok=True)
