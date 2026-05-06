@@ -1459,7 +1459,7 @@ class TestOfflineAndNoEnhanceFlags:
     ) -> None:
         """``--offline`` short-circuits before ``_initialize_orchestrator``."""
         runner = CliRunner()
-        runner.invoke(
+        result = runner.invoke(
             cli.app,
             [
                 "init",
@@ -1473,6 +1473,12 @@ class TestOfflineAndNoEnhanceFlags:
                 "--no-interactive",
             ],
         )
+
+        # ``runner.invoke`` swallows exceptions by default, so a broken
+        # ``--offline`` path could still leave ``mock_init_orch.assert_
+        # not_called()`` passing. Anchor the test on a successful exit
+        # first so a regression that crashes mid-init fails loudly.
+        assert result.exit_code == 0, result.stdout
 
         # The point of --offline: the API-key resolution helper is
         # never called, so a missing keyring or no env var cannot cause
@@ -1509,6 +1515,78 @@ class TestOfflineAndNoEnhanceFlags:
         mock_init_orch.assert_called_once()
         # The on-screen hint about ``green enhance`` should fire.
         assert "green enhance" in result.stdout
+
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_no_enhance_with_no_api_key_prints_actionable_hint(
+        self, mock_init_orch: Mock, tmp_path: Path
+    ) -> None:
+        """``--no-enhance`` without an API key still tells the user what happened.
+
+        Regression test for the silent-feedback bug: without this
+        branch the user sees neither the legacy "AI features disabled"
+        block (suppressed by ``--no-enhance``) nor the
+        "run ``green enhance`` later" hint, leaving them with no idea
+        what their flag did.
+        """
+        mock_init_orch.return_value = None  # Simulate no key found.
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "init",
+                "--project-name",
+                "no-enhance-no-key",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-enhance",
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mock_init_orch.assert_called_once()
+        # Specifically the "no API key found" branch — separate string
+        # from the key-found branch so a future refactor that collapses
+        # them is loud.
+        assert "no API key found" in result.stdout
+        # And the actionable next-step pointer.
+        assert "ANTHROPIC_API_KEY" in result.stdout
+
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_no_enhance_with_explicit_api_key_is_documented_happy_path(
+        self, mock_init_orch: Mock, tmp_path: Path
+    ) -> None:
+        """``--no-enhance --api-key X`` is the documented "tune later" combo."""
+        mock_init_orch.return_value = MagicMock(spec=AIOrchestrator)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "init",
+                "--project-name",
+                "no-enhance-with-key",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-enhance",
+                "--api-key",
+                "sk-test-key",
+                "--no-interactive",
+            ],
+        )
+
+        # Validator accepts the combo (no exit 1) and the helper is
+        # called with the explicit key.
+        assert result.exit_code == 0
+        mock_init_orch.assert_called_once()
+        # The key-found branch ran (not the no-key branch).
+        assert "run `green enhance`" in result.stdout
+        assert "no API key found" not in result.stdout
 
     def test_offline_and_no_enhance_together_exits(self, tmp_path: Path) -> None:
         """Validator surfaces conflict with exit code 1."""

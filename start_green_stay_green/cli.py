@@ -1501,10 +1501,20 @@ def _resolve_pass2_orchestrator(
     orchestrator = _initialize_orchestrator(api_key, no_interactive=no_interactive)
 
     if no_enhance:
+        # Always print *something* so the user knows --no-enhance had an
+        # effect, regardless of whether a key was resolved. The two
+        # paths differ in what the user can do next: with a key cached,
+        # ``green enhance`` will pick it up; without, they need to set
+        # ANTHROPIC_API_KEY first.
         if orchestrator is not None:
             console.print(
                 "[dim]--no-enhance: skipping Pass 2; run `green enhance` "
                 "later to add AI polish.[/dim]"
+            )
+        else:
+            console.print(
+                "[dim]--no-enhance: no API key found; Pass 2 skipped. "
+                "Set ANTHROPIC_API_KEY before running `green enhance`.[/dim]"
             )
         return None
 
@@ -1540,9 +1550,11 @@ def _validate_pass2_flags(
       it just is not used during this init.
 
     Args:
-        offline: Whether ``--offline`` was passed.
-        no_enhance: Whether ``--no-enhance`` was passed.
-        api_key: Whether ``--api-key`` was passed (any non-empty value).
+        offline: ``True`` if ``--offline`` was passed.
+        no_enhance: ``True`` if ``--no-enhance`` was passed.
+        api_key: The string value passed to ``--api-key``, or ``None``
+            if the flag was omitted. Truthiness is what matters here:
+            an empty string is treated the same as ``None``.
 
     Raises:
         typer.Exit: If a contradictory combination is detected.
