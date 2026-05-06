@@ -1640,3 +1640,317 @@ class TestOfflineAndNoEnhanceFlags:
         )
         assert result.exit_code == 1
         assert "contradictory" in result.stdout
+
+
+class TestEnhanceDetectionHelpers:
+    """Cover the auto-detection helpers used by ``green enhance``."""
+
+    def test_detect_project_name_reads_h1(self, tmp_path: Path) -> None:
+        """``_detect_project_name`` parses the ``Claude Code Project Context`` H1."""
+        (tmp_path / "CLAUDE.md").write_text(
+            "# Claude Code Project Context: my-cool-app\n\nrest of file...\n",
+            encoding="utf-8",
+        )
+        assert cli._detect_project_name(tmp_path) == "my-cool-app"
+
+    def test_detect_project_name_returns_none_without_claude_md(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing CLAUDE.md returns ``None`` (caller falls back to --project-name)."""
+        assert cli._detect_project_name(tmp_path) is None
+
+    def test_detect_project_name_returns_none_for_unmatched_h1(
+        self, tmp_path: Path
+    ) -> None:
+        """Different H1 → ``None`` so we don't grab the wrong string."""
+        (tmp_path / "CLAUDE.md").write_text(
+            "# Some Other Title\n\n",
+            encoding="utf-8",
+        )
+        assert cli._detect_project_name(tmp_path) is None
+
+    def test_detect_project_language_python(self, tmp_path: Path) -> None:
+        """``pyproject.toml`` → python."""
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
+        assert cli._detect_project_language(tmp_path) == "python"
+
+    def test_detect_project_language_typescript(self, tmp_path: Path) -> None:
+        """``package.json`` → typescript."""
+        (tmp_path / "package.json").write_text("{}")
+        assert cli._detect_project_language(tmp_path) == "typescript"
+
+    def test_detect_project_language_returns_none_for_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """No probe matches → ``None``."""
+        assert cli._detect_project_language(tmp_path) is None
+
+
+class TestEnhanceTargetResolution:
+    """Cover ``_resolve_enhance_targets`` and ``_validate_enhance_target``."""
+
+    def test_no_targets_means_all(self) -> None:
+        """``None`` (no flag) selects every canonical target."""
+        assert cli._resolve_enhance_targets(None) == cli._ENHANCE_TARGETS
+
+    def test_empty_list_means_all(self) -> None:
+        """An empty list also means "all" — shouldn't deselect everything."""
+        assert cli._resolve_enhance_targets([]) == cli._ENHANCE_TARGETS
+
+    def test_repeated_flag(self) -> None:
+        """``--targets claude-md --targets subagents`` → both, in canonical order."""
+        assert cli._resolve_enhance_targets(["claude-md", "subagents"]) == (
+            "claude-md",
+            "subagents",
+        )
+
+    def test_comma_separated(self) -> None:
+        """``--targets claude-md,subagents`` → both, in canonical order."""
+        assert cli._resolve_enhance_targets(["claude-md,subagents"]) == (
+            "claude-md",
+            "subagents",
+        )
+
+    def test_canonical_ordering(self) -> None:
+        """Order in input is irrelevant; canonical order wins."""
+        assert cli._resolve_enhance_targets(["subagents", "claude-md"]) == (
+            "claude-md",
+            "subagents",
+        )
+
+    def test_deduplicates(self) -> None:
+        """Duplicate targets are squashed."""
+        assert cli._resolve_enhance_targets(["claude-md", "claude-md,claude-md"]) == (
+            "claude-md",
+        )
+
+    def test_unknown_target_raises(self) -> None:
+        """An unknown target surfaces a typer.BadParameter."""
+        with pytest.raises(typer.BadParameter, match="unknown target"):
+            cli._resolve_enhance_targets(["bogus"])
+
+
+class TestEnhanceCommand:
+    """End-to-end CLI tests for the new ``enhance`` command."""
+
+    @staticmethod
+    def _flat(text: str) -> str:
+        """Collapse whitespace so substring checks survive Rich line-wrapping."""
+        return " ".join(text.split())
+
+    @staticmethod
+    def _make_project(tmp_path: Path, *, name: str, language: str) -> Path:
+        """Build a minimal green-init-shaped directory layout."""
+        project = tmp_path / name
+        project.mkdir()
+        (project / "CLAUDE.md").write_text(
+            f"# Claude Code Project Context: {name}\n\nbaseline content.\n",
+            encoding="utf-8",
+        )
+        # Drop a marker file so language detection works without flags.
+        if language == "python":
+            (project / "pyproject.toml").write_text("[project]\nname='x'\n")
+        elif language == "typescript":
+            (project / "package.json").write_text("{}")
+        # Pre-create the subagents dir so the writer doesn't have to
+        # mkdir during the test (mirrors real init output).
+        (project / ".claude" / "agents").mkdir(parents=True)
+        return project
+
+    def test_missing_path_exits(self, tmp_path: Path) -> None:
+        """Non-existent path exits 1 with an actionable message."""
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(tmp_path / "does-not-exist")],
+        )
+        assert result.exit_code == 1
+        assert "does not exist" in self._flat(result.stdout)
+
+    def test_path_is_a_file_exits(self, tmp_path: Path) -> None:
+        """Pointing at a file (not directory) exits 1."""
+        a_file = tmp_path / "looks-like-a-project"
+        a_file.write_text("not a directory")
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["enhance", str(a_file)])
+        assert result.exit_code == 1
+        assert "is not a directory" in self._flat(result.stdout)
+
+    def test_directory_without_claude_md_exits(self, tmp_path: Path) -> None:
+        """Empty directory without CLAUDE.md exits 1 with the actionable hint."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["enhance", str(tmp_path)])
+        assert result.exit_code == 1
+        assert "does not look like a green-init project" in self._flat(result.stdout)
+
+    def test_unknown_target_exits(self, tmp_path: Path) -> None:
+        """``--targets bogus`` exits non-zero before any API call."""
+        project = self._make_project(tmp_path, name="proj", language="python")
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--targets", "bogus"],
+        )
+        assert result.exit_code != 0
+        # ``typer.BadParameter`` writes to stderr; CliRunner.output
+        # mixes both streams while .stdout omits stderr.
+        assert "unknown target" in self._flat(result.output)
+
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_no_api_key_exits_with_actionable_message(
+        self, mock_init: Mock, tmp_path: Path
+    ) -> None:
+        """``enhance`` cannot run without a key — fail loudly, don't no-op."""
+        mock_init.return_value = None  # No key available.
+        project = self._make_project(tmp_path, name="needs-key", language="python")
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--no-interactive"],
+        )
+        assert result.exit_code == 1
+        flat = self._flat(result.stdout)
+        assert "requires an Anthropic API key" in flat
+        assert "ANTHROPIC_API_KEY" in flat
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_default_runs_every_target(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """No ``--targets`` flag → both helpers are invoked."""
+        mock_init.return_value = MagicMock(spec=AIOrchestrator)
+        project = self._make_project(tmp_path, name="full", language="python")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--no-interactive"],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        mock_claude.assert_called_once()
+        mock_subagents.assert_called_once()
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_targets_claude_md_skips_subagents(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """``--targets claude-md`` runs only that target."""
+        mock_init.return_value = MagicMock(spec=AIOrchestrator)
+        project = self._make_project(tmp_path, name="claude-only", language="python")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--targets",
+                "claude-md",
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        mock_claude.assert_called_once()
+        mock_subagents.assert_not_called()
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_dry_run_propagates_to_helpers(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """``--dry-run`` flows through to every target helper."""
+        mock_init.return_value = MagicMock(spec=AIOrchestrator)
+        project = self._make_project(tmp_path, name="preview", language="python")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--dry-run", "--no-interactive"],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        # Both helpers receive ``dry_run=True``.
+        assert mock_claude.call_args.kwargs["dry_run"] is True
+        assert mock_subagents.call_args.kwargs["dry_run"] is True
+        assert "Dry run complete" in result.stdout
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_explicit_overrides_skip_detection(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """``-n`` and ``-l`` win over auto-detection from the project."""
+        mock_init.return_value = MagicMock(spec=AIOrchestrator)
+        # Make the project look like Python + name="auto-name", but
+        # override both at the CLI.
+        project = self._make_project(tmp_path, name="auto-name", language="python")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--project-name",
+                "explicit-name",
+                "--language",
+                "typescript",
+                "--targets",
+                "claude-md",
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        # The helper was called with the *explicit* values, not the
+        # auto-detected ones.
+        call = mock_claude.call_args
+        # positional args: (project_path, project_name, language, orchestrator)
+        assert call.args[1] == "explicit-name"
+        assert call.args[2] == "typescript"
+
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_unknown_language_in_override_exits(
+        self, mock_init: Mock, tmp_path: Path
+    ) -> None:
+        """``-l cobol`` is rejected before any API call."""
+        mock_init.return_value = MagicMock(spec=AIOrchestrator)
+        project = self._make_project(tmp_path, name="bad-lang", language="python")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--language",
+                "cobol",
+                "--no-interactive",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Unsupported language" in self._flat(result.stdout)

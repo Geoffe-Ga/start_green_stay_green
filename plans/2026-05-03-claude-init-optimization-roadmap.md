@@ -9,12 +9,15 @@ Shipped:
 - Phases 0 (telemetry), 1 (de-AI generators), 2 (subagent parallelism) — PR #305
   merged onto main as commit `acf4572`.
 - Phase 3a (two-pass split foundation: `--offline` / `--no-enhance` flags +
-  `_generate_pass2_polish` rename) — branch
-  `claude/execute-optimization-roadmap-Fhfnu`, commit `1abea59`.
+  `_generate_pass2_polish` rename) — PR #308 merged onto main as commit
+  `0986d89`.
+- Phase 3b (MVP `green enhance [PATH]` command — re-runs Pass 2 against an
+  existing project; `--targets`, `--dry-run`, auto-detection of project
+  name + language) — branch `claude/execute-optimization-roadmap-Fhfnu`.
 
-Remaining: prompt caching + `tool_use` parsing (2c), `green enhance` command
-+ `.enhance-state.json` resume (3b), prompt cleanup (4), batch mode (5),
-UX/docs (6).
+Remaining: prompt caching + `tool_use` parsing (2c), `.enhance-state.json`
+resume + source-hash skip-logic (3c — splits the rest of Phase 3 from the
+roadmap), prompt cleanup (4), batch mode (5), UX/docs (6).
 
 ---
 
