@@ -1608,3 +1608,35 @@ class TestOfflineAndNoEnhanceFlags:
         )
         assert result.exit_code == 1
         assert "redundant" in result.stdout
+
+    def test_offline_with_api_key_together_exits(self, tmp_path: Path) -> None:
+        """Validator surfaces ``--offline --api-key`` conflict at the CLI layer.
+
+        The validator unit test (``TestValidatePass2Flags
+        .test_offline_with_api_key_rejected``) covers the validator
+        in isolation, but typer's option-parsing layer is its own
+        moving part. The symmetric ``--offline --no-enhance`` test
+        above exercises the same path end-to-end; this test is the
+        missing counterpart that locks the ``--offline --api-key``
+        wiring all the way from CLI argv to the validator's exit-1
+        path.
+        """
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "init",
+                "--project-name",
+                "conflict",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--offline",
+                "--api-key",
+                "sk-test-key",
+                "--no-interactive",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "contradictory" in result.stdout
