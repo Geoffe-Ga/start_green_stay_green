@@ -41,6 +41,7 @@ from start_green_stay_green import cli
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
+from start_green_stay_green.utils.enhance_state import load_state
 
 
 class TestVersionCommand:
@@ -1824,7 +1825,14 @@ class TestEnhanceCommand:
         tmp_path: Path,
     ) -> None:
         """No ``--targets`` flag → both helpers are invoked."""
-        mock_init.return_value = MagicMock(spec=AIOrchestrator)
+        # ``model`` is an instance attribute set in
+        # ``AIOrchestrator.__init__`` — ``MagicMock(spec=...)`` does
+        # not auto-populate instance attrs, so wire it explicitly for
+        # Phase 3c's ``state.mark_completed(..., orchestrator.model)``
+        # path.
+        orch = MagicMock(spec=AIOrchestrator)
+        orch.model = "claude-sonnet-4-5"
+        mock_init.return_value = orch
         project = self._make_project(tmp_path, name="full", language="python")
 
         runner = CliRunner()
@@ -1848,7 +1856,14 @@ class TestEnhanceCommand:
         tmp_path: Path,
     ) -> None:
         """``--targets claude-md`` runs only that target."""
-        mock_init.return_value = MagicMock(spec=AIOrchestrator)
+        # ``model`` is an instance attribute set in
+        # ``AIOrchestrator.__init__`` — ``MagicMock(spec=...)`` does
+        # not auto-populate instance attrs, so wire it explicitly for
+        # Phase 3c's ``state.mark_completed(..., orchestrator.model)``
+        # path.
+        orch = MagicMock(spec=AIOrchestrator)
+        orch.model = "claude-sonnet-4-5"
+        mock_init.return_value = orch
         project = self._make_project(tmp_path, name="claude-only", language="python")
 
         runner = CliRunner()
@@ -1878,7 +1893,14 @@ class TestEnhanceCommand:
         tmp_path: Path,
     ) -> None:
         """``--dry-run`` flows through to every target helper."""
-        mock_init.return_value = MagicMock(spec=AIOrchestrator)
+        # ``model`` is an instance attribute set in
+        # ``AIOrchestrator.__init__`` — ``MagicMock(spec=...)`` does
+        # not auto-populate instance attrs, so wire it explicitly for
+        # Phase 3c's ``state.mark_completed(..., orchestrator.model)``
+        # path.
+        orch = MagicMock(spec=AIOrchestrator)
+        orch.model = "claude-sonnet-4-5"
+        mock_init.return_value = orch
         project = self._make_project(tmp_path, name="preview", language="python")
 
         runner = CliRunner()
@@ -1904,7 +1926,14 @@ class TestEnhanceCommand:
         tmp_path: Path,
     ) -> None:
         """``-n`` and ``-l`` win over auto-detection from the project."""
-        mock_init.return_value = MagicMock(spec=AIOrchestrator)
+        # ``model`` is an instance attribute set in
+        # ``AIOrchestrator.__init__`` — ``MagicMock(spec=...)`` does
+        # not auto-populate instance attrs, so wire it explicitly for
+        # Phase 3c's ``state.mark_completed(..., orchestrator.model)``
+        # path.
+        orch = MagicMock(spec=AIOrchestrator)
+        orch.model = "claude-sonnet-4-5"
+        mock_init.return_value = orch
         # Make the project look like Python + name="auto-name", but
         # override both at the CLI.
         project = self._make_project(tmp_path, name="auto-name", language="python")
@@ -1938,7 +1967,14 @@ class TestEnhanceCommand:
         self, mock_init: Mock, tmp_path: Path
     ) -> None:
         """``-l cobol`` is rejected before any API call."""
-        mock_init.return_value = MagicMock(spec=AIOrchestrator)
+        # ``model`` is an instance attribute set in
+        # ``AIOrchestrator.__init__`` — ``MagicMock(spec=...)`` does
+        # not auto-populate instance attrs, so wire it explicitly for
+        # Phase 3c's ``state.mark_completed(..., orchestrator.model)``
+        # path.
+        orch = MagicMock(spec=AIOrchestrator)
+        orch.model = "claude-sonnet-4-5"
+        mock_init.return_value = orch
         project = self._make_project(tmp_path, name="bad-lang", language="python")
 
         runner = CliRunner()
@@ -1954,3 +1990,221 @@ class TestEnhanceCommand:
         )
         assert result.exit_code == 1
         assert "Unsupported language" in self._flat(result.stdout)
+
+
+class TestEnhanceSkipUnchanged:
+    """Phase 3c — ``green enhance`` skips targets whose source hash matches state."""
+
+    @staticmethod
+    def _make_project(tmp_path: Path) -> Path:
+        project = tmp_path / "phase-3c-project"
+        project.mkdir()
+        (project / "CLAUDE.md").write_text(
+            "# Claude Code Project Context: phase-3c-project\n", encoding="utf-8"
+        )
+        (project / "pyproject.toml").write_text("[project]\nname='x'\n")
+        (project / ".claude" / "agents").mkdir(parents=True)
+        return project
+
+    @staticmethod
+    def _flat(text: str) -> str:
+        return " ".join(text.split())
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_state_file_written_after_first_enhance(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """First enhance run writes ``.claude/.enhance-state.json`` for both targets."""
+        orch = MagicMock(spec=AIOrchestrator)
+        orch.model = "claude-sonnet-4-5"
+        mock_init.return_value = orch
+        project = self._make_project(tmp_path)
+
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+
+        assert result.exit_code == 0, result.stdout
+
+        state = load_state(project)
+        assert "claude-md" in state.completed
+        assert "subagents" in state.completed
+        # Model name is recorded for diagnostics.
+        assert state.completed["claude-md"].model == "claude-sonnet-4-5"
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_unchanged_target_is_skipped(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Second enhance with no input change skips both target helpers."""
+        orch = MagicMock(spec=AIOrchestrator)
+        orch.model = "claude-sonnet-4-5"
+        mock_init.return_value = orch
+        project = self._make_project(tmp_path)
+
+        runner = CliRunner()
+        # First run — both targets execute, state is written.
+        first = runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+        assert first.exit_code == 0
+        assert mock_claude.call_count == 1
+        assert mock_subagents.call_count == 1
+
+        # Second run — no source changed → both helpers skipped.
+        mock_claude.reset_mock()
+        mock_subagents.reset_mock()
+        second = runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+
+        assert second.exit_code == 0, second.stdout
+        mock_claude.assert_not_called()
+        mock_subagents.assert_not_called()
+        flat = self._flat(second.stdout)
+        assert "CLAUDE.md unchanged" in flat
+        assert "Subagents unchanged" in flat
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_force_overrides_skip(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """``--force`` re-tunes even when the source hash matches."""
+        orch = MagicMock(spec=AIOrchestrator)
+        orch.model = "claude-sonnet-4-5"
+        mock_init.return_value = orch
+        project = self._make_project(tmp_path)
+
+        runner = CliRunner()
+        # Seed state with a successful first run.
+        runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+        mock_claude.reset_mock()
+        mock_subagents.reset_mock()
+
+        # --force → skip is bypassed.
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--no-interactive", "--force"],
+        )
+        assert result.exit_code == 0
+        assert mock_claude.call_count == 1
+        assert mock_subagents.call_count == 1
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_changed_overrides_skip(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Project name change → CLAUDE.md hash differs → re-tune fires."""
+        orch = MagicMock(spec=AIOrchestrator)
+        orch.model = "claude-sonnet-4-5"
+        mock_init.return_value = orch
+        project = self._make_project(tmp_path)
+
+        runner = CliRunner()
+        # Seed state with the auto-detected project name.
+        runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+        mock_claude.reset_mock()
+        mock_subagents.reset_mock()
+
+        # Override the project name → both target hashes change.
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--project-name",
+                "renamed-project",
+                "--no-interactive",
+            ],
+        )
+        assert result.exit_code == 0
+        assert mock_claude.call_count == 1
+        assert mock_subagents.call_count == 1
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_dry_run_does_not_persist_state(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """``--dry-run`` runs the helpers but doesn't claim a tune happened."""
+        orch = MagicMock(spec=AIOrchestrator)
+        orch.model = "claude-sonnet-4-5"
+        mock_init.return_value = orch
+        project = self._make_project(tmp_path)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--dry-run", "--no-interactive"],
+        )
+
+        assert result.exit_code == 0
+        # The state file must not exist after a dry run; otherwise the
+        # next real run would skip these targets thinking they're up
+        # to date when no actual write happened.
+        state_file = project / ".claude" / ".enhance-state.json"
+        assert not state_file.exists(), state_file.read_text(encoding="utf-8")
+
+
+class TestEnhanceSourceHashes:
+    """Hash determinism + sensitivity for the per-target hash helpers."""
+
+    def test_claude_md_hash_changes_with_project_name(self) -> None:
+        a = cli._compute_target_source_hash("claude-md", "alpha", "python")
+        b = cli._compute_target_source_hash("claude-md", "beta", "python")
+        assert a != b
+
+    def test_claude_md_hash_changes_with_language(self) -> None:
+        a = cli._compute_target_source_hash("claude-md", "alpha", "python")
+        b = cli._compute_target_source_hash("claude-md", "alpha", "go")
+        assert a != b
+
+    def test_claude_md_hash_is_deterministic(self) -> None:
+        a = cli._compute_target_source_hash("claude-md", "alpha", "python")
+        b = cli._compute_target_source_hash("claude-md", "alpha", "python")
+        assert a == b
+        assert a.startswith("sha256:")
+
+    def test_subagents_hash_changes_with_project_name(self) -> None:
+        a = cli._compute_target_source_hash("subagents", "alpha", "python")
+        b = cli._compute_target_source_hash("subagents", "beta", "python")
+        assert a != b
+
+    def test_subagents_hash_is_deterministic(self) -> None:
+        a = cli._compute_target_source_hash("subagents", "alpha", "python")
+        b = cli._compute_target_source_hash("subagents", "alpha", "python")
+        assert a == b
+
+    def test_unknown_target_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown target"):
+            cli._compute_target_source_hash("bogus", "alpha", "python")
+
+    def test_target_namespace_separation(self) -> None:
+        """Two targets with same metadata must hash differently — no collisions."""
+        a = cli._compute_target_source_hash("claude-md", "alpha", "python")
+        b = cli._compute_target_source_hash("subagents", "alpha", "python")
+        assert a != b

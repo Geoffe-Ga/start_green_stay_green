@@ -21,9 +21,12 @@ from typing import TYPE_CHECKING
 from typing import TypeVar
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from collections.abc import Coroutine
     from collections.abc import Generator
     from collections.abc import Sequence
+
+    from start_green_stay_green.utils.enhance_state import EnhanceState
 
 from rich.console import Console
 from rich.panel import Panel
@@ -63,6 +66,9 @@ from start_green_stay_green.generators.tests_gen import TestsGenerator
 from start_green_stay_green.utils.async_bridge import run_async
 from start_green_stay_green.utils.credentials import get_api_key_from_keyring
 from start_green_stay_green.utils.credentials import store_api_key_in_keyring
+from start_green_stay_green.utils.enhance_state import hash_inputs
+from start_green_stay_green.utils.enhance_state import load_state
+from start_green_stay_green.utils.enhance_state import save_state
 from start_green_stay_green.utils.file_writer import FileWriter
 from start_green_stay_green.utils.timing import TimingReport
 from start_green_stay_green.utils.timing import set_active_report
@@ -1939,6 +1945,83 @@ def _require_enhance_orchestrator(
     return orchestrator
 
 
+def _hash_claude_md_inputs(project_name: str, language: str) -> str:
+    """Hash the inputs that drive a ``CLAUDE.md`` re-tune.
+
+    Captures everything that would alter the model's output: the
+    reference template content (so updates to the canonical template
+    invalidate stale tunes), plus the project metadata (name +
+    language + the script and skill lists baked into the prompt).
+    """
+    project_root = Path(__file__).parent.parent
+    reference = project_root / "reference" / "claude" / "CLAUDE.md"
+    template_bytes = (
+        reference.read_text(encoding="utf-8") if reference.is_file() else ""
+    )
+    return hash_inputs(
+        [
+            "claude-md\x00",
+            f"project_name={project_name}\x00",
+            f"language={language}\x00",
+            f"scripts={','.join(sorted(_CLAUDE_MD_SCRIPTS))}\x00",
+            f"skills={','.join(sorted(REQUIRED_SKILLS))}\x00",
+            "template:\x00",
+            template_bytes,
+        ]
+    )
+
+
+def _hash_subagents_inputs(project_name: str, language: str) -> str:
+    """Hash the inputs that drive a subagents re-tune.
+
+    Captures the union of every required reference subagent's content
+    (so a maintainer-side update to any one of them invalidates the
+    cached tune) plus the target context (project name + language)
+    which flows verbatim into the prompt.
+    """
+    parts: list[str | bytes] = [
+        "subagents\x00",
+        f"project_name={project_name}\x00",
+        f"language={language}\x00",
+    ]
+    # Walk REQUIRED_AGENTS in declaration order so the hash is
+    # deterministic regardless of dict insertion-order quirks.
+    for agent_name, source_file in REQUIRED_AGENTS.items():
+        source_path = REFERENCE_AGENTS_DIR / source_file
+        body = source_path.read_text(encoding="utf-8") if source_path.is_file() else ""
+        parts.append(f"agent={agent_name}\x00")
+        parts.append(body)
+    return hash_inputs(parts)
+
+
+# Single source of truth for the script list embedded in the
+# CLAUDE.md prompt. Kept here (not duplicated in
+# ``_enhance_claude_md``) so the hash stays in sync with the actual
+# input.
+_CLAUDE_MD_SCRIPTS: tuple[str, ...] = (
+    "check-all.sh",
+    "test.sh",
+    "lint.sh",
+    "format.sh",
+    "security.sh",
+    "mutation.sh",
+)
+
+
+def _compute_target_source_hash(
+    target: str,
+    project_name: str,
+    language: str,
+) -> str:
+    """Dispatch to the per-target hash function."""
+    if target == "claude-md":
+        return _hash_claude_md_inputs(project_name, language)
+    if target == "subagents":
+        return _hash_subagents_inputs(project_name, language)
+    msg = f"unknown target: {target}"
+    raise ValueError(msg)
+
+
 def _enhance_claude_md(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
     project_path: Path,
     project_name: str,
@@ -1961,14 +2044,7 @@ def _enhance_claude_md(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
             {
                 "project_name": project_name,
                 "language": language,
-                "scripts": [
-                    "check-all.sh",
-                    "test.sh",
-                    "lint.sh",
-                    "format.sh",
-                    "security.sh",
-                    "mutation.sh",
-                ],
+                "scripts": list(_CLAUDE_MD_SCRIPTS),
                 "skills": REQUIRED_SKILLS.copy(),
             }
         )
@@ -2080,6 +2156,144 @@ def _resolve_enhance_metadata(
         _resolve_enhance_name(project_path, project_name),
         _resolve_enhance_language(project_path, language),
     )
+
+
+# Map from target name → (skip-message, name-of-helper-on-this-module).
+# Storing the helper *name* (rather than the function reference) lets
+# tests patch ``cli._enhance_claude_md`` / ``cli._enhance_subagents``
+# at the module attribute level and have the dispatcher pick up the
+# patched version at call time. Python's late binding via
+# ``globals()[name]`` is the simplest way to achieve that without
+# adding a registry layer.
+_ENHANCE_DISPATCH: dict[str, tuple[str, str]] = {
+    "claude-md": (
+        "[dim]CLAUDE.md unchanged since last successful tune — "
+        "skipping (use --force to re-tune anyway).[/dim]",
+        "_enhance_claude_md",
+    ),
+    "subagents": (
+        "[dim]Subagents unchanged since last successful tune — "
+        "skipping (use --force to re-tune anyway).[/dim]",
+        "_enhance_subagents",
+    ),
+}
+
+
+def _dispatch_enhance_targets(  # noqa: PLR0913 — orchestration glue
+    targets: tuple[str, ...],
+    *,
+    project_path: Path,
+    project_name: str,
+    language: str,
+    orchestrator: AIOrchestrator,
+    state: EnhanceState,
+    target_hashes: dict[str, str],
+    dry_run: bool,
+    force: bool,
+    file_writer: FileWriter | None,
+) -> list[str]:
+    """Drive Pass 2 across each selected target with the skip/force logic.
+
+    Returns the list of target names that were skipped because the
+    source hash matched a stored completion. The caller uses that to
+    decide whether the state file is worth re-writing.
+    """
+    skipped: list[str] = []
+    for target in targets:
+        skip_message, helper_name = _ENHANCE_DISPATCH[target]
+        target_hash = target_hashes[target]
+        if not force and state.is_unchanged(target, target_hash):
+            console.print(skip_message)
+            skipped.append(target)
+            continue
+        # Late-bound lookup so test ``patch("cli._enhance_claude_md")``
+        # decorations are honoured.
+        helper: Callable[..., None] = globals()[helper_name]
+        helper(
+            project_path,
+            project_name,
+            language,
+            orchestrator,
+            dry_run=dry_run,
+            file_writer=file_writer,
+        )
+        if not dry_run:
+            state.mark_completed(target, target_hash, orchestrator.model)
+    return skipped
+
+
+def _persist_enhance_state(
+    project_path: Path,
+    state: EnhanceState,
+    *,
+    skipped: list[str],
+    selected_targets: tuple[str, ...],
+    dry_run: bool,
+) -> None:
+    """Save the state file unless this run wrote nothing.
+
+    A "nothing happened" run is either a ``--dry-run`` (we ran the
+    API calls but skipped the writes) or a run where every selected
+    target was skipped because its source hash matched. In both
+    cases the prior state on disk is still authoritative.
+    """
+    if dry_run:
+        return
+    if len(skipped) >= len(selected_targets):
+        return
+    save_state(project_path, state)
+
+
+def _print_enhance_summary(*, project_name: str, dry_run: bool) -> None:
+    """Print the closing one-liner for an ``enhance`` invocation."""
+    if dry_run:
+        console.print("\n[green]✓[/green] Dry run complete — no files written.")
+    else:
+        console.print(f"\n[green]✓[/green] Enhancement complete: {project_name}")
+
+
+def _run_enhance_pipeline(  # noqa: PLR0913 — orchestration glue
+    *,
+    project_path: Path,
+    project_name: str,
+    language: str,
+    selected_targets: tuple[str, ...],
+    orchestrator: AIOrchestrator,
+    file_writer: FileWriter | None,
+    dry_run: bool,
+    force: bool,
+) -> None:
+    """Execute the full Pass 2 pipeline + persist state on success."""
+    console.print(
+        f"[dim]Enhancing project: {project_name} ({language})"
+        f"  →  targets: {', '.join(selected_targets)}"
+        f"{'  [DRY RUN]' if dry_run else ''}[/dim]"
+    )
+    state = load_state(project_path)
+    target_hashes = {
+        target: _compute_target_source_hash(target, project_name, language)
+        for target in selected_targets
+    }
+    skipped = _dispatch_enhance_targets(
+        selected_targets,
+        project_path=project_path,
+        project_name=project_name,
+        language=language,
+        orchestrator=orchestrator,
+        state=state,
+        target_hashes=target_hashes,
+        dry_run=dry_run,
+        force=force,
+        file_writer=file_writer,
+    )
+    _persist_enhance_state(
+        project_path,
+        state,
+        skipped=skipped,
+        selected_targets=selected_targets,
+        dry_run=dry_run,
+    )
+    _print_enhance_summary(project_name=project_name, dry_run=dry_run)
 
 
 def _validate_enhance_path(project_path: Path) -> None:
@@ -2252,7 +2466,6 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
 
     selected_targets = _resolve_enhance_targets(targets)
     orchestrator = _require_enhance_orchestrator(api_key, no_interactive=no_interactive)
-
     file_writer = FileWriter(
         project_root=project_path,
         force=force,
@@ -2260,35 +2473,16 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         console=console,
     )
 
-    console.print(
-        f"[dim]Enhancing project: {resolved_name} ({resolved_language})"
-        f"  →  targets: {', '.join(selected_targets)}"
-        f"{'  [DRY RUN]' if dry_run else ''}[/dim]"
+    _run_enhance_pipeline(
+        project_path=project_path,
+        project_name=resolved_name,
+        language=resolved_language,
+        selected_targets=selected_targets,
+        orchestrator=orchestrator,
+        file_writer=file_writer,
+        dry_run=dry_run,
+        force=force,
     )
-
-    if "claude-md" in selected_targets:
-        _enhance_claude_md(
-            project_path,
-            resolved_name,
-            resolved_language,
-            orchestrator,
-            dry_run=dry_run,
-            file_writer=file_writer,
-        )
-    if "subagents" in selected_targets:
-        _enhance_subagents(
-            project_path,
-            resolved_name,
-            resolved_language,
-            orchestrator,
-            dry_run=dry_run,
-            file_writer=file_writer,
-        )
-
-    if dry_run:
-        console.print("\n[green]✓[/green] Dry run complete — no files written.")
-    else:
-        console.print(f"\n[green]✓[/green] Enhancement complete: {resolved_name}")
 
 
 def cli_main() -> None:
