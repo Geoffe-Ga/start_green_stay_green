@@ -6,6 +6,7 @@ Implements the command-line interface using Typer with rich output formatting.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 import json
@@ -21,9 +22,12 @@ from typing import TYPE_CHECKING
 from typing import TypeVar
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from collections.abc import Coroutine
     from collections.abc import Generator
     from collections.abc import Sequence
+
+    from start_green_stay_green.utils.enhance_state import EnhanceState
 
 from rich.console import Console
 from rich.panel import Panel
@@ -63,6 +67,9 @@ from start_green_stay_green.generators.tests_gen import TestsGenerator
 from start_green_stay_green.utils.async_bridge import run_async
 from start_green_stay_green.utils.credentials import get_api_key_from_keyring
 from start_green_stay_green.utils.credentials import store_api_key_in_keyring
+from start_green_stay_green.utils.enhance_state import hash_inputs
+from start_green_stay_green.utils.enhance_state import load_state
+from start_green_stay_green.utils.enhance_state import save_state
 from start_green_stay_green.utils.file_writer import FileWriter
 from start_green_stay_green.utils.timing import TimingReport
 from start_green_stay_green.utils.timing import set_active_report
@@ -632,7 +639,7 @@ def _copy_reference_subagents(
 @contextmanager
 def _maybe_collect_timing(
     timing_json: Path | None,
-) -> Generator[None, None, None]:
+) -> Generator[None]:
     """Optionally install a :class:`TimingReport` for the wrapped block.
 
     When ``timing_json`` is ``None`` the manager is a no-op; otherwise a
@@ -1939,6 +1946,101 @@ def _require_enhance_orchestrator(
     return orchestrator
 
 
+# Single source of truth for the script list embedded in the CLAUDE.md prompt.
+_CLAUDE_MD_SCRIPTS: tuple[str, ...] = (
+    "check-all.sh",
+    "test.sh",
+    "lint.sh",
+    "format.sh",
+    "security.sh",
+    "mutation.sh",
+)
+
+
+def _read_reference_or_warn(path: Path, label: str) -> str:
+    """Read a reference file or print a dim warning and return ``""``.
+
+    The hash helpers must remain crash-free even on a broken install
+    (missing submodule, moved file, etc.) — see Phase 3c reviewer
+    note. But silent fallback to an empty string would let the empty
+    hash get persisted, after which every subsequent re-tune skips
+    permanently with no user-visible signal. Print a warning so the
+    user can spot the broken install while still preserving the
+    no-crash contract.
+    """
+    if path.is_file():
+        return path.read_text(encoding="utf-8")
+    console.print(
+        f"[yellow]warning:[/yellow] reference file missing — "
+        f"{label}: {path}\n"
+        f"  This will produce an empty-input hash and may suppress "
+        f"future re-tunes. Check your install."
+    )
+    return ""
+
+
+def _hash_claude_md_inputs(project_name: str, language: str) -> str:
+    """Hash the inputs that drive a ``CLAUDE.md`` re-tune.
+
+    Captures everything that would alter the model's output: the
+    reference template content (so updates to the canonical template
+    invalidate stale tunes), plus the project metadata (name +
+    language + the script and skill lists baked into the prompt).
+    """
+    project_root = Path(__file__).parent.parent
+    reference = project_root / "reference" / "claude" / "CLAUDE.md"
+    template_bytes = _read_reference_or_warn(reference, "CLAUDE.md template")
+    return hash_inputs(
+        [
+            "claude-md\x00",
+            f"project_name={project_name}\x00",
+            f"language={language}\x00",
+            # Declaration order is authoritative — same order the prompt sees.
+            f"scripts={','.join(_CLAUDE_MD_SCRIPTS)}\x00",
+            f"skills={','.join(sorted(REQUIRED_SKILLS))}\x00",
+            "template:\x00",
+            template_bytes,
+        ]
+    )
+
+
+def _hash_subagents_inputs(project_name: str, language: str) -> str:
+    """Hash the inputs that drive a subagents re-tune.
+
+    Captures the union of every required reference subagent's content
+    (so a maintainer-side update to any one of them invalidates the
+    cached tune) plus the target context (project name + language)
+    which flows verbatim into the prompt.
+    """
+    parts: list[str | bytes] = [
+        "subagents\x00",
+        f"project_name={project_name}\x00",
+        f"language={language}\x00",
+    ]
+    # Walk REQUIRED_AGENTS in declaration order so the hash is
+    # deterministic regardless of dict insertion-order quirks.
+    for agent_name, source_file in REQUIRED_AGENTS.items():
+        source_path = REFERENCE_AGENTS_DIR / source_file
+        body = _read_reference_or_warn(source_path, f"subagent '{agent_name}'")
+        parts.append(f"agent={agent_name}\x00")
+        parts.append(body)
+    return hash_inputs(parts)
+
+
+def _compute_target_source_hash(
+    target: str,
+    project_name: str,
+    language: str,
+) -> str:
+    """Look the target up in the registry and call its hash helper."""
+    spec = _ENHANCE_DISPATCH.get(target)
+    if spec is None:
+        msg = f"unknown target: {target}"
+        raise ValueError(msg)
+    hash_helper: Callable[[str, str], str] = globals()[spec.hash_helper_name]
+    return hash_helper(project_name, language)
+
+
 def _enhance_claude_md(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
     project_path: Path,
     project_name: str,
@@ -1961,14 +2063,7 @@ def _enhance_claude_md(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
             {
                 "project_name": project_name,
                 "language": language,
-                "scripts": [
-                    "check-all.sh",
-                    "test.sh",
-                    "lint.sh",
-                    "format.sh",
-                    "security.sh",
-                    "mutation.sh",
-                ],
+                "scripts": list(_CLAUDE_MD_SCRIPTS),
                 "skills": REQUIRED_SKILLS.copy(),
             }
         )
@@ -2080,6 +2175,188 @@ def _resolve_enhance_metadata(
         _resolve_enhance_name(project_path, project_name),
         _resolve_enhance_language(project_path, language),
     )
+
+
+@dataclass(frozen=True)
+class _EnhanceTargetSpec:
+    """Per-target wiring for ``green enhance``.
+
+    Single source of truth pairing the skip message, the tune helper,
+    and the source-hash helper for one target. Holding all three in
+    one record means a new target requires exactly one entry in
+    :data:`_ENHANCE_DISPATCH` — there is no separate hash table to
+    forget to update. Helpers are stored by *name* (not function
+    reference) so test ``patch("cli._enhance_…")`` decorations are
+    honoured at call time via ``globals()[name]``.
+    """
+
+    skip_message: str
+    helper_name: str
+    hash_helper_name: str
+
+
+_ENHANCE_DISPATCH: dict[str, _EnhanceTargetSpec] = {
+    "claude-md": _EnhanceTargetSpec(
+        skip_message=(
+            "[dim]CLAUDE.md unchanged since last successful tune — "
+            "skipping (use --force to re-tune anyway).[/dim]"
+        ),
+        helper_name="_enhance_claude_md",
+        hash_helper_name="_hash_claude_md_inputs",
+    ),
+    "subagents": _EnhanceTargetSpec(
+        skip_message=(
+            "[dim]Subagents unchanged since last successful tune — "
+            "skipping (use --force to re-tune anyway).[/dim]"
+        ),
+        helper_name="_enhance_subagents",
+        hash_helper_name="_hash_subagents_inputs",
+    ),
+}
+
+
+def _assert_enhance_dispatch_intact() -> None:
+    """Fail at import time if a dispatch entry references a missing helper.
+
+    The registry looks helpers up by *name* (so test ``patch``
+    decorators can intercept), which trades static-analysis safety
+    for late-binding flexibility. This guard rebuilds the missing
+    safety net at import time so a typo in either ``helper_name`` or
+    ``hash_helper_name`` is caught as soon as the module loads, not
+    at first ``green enhance`` invocation.
+    """
+    missing: list[str] = [
+        name
+        for spec in _ENHANCE_DISPATCH.values()
+        for name in (spec.helper_name, spec.hash_helper_name)
+        if name not in globals()
+    ]
+    if missing:
+        msg = (
+            f"_ENHANCE_DISPATCH references undefined helper(s): "
+            f"{', '.join(missing)}"
+        )
+        raise RuntimeError(msg)
+
+
+_assert_enhance_dispatch_intact()
+
+
+def _dispatch_enhance_targets(  # noqa: PLR0913 — orchestration glue
+    targets: tuple[str, ...],
+    *,
+    project_path: Path,
+    project_name: str,
+    language: str,
+    orchestrator: AIOrchestrator,
+    state: EnhanceState,
+    target_hashes: dict[str, str],
+    dry_run: bool,
+    force: bool,
+    file_writer: FileWriter | None,
+) -> list[str]:
+    """Drive Pass 2 across each selected target with the skip/force logic.
+
+    Returns the list of target names that were skipped because the
+    source hash matched a stored completion. The caller uses that to
+    decide whether the state file is worth re-writing.
+    """
+    skipped: list[str] = []
+    for target in targets:
+        spec = _ENHANCE_DISPATCH[target]
+        target_hash = target_hashes[target]
+        if not force and state.is_unchanged(target, target_hash):
+            console.print(spec.skip_message)
+            skipped.append(target)
+            continue
+        # Late-bound lookup so test ``patch("cli._enhance_claude_md")``
+        # decorations are honoured.
+        helper: Callable[..., None] = globals()[spec.helper_name]
+        helper(
+            project_path,
+            project_name,
+            language,
+            orchestrator,
+            dry_run=dry_run,
+            file_writer=file_writer,
+        )
+        if not dry_run:
+            state.mark_completed(target, target_hash, orchestrator.model)
+    return skipped
+
+
+def _persist_enhance_state(
+    project_path: Path,
+    state: EnhanceState,
+    *,
+    skipped: list[str],
+    selected_targets: tuple[str, ...],
+    dry_run: bool,
+) -> None:
+    """Save the state file unless this run wrote nothing.
+
+    A "nothing happened" run is either a ``--dry-run`` (we ran the
+    API calls but skipped the writes) or a run where every selected
+    target was skipped because its source hash matched. In both
+    cases the prior state on disk is still authoritative.
+    """
+    if dry_run:
+        return
+    if len(skipped) == len(selected_targets):
+        return
+    save_state(project_path, state)
+
+
+def _print_enhance_summary(*, project_name: str, dry_run: bool) -> None:
+    """Print the closing one-liner for an ``enhance`` invocation."""
+    if dry_run:
+        console.print("\n[green]✓[/green] Dry run complete — no files written.")
+    else:
+        console.print(f"\n[green]✓[/green] Enhancement complete: {project_name}")
+
+
+def _run_enhance_pipeline(  # noqa: PLR0913 — orchestration glue
+    *,
+    project_path: Path,
+    project_name: str,
+    language: str,
+    selected_targets: tuple[str, ...],
+    orchestrator: AIOrchestrator,
+    file_writer: FileWriter | None,
+    dry_run: bool,
+    force: bool,
+) -> None:
+    """Execute the full Pass 2 pipeline + persist state on success."""
+    console.print(
+        f"[dim]Enhancing project: {project_name} ({language})"
+        f"  →  targets: {', '.join(selected_targets)}"
+        f"{'  [DRY RUN]' if dry_run else ''}[/dim]"
+    )
+    state = load_state(project_path)
+    target_hashes = {
+        target: _compute_target_source_hash(target, project_name, language)
+        for target in selected_targets
+    }
+    skipped = _dispatch_enhance_targets(
+        selected_targets,
+        project_path=project_path,
+        project_name=project_name,
+        language=language,
+        orchestrator=orchestrator,
+        state=state,
+        target_hashes=target_hashes,
+        dry_run=dry_run,
+        force=force,
+        file_writer=file_writer,
+    )
+    _persist_enhance_state(
+        project_path,
+        state,
+        skipped=skipped,
+        selected_targets=selected_targets,
+        dry_run=dry_run,
+    )
+    _print_enhance_summary(project_name=project_name, dry_run=dry_run)
 
 
 def _validate_enhance_path(project_path: Path) -> None:
@@ -2252,7 +2529,6 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
 
     selected_targets = _resolve_enhance_targets(targets)
     orchestrator = _require_enhance_orchestrator(api_key, no_interactive=no_interactive)
-
     file_writer = FileWriter(
         project_root=project_path,
         force=force,
@@ -2260,35 +2536,16 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         console=console,
     )
 
-    console.print(
-        f"[dim]Enhancing project: {resolved_name} ({resolved_language})"
-        f"  →  targets: {', '.join(selected_targets)}"
-        f"{'  [DRY RUN]' if dry_run else ''}[/dim]"
+    _run_enhance_pipeline(
+        project_path=project_path,
+        project_name=resolved_name,
+        language=resolved_language,
+        selected_targets=selected_targets,
+        orchestrator=orchestrator,
+        file_writer=file_writer,
+        dry_run=dry_run,
+        force=force,
     )
-
-    if "claude-md" in selected_targets:
-        _enhance_claude_md(
-            project_path,
-            resolved_name,
-            resolved_language,
-            orchestrator,
-            dry_run=dry_run,
-            file_writer=file_writer,
-        )
-    if "subagents" in selected_targets:
-        _enhance_subagents(
-            project_path,
-            resolved_name,
-            resolved_language,
-            orchestrator,
-            dry_run=dry_run,
-            file_writer=file_writer,
-        )
-
-    if dry_run:
-        console.print("\n[green]✓[/green] Dry run complete — no files written.")
-    else:
-        console.print(f"\n[green]✓[/green] Enhancement complete: {resolved_name}")
 
 
 def cli_main() -> None:
