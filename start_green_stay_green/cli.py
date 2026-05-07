@@ -1945,6 +1945,43 @@ def _require_enhance_orchestrator(
     return orchestrator
 
 
+# Single source of truth for the script list embedded in the
+# CLAUDE.md prompt. Defined ahead of the helpers that read it so
+# the dependency direction is obvious to a reader scanning the file
+# top-to-bottom (Python's late binding makes any order legal, but
+# top-down readability is worth the four lines of motion).
+_CLAUDE_MD_SCRIPTS: tuple[str, ...] = (
+    "check-all.sh",
+    "test.sh",
+    "lint.sh",
+    "format.sh",
+    "security.sh",
+    "mutation.sh",
+)
+
+
+def _read_reference_or_warn(path: Path, label: str) -> str:
+    """Read a reference file or print a dim warning and return ``""``.
+
+    The hash helpers must remain crash-free even on a broken install
+    (missing submodule, moved file, etc.) — see Phase 3c reviewer
+    note. But silent fallback to an empty string would let the empty
+    hash get persisted, after which every subsequent re-tune skips
+    permanently with no user-visible signal. Print a warning so the
+    user can spot the broken install while still preserving the
+    no-crash contract.
+    """
+    if path.is_file():
+        return path.read_text(encoding="utf-8")
+    console.print(
+        f"[yellow]warning:[/yellow] reference file missing — "
+        f"{label}: {path}\n"
+        f"  This will produce an empty-input hash and may suppress "
+        f"future re-tunes. Check your install."
+    )
+    return ""
+
+
 def _hash_claude_md_inputs(project_name: str, language: str) -> str:
     """Hash the inputs that drive a ``CLAUDE.md`` re-tune.
 
@@ -1955,9 +1992,7 @@ def _hash_claude_md_inputs(project_name: str, language: str) -> str:
     """
     project_root = Path(__file__).parent.parent
     reference = project_root / "reference" / "claude" / "CLAUDE.md"
-    template_bytes = (
-        reference.read_text(encoding="utf-8") if reference.is_file() else ""
-    )
+    template_bytes = _read_reference_or_warn(reference, "CLAUDE.md template")
     return hash_inputs(
         [
             "claude-md\x00",
@@ -1988,24 +2023,10 @@ def _hash_subagents_inputs(project_name: str, language: str) -> str:
     # deterministic regardless of dict insertion-order quirks.
     for agent_name, source_file in REQUIRED_AGENTS.items():
         source_path = REFERENCE_AGENTS_DIR / source_file
-        body = source_path.read_text(encoding="utf-8") if source_path.is_file() else ""
+        body = _read_reference_or_warn(source_path, f"subagent '{agent_name}'")
         parts.append(f"agent={agent_name}\x00")
         parts.append(body)
     return hash_inputs(parts)
-
-
-# Single source of truth for the script list embedded in the
-# CLAUDE.md prompt. Kept here (not duplicated in
-# ``_enhance_claude_md``) so the hash stays in sync with the actual
-# input.
-_CLAUDE_MD_SCRIPTS: tuple[str, ...] = (
-    "check-all.sh",
-    "test.sh",
-    "lint.sh",
-    "format.sh",
-    "security.sh",
-    "mutation.sh",
-)
 
 
 def _compute_target_source_hash(
@@ -2177,6 +2198,30 @@ _ENHANCE_DISPATCH: dict[str, tuple[str, str]] = {
         "_enhance_subagents",
     ),
 }
+
+
+def _assert_enhance_dispatch_intact() -> None:
+    """Fail at import time if a dispatch entry references a missing helper.
+
+    The dispatch table looks helpers up by *name* (so test ``patch``
+    decorators can intercept), which trades static-analysis safety
+    for late-binding flexibility. This guard rebuilds the missing
+    safety net at import time so a typo in ``_ENHANCE_DISPATCH`` is
+    caught as soon as the module loads, not at first ``green
+    enhance`` invocation.
+    """
+    missing = [
+        name for _msg, name in _ENHANCE_DISPATCH.values() if name not in globals()
+    ]
+    if missing:
+        msg = (
+            f"_ENHANCE_DISPATCH references undefined helper(s): "
+            f"{', '.join(missing)}"
+        )
+        raise RuntimeError(msg)
+
+
+_assert_enhance_dispatch_intact()
 
 
 def _dispatch_enhance_targets(  # noqa: PLR0913 — orchestration glue

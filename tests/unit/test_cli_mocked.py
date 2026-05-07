@@ -2094,7 +2094,14 @@ class TestEnhanceSkipUnchanged:
         mock_claude.reset_mock()
         mock_subagents.reset_mock()
 
-        # --force → skip is bypassed.
+        # Capture the seeded state's last_run timestamp so we can
+        # verify the force run actually rewrites the record (not just
+        # re-invokes the helpers).
+        seeded_state = load_state(project)
+        seeded_last_run = seeded_state.last_run
+        seeded_claude_ts = seeded_state.completed["claude-md"].timestamp
+
+        # --force → skip is bypassed AND state is updated.
         result = runner.invoke(
             cli.app,
             ["enhance", str(project), "--no-interactive", "--force"],
@@ -2102,6 +2109,21 @@ class TestEnhanceSkipUnchanged:
         assert result.exit_code == 0
         assert mock_claude.call_count == 1
         assert mock_subagents.call_count == 1
+
+        # The PR description's claim ("forced re-tunes produce an
+        # idempotent state file") only holds if mark_completed runs
+        # on the force path. Verify by reading the state file after
+        # the force run and asserting both records are present and
+        # carry refreshed timestamps.
+        post_force = load_state(project)
+        assert "claude-md" in post_force.completed
+        assert "subagents" in post_force.completed
+        assert post_force.completed["claude-md"].model == "claude-sonnet-4-5"
+        assert post_force.completed["subagents"].model == "claude-sonnet-4-5"
+        # Timestamps moved forward — rules out the silent "we ran
+        # the helpers but forgot to mark_completed" regression.
+        assert post_force.last_run >= seeded_last_run
+        assert post_force.completed["claude-md"].timestamp >= seeded_claude_ts
 
     @patch("start_green_stay_green.cli._enhance_subagents")
     @patch("start_green_stay_green.cli._enhance_claude_md")
@@ -2169,6 +2191,41 @@ class TestEnhanceSkipUnchanged:
         state_file = project / ".claude" / ".enhance-state.json"
         assert not state_file.exists(), state_file.read_text(encoding="utf-8")
 
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_dry_run_after_seeded_state_leaves_file_untouched(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """A dry run after a real run preserves the existing state file.
+
+        Catches a regression where dry-run logic might bump the
+        ``last_run`` timestamp or otherwise rewrite the file even
+        though no tune actually happened.
+        """
+        orch = MagicMock(spec=AIOrchestrator)
+        orch.model = "claude-sonnet-4-5"
+        mock_init.return_value = orch
+        project = self._make_project(tmp_path)
+        runner = CliRunner()
+
+        # Seed real state.
+        runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+        state_file = project / ".claude" / ".enhance-state.json"
+        seeded_bytes = state_file.read_bytes()
+
+        # Dry run after seeded state — file must be byte-identical.
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--dry-run", "--no-interactive"],
+        )
+        assert result.exit_code == 0
+        assert state_file.read_bytes() == seeded_bytes
+
 
 class TestEnhanceSourceHashes:
     """Hash determinism + sensitivity for the per-target hash helpers."""
@@ -2208,3 +2265,61 @@ class TestEnhanceSourceHashes:
         a = cli._compute_target_source_hash("claude-md", "alpha", "python")
         b = cli._compute_target_source_hash("subagents", "alpha", "python")
         assert a != b
+
+
+class TestReferenceFileWarning:
+    """``_read_reference_or_warn`` returns "" + prints when file missing."""
+
+    def test_missing_file_prints_warning_and_returns_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """Broken-install case: missing ref → warning + empty string.
+
+        Regression test for the silent-empty-hash issue: if a
+        reference file vanishes (moved submodule, partial install)
+        the helper must surface that to the user instead of silently
+        baking the empty hash into the state file and permanently
+        suppressing future re-tunes.
+        """
+        missing = tmp_path / "nope.md"
+        with patch("start_green_stay_green.cli.console") as mock_console:
+            result = cli._read_reference_or_warn(missing, "test label")
+
+        assert result == ""
+        mock_console.print.assert_called_once()
+        # The warning names the file label so a user can tell which
+        # of the several refs is broken.
+        printed = mock_console.print.call_args[0][0]
+        assert "test label" in printed
+        assert "missing" in printed.lower()
+
+    def test_present_file_returns_contents_silently(self, tmp_path: Path) -> None:
+        """The happy path stays silent — no warning when the file exists."""
+        path = tmp_path / "ref.md"
+        path.write_text("hello\n", encoding="utf-8")
+        with patch("start_green_stay_green.cli.console") as mock_console:
+            result = cli._read_reference_or_warn(path, "test label")
+
+        assert result == "hello\n"
+        mock_console.print.assert_not_called()
+
+
+class TestEnhanceDispatchAssertion:
+    """The import-time guard that catches typos in ``_ENHANCE_DISPATCH``."""
+
+    def test_assert_passes_for_current_table(self) -> None:
+        """Sanity: every helper name in the live dispatch resolves."""
+        # Should be a no-op (raises only on broken install).
+        cli._assert_enhance_dispatch_intact()
+
+    def test_assert_raises_when_helper_is_undefined(self) -> None:
+        """A typo'd helper name in the table is caught at import time."""
+        with (
+            patch.dict(
+                cli._ENHANCE_DISPATCH,
+                {"bogus": ("[dim]nope[/dim]", "_does_not_exist")},
+                clear=False,
+            ),
+            pytest.raises(RuntimeError, match="undefined helper"),
+        ):
+            cli._assert_enhance_dispatch_intact()
