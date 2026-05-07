@@ -1785,6 +1785,512 @@ def init(  # noqa: PLR0913
         )
 
 
+_LANGUAGE_PROBES: tuple[tuple[str, str], ...] = (
+    # (filename relative to project root, language). The first match wins.
+    ("pyproject.toml", "python"),
+    ("requirements.txt", "python"),
+    ("package.json", "typescript"),
+    ("go.mod", "go"),
+    ("Cargo.toml", "rust"),
+    ("pom.xml", "java"),
+    ("build.gradle", "java"),
+    ("Gemfile", "ruby"),
+    ("composer.json", "php"),
+    ("Package.swift", "swift"),
+)
+
+# Pattern for the H1 line in a generated CLAUDE.md file.
+# ``# Claude Code Project Context: <project-name>``
+_CLAUDE_MD_TITLE = re.compile(
+    r"^#\s+Claude Code Project Context:\s+(?P<name>.+?)\s*$",
+    re.MULTILINE,
+)
+
+# Targets the ``green enhance`` command knows how to re-tune. Order
+# matches the on-disk layout users expect to see touched.
+_ENHANCE_TARGETS: tuple[str, ...] = ("claude-md", "subagents")
+
+
+def _detect_project_name(project_path: Path) -> str | None:
+    """Return the project name parsed out of an existing CLAUDE.md.
+
+    The init-generated CLAUDE.md baseline starts with
+    ``# Claude Code Project Context: <name>``. Reading the first line
+    matching that pattern is more reliable than guessing from the
+    directory name (the user may have renamed the directory) or from
+    ``pyproject.toml`` (project may be multi-language).
+
+    Returns ``None`` if CLAUDE.md is missing or doesn't have the
+    expected H1 — in which case the caller must require ``-n``.
+    """
+    claude_md = project_path / "CLAUDE.md"
+    if not claude_md.is_file():
+        return None
+    try:
+        content = claude_md.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = _CLAUDE_MD_TITLE.search(content)
+    if match is None:
+        return None
+    return match.group("name").strip() or None
+
+
+def _detect_project_language(project_path: Path) -> str | None:
+    """Return the project's primary language by file probing.
+
+    The probes are ordered: the first hit wins. For multi-language
+    projects this returns whatever shows up first in the canonical
+    list; users can override with ``-l`` if the auto-detected one
+    isn't the one they want re-tuned.
+
+    Returns ``None`` if no probe matched, in which case the caller
+    must require ``-l``.
+    """
+    for filename, language in _LANGUAGE_PROBES:
+        if (project_path / filename).is_file():
+            return language
+    return None
+
+
+def _validate_enhance_target(value: str) -> str:
+    """Normalize and validate one ``--targets`` value.
+
+    Args:
+        value: A single target name from the CLI.
+
+    Returns:
+        The lower-cased target name if it is recognised.
+
+    Raises:
+        typer.BadParameter: If the target is not in
+            :data:`_ENHANCE_TARGETS`.
+    """
+    normalized = value.strip().lower()
+    if normalized not in _ENHANCE_TARGETS:
+        valid = ", ".join(_ENHANCE_TARGETS)
+        msg = f"unknown target {value!r}; choose from: {valid}"
+        raise typer.BadParameter(msg)
+    return normalized
+
+
+def _split_target_pieces(targets: list[str]) -> list[str]:
+    """Flatten ``--targets`` values into individual pieces, dropping empties."""
+    return [
+        piece.strip() for raw in targets for piece in raw.split(",") if piece.strip()
+    ]
+
+
+def _resolve_enhance_targets(targets: list[str] | None) -> tuple[str, ...]:
+    """Resolve the ``--targets`` argument list (possibly comma-separated).
+
+    Accepts both ``--targets claude-md --targets subagents`` and
+    ``--targets claude-md,subagents``. ``None`` (no flag passed) means
+    "tune every target".
+
+    Args:
+        targets: Raw values from the typer option.
+
+    Returns:
+        A tuple of resolved target names in the canonical order
+        defined by :data:`_ENHANCE_TARGETS`.
+
+    Raises:
+        typer.BadParameter: If any target is unknown.
+    """
+    if not targets:
+        return _ENHANCE_TARGETS
+    requested = {_validate_enhance_target(p) for p in _split_target_pieces(targets)}
+    # Preserve canonical order, deduplicating.
+    return tuple(t for t in _ENHANCE_TARGETS if t in requested)
+
+
+def _require_enhance_orchestrator(
+    api_key: str | None,
+    *,
+    no_interactive: bool,
+) -> AIOrchestrator:
+    """Resolve an :class:`AIOrchestrator` for the ``enhance`` command.
+
+    Unlike ``init``, ``enhance`` cannot fall back to a deterministic
+    path — re-tuning is the entire point. If no API key is available,
+    fail fast with an actionable message instead of writing an empty
+    "tuning" that silently no-ops.
+
+    Args:
+        api_key: Optional CLI-supplied key.
+        no_interactive: Skip any keyring prompts.
+
+    Returns:
+        A real ``AIOrchestrator`` ready to dispatch.
+
+    Raises:
+        typer.Exit: With code 1 if no key could be resolved.
+    """
+    orchestrator = _initialize_orchestrator(api_key, no_interactive=no_interactive)
+    if orchestrator is None:
+        console.print(
+            "[red]Error:[/red] `green enhance` requires an Anthropic API "
+            "key — there is no deterministic fallback for AI-tuned "
+            "artifacts.\n  Set ANTHROPIC_API_KEY or pass --api-key.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+    return orchestrator
+
+
+def _enhance_claude_md(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
+    project_path: Path,
+    project_name: str,
+    language: str,
+    orchestrator: AIOrchestrator,
+    *,
+    dry_run: bool,
+    file_writer: FileWriter | None,
+) -> None:
+    """Re-tune ``CLAUDE.md`` against the existing project.
+
+    Mirrors :func:`_generate_claude_md_step`'s tuning path but writes
+    to the existing project rather than a fresh scaffold. ``dry_run``
+    skips the write but still runs the API call so the user sees the
+    full token-usage telemetry (and any errors) they'd see for real.
+    """
+    with step_timer("enhance_claude_md"), console.status("Re-tuning CLAUDE.md..."):
+        claude_md_generator = ClaudeMdGenerator(orchestrator)
+        result = claude_md_generator.generate(
+            {
+                "project_name": project_name,
+                "language": language,
+                "scripts": [
+                    "check-all.sh",
+                    "test.sh",
+                    "lint.sh",
+                    "format.sh",
+                    "security.sh",
+                    "mutation.sh",
+                ],
+                "skills": REQUIRED_SKILLS.copy(),
+            }
+        )
+        target = project_path / "CLAUDE.md"
+        if dry_run:
+            console.print(
+                f"[dim]--dry-run: would rewrite {target} "
+                f"({len(result.content):,} chars).[/dim]"
+            )
+            return
+        if file_writer is not None:
+            file_writer.write_file(target, result.content)
+        else:
+            target.write_text(result.content, encoding="utf-8")
+    console.print("[green]✓[/green] Re-tuned CLAUDE.md")
+
+
+def _enhance_subagents(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
+    project_path: Path,
+    project_name: str,
+    language: str,
+    orchestrator: AIOrchestrator,
+    *,
+    dry_run: bool,
+    file_writer: FileWriter | None,
+) -> None:
+    """Re-tune every subagent against the existing project.
+
+    Same parallel-fan-out path as Pass 2 of init, but writes back to
+    ``<project>/.claude/agents`` instead of generating it fresh.
+    """
+    target_dir = project_path / ".claude" / "agents"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    with step_timer("enhance_subagents"), console.status("Re-tuning subagents..."):
+        subagents_generator = SubagentsGenerator(orchestrator)
+        target_context = (
+            f"Project: {project_name}, "
+            f"Language: {language}, "
+            f"Type: existing project being re-tuned via `green enhance`"
+        )
+        results = run_async(
+            _run_with_orchestrator_close(
+                orchestrator,
+                subagents_generator.generate_all_agents(target_context),
+            )
+        )
+        if dry_run:
+            console.print(
+                f"[dim]--dry-run: would rewrite {len(results)} agent "
+                f"file(s) in {target_dir}.[/dim]"
+            )
+            return
+        for agent_name, result in results.items():
+            agent_file = target_dir / f"{agent_name}.md"
+            if file_writer is not None:
+                file_writer.write_file(agent_file, result.content)
+            else:
+                agent_file.write_text(result.content, encoding="utf-8")
+    console.print(f"[green]✓[/green] Re-tuned {len(results)} subagents")
+
+
+def _resolve_enhance_name(project_path: Path, override: str | None) -> str:
+    """Resolve the project name for ``enhance``; exit if neither path works."""
+    resolved = override or _detect_project_name(project_path)
+    if resolved is None:
+        console.print(
+            "[red]Error:[/red] could not determine the project name "
+            "from CLAUDE.md. Pass --project-name explicitly.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+    return resolved
+
+
+def _resolve_enhance_language(project_path: Path, override: str | None) -> str:
+    """Resolve the language for ``enhance``; exit if absent or unsupported."""
+    resolved = override or _detect_project_language(project_path)
+    if resolved is None:
+        console.print(
+            "[red]Error:[/red] could not detect the project language. "
+            "Pass --language explicitly.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+    try:
+        validate_language(resolved)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}", style="bold")
+        raise typer.Exit(code=1) from e
+    return resolved
+
+
+def _resolve_enhance_metadata(
+    project_path: Path,
+    *,
+    project_name: str | None,
+    language: str | None,
+) -> tuple[str, str]:
+    """Resolve project name + language for ``enhance``, exiting on failure.
+
+    Auto-detection from the project layout is the default path; the
+    explicit ``--project-name`` and ``--language`` flags win where
+    supplied. Either piece missing (no override + no detected value)
+    is a fatal error so the caller cannot accidentally tune the wrong
+    project metadata into a fresh CLAUDE.md.
+    """
+    return (
+        _resolve_enhance_name(project_path, project_name),
+        _resolve_enhance_language(project_path, language),
+    )
+
+
+def _validate_enhance_path(project_path: Path) -> None:
+    """Confirm ``project_path`` looks like a generated green-init project.
+
+    The cheapest reliable signature is the presence of ``CLAUDE.md`` —
+    every init flow writes one (Phase 1 added the deterministic
+    baseline so even ``--offline`` projects have it). Without that
+    file, ``enhance`` has no project to re-tune; fail fast with a
+    pointer to ``green init``.
+
+    Args:
+        project_path: Directory the user passed as the enhance target.
+
+    Raises:
+        typer.Exit: With code 1 if the path is not an enhanceable
+            project.
+    """
+    if not project_path.exists():
+        console.print(
+            f"[red]Error:[/red] {project_path} does not exist.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+    if not project_path.is_dir():
+        console.print(
+            f"[red]Error:[/red] {project_path} is not a directory.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+    if not (project_path / "CLAUDE.md").is_file():
+        console.print(
+            f"[red]Error:[/red] {project_path} does not look like a "
+            "green-init project (no CLAUDE.md found).\n  Run "
+            "`green init` first or pass a different path.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
+    project_path: Annotated[
+        Path,
+        typer.Argument(
+            help=(
+                "Path to an existing green-init project. Defaults to the "
+                "current directory. The directory must contain a "
+                "``CLAUDE.md`` produced by `green init`."
+            ),
+            exists=False,
+        ),
+    ] = Path(),
+    project_name: Annotated[
+        str | None,
+        typer.Option(
+            "--project-name",
+            "-n",
+            help=(
+                "Override the auto-detected project name. By default the "
+                "name is parsed out of the existing ``CLAUDE.md``'s H1 "
+                "title."
+            ),
+        ),
+    ] = None,
+    language: Annotated[
+        str | None,
+        typer.Option(
+            "--language",
+            "-l",
+            help=(
+                "Override the auto-detected primary language. By default "
+                "the language is probed from canonical project files "
+                "(pyproject.toml, package.json, go.mod, Cargo.toml, ...)."
+            ),
+        ),
+    ] = None,
+    targets: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--targets",
+            "-t",
+            help=(
+                "Subset of artifacts to re-tune. Repeat the flag or "
+                f"comma-separate. Choices: {', '.join(_ENHANCE_TARGETS)}. "
+                "Default: re-tune everything."
+            ),
+        ),
+    ] = None,
+    *,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help=(
+                "Make the API calls but do not write any files. Useful "
+                "for previewing token cost / changes before committing "
+                "to a re-tune."
+            ),
+        ),
+    ] = False,
+    api_key: Annotated[
+        str | None,
+        typer.Option(
+            "--api-key",
+            help=(
+                "[DEPRECATED] API key is visible in process list. "
+                "Use ANTHROPIC_API_KEY env var or keyring instead."
+            ),
+            hide_input=True,
+        ),
+    ] = None,
+    no_interactive: Annotated[
+        bool,
+        typer.Option(
+            "--no-interactive",
+            help="Run in non-interactive mode (skip keyring prompts).",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Overwrite files without prompting. Off by default.",
+        ),
+    ] = False,
+) -> None:
+    r"""Re-run Pass 2 (AI tuning) on an existing green-init project.
+
+    Phase 3b of the optimization roadmap: gives users who ran
+    ``green init --offline`` (or who have updated their reference
+    skills/subagents) a way to add or refresh the AI-tuned artifacts
+    without re-scaffolding the whole project.
+
+    Examples:
+        \b
+        # Re-tune everything in the current directory:
+        green enhance
+    \b
+        # Re-tune only CLAUDE.md in a specific project:
+        green enhance ./my-app --targets claude-md
+    \b
+        # Preview the token cost without writing anything:
+        green enhance --dry-run
+
+    Args:
+        project_path: Directory of the existing project.
+        project_name: Optional override for auto-detection.
+        language: Optional override for auto-detection.
+        targets: Subset of artifacts to re-tune.
+        dry_run: Run the API calls but skip the writes.
+        api_key: Optional Claude API key.
+        no_interactive: Disable interactive prompts.
+        force: Overwrite files without prompting.
+
+    Raises:
+        typer.Exit: If the path is invalid, project metadata cannot
+            be inferred, an unknown ``--targets`` value is supplied,
+            or no API key is available.
+    """
+    project_path = project_path.resolve()
+    _validate_enhance_path(project_path)
+
+    resolved_name, resolved_language = _resolve_enhance_metadata(
+        project_path,
+        project_name=project_name,
+        language=language,
+    )
+
+    selected_targets = _resolve_enhance_targets(targets)
+    orchestrator = _require_enhance_orchestrator(api_key, no_interactive=no_interactive)
+
+    file_writer = FileWriter(
+        project_root=project_path,
+        force=force,
+        interactive=False,
+        console=console,
+    )
+
+    console.print(
+        f"[dim]Enhancing project: {resolved_name} ({resolved_language})"
+        f"  →  targets: {', '.join(selected_targets)}"
+        f"{'  [DRY RUN]' if dry_run else ''}[/dim]"
+    )
+
+    if "claude-md" in selected_targets:
+        _enhance_claude_md(
+            project_path,
+            resolved_name,
+            resolved_language,
+            orchestrator,
+            dry_run=dry_run,
+            file_writer=file_writer,
+        )
+    if "subagents" in selected_targets:
+        _enhance_subagents(
+            project_path,
+            resolved_name,
+            resolved_language,
+            orchestrator,
+            dry_run=dry_run,
+            file_writer=file_writer,
+        )
+
+    if dry_run:
+        console.print("\n[green]✓[/green] Dry run complete — no files written.")
+    else:
+        console.print(f"\n[green]✓[/green] Enhancement complete: {resolved_name}")
+
+
 def cli_main() -> None:
     """Entry point for the CLI when installed as a package."""
     app()
