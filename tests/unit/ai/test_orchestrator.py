@@ -1,5 +1,7 @@
 """Unit tests for AI Orchestrator data classes and core functionality."""
 
+from collections.abc import Iterator
+from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import Mock
 from unittest.mock import call
@@ -7,6 +9,7 @@ from unittest.mock import create_autospec
 from unittest.mock import patch
 
 from anthropic.types import TextBlock
+from anthropic.types import ToolUseBlock
 import pytest
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
@@ -15,6 +18,9 @@ from start_green_stay_green.ai.orchestrator import GenerationResult
 from start_green_stay_green.ai.orchestrator import ModelConfig
 from start_green_stay_green.ai.orchestrator import PromptTemplateError
 from start_green_stay_green.ai.orchestrator import TokenUsage
+from start_green_stay_green.ai.orchestrator import ToolUseResult
+from start_green_stay_green.utils.timing import TimingReport
+from start_green_stay_green.utils.timing import set_active_report
 
 
 class TestTokenUsage:
@@ -1004,3 +1010,257 @@ class TestMutationKillers:
         assert isinstance(exc_info.value.cause, Exception)
         # If last_error was initialized to "", it wouldn't work as Exception type
         assert not isinstance(exc_info.value.cause, str)
+
+
+def _build_tool_use_response(
+    *,
+    tool_input: dict[str, object],
+    cache_read: int = 0,
+    cache_creation: int = 0,
+) -> MagicMock:
+    """Build a mock Anthropic response carrying a ``ToolUseBlock``.
+
+    Centralised so the cache + tool_use tests share one shape — keeps
+    the per-test setup short and the field names obvious.
+    """
+    response = MagicMock()
+    response.id = "msg_tool_test"
+    response.model = ModelConfig.SONNET
+    response.usage.input_tokens = 200
+    response.usage.output_tokens = 25
+    response.usage.cache_read_input_tokens = cache_read
+    response.usage.cache_creation_input_tokens = cache_creation
+    tool_block = create_autospec(ToolUseBlock, instance=True)
+    tool_block.name = "report_tuning"
+    tool_block.input = tool_input
+    response.content = [tool_block]
+    return response
+
+
+def _make_async_client(create_return: MagicMock) -> MagicMock:
+    """Build a mock ``AsyncAnthropic`` client with awaitable hooks.
+
+    ``messages.create`` and ``close`` are both async on the real SDK,
+    so they must be :class:`AsyncMock` here to avoid
+    ``TypeError: object MagicMock can't be used in 'await' expression``
+    inside ``aclose``.
+    """
+    client = MagicMock()
+    client.messages.create = AsyncMock(return_value=create_return)
+    client.close = AsyncMock()
+    return client
+
+
+@pytest.fixture
+def isolated_report() -> Iterator[TimingReport]:
+    """Install a fresh :class:`TimingReport` for the test, then clear it."""
+    report = TimingReport()
+    set_active_report(report)
+    try:
+        yield report
+    finally:
+        set_active_report(None)
+
+
+class TestGenerateToolUseAsync:
+    """Tests for the structured ``generate_tool_use_async`` path."""
+
+    @pytest.mark.asyncio
+    async def test_returns_parsed_tool_input(self) -> None:
+        """The tool's JSON ``input`` is returned verbatim as a dict."""
+        orchestrator = AIOrchestrator(api_key="test-key")
+        mock_client = _make_async_client(
+            _build_tool_use_response(
+                tool_input={"tuned_content": "hello", "changes": ["one"]},
+            )
+        )
+        orchestrator._async_client = mock_client
+
+        try:
+            result = await orchestrator.generate_tool_use_async(
+                "user message",
+                system_blocks=[{"type": "text", "text": "stable prefix"}],
+                tool_schema={"name": "report_tuning"},
+            )
+        finally:
+            await orchestrator.aclose()
+
+        assert isinstance(result, ToolUseResult)
+        assert result.tool_name == "report_tuning"
+        assert result.tool_input == {"tuned_content": "hello", "changes": ["one"]}
+        assert result.token_usage.input_tokens == 200
+        assert result.token_usage.output_tokens == 25
+
+    @pytest.mark.asyncio
+    async def test_passes_system_blocks_and_forces_tool_choice(self) -> None:
+        """The Anthropic call gets the system blocks and ``tool_choice``.
+
+        Locks the contract so nothing silently strips
+        ``cache_control`` markers off the system blocks before they
+        reach the API — that would defeat Phase 2c's whole purpose.
+        """
+        orchestrator = AIOrchestrator(api_key="test-key")
+        mock_client = _make_async_client(
+            _build_tool_use_response(
+                tool_input={"tuned_content": "x", "changes": []},
+            )
+        )
+        orchestrator._async_client = mock_client
+
+        system_blocks: list[dict[str, object]] = [
+            {"type": "text", "text": "instructions"},
+            {
+                "type": "text",
+                "text": "context",
+                "cache_control": {"type": "ephemeral"},
+            },
+        ]
+        try:
+            await orchestrator.generate_tool_use_async(
+                "user message",
+                system_blocks=system_blocks,
+                tool_schema={"name": "report_tuning"},
+            )
+        finally:
+            await orchestrator.aclose()
+
+        kwargs = mock_client.messages.create.call_args.kwargs
+        # Cache marker survives intact through to the API call.
+        assert kwargs["system"] is system_blocks
+        assert kwargs["system"][-1]["cache_control"] == {"type": "ephemeral"}
+        # Forced tool_use prevents free-form text drifts.
+        assert kwargs["tool_choice"] == {"type": "tool", "name": "report_tuning"}
+        assert kwargs["tools"][0]["name"] == "report_tuning"
+
+    @pytest.mark.asyncio
+    async def test_raises_when_no_tool_use_block_in_response(self) -> None:
+        """A response missing the tool block is a hard error, not a fallback."""
+        orchestrator = AIOrchestrator(api_key="test-key")
+        text_response = MagicMock()
+        text_response.id = "msg_x"
+        text_response.model = ModelConfig.SONNET
+        text_response.usage.input_tokens = 1
+        text_response.usage.output_tokens = 1
+        text_response.usage.cache_read_input_tokens = 0
+        text_response.usage.cache_creation_input_tokens = 0
+        text_block = create_autospec(TextBlock, instance=True)
+        text_block.text = "wrong shape"
+        text_response.content = [text_block]
+        mock_client = _make_async_client(text_response)
+        orchestrator._async_client = mock_client
+
+        try:
+            with pytest.raises(GenerationError, match="ToolUseBlock"):
+                await orchestrator.generate_tool_use_async(
+                    "user message",
+                    system_blocks=[{"type": "text", "text": "x"}],
+                    tool_schema={"name": "report_tuning"},
+                )
+        finally:
+            await orchestrator.aclose()
+
+    @pytest.mark.asyncio
+    async def test_records_cache_read_tokens_to_active_report(
+        self, isolated_report: TimingReport
+    ) -> None:
+        """Cache-hit tokens land on the active :class:`TimingReport`.
+
+        Without this the dashboard cache total stays at zero forever
+        even when caching is working — the original Phase 0 telemetry
+        shipped the field but no producer wrote to it.
+        """
+        orchestrator = AIOrchestrator(api_key="test-key")
+        mock_client = _make_async_client(
+            _build_tool_use_response(
+                tool_input={"tuned_content": "x", "changes": []},
+                cache_read=150,
+                cache_creation=80,
+            )
+        )
+        orchestrator._async_client = mock_client
+
+        try:
+            await orchestrator.generate_tool_use_async(
+                "user message",
+                system_blocks=[{"type": "text", "text": "x"}],
+                tool_schema={"name": "report_tuning"},
+            )
+        finally:
+            await orchestrator.aclose()
+
+        assert isolated_report.total_cache_read_tokens == 150
+        assert isolated_report.total_cache_creation_tokens == 80
+
+    @pytest.mark.asyncio
+    async def test_propagates_cache_tokens_to_result(self) -> None:
+        """The cache fields also flow through to the returned dataclass."""
+        orchestrator = AIOrchestrator(api_key="test-key")
+        mock_client = _make_async_client(
+            _build_tool_use_response(
+                tool_input={"tuned_content": "x", "changes": []},
+                cache_read=42,
+                cache_creation=7,
+            )
+        )
+        orchestrator._async_client = mock_client
+
+        try:
+            result = await orchestrator.generate_tool_use_async(
+                "msg",
+                system_blocks=[{"type": "text", "text": "x"}],
+                tool_schema={"name": "report_tuning"},
+            )
+        finally:
+            await orchestrator.aclose()
+
+        assert result.cache_read_tokens == 42
+        assert result.cache_creation_tokens == 7
+
+    @pytest.mark.asyncio
+    async def test_rejects_empty_prompt(self) -> None:
+        """Same prompt validation rules as the non-tool path."""
+        orchestrator = AIOrchestrator(api_key="test-key")
+        try:
+            with pytest.raises(ValueError, match="Prompt cannot be empty"):
+                await orchestrator.generate_tool_use_async(
+                    "",
+                    system_blocks=[{"type": "text", "text": "x"}],
+                    tool_schema={"name": "report_tuning"},
+                )
+        finally:
+            await orchestrator.aclose()
+
+
+class TestCacheTelemetryOnTextPath:
+    """The non-tool ``generate_async`` path also records cache fields."""
+
+    @pytest.mark.asyncio
+    async def test_text_path_records_cache_tokens(
+        self, isolated_report: TimingReport
+    ) -> None:
+        """Caching works the same for ``generate_async`` (text path).
+
+        Pinned so a later refactor that drifts the two helpers' cache
+        plumbing will be loud, not silent.
+        """
+        orchestrator = AIOrchestrator(api_key="test-key")
+        text_response = MagicMock()
+        text_response.id = "msg_x"
+        text_response.model = ModelConfig.SONNET
+        text_response.usage.input_tokens = 50
+        text_response.usage.output_tokens = 10
+        text_response.usage.cache_read_input_tokens = 30
+        text_response.usage.cache_creation_input_tokens = 0
+        text_block = create_autospec(TextBlock, instance=True)
+        text_block.text = "hi"
+        text_response.content = [text_block]
+        mock_client = _make_async_client(text_response)
+        orchestrator._async_client = mock_client
+
+        try:
+            result = await orchestrator.generate_async("hello", "markdown")
+        finally:
+            await orchestrator.aclose()
+
+        assert result.cache_read_tokens == 30
+        assert isolated_report.total_cache_read_tokens == 30

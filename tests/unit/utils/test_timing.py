@@ -76,6 +76,7 @@ class TestTimingReport:
                 input_tokens=100,
                 output_tokens=200,
                 cache_read_tokens=50,
+                cache_creation_tokens=20,
             )
         )
         report.record_api_call(
@@ -83,12 +84,14 @@ class TestTimingReport:
                 latency_s=2.0,
                 input_tokens=300,
                 output_tokens=400,
+                cache_creation_tokens=10,
             )
         )
 
         assert report.total_input_tokens == 400
         assert report.total_output_tokens == 600
         assert report.total_cache_read_tokens == 50
+        assert report.total_cache_creation_tokens == 30
         assert report.api_seconds == pytest.approx(3.0)
 
     def test_to_dict_shape(self) -> None:
@@ -102,7 +105,12 @@ class TestTimingReport:
         payload = report.to_dict()
 
         assert payload["api_calls"] == 1
-        assert payload["tokens"] == {"input": 10, "output": 20, "cache_read": 0}
+        assert payload["tokens"] == {
+            "input": 10,
+            "output": 20,
+            "cache_read": 0,
+            "cache_creation": 0,
+        }
         steps = payload["steps"]
         assert isinstance(steps, list)
         assert steps[0]["name"] == "ci"

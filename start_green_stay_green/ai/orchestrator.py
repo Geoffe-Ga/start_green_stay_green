@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from anthropic import Anthropic
 from anthropic import AsyncAnthropic
 from anthropic.types import TextBlock
+from anthropic.types import ToolUseBlock
 
 from start_green_stay_green.utils.timing import APICallRecord
 from start_green_stay_green.utils.timing import get_active_report
@@ -88,6 +89,11 @@ class GenerationResult:
         content: Generated content from the AI model.
         format: Output format (yaml, toml, markdown, bash).
         token_usage: Token usage statistics for the request.
+        cache_read_tokens: Subset of input tokens served from the
+            prompt cache. ``0`` when caching is disabled or the
+            response did not report this field.
+        cache_creation_tokens: Tokens written to the prompt cache on
+            this call (billed at a higher rate than reads).
         model: Model identifier used for generation.
         message_id: Unique identifier for the API message.
     """
@@ -97,6 +103,37 @@ class GenerationResult:
     token_usage: TokenUsage
     model: str
     message_id: str
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+
+
+@dataclass(frozen=True)
+class ToolUseResult:
+    """Result from a structured (``tool_use``) API call.
+
+    The Claude API returns a JSON object validated against the tool's
+    ``input_schema``; ``tool_input`` is that object verbatim. Replaces
+    free-form text parsing for callers that need typed fields out of
+    the model.
+
+    Attributes:
+        tool_name: Name of the tool the model invoked.
+        tool_input: Parsed JSON input the model passed to the tool.
+        token_usage: Token usage statistics for the request.
+        cache_read_tokens: Subset of input tokens served from the
+            prompt cache.
+        cache_creation_tokens: Tokens written to the prompt cache.
+        model: Model identifier used for generation.
+        message_id: Unique identifier for the API message.
+    """
+
+    tool_name: str
+    tool_input: dict[str, object]
+    token_usage: TokenUsage
+    model: str
+    message_id: str
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -104,6 +141,14 @@ class _AttemptOutcome:
     """Internal helper: success result or captured retryable error."""
 
     result: GenerationResult | None
+    error: Exception | None
+
+
+@dataclass(frozen=True)
+class _ToolAttemptOutcome:
+    """Internal helper: ``tool_use`` success or captured retryable error."""
+
+    result: ToolUseResult | None
     error: Exception | None
 
 
@@ -214,6 +259,21 @@ class AIOrchestrator:
             msg = f"Unsupported output format: {output_format}"
             raise ValueError(msg)
 
+    @staticmethod
+    def _cache_tokens(usage: object) -> tuple[int, int]:
+        """Extract ``(cache_read, cache_creation)`` token counts from ``usage``.
+
+        The Anthropic SDK exposes ``cache_read_input_tokens`` and
+        ``cache_creation_input_tokens`` only when prompt caching is
+        active *and* the SDK version supports them; both fields can be
+        ``None``. Coerce to ``int`` so downstream telemetry never has
+        to defend against ``None``.
+        """
+        return (
+            int(getattr(usage, "cache_read_input_tokens", 0) or 0),
+            int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
+        )
+
     def _call_api(
         self,
         client: Anthropic,
@@ -254,6 +314,7 @@ class AIOrchestrator:
             msg = "Expected TextBlock in response"
             raise GenerationError(msg)
 
+        cache_read, cache_creation = self._cache_tokens(response.usage)
         return GenerationResult(
             content=first_block.text,
             format=output_format,
@@ -263,6 +324,8 @@ class AIOrchestrator:
             ),
             model=response.model,
             message_id=response.id,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
         )
 
     def _retry_with_backoff(
@@ -320,11 +383,35 @@ class AIOrchestrator:
             return _AttemptOutcome(result=None, error=e)
 
     @staticmethod
+    def _build_api_call_record(
+        latency_s: float,
+        attempt: int,
+        result: GenerationResult | ToolUseResult | None,
+    ) -> APICallRecord:
+        """Build an ``APICallRecord`` from a result, or zeros for failures.
+
+        Extracted from :meth:`_record_call` to keep the recorder at
+        cyclomatic grade A: the four-way ``result and X`` branch chain
+        was tipping it into grade B.
+        """
+        if result is None:
+            return APICallRecord(latency_s=latency_s, retries=attempt)
+        return APICallRecord(
+            latency_s=latency_s,
+            retries=attempt,
+            input_tokens=result.token_usage.input_tokens,
+            output_tokens=result.token_usage.output_tokens,
+            cache_read_tokens=result.cache_read_tokens,
+            cache_creation_tokens=result.cache_creation_tokens,
+        )
+
+    @classmethod
     def _record_call(
+        cls,
         report: TimingReport | None,
         start: float,
         attempt: int,
-        result: GenerationResult | None,
+        result: GenerationResult | ToolUseResult | None,
     ) -> None:
         """Record a completed call (success or failure) on the active report.
 
@@ -337,19 +424,14 @@ class AIOrchestrator:
                 ``N`` retries were used. Stored as ``retries`` on the
                 resulting :class:`APICallRecord` because that's the
                 telemetry consumer's preferred naming.
-            result: Successful :class:`GenerationResult`, or ``None``
-                when the call failed (so token counts default to 0).
+            result: Successful :class:`GenerationResult` or
+                :class:`ToolUseResult`, or ``None`` when the call
+                failed (so token counts default to 0).
         """
         if report is None:
             return
-        report.record_api_call(
-            APICallRecord(
-                latency_s=time.perf_counter() - start,
-                retries=attempt,
-                input_tokens=result.token_usage.input_tokens if result else 0,
-                output_tokens=result.token_usage.output_tokens if result else 0,
-            )
-        )
+        latency_s = time.perf_counter() - start
+        report.record_api_call(cls._build_api_call_record(latency_s, attempt, result))
 
     def generate(
         self,
@@ -418,6 +500,7 @@ class AIOrchestrator:
             msg = "Expected TextBlock in response"
             raise GenerationError(msg)
 
+        cache_read, cache_creation = self._cache_tokens(response.usage)
         return GenerationResult(
             content=first_block.text,
             format=output_format,
@@ -427,6 +510,8 @@ class AIOrchestrator:
             ),
             model=response.model,
             message_id=response.id,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
         )
 
     async def _retry_with_backoff_async(
@@ -487,6 +572,169 @@ class AIOrchestrator:
 
         client = self._get_async_client()
         return await self._retry_with_backoff_async(client, prompt, output_format)
+
+    async def _call_tool_api_async(
+        self,
+        client: AsyncAnthropic,
+        prompt: str,
+        *,
+        system_blocks: list[dict[str, object]],
+        tool_schema: dict[str, object],
+    ) -> ToolUseResult:
+        """Make one ``tool_use`` API call and return the parsed result.
+
+        Forces the model into the supplied tool via ``tool_choice``,
+        then extracts the first :class:`ToolUseBlock` from the
+        response. The block's ``input`` (already validated against the
+        tool's ``input_schema`` server-side) is the structured payload
+        the caller wants.
+        """
+        tool_name = str(tool_schema["name"])
+        # The Anthropic SDK exposes ``system``, ``tools``, and
+        # ``tool_choice`` as deeply-nested TypedDict unions. Threading
+        # those through the generic ``dict[str, object]`` shapes we
+        # accept from callers would mean re-exporting half the SDK's
+        # internal types just to satisfy mypy, with no runtime
+        # benefit. The SDK validates the payload server-side; we
+        # type-ignore the single call site instead.
+        response = await client.messages.create(  # type: ignore[call-overload]
+            model=self.model,
+            max_tokens=4096,
+            system=system_blocks,
+            tools=[tool_schema],
+            tool_choice={"type": "tool", "name": tool_name},
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+        )
+
+        tool_block = next(
+            (b for b in response.content if isinstance(b, ToolUseBlock)),
+            None,
+        )
+        if tool_block is None:
+            msg = "Expected ToolUseBlock in response"
+            raise GenerationError(msg)
+        if not isinstance(tool_block.input, dict):
+            msg = "Tool input was not a JSON object"
+            raise GenerationError(msg)
+
+        cache_read, cache_creation = self._cache_tokens(response.usage)
+        return ToolUseResult(
+            tool_name=tool_block.name,
+            tool_input=dict(tool_block.input),
+            token_usage=TokenUsage(
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+            ),
+            model=response.model,
+            message_id=response.id,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
+        )
+
+    async def _attempt_tool_async(
+        self,
+        client: AsyncAnthropic,
+        prompt: str,
+        *,
+        system_blocks: list[dict[str, object]],
+        tool_schema: dict[str, object],
+    ) -> _ToolAttemptOutcome:
+        """Run one async ``tool_use`` attempt; capture errors for retry."""
+        try:
+            result = await self._call_tool_api_async(
+                client,
+                prompt,
+                system_blocks=system_blocks,
+                tool_schema=tool_schema,
+            )
+        except GenerationError:
+            raise
+        except Exception as e:  # noqa: BLE001 — preserved for retry semantics
+            return _ToolAttemptOutcome(result=None, error=e)
+        else:
+            return _ToolAttemptOutcome(result=result, error=None)
+
+    async def _retry_tool_with_backoff_async(
+        self,
+        client: AsyncAnthropic,
+        prompt: str,
+        *,
+        system_blocks: list[dict[str, object]],
+        tool_schema: dict[str, object],
+    ) -> ToolUseResult:
+        """Async retry loop for the ``tool_use`` path."""
+        report = get_active_report()
+        call_started = time.perf_counter()
+
+        for attempt, sleep_s in self._retry_schedule():
+            outcome = await self._attempt_tool_async(
+                client,
+                prompt,
+                system_blocks=system_blocks,
+                tool_schema=tool_schema,
+            )
+            if outcome.result is not None:
+                self._record_call(report, call_started, attempt, outcome.result)
+                return outcome.result
+            if sleep_s is None:
+                self._record_call(report, call_started, attempt, None)
+                msg = "Failed to generate content"
+                raise GenerationError(msg, cause=outcome.error) from outcome.error
+            await asyncio.sleep(sleep_s)
+
+        msg = "Failed to generate content"
+        raise GenerationError(msg)
+
+    async def generate_tool_use_async(
+        self,
+        prompt: str,
+        *,
+        system_blocks: list[dict[str, object]],
+        tool_schema: dict[str, object],
+    ) -> ToolUseResult:
+        """Run a structured (``tool_use``) generation.
+
+        The model is forced to invoke ``tool_schema`` and the parsed
+        ``input`` dict is returned to the caller — no free-form text
+        parsing required. ``system_blocks`` is passed verbatim to the
+        Anthropic API, so callers can attach
+        ``cache_control={"type": "ephemeral"}`` to whichever blocks
+        should participate in prompt caching.
+
+        Args:
+            prompt: User-message body (per-call delta — should NOT
+                duplicate content already present in
+                ``system_blocks``, otherwise cache-key mismatches will
+                defeat the cache).
+            system_blocks: Ordered list of system-prompt blocks, each
+                a dict matching the Anthropic SDK's system-block
+                schema (``{"type": "text", "text": "...",
+                "cache_control": {...}}``).
+            tool_schema: Anthropic-SDK-shaped tool definition with
+                ``name``, ``description``, and ``input_schema`` keys.
+
+        Returns:
+            :class:`ToolUseResult` with the parsed ``tool_input`` dict
+            and full token / cache telemetry.
+
+        Raises:
+            ValueError: If ``prompt`` is empty.
+            GenerationError: If the API call fails after retries or
+                the response does not contain a tool-use block.
+        """
+        self._validate_prompt(prompt)
+        client = self._get_async_client()
+        return await self._retry_tool_with_backoff_async(
+            client,
+            prompt,
+            system_blocks=system_blocks,
+            tool_schema=tool_schema,
+        )
 
     async def aclose(self) -> None:
         """Release the cached async client, if any.

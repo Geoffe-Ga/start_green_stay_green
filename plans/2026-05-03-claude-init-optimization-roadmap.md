@@ -17,10 +17,14 @@ Shipped:
 - Phase 3c (`.claude/.enhance-state.json` resume + per-target source-hash
   skip logic; `--force` bypasses the skip; `green enhance` is now
   idempotent — re-running on a project with no input changes is a fast
-  no-op) — branch `claude/execute-optimization-roadmap-Fhfnu`.
+  no-op) — PR #310 merged onto main as commit `2ade636`.
+- Phase 2c (prompt caching via cache-controlled system blocks +
+  `tool_use` structured output replacing the regex `CHANGES:` parser;
+  `cache_read_input_tokens` / `cache_creation_input_tokens` plumbed
+  through to the timing report) — branch
+  `claude/phase-2c-cache-and-tool-use`.
 
-Remaining: prompt caching + `tool_use` parsing (2c), prompt cleanup (4),
-batch mode (5), UX/docs (6).
+Remaining: prompt cleanup (4), batch mode (5), UX/docs (6).
 
 ---
 

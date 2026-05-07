@@ -569,7 +569,12 @@ class TestFullIntegrationFlow:
         assert isinstance(report["api_calls"], int)
         assert isinstance(report["api_seconds"], (int, float))
         assert isinstance(report["steps"], list)
-        assert report["tokens"] == {"input": 0, "output": 0, "cache_read": 0}
+        assert report["tokens"] == {
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_creation": 0,
+        }
 
         # In offline mode no API calls are made; every deterministic
         # step is recorded with zero attributed API calls.
