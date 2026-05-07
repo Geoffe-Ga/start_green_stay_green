@@ -44,6 +44,21 @@ from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
 from start_green_stay_green.utils.enhance_state import load_state
 
 
+def _make_orch_mock(mock_init: Mock) -> MagicMock:
+    """Build an ``AIOrchestrator`` mock with ``.model`` populated.
+
+    ``MagicMock(spec=AIOrchestrator)`` does not auto-populate the
+    instance attributes set in ``__init__``, so the Phase 3c
+    ``state.mark_completed(..., orchestrator.model)`` path fails
+    without a value here. Wires the mock onto ``mock_init`` and
+    returns it for callers that need to set further attributes.
+    """
+    orch = MagicMock(spec=AIOrchestrator)
+    orch.model = "claude-sonnet-4-5"
+    mock_init.return_value = orch
+    return orch
+
+
 class TestVersionCommand:
     """Test version-related functionality."""
 
@@ -1825,14 +1840,7 @@ class TestEnhanceCommand:
         tmp_path: Path,
     ) -> None:
         """No ``--targets`` flag → both helpers are invoked."""
-        # ``model`` is an instance attribute set in
-        # ``AIOrchestrator.__init__`` — ``MagicMock(spec=...)`` does
-        # not auto-populate instance attrs, so wire it explicitly for
-        # Phase 3c's ``state.mark_completed(..., orchestrator.model)``
-        # path.
-        orch = MagicMock(spec=AIOrchestrator)
-        orch.model = "claude-sonnet-4-5"
-        mock_init.return_value = orch
+        _make_orch_mock(mock_init)
         project = self._make_project(tmp_path, name="full", language="python")
 
         runner = CliRunner()
@@ -1856,14 +1864,7 @@ class TestEnhanceCommand:
         tmp_path: Path,
     ) -> None:
         """``--targets claude-md`` runs only that target."""
-        # ``model`` is an instance attribute set in
-        # ``AIOrchestrator.__init__`` — ``MagicMock(spec=...)`` does
-        # not auto-populate instance attrs, so wire it explicitly for
-        # Phase 3c's ``state.mark_completed(..., orchestrator.model)``
-        # path.
-        orch = MagicMock(spec=AIOrchestrator)
-        orch.model = "claude-sonnet-4-5"
-        mock_init.return_value = orch
+        _make_orch_mock(mock_init)
         project = self._make_project(tmp_path, name="claude-only", language="python")
 
         runner = CliRunner()
@@ -1893,14 +1894,7 @@ class TestEnhanceCommand:
         tmp_path: Path,
     ) -> None:
         """``--dry-run`` flows through to every target helper."""
-        # ``model`` is an instance attribute set in
-        # ``AIOrchestrator.__init__`` — ``MagicMock(spec=...)`` does
-        # not auto-populate instance attrs, so wire it explicitly for
-        # Phase 3c's ``state.mark_completed(..., orchestrator.model)``
-        # path.
-        orch = MagicMock(spec=AIOrchestrator)
-        orch.model = "claude-sonnet-4-5"
-        mock_init.return_value = orch
+        _make_orch_mock(mock_init)
         project = self._make_project(tmp_path, name="preview", language="python")
 
         runner = CliRunner()
@@ -1926,14 +1920,7 @@ class TestEnhanceCommand:
         tmp_path: Path,
     ) -> None:
         """``-n`` and ``-l`` win over auto-detection from the project."""
-        # ``model`` is an instance attribute set in
-        # ``AIOrchestrator.__init__`` — ``MagicMock(spec=...)`` does
-        # not auto-populate instance attrs, so wire it explicitly for
-        # Phase 3c's ``state.mark_completed(..., orchestrator.model)``
-        # path.
-        orch = MagicMock(spec=AIOrchestrator)
-        orch.model = "claude-sonnet-4-5"
-        mock_init.return_value = orch
+        _make_orch_mock(mock_init)
         # Make the project look like Python + name="auto-name", but
         # override both at the CLI.
         project = self._make_project(tmp_path, name="auto-name", language="python")
@@ -1967,14 +1954,7 @@ class TestEnhanceCommand:
         self, mock_init: Mock, tmp_path: Path
     ) -> None:
         """``-l cobol`` is rejected before any API call."""
-        # ``model`` is an instance attribute set in
-        # ``AIOrchestrator.__init__`` — ``MagicMock(spec=...)`` does
-        # not auto-populate instance attrs, so wire it explicitly for
-        # Phase 3c's ``state.mark_completed(..., orchestrator.model)``
-        # path.
-        orch = MagicMock(spec=AIOrchestrator)
-        orch.model = "claude-sonnet-4-5"
-        mock_init.return_value = orch
+        _make_orch_mock(mock_init)
         project = self._make_project(tmp_path, name="bad-lang", language="python")
 
         runner = CliRunner()
@@ -2021,9 +2001,7 @@ class TestEnhanceSkipUnchanged:
         tmp_path: Path,
     ) -> None:
         """First enhance run writes ``.claude/.enhance-state.json`` for both targets."""
-        orch = MagicMock(spec=AIOrchestrator)
-        orch.model = "claude-sonnet-4-5"
-        mock_init.return_value = orch
+        _make_orch_mock(mock_init)
         project = self._make_project(tmp_path)
 
         runner = CliRunner()
@@ -2048,9 +2026,7 @@ class TestEnhanceSkipUnchanged:
         tmp_path: Path,
     ) -> None:
         """Second enhance with no input change skips both target helpers."""
-        orch = MagicMock(spec=AIOrchestrator)
-        orch.model = "claude-sonnet-4-5"
-        mock_init.return_value = orch
+        _make_orch_mock(mock_init)
         project = self._make_project(tmp_path)
 
         runner = CliRunner()
@@ -2083,9 +2059,7 @@ class TestEnhanceSkipUnchanged:
         tmp_path: Path,
     ) -> None:
         """``--force`` re-tunes even when the source hash matches."""
-        orch = MagicMock(spec=AIOrchestrator)
-        orch.model = "claude-sonnet-4-5"
-        mock_init.return_value = orch
+        _make_orch_mock(mock_init)
         project = self._make_project(tmp_path)
 
         runner = CliRunner()
@@ -2136,9 +2110,7 @@ class TestEnhanceSkipUnchanged:
         tmp_path: Path,
     ) -> None:
         """Project name change → CLAUDE.md hash differs → re-tune fires."""
-        orch = MagicMock(spec=AIOrchestrator)
-        orch.model = "claude-sonnet-4-5"
-        mock_init.return_value = orch
+        _make_orch_mock(mock_init)
         project = self._make_project(tmp_path)
 
         runner = CliRunner()
@@ -2173,9 +2145,7 @@ class TestEnhanceSkipUnchanged:
         tmp_path: Path,
     ) -> None:
         """``--dry-run`` runs the helpers but doesn't claim a tune happened."""
-        orch = MagicMock(spec=AIOrchestrator)
-        orch.model = "claude-sonnet-4-5"
-        mock_init.return_value = orch
+        _make_orch_mock(mock_init)
         project = self._make_project(tmp_path)
 
         runner = CliRunner()
@@ -2207,9 +2177,7 @@ class TestEnhanceSkipUnchanged:
         ``last_run`` timestamp or otherwise rewrite the file even
         though no tune actually happened.
         """
-        orch = MagicMock(spec=AIOrchestrator)
-        orch.model = "claude-sonnet-4-5"
-        mock_init.return_value = orch
+        _make_orch_mock(mock_init)
         project = self._make_project(tmp_path)
         runner = CliRunner()
 
@@ -2225,6 +2193,81 @@ class TestEnhanceSkipUnchanged:
         )
         assert result.exit_code == 0
         assert state_file.read_bytes() == seeded_bytes
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_force_dry_run_combo_does_not_persist_state(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """``--force --dry-run`` invokes helpers but leaves state on disk untouched.
+
+        Both flags are independently respected: ``--force`` bypasses
+        the skip so the helpers run; ``--dry-run`` short-circuits
+        ``_persist_enhance_state`` so no write happens.
+        """
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path)
+        runner = CliRunner()
+
+        runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+        state_file = project / ".claude" / ".enhance-state.json"
+        seeded_bytes = state_file.read_bytes()
+        mock_claude.reset_mock()
+        mock_subagents.reset_mock()
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--force",
+                "--dry-run",
+                "--no-interactive",
+            ],
+        )
+        assert result.exit_code == 0
+        # ``--force`` ran the helpers…
+        assert mock_claude.call_count == 1
+        assert mock_subagents.call_count == 1
+        # …but ``--dry-run`` left the state file byte-identical.
+        assert state_file.read_bytes() == seeded_bytes
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_persist_skipped_when_every_target_is_skipped(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """A run where every target is skipped never calls ``save_state``.
+
+        Pairs with ``test_unchanged_target_is_skipped`` but asserts
+        the implementation detail directly: no spurious ``last_run``
+        bumps from no-op invocations.
+        """
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path)
+        runner = CliRunner()
+
+        # Seed state (real ``save_state``).
+        runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+
+        # Second run — every target skipped. Patch ``save_state`` only
+        # for this invocation so the seed actually persisted.
+        with patch("start_green_stay_green.cli.save_state") as mock_save:
+            result = runner.invoke(
+                cli.app, ["enhance", str(project), "--no-interactive"]
+            )
+        assert result.exit_code == 0
+        mock_save.assert_not_called()
 
 
 class TestEnhanceSourceHashes:
@@ -2307,19 +2350,28 @@ class TestReferenceFileWarning:
 class TestEnhanceDispatchAssertion:
     """The import-time guard that catches typos in ``_ENHANCE_DISPATCH``."""
 
-    def test_assert_passes_for_current_table(self) -> None:
-        """Sanity: every helper name in the live dispatch resolves."""
-        # Should be a no-op (raises only on broken install).
-        cli._assert_enhance_dispatch_intact()
-
     def test_assert_raises_when_helper_is_undefined(self) -> None:
         """A typo'd helper name in the table is caught at import time."""
+        bogus = cli._EnhanceTargetSpec(
+            skip_message="[dim]nope[/dim]",
+            helper_name="_does_not_exist",
+            hash_helper_name="_hash_claude_md_inputs",
+        )
         with (
-            patch.dict(
-                cli._ENHANCE_DISPATCH,
-                {"bogus": ("[dim]nope[/dim]", "_does_not_exist")},
-                clear=False,
-            ),
+            patch.dict(cli._ENHANCE_DISPATCH, {"bogus": bogus}, clear=False),
+            pytest.raises(RuntimeError, match="undefined helper"),
+        ):
+            cli._assert_enhance_dispatch_intact()
+
+    def test_assert_raises_when_hash_helper_is_undefined(self) -> None:
+        """The guard also catches typos in ``hash_helper_name``."""
+        bogus = cli._EnhanceTargetSpec(
+            skip_message="[dim]nope[/dim]",
+            helper_name="_enhance_claude_md",
+            hash_helper_name="_does_not_exist",
+        )
+        with (
+            patch.dict(cli._ENHANCE_DISPATCH, {"bogus": bogus}, clear=False),
             pytest.raises(RuntimeError, match="undefined helper"),
         ):
             cli._assert_enhance_dispatch_intact()

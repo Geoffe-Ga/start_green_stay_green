@@ -6,6 +6,7 @@ Implements the command-line interface using Typer with rich output formatting.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 import json
@@ -638,7 +639,7 @@ def _copy_reference_subagents(
 @contextmanager
 def _maybe_collect_timing(
     timing_json: Path | None,
-) -> Generator[None, None, None]:
+) -> Generator[None]:
     """Optionally install a :class:`TimingReport` for the wrapped block.
 
     When ``timing_json`` is ``None`` the manager is a no-op; otherwise a
@@ -1945,11 +1946,7 @@ def _require_enhance_orchestrator(
     return orchestrator
 
 
-# Single source of truth for the script list embedded in the
-# CLAUDE.md prompt. Defined ahead of the helpers that read it so
-# the dependency direction is obvious to a reader scanning the file
-# top-to-bottom (Python's late binding makes any order legal, but
-# top-down readability is worth the four lines of motion).
+# Single source of truth for the script list embedded in the CLAUDE.md prompt.
 _CLAUDE_MD_SCRIPTS: tuple[str, ...] = (
     "check-all.sh",
     "test.sh",
@@ -1998,7 +1995,8 @@ def _hash_claude_md_inputs(project_name: str, language: str) -> str:
             "claude-md\x00",
             f"project_name={project_name}\x00",
             f"language={language}\x00",
-            f"scripts={','.join(sorted(_CLAUDE_MD_SCRIPTS))}\x00",
+            # Declaration order is authoritative — same order the prompt sees.
+            f"scripts={','.join(_CLAUDE_MD_SCRIPTS)}\x00",
             f"skills={','.join(sorted(REQUIRED_SKILLS))}\x00",
             "template:\x00",
             template_bytes,
@@ -2034,13 +2032,13 @@ def _compute_target_source_hash(
     project_name: str,
     language: str,
 ) -> str:
-    """Dispatch to the per-target hash function."""
-    if target == "claude-md":
-        return _hash_claude_md_inputs(project_name, language)
-    if target == "subagents":
-        return _hash_subagents_inputs(project_name, language)
-    msg = f"unknown target: {target}"
-    raise ValueError(msg)
+    """Look the target up in the registry and call its hash helper."""
+    spec = _ENHANCE_DISPATCH.get(target)
+    if spec is None:
+        msg = f"unknown target: {target}"
+        raise ValueError(msg)
+    hash_helper: Callable[[str, str], str] = globals()[spec.hash_helper_name]
+    return hash_helper(project_name, language)
 
 
 def _enhance_claude_md(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
@@ -2179,23 +2177,40 @@ def _resolve_enhance_metadata(
     )
 
 
-# Map from target name → (skip-message, name-of-helper-on-this-module).
-# Storing the helper *name* (rather than the function reference) lets
-# tests patch ``cli._enhance_claude_md`` / ``cli._enhance_subagents``
-# at the module attribute level and have the dispatcher pick up the
-# patched version at call time. Python's late binding via
-# ``globals()[name]`` is the simplest way to achieve that without
-# adding a registry layer.
-_ENHANCE_DISPATCH: dict[str, tuple[str, str]] = {
-    "claude-md": (
-        "[dim]CLAUDE.md unchanged since last successful tune — "
-        "skipping (use --force to re-tune anyway).[/dim]",
-        "_enhance_claude_md",
+@dataclass(frozen=True)
+class _EnhanceTargetSpec:
+    """Per-target wiring for ``green enhance``.
+
+    Single source of truth pairing the skip message, the tune helper,
+    and the source-hash helper for one target. Holding all three in
+    one record means a new target requires exactly one entry in
+    :data:`_ENHANCE_DISPATCH` — there is no separate hash table to
+    forget to update. Helpers are stored by *name* (not function
+    reference) so test ``patch("cli._enhance_…")`` decorations are
+    honoured at call time via ``globals()[name]``.
+    """
+
+    skip_message: str
+    helper_name: str
+    hash_helper_name: str
+
+
+_ENHANCE_DISPATCH: dict[str, _EnhanceTargetSpec] = {
+    "claude-md": _EnhanceTargetSpec(
+        skip_message=(
+            "[dim]CLAUDE.md unchanged since last successful tune — "
+            "skipping (use --force to re-tune anyway).[/dim]"
+        ),
+        helper_name="_enhance_claude_md",
+        hash_helper_name="_hash_claude_md_inputs",
     ),
-    "subagents": (
-        "[dim]Subagents unchanged since last successful tune — "
-        "skipping (use --force to re-tune anyway).[/dim]",
-        "_enhance_subagents",
+    "subagents": _EnhanceTargetSpec(
+        skip_message=(
+            "[dim]Subagents unchanged since last successful tune — "
+            "skipping (use --force to re-tune anyway).[/dim]"
+        ),
+        helper_name="_enhance_subagents",
+        hash_helper_name="_hash_subagents_inputs",
     ),
 }
 
@@ -2203,15 +2218,18 @@ _ENHANCE_DISPATCH: dict[str, tuple[str, str]] = {
 def _assert_enhance_dispatch_intact() -> None:
     """Fail at import time if a dispatch entry references a missing helper.
 
-    The dispatch table looks helpers up by *name* (so test ``patch``
+    The registry looks helpers up by *name* (so test ``patch``
     decorators can intercept), which trades static-analysis safety
     for late-binding flexibility. This guard rebuilds the missing
-    safety net at import time so a typo in ``_ENHANCE_DISPATCH`` is
-    caught as soon as the module loads, not at first ``green
-    enhance`` invocation.
+    safety net at import time so a typo in either ``helper_name`` or
+    ``hash_helper_name`` is caught as soon as the module loads, not
+    at first ``green enhance`` invocation.
     """
-    missing = [
-        name for _msg, name in _ENHANCE_DISPATCH.values() if name not in globals()
+    missing: list[str] = [
+        name
+        for spec in _ENHANCE_DISPATCH.values()
+        for name in (spec.helper_name, spec.hash_helper_name)
+        if name not in globals()
     ]
     if missing:
         msg = (
@@ -2245,15 +2263,15 @@ def _dispatch_enhance_targets(  # noqa: PLR0913 — orchestration glue
     """
     skipped: list[str] = []
     for target in targets:
-        skip_message, helper_name = _ENHANCE_DISPATCH[target]
+        spec = _ENHANCE_DISPATCH[target]
         target_hash = target_hashes[target]
         if not force and state.is_unchanged(target, target_hash):
-            console.print(skip_message)
+            console.print(spec.skip_message)
             skipped.append(target)
             continue
         # Late-bound lookup so test ``patch("cli._enhance_claude_md")``
         # decorations are honoured.
-        helper: Callable[..., None] = globals()[helper_name]
+        helper: Callable[..., None] = globals()[spec.helper_name]
         helper(
             project_path,
             project_name,
@@ -2284,7 +2302,7 @@ def _persist_enhance_state(
     """
     if dry_run:
         return
-    if len(skipped) >= len(selected_targets):
+    if len(skipped) == len(selected_targets):
         return
     save_state(project_path, state)
 
