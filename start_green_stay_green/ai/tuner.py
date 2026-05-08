@@ -20,6 +20,7 @@ from typing import cast
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError
+from start_green_stay_green.ai.prompts.manager import get_default_manager
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -180,20 +181,20 @@ class ContentTuner:
         target_context: str,
         preserve_sections: Sequence[str] | None,
     ) -> list[dict[str, object]]:
-        """Assemble the cache-controlled system blocks for a tune call.
+        """Render the cache-controlled system block for a tune call.
 
-        Why split this off into system blocks (rather than inline into
-        the user message)? The Anthropic prompt cache keys on the
-        leading prefix of every request. Per-call deltas
-        (``source_content``) live in the user message; everything
-        stable across the 8 subagent tunes in one ``green init``
-        (instructions + source/target context + preserve list) lives
-        here so the second-and-later tunes in a session can hit the
-        cache.
+        Phase 4: full prompt body is rendered from
+        ``ai/prompts/templates/content_tune.jinja2`` (6-component
+        framework). The single block carries
+        ``cache_control: {"type": "ephemeral"}`` so Anthropic caches
+        the entire prefix for ~5 minutes — back-to-back per-agent
+        tunes within one ``green init`` hit the cache.
 
-        The final block carries
-        ``cache_control: {"type": "ephemeral"}`` — Anthropic caches
-        the prefix up through that block for ~5 minutes.
+        Why a single block (rather than splitting instructions and
+        context across two)? The Anthropic prompt cache keys on the
+        leading prefix; one cached block is the cleanest contract.
+        Per-call deltas (``source_content``) live in the user
+        message, not here.
 
         Args:
             source_context: Description of the source repository.
@@ -202,42 +203,23 @@ class ContentTuner:
                 model must leave verbatim.
 
         Returns:
-            List of system blocks, ready to pass straight to
-            :meth:`AIOrchestrator.generate_tool_use_async`.
+            One-element list of system blocks, ready to pass straight
+            to :meth:`AIOrchestrator.generate_tool_use_async`.
         """
-        instructions = (
-            "You are a content tuner adapting source repository "
-            "content to a target repository context. "
-            "Always invoke the report_tuning tool with the adapted "
-            "content and a list of the changes you made.\n\n"
-            "REQUIREMENTS:\n"
-            "- Preserve the structure and format of the original content.\n"
-            "- Adapt terminology, examples, and references to match the "
-            "target context.\n"
-            "- Maintain all section headings and organisation.\n"
-            "- Keep the same level of detail and completeness.\n"
-            "- List every meaningful change in the changes array; "
-            "return an empty array when no changes were necessary."
+        prompt = get_default_manager().render(
+            "content_tune",
+            {
+                "source_context": source_context,
+                "target_context": target_context,
+                "preserve_sections": list(preserve_sections or []),
+            },
         )
-        if preserve_sections:
-            sections = ", ".join(f'"{s}"' for s in preserve_sections)
-            instructions += f"\n- Leave the following sections unchanged: {sections}."
-
-        context_block = (
-            f"SOURCE CONTEXT:\n{source_context}\n\n"
-            f"TARGET CONTEXT:\n{target_context}"
-        )
-
-        # Mark only the *last* block as cached. Anthropic caches every
-        # block up to and including the marked one, so a single marker
-        # at the tail caches the full stable prefix.
         return [
-            {"type": "text", "text": instructions},
             {
                 "type": "text",
-                "text": context_block,
+                "text": prompt,
                 "cache_control": {"type": "ephemeral"},
-            },
+            }
         ]
 
     @staticmethod

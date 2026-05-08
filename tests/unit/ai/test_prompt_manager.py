@@ -66,11 +66,16 @@ class TestPromptManagerInitialization:
     def test_init_supported_template_types_constant(self) -> None:
         """Test SUPPORTED_TEMPLATE_TYPES constant is properly defined."""
         assert {
+            # Pre-Phase-4 stubs.
             "ci_cd",
             "precommit",
             "quality_scripts",
             "claude_md",
             "project_scaffolding",
+            # Phase 4 — generator-side prompts hoisted from inline f-strings.
+            "claude_md_tune",
+            "ci_enhance",
+            "content_tune",
         } == PromptManager.SUPPORTED_TEMPLATE_TYPES
 
 
@@ -791,14 +796,19 @@ class TestMutationKillers:
     def test_supported_template_types_exact_set(self) -> None:
         """Test SUPPORTED_TEMPLATE_TYPES contains exact set."""
         expected = {
+            # Pre-Phase-4 stubs.
             "ci_cd",
             "precommit",
             "quality_scripts",
             "claude_md",
             "project_scaffolding",
+            # Phase 4 additions.
+            "claude_md_tune",
+            "ci_enhance",
+            "content_tune",
         }
         assert expected == PromptManager.SUPPORTED_TEMPLATE_TYPES
-        assert len(PromptManager.SUPPORTED_TEMPLATE_TYPES) == 5
+        assert len(PromptManager.SUPPORTED_TEMPLATE_TYPES) == 8
 
     def test_supported_template_types_contains_ci_cd(self) -> None:
         """Test SUPPORTED_TEMPLATE_TYPES contains ci_cd."""
@@ -1174,3 +1184,98 @@ class TestPromptManagerExceptionChaining:
         # Nonexistent should raise
         with pytest.raises(PromptTemplateError):
             PromptManager(template_dir=nonexistent_dir)
+
+
+class TestPhase4TemplatesSixComponent:
+    """Phase 4: every generator-side prompt template carries the
+    6-component framework (Role / Goal / Context / Output Format /
+    Examples / Requirements). These tests pin that structure so a
+    reviewer cannot accidentally drop a section while iterating.
+    """
+
+    SIX_COMPONENT_HEADINGS = (
+        "## Role",
+        "## Goal",
+        "## Context",
+        "## Output Format",
+        "## Examples",
+        "## Requirements",
+    )
+
+    def test_claude_md_tune_renders_with_all_six_components(self) -> None:
+        """`claude_md_tune` carries all six headings in the rendered prompt."""
+        manager = PromptManager()
+        rendered = manager.render(
+            "claude_md_tune",
+            {
+                "project_name": "alpha",
+                "language": "python",
+                "scripts": ["check-all.sh"],
+                "skills": ["stay-green"],
+                "claude_md_reference": "# Reference\n\nbody",
+                "quality_reference": "thresholds...",
+            },
+        )
+        for heading in self.SIX_COMPONENT_HEADINGS:
+            assert heading in rendered, f"missing {heading} from claude_md_tune"
+
+    def test_ci_enhance_renders_with_all_six_components(self) -> None:
+        """`ci_enhance` carries all six headings in the rendered prompt."""
+        manager = PromptManager()
+        rendered = manager.render(
+            "ci_enhance",
+            {"language": "python", "context": "Python 3.12, pip"},
+        )
+        for heading in self.SIX_COMPONENT_HEADINGS:
+            assert heading in rendered, f"missing {heading} from ci_enhance"
+
+    def test_content_tune_renders_with_all_six_components(self) -> None:
+        """`content_tune` carries all six headings in the rendered prompt."""
+        manager = PromptManager()
+        rendered = manager.render(
+            "content_tune",
+            {
+                "source_context": "Source",
+                "target_context": "Target",
+                "preserve_sections": [],
+            },
+        )
+        for heading in self.SIX_COMPONENT_HEADINGS:
+            assert heading in rendered, f"missing {heading} from content_tune"
+
+    def test_content_tune_renders_preserve_sections_when_supplied(self) -> None:
+        """Optional preserve list flows into the rendered prompt verbatim."""
+        manager = PromptManager()
+        rendered = manager.render(
+            "content_tune",
+            {
+                "source_context": "Source",
+                "target_context": "Target",
+                "preserve_sections": ["Identity", "Workflow"],
+            },
+        )
+        assert "PRESERVE THESE SECTIONS UNCHANGED" in rendered
+        assert "Identity" in rendered
+        assert "Workflow" in rendered
+
+    def test_claude_md_tune_handles_empty_scripts_and_skills(self) -> None:
+        """An empty scripts/skills list does not crash the template."""
+        manager = PromptManager()
+        rendered = manager.render(
+            "claude_md_tune",
+            {
+                "project_name": "alpha",
+                "language": "python",
+                "scripts": [],
+                "skills": [],
+                "claude_md_reference": "# Reference",
+                "quality_reference": "Q",
+            },
+        )
+        assert "(none)" in rendered
+
+    def test_each_phase_4_template_validates(self) -> None:
+        """`validate_template` confirms each new template is loadable."""
+        manager = PromptManager()
+        for name in ("claude_md_tune", "ci_enhance", "content_tune"):
+            assert manager.validate_template(name), f"{name} failed validation"
