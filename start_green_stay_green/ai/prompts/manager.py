@@ -4,6 +4,7 @@ This module provides utilities for managing Jinja2-based prompt templates
 including caching, validation, and language-specific rendering.
 """
 
+import functools
 import logging
 from pathlib import Path
 from typing import Any
@@ -178,9 +179,7 @@ class PromptManager:
         self._template_cache.clear()
 
 
-_default_manager: PromptManager | None = None
-
-
+@functools.cache
 def get_default_manager() -> PromptManager:
     """Return the process-wide default :class:`PromptManager`, creating it lazily.
 
@@ -189,9 +188,7 @@ def get_default_manager() -> PromptManager:
     manager can keep building their own with a custom
     ``template_dir``; this singleton is for the production path
     where every generator wants the same ``ai/prompts/templates``
-    directory.
+    directory. Tests that need to force a rebuild call
+    ``get_default_manager.cache_clear()``.
     """
-    global _default_manager  # noqa: PLW0603 — module-level singleton by design
-    if _default_manager is None:
-        _default_manager = PromptManager()
-    return _default_manager
+    return PromptManager()

@@ -237,6 +237,10 @@ class TestContentTunerSystemBlocks:
         blocks = ContentTuner._build_system_blocks(
             "Source", "Target", preserve_sections=None
         )
+        # The cache prefix is a single block by design — splitting it
+        # back into two would re-introduce the partition the
+        # consolidation removed, so pin the count.
+        assert len(blocks) == 1
         # Earlier blocks must not be marked or the cache key partition
         # would leak per-call deltas into the cached prefix.
         for block in blocks[:-1]:

@@ -5,7 +5,6 @@ from pathlib import Path
 from jinja2 import TemplateNotFound
 import pytest
 
-import start_green_stay_green.ai.prompts.manager as manager_module
 from start_green_stay_green.ai.prompts.manager import PromptManager
 from start_green_stay_green.ai.prompts.manager import PromptTemplateError
 from start_green_stay_green.ai.prompts.manager import get_default_manager
@@ -1283,12 +1282,12 @@ class TestGetDefaultManager:
     """Lock in the lazy-singleton contract for ``get_default_manager``."""
 
     def setup_method(self) -> None:
-        """Reset the module-level cache so tests do not interfere."""
-        manager_module._default_manager = None
+        """Drop the cache so each test starts with no constructed manager."""
+        get_default_manager.cache_clear()
 
     def teardown_method(self) -> None:
-        """Reset again so production callers in later tests get a fresh manager."""
-        manager_module._default_manager = None
+        """Drop the cache so production callers in later tests rebuild fresh."""
+        get_default_manager.cache_clear()
 
     def test_returns_prompt_manager_instance(self) -> None:
         """First call constructs and returns a real ``PromptManager``."""
@@ -1299,10 +1298,10 @@ class TestGetDefaultManager:
         """The singleton guarantee — both calls hand back the *same* object.
 
         Identity check (``is``), not equality. ``PromptManager`` does
-        not override ``__eq__``, so an accidental drop of either the
-        ``global`` declaration or the ``None`` guard would silently
-        return distinct objects that compare equal by reference but
-        consume separate Jinja2 environments.
+        not override ``__eq__``, so an accidental drop of the
+        ``@functools.lru_cache`` decorator would silently return
+        distinct objects that compare equal by reference but consume
+        separate Jinja2 environments.
         """
         first = get_default_manager()
         second = get_default_manager()
@@ -1313,9 +1312,10 @@ class TestGetDefaultManager:
 
         Important so tests that use a custom ``template_dir`` can
         construct their own ``PromptManager`` without paying for the
-        default one. Setup hook above guarantees the cache starts
-        ``None``; verify nothing along the import path repopulated it.
+        default one. ``cache_info().currsize`` is the public hook
+        ``functools.lru_cache`` exposes for inspecting cache state;
+        zero before the first call, one after.
         """
-        assert manager_module._default_manager is None
+        assert get_default_manager.cache_info().currsize == 0
         get_default_manager()
-        assert manager_module._default_manager is not None
+        assert get_default_manager.cache_info().currsize == 1
