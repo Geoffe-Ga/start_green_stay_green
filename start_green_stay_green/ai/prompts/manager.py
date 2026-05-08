@@ -44,7 +44,6 @@ class PromptManager:
         "quality_scripts",
         "claude_md",
         "project_scaffolding",
-        # Phase 4 — generator-side prompts migrated out of inline f-strings.
         "claude_md_tune",
         "ci_enhance",
         "content_tune",

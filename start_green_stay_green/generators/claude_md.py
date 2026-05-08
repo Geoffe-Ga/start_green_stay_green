@@ -127,11 +127,9 @@ class ClaudeMdGenerator:
     ) -> str:
         """Render the ``claude_md_tune`` prompt template.
 
-        Phase 4: this is now a thin wrapper around
-        :func:`PromptManager.render`. The 6-component prompt body
-        lives in
+        The 6-component prompt body lives in
         ``start_green_stay_green/ai/prompts/templates/claude_md_tune.jinja2``;
-        this method just supplies the context dict.
+        this method supplies the context dict.
 
         Args:
             claude_md_reference: Reference CLAUDE.md template.

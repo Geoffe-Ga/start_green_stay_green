@@ -185,7 +185,7 @@ class TestContentTunerSystemBlocks:
         assert "Django project" in joined
 
     def test_system_blocks_include_six_component_headings(self) -> None:
-        """Phase 4: the rendered system prompt carries the 6-component framework."""
+        """The rendered system prompt carries the 6-component framework."""
         blocks = ContentTuner._build_system_blocks(
             "Source", "Target", preserve_sections=None
         )
@@ -481,7 +481,6 @@ class TestContentTunerTuneAsync:
 
         keyword = orchestrator.generate_tool_use_async.call_args.kwargs
         joined = " ".join(str(b["text"]) for b in keyword["system_blocks"])
-        # Phase 4: preserve list rendered through the content_tune template.
         assert "PRESERVE THESE SECTIONS UNCHANGED" in joined
         assert '"License"' in joined
         assert '"Credits"' in joined

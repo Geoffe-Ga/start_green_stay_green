@@ -183,12 +183,11 @@ class ContentTuner:
     ) -> list[dict[str, object]]:
         """Render the cache-controlled system block for a tune call.
 
-        Phase 4: full prompt body is rendered from
-        ``ai/prompts/templates/content_tune.jinja2`` (6-component
-        framework). The single block carries
-        ``cache_control: {"type": "ephemeral"}`` so Anthropic caches
-        the entire prefix for ~5 minutes — back-to-back per-agent
-        tunes within one ``green init`` hit the cache.
+        The full prompt body is rendered from
+        ``ai/prompts/templates/content_tune.jinja2``. The single block
+        carries ``cache_control: {"type": "ephemeral"}`` so Anthropic
+        caches the entire prefix for ~5 minutes — back-to-back
+        per-agent tunes within one ``green init`` hit the cache.
 
         Why a single block (rather than splitting instructions and
         context across two)? The Anthropic prompt cache keys on the

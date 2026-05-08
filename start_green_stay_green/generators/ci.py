@@ -333,10 +333,10 @@ The CI workflow MUST:
     def _generate_with_ai(self, context: str) -> GenerationResult:
         """Generate workflow using AI orchestrator.
 
-        Phase 4: prompt body lives in the
-        ``ai/prompts/templates/ci_enhance.jinja2`` template; this
-        method is a thin wrapper that supplies the context dict and
-        forwards to ``orchestrator.generate``.
+        The prompt body lives in
+        ``ai/prompts/templates/ci_enhance.jinja2``; this method
+        supplies the context dict and forwards to
+        ``orchestrator.generate``.
 
         Args:
             context: Context information for generation.

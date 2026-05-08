@@ -5,8 +5,10 @@ from pathlib import Path
 from jinja2 import TemplateNotFound
 import pytest
 
+import start_green_stay_green.ai.prompts.manager as manager_module
 from start_green_stay_green.ai.prompts.manager import PromptManager
 from start_green_stay_green.ai.prompts.manager import PromptTemplateError
+from start_green_stay_green.ai.prompts.manager import get_default_manager
 
 
 class TestPromptManagerInitialization:
@@ -66,13 +68,11 @@ class TestPromptManagerInitialization:
     def test_init_supported_template_types_constant(self) -> None:
         """Test SUPPORTED_TEMPLATE_TYPES constant is properly defined."""
         assert {
-            # Pre-Phase-4 stubs.
             "ci_cd",
             "precommit",
             "quality_scripts",
             "claude_md",
             "project_scaffolding",
-            # Phase 4 — generator-side prompts hoisted from inline f-strings.
             "claude_md_tune",
             "ci_enhance",
             "content_tune",
@@ -796,13 +796,11 @@ class TestMutationKillers:
     def test_supported_template_types_exact_set(self) -> None:
         """Test SUPPORTED_TEMPLATE_TYPES contains exact set."""
         expected = {
-            # Pre-Phase-4 stubs.
             "ci_cd",
             "precommit",
             "quality_scripts",
             "claude_md",
             "project_scaffolding",
-            # Phase 4 additions.
             "claude_md_tune",
             "ci_enhance",
             "content_tune",
@@ -1187,10 +1185,10 @@ class TestPromptManagerExceptionChaining:
 
 
 class TestPhase4TemplatesSixComponent:
-    """Phase 4: every generator-side prompt template carries the
-    6-component framework (Role / Goal / Context / Output Format /
-    Examples / Requirements). These tests pin that structure so a
-    reviewer cannot accidentally drop a section while iterating.
+    """Each generator-side prompt template carries the 6-component
+    framework (Role / Goal / Context / Output Format / Examples /
+    Requirements). These tests pin that structure so a reviewer
+    cannot accidentally drop a section while iterating.
     """
 
     SIX_COMPONENT_HEADINGS = (
@@ -1279,3 +1277,45 @@ class TestPhase4TemplatesSixComponent:
         manager = PromptManager()
         for name in ("claude_md_tune", "ci_enhance", "content_tune"):
             assert manager.validate_template(name), f"{name} failed validation"
+
+
+class TestGetDefaultManager:
+    """Lock in the lazy-singleton contract for ``get_default_manager``."""
+
+    def setup_method(self) -> None:
+        """Reset the module-level cache so tests do not interfere."""
+        manager_module._default_manager = None
+
+    def teardown_method(self) -> None:
+        """Reset again so production callers in later tests get a fresh manager."""
+        manager_module._default_manager = None
+
+    def test_returns_prompt_manager_instance(self) -> None:
+        """First call constructs and returns a real ``PromptManager``."""
+        result = get_default_manager()
+        assert isinstance(result, PromptManager)
+
+    def test_returns_same_instance_on_repeated_calls(self) -> None:
+        """The singleton guarantee — both calls hand back the *same* object.
+
+        Identity check (``is``), not equality. ``PromptManager`` does
+        not override ``__eq__``, so an accidental drop of either the
+        ``global`` declaration or the ``None`` guard would silently
+        return distinct objects that compare equal by reference but
+        consume separate Jinja2 environments.
+        """
+        first = get_default_manager()
+        second = get_default_manager()
+        assert first is second
+
+    def test_lazy_construction_defers_until_first_call(self) -> None:
+        """Importing the module does not eagerly build a manager.
+
+        Important so tests that use a custom ``template_dir`` can
+        construct their own ``PromptManager`` without paying for the
+        default one. Setup hook above guarantees the cache starts
+        ``None``; verify nothing along the import path repopulated it.
+        """
+        assert manager_module._default_manager is None
+        get_default_manager()
+        assert manager_module._default_manager is not None
