@@ -1,6 +1,12 @@
 """Content tuning system for adapting content to target repository context.
 
 Uses Claude Sonnet to adapt copied content while preserving structure.
+The model is invoked via the ``report_tuning`` tool so the response
+arrives as validated JSON (``tuned_content`` + ``changes``) instead of
+free-form text — eliminates the previous regex-based ``CHANGES:``
+parser. The stable instruction prefix is sent as a cache-controlled
+system block so back-to-back per-agent tunes within a single
+``green init`` (or ``green enhance``) hit the prompt cache.
 """
 
 from __future__ import annotations
@@ -20,11 +26,41 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from collections.abc import Sequence
 
+    from start_green_stay_green.ai.orchestrator import ToolUseResult
+
 
 logger = logging.getLogger(__name__)
 
-# Constants for response parsing
-_CHANGES_SECTION_PARTS = 2
+
+# Tool definition for the structured-output path. The model is
+# *forced* to invoke this tool (via ``tool_choice``) so the response
+# is always a JSON object matching the schema — no regex parsing.
+_REPORT_TUNING_TOOL: dict[str, object] = {
+    "name": "report_tuning",
+    "description": (
+        "Report the tuned content and a bullet list of changes made "
+        "while adapting the source content to the target context."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "tuned_content": {
+                "type": "string",
+                "description": "The fully adapted content.",
+            },
+            "changes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Short bullet describing each change made. "
+                    "Empty list when no changes were necessary."
+                ),
+            },
+        },
+        "required": ["tuned_content", "changes"],
+    },
+}
+
 
 # Generic over the result type so callers get a precise return type back
 # instead of a blanket ``Any``.
@@ -138,89 +174,112 @@ class ContentTuner:
             msg = f"{context_name} cannot be empty"
             raise ValueError(msg)
 
-    def _build_tuning_prompt(
-        self,
-        source_content: str,
+    @staticmethod
+    def _build_system_blocks(
         source_context: str,
         target_context: str,
-        preserve_sections: Sequence[str] | None = None,
-    ) -> str:
-        """Build prompt for tuning operation.
+        preserve_sections: Sequence[str] | None,
+    ) -> list[dict[str, object]]:
+        """Assemble the cache-controlled system blocks for a tune call.
+
+        Why split this off into system blocks (rather than inline into
+        the user message)? The Anthropic prompt cache keys on the
+        leading prefix of every request. Per-call deltas
+        (``source_content``) live in the user message; everything
+        stable across the 8 subagent tunes in one ``green init``
+        (instructions + source/target context + preserve list) lives
+        here so the second-and-later tunes in a session can hit the
+        cache.
+
+        The final block carries
+        ``cache_control: {"type": "ephemeral"}`` — Anthropic caches
+        the prefix up through that block for ~5 minutes.
 
         Args:
-            source_content: Original content to adapt.
-            source_context: Description of source repository.
-            target_context: Description of target repository.
-            preserve_sections: Sections to leave unchanged.
+            source_context: Description of the source repository.
+            target_context: Description of the target repository.
+            preserve_sections: Optional list of section headings the
+                model must leave verbatim.
 
         Returns:
-            Formatted prompt for AI tuning.
+            List of system blocks, ready to pass straight to
+            :meth:`AIOrchestrator.generate_tool_use_async`.
         """
-        preserve_text = ""
+        instructions = (
+            "You are a content tuner adapting source repository "
+            "content to a target repository context. "
+            "Always invoke the report_tuning tool with the adapted "
+            "content and a list of the changes you made.\n\n"
+            "REQUIREMENTS:\n"
+            "- Preserve the structure and format of the original content.\n"
+            "- Adapt terminology, examples, and references to match the "
+            "target context.\n"
+            "- Maintain all section headings and organisation.\n"
+            "- Keep the same level of detail and completeness.\n"
+            "- List every meaningful change in the changes array; "
+            "return an empty array when no changes were necessary."
+        )
         if preserve_sections:
             sections = ", ".join(f'"{s}"' for s in preserve_sections)
-            preserve_text = f"\n\nPRESERVE THESE SECTIONS UNCHANGED: {sections}"
+            instructions += f"\n- Leave the following sections unchanged: {sections}."
 
-        return f"""Adapt the following content from the source repository \
-context to the target repository context.
+        context_block = (
+            f"SOURCE CONTEXT:\n{source_context}\n\n"
+            f"TARGET CONTEXT:\n{target_context}"
+        )
 
-SOURCE CONTEXT:
-{source_context}
+        # Mark only the *last* block as cached. Anthropic caches every
+        # block up to and including the marked one, so a single marker
+        # at the tail caches the full stable prefix.
+        return [
+            {"type": "text", "text": instructions},
+            {
+                "type": "text",
+                "text": context_block,
+                "cache_control": {"type": "ephemeral"},
+            },
+        ]
 
-TARGET CONTEXT:
-{target_context}
+    @staticmethod
+    def _build_user_message(source_content: str) -> str:
+        """Per-call delta: the only part that varies between subagent tunes.
 
-REQUIREMENTS:
-- Preserve the structure and format of the original content
-- Adapt terminology, examples, and references to match target context
-- Maintain all section headings and organization
-- Keep the same level of detail and completeness
-- List all changes made at the end{preserve_text}
-
-CONTENT TO ADAPT:
-{source_content}
-
-OUTPUT FORMAT:
-Provide the adapted content followed by a CHANGES section listing what was modified.
-
-Example format:
-[Adapted content here]
-
-CHANGES:
-- Changed "FastAPI" to "Django" in examples
-- Updated repository name references
-- Adapted script paths
-"""
-
-    def _parse_tuning_response(self, response_content: str) -> tuple[str, list[str]]:
-        """Parse AI response to extract content and changes.
-
-        Args:
-            response_content: Raw response from AI.
-
-        Returns:
-            Tuple of (adapted_content, list_of_changes).
+        Kept tiny on purpose so the cache prefix (system blocks) is as
+        long as possible relative to the per-call body.
         """
-        # Split on CHANGES section
-        parts = response_content.split("CHANGES:", 1)
+        return f"CONTENT TO ADAPT:\n{source_content}"
 
-        if len(parts) == _CHANGES_SECTION_PARTS:
-            content = parts[0].strip()
-            changes_text = parts[1].strip()
+    @staticmethod
+    def _validate_tool_use_input(
+        tool_input: dict[str, object],
+    ) -> tuple[str, list[object]]:
+        """Validate ``tool_input`` shape and return its two required fields.
 
-            # Parse changes (each line starting with - or *)
-            changes = []
-            for raw_line in changes_text.split("\n"):
-                line = raw_line.strip()
-                if line.startswith(("-", "*")):
-                    changes.append(line.lstrip("-* "))
-                elif line:  # Non-empty line without marker
-                    changes.append(line)
+        Splits validation off from filtering so the parser stays at
+        cyclomatic grade A. The schema enforces both fields at the
+        API layer; this catches malformed payloads from an SDK
+        version mismatch before they cause a confusing ``TypeError``
+        downstream.
+        """
+        raw_content = tool_input.get("tuned_content")
+        if not isinstance(raw_content, str):
+            msg = "report_tuning.tuned_content must be a string"
+            raise GenerationError(msg)
+        raw_changes = tool_input.get("changes", [])
+        if not isinstance(raw_changes, list):
+            msg = "report_tuning.changes must be a list of strings"
+            raise GenerationError(msg)
+        return raw_content, raw_changes
 
-            return content, changes
-
-        # No CHANGES section found, return full content
-        return response_content.strip(), []
+    @classmethod
+    def _parse_tool_use_input(
+        cls,
+        tool_input: dict[str, object],
+    ) -> tuple[str, list[str]]:
+        """Extract ``(tuned_content, changes)`` from the tool's JSON input."""
+        raw_content, raw_changes = cls._validate_tool_use_input(tool_input)
+        changes = [c for c in raw_changes if isinstance(c, str) and c.strip()]
+        return raw_content, changes
 
     async def tune(
         self,
@@ -272,13 +331,10 @@ CHANGES:
                 token_usage_output=0,
             )
 
-        # Build prompt and generate
-        prompt = self._build_tuning_prompt(
-            source_content,
-            source_context,
-            target_context,
-            preserve_sections,
+        system_blocks = self._build_system_blocks(
+            source_context, target_context, preserve_sections
         )
+        user_message = self._build_user_message(source_content)
 
         logger.info(
             "Tuning content (source: %s, target: %s)",
@@ -287,17 +343,20 @@ CHANGES:
         )
 
         try:
-            result = await _await_or_offload(
-                self.orchestrator.generate,
-                prompt,
-                "markdown",
+            tool_result: ToolUseResult = await _await_or_offload(
+                cast(
+                    "Callable[..., Awaitable[ToolUseResult]]",
+                    self.orchestrator.generate_tool_use_async,
+                ),
+                user_message,
+                system_blocks=system_blocks,
+                tool_schema=_REPORT_TUNING_TOOL,
             )
         except GenerationError:
             logger.exception("Tuning failed")
             raise
 
-        # Parse response
-        content, changes = self._parse_tuning_response(result.content)
+        content, changes = self._parse_tool_use_input(tool_result.tool_input)
 
         logger.info("Tuning complete, %d changes made", len(changes))
         for change in changes:
@@ -307,6 +366,6 @@ CHANGES:
             content=content,
             changes=changes,
             dry_run=False,
-            token_usage_input=result.token_usage.input_tokens,
-            token_usage_output=result.token_usage.output_tokens,
+            token_usage_input=tool_result.token_usage.input_tokens,
+            token_usage_output=tool_result.token_usage.output_tokens,
         )

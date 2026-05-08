@@ -49,6 +49,10 @@ class APICallRecord:
         input_tokens: Tokens billed as input (prompt + cache reads).
         output_tokens: Tokens billed as output.
         cache_read_tokens: Tokens served from prompt cache, if reported.
+        cache_creation_tokens: Tokens written to prompt cache on this
+            call, if reported. Cache writes are billed at a higher
+            rate than reads, so isolating them in telemetry lets us
+            verify the cache is amortising as expected over a session.
     """
 
     latency_s: float
@@ -56,6 +60,7 @@ class APICallRecord:
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
 
 
 @dataclass
@@ -156,6 +161,11 @@ class TimingReport:
         """Total tokens served from the prompt cache."""
         return sum(c.cache_read_tokens for c in self.api_calls)
 
+    @property
+    def total_cache_creation_tokens(self) -> int:
+        """Total tokens written to the prompt cache."""
+        return sum(c.cache_creation_tokens for c in self.api_calls)
+
     def to_dict(self) -> dict[str, object]:
         """Serialize the report to a JSON-friendly dict."""
         return {
@@ -174,6 +184,7 @@ class TimingReport:
                 "input": self.total_input_tokens,
                 "output": self.total_output_tokens,
                 "cache_read": self.total_cache_read_tokens,
+                "cache_creation": self.total_cache_creation_tokens,
             },
         }
 
