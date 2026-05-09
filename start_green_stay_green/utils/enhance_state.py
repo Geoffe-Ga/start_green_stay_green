@@ -108,6 +108,13 @@ class TargetCompletion:
 class EnhanceState:
     """Persistent state for ``green enhance``.
 
+    Mutable by design — the CLI layer drives the lifecycle through
+    :meth:`mark_completed`, :meth:`start_batch`, and :meth:`clear_batch`,
+    which would all need replace-and-reassign workarounds under
+    ``frozen=True``. The on-disk file is the durable contract;
+    in-memory mutation is bounded to the duration of one
+    ``green enhance`` invocation.
+
     Attributes:
         version: Schema version. Always equal to
             :data:`STATE_FILE_VERSION` on round-trip.
@@ -115,6 +122,9 @@ class EnhanceState:
             ``enhance`` invocation that wrote this file.
         completed: Map from target name (e.g. ``"claude-md"``,
             ``"subagents"``) to its :class:`TargetCompletion` record.
+        batch: In-flight :class:`BatchProgress` recorded after a
+            ``--batch`` submission and cleared once results are
+            reconciled. ``None`` when no batch is in flight.
     """
 
     version: int = STATE_FILE_VERSION
@@ -242,6 +252,21 @@ def _valid_hash(raw: object) -> str | None:
     return None
 
 
+def _nonempty_str(raw: object) -> str | None:
+    """Return ``raw`` when it's a non-empty string; else ``None``.
+
+    Same predicate as :func:`_valid_hash` today, but separate by intent:
+    ``_valid_hash`` validates a SHA-256 digest string and a future
+    tightening (e.g. enforcing the ``sha256:`` prefix) would be
+    correct. ``_nonempty_str`` validates an Anthropic-side opaque
+    identifier (``batch_id``) and must NOT add format requirements
+    — the only contract is "must be present and non-empty."
+    """
+    if isinstance(raw, str) and raw:
+        return raw
+    return None
+
+
 def _parse_record(raw: object) -> TargetCompletion | None:
     """Validate and build a single ``TargetCompletion`` from a stored payload.
 
@@ -282,7 +307,7 @@ def _parse_batch_progress(raw: object) -> BatchProgress | None:
     """
     if not isinstance(raw, dict):
         return None
-    batch_id = _valid_hash(raw.get("batch_id"))
+    batch_id = _nonempty_str(raw.get("batch_id"))
     if batch_id is None:
         return None
     return BatchProgress(

@@ -20,9 +20,9 @@ from start_green_stay_green.ai.batch import BatchResultsBundle
 from start_green_stay_green.ai.batch import BatchSubmission
 from start_green_stay_green.ai.batch import ToolUseBatchRequest
 from start_green_stay_green.ai.batch import parse_batch_result_entry
-from start_green_stay_green.ai.orchestrator import GenerationError
-from start_green_stay_green.ai.orchestrator import TokenUsage
-from start_green_stay_green.ai.orchestrator import ToolUseResult
+from start_green_stay_green.ai.types import GenerationError
+from start_green_stay_green.ai.types import TokenUsage
+from start_green_stay_green.ai.types import ToolUseResult
 
 _DEFAULT_USAGE: dict[str, int] = {
     "input_tokens": 100,

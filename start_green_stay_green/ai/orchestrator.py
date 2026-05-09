@@ -13,6 +13,7 @@ import time
 from typing import Final
 from typing import Literal
 from typing import TYPE_CHECKING
+from typing import cast
 
 from anthropic import Anthropic
 from anthropic import AsyncAnthropic
@@ -45,27 +46,35 @@ __all__ = [
     "ToolUseResult",
 ]
 
+from collections.abc import AsyncIterable
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from collections.abc import Iterable
     from collections.abc import Iterator
     from collections.abc import Sequence
 
     from start_green_stay_green.utils.timing import TimingReport
 
 
-async def _aiter(stream: object) -> AsyncIterator[object]:
-    """Yield from an async iterator OR a sync iterable.
+async def _aiter(
+    stream: AsyncIterable[object] | Iterable[object],
+) -> AsyncIterator[object]:
+    """Yield from an async iterable OR a sync iterable.
 
     The Anthropic SDK's ``messages.batches.results`` returns an
     async iterator at runtime, but unit tests construct fakes that
     are easier to write as plain lists. Accept both shapes so the
     test seam is wide.
+
+    ``isinstance(stream, AsyncIterable)`` narrows the union for
+    mypy on both branches, so neither path needs a ``type: ignore``.
     """
-    if hasattr(stream, "__aiter__"):
+    if isinstance(stream, AsyncIterable):
         async for item in stream:
             yield item
         return
-    for item in stream:  # type: ignore[attr-defined]
+    for item in stream:
         yield item
 
 
@@ -82,6 +91,12 @@ class ModelConfig:
 
     OPUS: Final[str] = "claude-opus-4-5-20251101"
     SONNET: Final[str] = "claude-sonnet-4-5-20250929"
+
+
+# Per-call max_tokens for every Claude request the orchestrator
+# issues — sync, async, tool-use, and batch alike. Single source of
+# truth so a future limit change is one edit instead of four.
+_MAX_TOKENS: Final[int] = 4096
 
 
 @dataclass(frozen=True)
@@ -243,7 +258,7 @@ class AIOrchestrator:
         """
         response = client.messages.create(
             model=self.model,
-            max_tokens=4096,
+            max_tokens=_MAX_TOKENS,
             system=(
                 f"Generate {output_format} output. "
                 "Follow the instructions precisely."
@@ -430,7 +445,7 @@ class AIOrchestrator:
         """Async counterpart of :meth:`_call_api`."""
         response = await client.messages.create(
             model=self.model,
-            max_tokens=4096,
+            max_tokens=_MAX_TOKENS,
             system=(
                 f"Generate {output_format} output. "
                 "Follow the instructions precisely."
@@ -547,7 +562,7 @@ class AIOrchestrator:
         # type-ignore the single call site instead.
         response = await client.messages.create(  # type: ignore[call-overload]
             model=self.model,
-            max_tokens=4096,
+            max_tokens=_MAX_TOKENS,
             system=system_blocks,
             tools=[tool_schema],
             tool_choice={"type": "tool", "name": tool_name},
@@ -847,14 +862,27 @@ class AIOrchestrator:
             msg = f"Batch retrieve failed for {batch_id}"
             raise GenerationError(msg, cause=exc) from exc
 
-    async def _open_results_stream(self, batch_id: str) -> object:
-        """Wrap the SDK results call so callers see ``GenerationError`` on failure."""
+    async def _open_results_stream(
+        self, batch_id: str,
+    ) -> AsyncIterable[object] | Iterable[object]:
+        """Open the batch's result stream as an iterable.
+
+        Returns the iterable shape ``_aiter`` expects directly, so
+        callers do not have to cast. SDK errors are remapped to
+        :class:`GenerationError` to keep the public surface uniform
+        with the sync path.
+        """
         client = self._get_async_client()
         try:
-            return await client.messages.batches.results(batch_id)
+            stream = await client.messages.batches.results(batch_id)
         except Exception as exc:
             msg = f"Batch results stream failed for {batch_id}"
             raise GenerationError(msg, cause=exc) from exc
+        # The SDK returns an async iterator at runtime; tests pass a
+        # plain list via ``AsyncMock``. Both satisfy the union, so
+        # the cast is a type-check-only narrowing — no isinstance
+        # at runtime.
+        return cast("AsyncIterable[object] | Iterable[object]", stream)
 
     def _batch_request_envelope(
         self,
@@ -873,7 +901,7 @@ class AIOrchestrator:
             "custom_id": request.custom_id,
             "params": {
                 "model": self.model,
-                "max_tokens": 4096,
+                "max_tokens": _MAX_TOKENS,
                 "system": list(request.system_blocks),
                 "tools": [request.tool_schema],
                 "tool_choice": {"type": "tool", "name": tool_name},

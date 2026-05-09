@@ -768,3 +768,34 @@ class TestContentTunerParseBatchResult:
         assert result.token_usage_input == 100
         assert result.token_usage_output == 50
         assert not result.dry_run
+
+    def test_missing_tuned_content_raises_generation_error(self) -> None:
+        """A malformed ``tool_input`` (missing ``tuned_content``) raises.
+
+        Pins the negative-path behaviour explicitly — the parser is
+        shared with the sync path's ``_parse_tool_use_input``, but a
+        future refactor that bypasses the shared validator on the
+        batch resume path would silently lose this guard if no
+        dedicated test pinned it.
+        """
+        tool_result = ToolUseResult(
+            tool_name="report_tuning",
+            tool_input={"changes": []},  # no ``tuned_content``
+            token_usage=TokenUsage(input_tokens=1, output_tokens=1),
+            model="claude",
+            message_id="msg_bad",
+        )
+        with pytest.raises(GenerationError, match="tuned_content"):
+            ContentTuner.parse_batch_tuning_result(tool_result)
+
+    def test_non_list_changes_raises_generation_error(self) -> None:
+        """``changes`` must be a list — a string-shaped value is rejected."""
+        tool_result = ToolUseResult(
+            tool_name="report_tuning",
+            tool_input={"tuned_content": "x", "changes": "not a list"},
+            token_usage=TokenUsage(input_tokens=1, output_tokens=1),
+            model="claude",
+            message_id="msg_bad",
+        )
+        with pytest.raises(GenerationError, match="list of strings"):
+            ContentTuner.parse_batch_tuning_result(tool_result)
