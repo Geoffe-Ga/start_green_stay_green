@@ -408,3 +408,22 @@ class TestBatchProgressExpiry:
             custom_id_map={"subagent:foo": "subagents"},
         )
         assert not progress.is_potentially_expired()
+
+    def test_handles_tz_naive_submitted_at(self) -> None:
+        """A tz-naive ISO string is treated as UTC.
+
+        Pins the ``replace(tzinfo=UTC)`` branch in
+        :meth:`BatchProgress._parsed_submitted_at`. Without this
+        coverage a refactor that drops the tz-naive promotion would
+        produce a ``TypeError: can't subtract offset-naive and
+        offset-aware datetimes`` at runtime — exactly the kind of
+        regression mutation testing is meant to catch.
+        """
+        # Submitted 25h ago in tz-naive form; should still flag expired.
+        now = datetime(2026, 5, 10, 1, 0, tzinfo=UTC)
+        progress = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at="2026-05-09T00:00:00",  # no offset suffix
+            custom_id_map={"subagent:foo": "subagents"},
+        )
+        assert progress.is_potentially_expired(now=now)
