@@ -1,7 +1,7 @@
 ---
 name: comprehensive-pr-review
 description: >-
-  Structured 10-section PR review covering security, quality, testing,
+  Structured 11-section PR review covering security, quality, testing,
   and documentation. Use when reviewing pull requests, evaluating code
   changes, or doing code review. Produces verdicts with specific references.
   Do NOT use for backlog grooming or issue triage (use backlog-grooming)
