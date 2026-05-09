@@ -778,3 +778,73 @@ class TestSubagentsBatchPlan:
         assert result.content.startswith("---\n")
         assert "# Adapted body" in result.content
         assert "renamed FastAPI to Django" in result.changes
+
+    def test_get_agent_frontmatter_returns_yaml_block_unmodified(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
+        """Public sibling of ``apply_batch_result`` for the resume path.
+
+        Replaces two ``noqa: SLF001`` suppressions in
+        ``batch_dispatch.py`` (review feedback on PR #315). The
+        method must return the YAML frontmatter block byte-equivalent
+        to what ``_parse_frontmatter`` would have produced — same
+        leading ``---``, same closing delimiter, no body content.
+        """
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "chief-architect.md").write_text(
+            SAMPLE_AGENT_CONTENT, encoding="utf-8"
+        )
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+        )
+
+        frontmatter = generator.get_agent_frontmatter("chief-architect")
+
+        assert frontmatter.startswith("---")
+        assert "name: test-agent" in frontmatter
+        # Closing delimiter present, body NOT included.
+        assert frontmatter.rstrip().endswith("---")
+        assert "# Test Agent" not in frontmatter
+
+    def test_get_agent_frontmatter_picks_up_local_edits_between_calls(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
+        """Re-read semantics: edit on disk → fresh return value.
+
+        ``_frontmatter_for`` (now folded into this method) was
+        documented to re-read at fetch time so a frontmatter edit
+        between submit and fetch is picked up automatically. This
+        test exercises that contract directly — review feedback
+        flagged that the docstring claimed this guarantee but no
+        test backed it up.
+        """
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        agent_file = agents_dir / "chief-architect.md"
+        agent_file.write_text(SAMPLE_AGENT_CONTENT, encoding="utf-8")
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+        )
+
+        first = generator.get_agent_frontmatter("chief-architect")
+
+        # Edit the source file's frontmatter in place.
+        agent_file.write_text(
+            SAMPLE_AGENT_CONTENT.replace(
+                "name: test-agent", "name: edited-after-submit"
+            ),
+            encoding="utf-8",
+        )
+
+        second = generator.get_agent_frontmatter("chief-architect")
+
+        assert "name: test-agent" in first
+        assert "name: edited-after-submit" in second
+        assert first != second

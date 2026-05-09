@@ -80,11 +80,9 @@ def _fake_generator() -> MagicMock:
     ]
     # The dispatch re-reads frontmatter at fetch time via the
     # private helpers (see ``_frontmatter_for``).
-    gen._load_agent_content.side_effect = lambda name: (f"---\nname: {name}\n---\nbody")
-    gen._parse_frontmatter.side_effect = lambda content: (
-        content.split("\n---\n", 1)[0] + "\n---",
-        "body",
-    )
+    # Phase 5b post-feedback: dispatch reads frontmatter through the
+    # public ``get_agent_frontmatter`` (no more SLF001 suppressions).
+    gen.get_agent_frontmatter.side_effect = lambda name: f"---\nname: {name}\n---"
     return gen
 
 

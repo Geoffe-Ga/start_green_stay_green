@@ -2455,22 +2455,31 @@ def _run_enhance_batch(  # noqa: PLR0913 — orchestration glue
         return
 
     state = load_state(project_path)
-    if state.has_batch():
-        _resume_subagent_batch_cli(
+    try:
+        if state.has_batch():
+            _resume_subagent_batch_cli(
+                project_path=project_path,
+                orchestrator=orchestrator,
+                state=state,
+                file_writer=file_writer,
+                wait=wait,
+            )
+            return
+        _submit_subagent_batch_cli(
             project_path=project_path,
+            project_name=project_name,
+            language=language,
             orchestrator=orchestrator,
             state=state,
-            file_writer=file_writer,
-            wait=wait,
         )
-        return
-    _submit_subagent_batch_cli(
-        project_path=project_path,
-        project_name=project_name,
-        language=language,
-        orchestrator=orchestrator,
-        state=state,
-    )
+    except AIGenerationError as ai_err:
+        # Unlike the ``green init`` Pass 2 flow (which downgrades AI
+        # failures to warnings + offline scaffold), the user
+        # explicitly opted into batch mode here — there is no
+        # silent fallback. Surface the API error and exit non-zero
+        # so the user can re-run when ready.
+        console.print(f"[red]Error:[/red] Batch API call failed: {ai_err}")
+        raise typer.Exit(code=1) from ai_err
 
 
 def _submit_subagent_batch_cli(
@@ -2535,6 +2544,12 @@ def _resume_subagent_batch_cli(
     _render_batch_resume_outcome(outcome)
 
 
+# Static-message statuses for :func:`_render_batch_resume_outcome`.
+# IN_PROGRESS and ENDED are deliberately absent — they need
+# ``outcome.poll`` / ``outcome.bundle`` data woven into the rendered
+# message, so they branch into ``_render_batch_in_progress`` /
+# ``_render_batch_ended`` instead. Adding them to this dict would
+# silently drop their dynamic data.
 _BATCH_OUTCOME_STATIC: dict[str, str] = {
     ResumeStatus.NO_BATCH: (
         "[yellow]No batch is in flight; nothing to resume.[/yellow]"

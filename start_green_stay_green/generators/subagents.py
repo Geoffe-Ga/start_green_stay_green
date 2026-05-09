@@ -416,6 +416,36 @@ class SubagentsGenerator(BaseGenerator):
             changes=tuning_result.changes,
         )
 
+    def get_agent_frontmatter(self, agent_name: str) -> str:
+        """Re-read the source agent's YAML frontmatter at fetch time.
+
+        Public sibling of :meth:`apply_batch_result` for the Phase 5b
+        batch resume path. The dispatch in
+        :mod:`start_green_stay_green.ai.batch_dispatch` calls this
+        rather than reaching into the private ``_load_agent_content``
+        / ``_parse_frontmatter`` helpers — the frontmatter capture is
+        intentionally re-read (not persisted in the state file) so a
+        local edit to the source agent between submit and fetch is
+        picked up automatically.
+
+        Args:
+            agent_name: Name of the agent (must be a
+                :data:`REQUIRED_AGENTS` key).
+
+        Returns:
+            The YAML frontmatter block, terminating delimiter
+            included — ready to prepend to a tuned body.
+
+        Raises:
+            FileNotFoundError: If the source agent file is missing
+                (raised by :meth:`_load_agent_content`).
+            ValueError: If the source file lacks a frontmatter block
+                (raised by :meth:`_parse_frontmatter`).
+        """
+        content = self._load_agent_content(agent_name)
+        frontmatter, _ = self._parse_frontmatter(content)
+        return frontmatter
+
     def generate(self) -> dict[str, Any]:
         """Generate subagents synchronously (not supported).
 

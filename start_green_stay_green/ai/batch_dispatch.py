@@ -406,7 +406,7 @@ def _write_one_agent(
     (one over successes, one over failures) without an embedded
     write block — keeps that function grade-A under xenon.
     """
-    frontmatter = _frontmatter_for(generator, agent_name)
+    frontmatter = generator.get_agent_frontmatter(agent_name)
     result = SubagentsGenerator.apply_batch_result(
         agent_name=agent_name,
         frontmatter=frontmatter,
@@ -428,6 +428,14 @@ def _lookup_from_state(state: EnhanceState) -> dict[str, str]:
     skip targets it does not handle). The agent-level mapping is
     encoded in the ``custom_id`` itself by convention
     (``"subagent:<agent_name>"``); this helper extracts it back.
+
+    Note: passes an explicit empty fallback dict to
+    :func:`_agent_name_from_custom_id` because Phase 5b only
+    supports the ``subagent:`` id schema. A future phase introducing
+    a new id shape (e.g. ``skill:<name>``) should also extend
+    :data:`BATCH_TARGET_SUBAGENTS` and thread its own lookup table
+    here — silently widening the fallback would route results to
+    the wrong target.
     """
     if state.batch is None:
         return {}
@@ -457,20 +465,6 @@ def _agent_name_from_custom_id(
         name = custom_id[len(prefix) :]
         return name or None
     return fallback_lookup.get(custom_id)
-
-
-def _frontmatter_for(generator: SubagentsGenerator, agent_name: str) -> str:
-    """Re-parse the source agent's frontmatter at fetch time.
-
-    Re-reading the source (rather than persisting frontmatter into
-    the state file) keeps :class:`BatchProgress` schema small and
-    means a frontmatter edit between submit and fetch is picked up
-    automatically. Only the body diverges across runs; frontmatter
-    is structurally fixed.
-    """
-    content = generator._load_agent_content(agent_name)  # noqa: SLF001
-    frontmatter, _ = generator._parse_frontmatter(content)  # noqa: SLF001
-    return frontmatter
 
 
 def _now() -> float:

@@ -40,9 +40,13 @@ from typer.testing import CliRunner
 
 from start_green_stay_green import cli
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
+from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
+from start_green_stay_green.utils.enhance_state import BatchProgress
+from start_green_stay_green.utils.enhance_state import EnhanceState
 from start_green_stay_green.utils.enhance_state import load_state
+from start_green_stay_green.utils.enhance_state import save_state
 
 
 def _make_orch_mock(mock_init: Mock) -> MagicMock:
@@ -2471,3 +2475,80 @@ class TestEnhanceBatchCLI:
         assert "--dry-run with --batch" in self._flat(result.stdout)
         submit.assert_not_called()
         resume.assert_not_called()
+
+    def test_batch_submit_api_error_exits_cleanly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``AIGenerationError`` from submit → exit 1 + clear message.
+
+        Review feedback (PR #315): the docstring of
+        :func:`submit_subagent_batch` lists ``GenerationError`` as a
+        documented raise, but the CLI lacked a handler so a real
+        SDK-side failure produced an uncaught traceback. This test
+        pins the post-feedback behaviour: human-readable error, exit
+        code 1, no stack trace bleeding to stdout.
+        """
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+
+        # ``submit_subagent_batch`` raises before any state is written
+        # so there's no in-flight batch on disk after the run.
+        with mock.patch(
+            "start_green_stay_green.cli.submit_subagent_batch",
+            side_effect=AIGenerationError("Anthropic API rejected the batch (mocked)"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                ],
+            )
+
+        assert result.exit_code == 1
+        flat = self._flat(result.stdout)
+        assert "Batch API call failed" in flat
+        # Original error message survives so the user sees what went wrong.
+        assert "Anthropic API rejected the batch (mocked)" in flat
+        # No raw traceback in user-facing output.
+        assert "Traceback" not in result.stdout
+
+    def test_batch_resume_api_error_exits_cleanly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``AIGenerationError`` from resume → exit 1 + clear message."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+        # Pre-seed an in-flight batch so the resume branch is taken.
+        state = EnhanceState()
+        state.batch = BatchProgress(
+            batch_id="msgbatch_pre_seeded",
+            submitted_at="2026-05-09T22:00:00+00:00",
+            custom_id_map={"subagent:alpha": "subagents"},
+        )
+        save_state(project, state)
+
+        with mock.patch(
+            "start_green_stay_green.cli.resume_subagent_batch",
+            side_effect=AIGenerationError("poll failed (mocked)"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                ],
+            )
+
+        assert result.exit_code == 1
+        flat = self._flat(result.stdout)
+        assert "Batch API call failed" in flat
+        assert "poll failed (mocked)" in flat
