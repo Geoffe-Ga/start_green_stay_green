@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from typing import TypeVar
 from typing import cast
 
+from start_green_stay_green.ai.batch import ToolUseBatchRequest
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError
 from start_green_stay_green.ai.prompts.manager import get_default_manager
@@ -261,6 +262,85 @@ class ContentTuner:
         raw_content, raw_changes = cls._validate_tool_use_input(tool_input)
         changes = [c for c in raw_changes if isinstance(c, str) and c.strip()]
         return raw_content, changes
+
+    def build_batch_request(
+        self,
+        custom_id: str,
+        source_content: str,
+        source_context: str,
+        target_context: str,
+        preserve_sections: Sequence[str] | None = None,
+    ) -> ToolUseBatchRequest:
+        """Render the per-call payload for one tune as a batch request.
+
+        Same inputs as :meth:`tune`, plus a caller-chosen
+        ``custom_id`` that the Anthropic Batches API echoes back so
+        results can be correlated to the originating target. Returns
+        the dataclass :meth:`AIOrchestrator.submit_tool_use_batch`
+        accepts without firing a sync API call — the caller owns the
+        submission.
+
+        The returned request reuses :meth:`_build_system_blocks` and
+        :meth:`_build_user_message` so the cache prefix (and
+        therefore the cache hit ratio) is identical between sync and
+        batch paths.
+
+        Args:
+            custom_id: Unique identifier within the batch the caller
+                will submit. Conventional shape:
+                ``"<kind>:<name>"`` (e.g. ``"subagent:architecture"``).
+            source_content: Original content to adapt.
+            source_context: Description of source repository.
+            target_context: Description of target repository.
+            preserve_sections: Sections to leave unchanged.
+
+        Returns:
+            :class:`ToolUseBatchRequest` ready to bundle alongside
+            sibling targets in a single
+            ``submit_tool_use_batch`` call.
+
+        Raises:
+            ValueError: If any input fails the same validation
+                :meth:`tune` applies.
+        """
+        if not custom_id or not custom_id.strip():
+            msg = "custom_id cannot be empty"
+            raise ValueError(msg)
+        self._validate_content(source_content)
+        self._validate_context(source_context, "Source context")
+        self._validate_context(target_context, "Target context")
+
+        return ToolUseBatchRequest(
+            custom_id=custom_id,
+            prompt=self._build_user_message(source_content),
+            system_blocks=self._build_system_blocks(
+                source_context,
+                target_context,
+                preserve_sections,
+            ),
+            tool_schema=_REPORT_TUNING_TOOL,
+        )
+
+    @classmethod
+    def parse_batch_tuning_result(
+        cls,
+        tool_result: ToolUseResult,
+    ) -> TuningResult:
+        """Lift a ``ToolUseResult`` from a batch into a :class:`TuningResult`.
+
+        Same parser :meth:`tune` uses on its sync result, exposed
+        publicly so the batch resume path (which fetches the result
+        long after the originating ``tune`` call would have returned)
+        can build the same downstream dataclass.
+        """
+        content, changes = cls._parse_tool_use_input(tool_result.tool_input)
+        return TuningResult(
+            content=content,
+            changes=changes,
+            dry_run=False,
+            token_usage_input=tool_result.token_usage.input_tokens,
+            token_usage_output=tool_result.token_usage.output_tokens,
+        )
 
     async def tune(
         self,

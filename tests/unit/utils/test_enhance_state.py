@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from start_green_stay_green.utils.enhance_state import BatchProgress
 from start_green_stay_green.utils.enhance_state import EnhanceState
 from start_green_stay_green.utils.enhance_state import STATE_FILE_VERSION
 from start_green_stay_green.utils.enhance_state import TargetCompletion
@@ -204,3 +205,119 @@ def test_target_completion_is_immutable() -> None:
     rec = TargetCompletion(hash="sha256:abc", model="x", timestamp="y")
     with pytest.raises(AttributeError):
         rec.hash = "sha256:def"  # type: ignore[misc]
+
+
+class TestBatchProgressExtension:
+    """Phase 5a: optional in-flight batch field on ``EnhanceState``."""
+
+    def test_default_state_has_no_batch(self) -> None:
+        state = EnhanceState()
+        assert state.batch is None
+        assert not state.has_batch()
+
+    def test_start_batch_records_id_and_map(self) -> None:
+        state = EnhanceState()
+        state.start_batch(
+            "msgbatch_42",
+            {"a": "subagent:foo", "b": "skill:bar"},
+            "2026-05-09T12:00:00+00:00",
+        )
+
+        assert state.has_batch()
+        assert isinstance(state.batch, BatchProgress)
+        assert state.batch.batch_id == "msgbatch_42"
+        assert state.batch.custom_id_map == {
+            "a": "subagent:foo",
+            "b": "skill:bar",
+        }
+        assert state.batch.submitted_at == "2026-05-09T12:00:00+00:00"
+        # last_run is also bumped so a future read knows when this happened
+        assert state.last_run == "2026-05-09T12:00:00+00:00"
+
+    def test_start_batch_refuses_to_overwrite_in_flight(self) -> None:
+        state = EnhanceState()
+        state.start_batch("msgbatch_first", {"a": "x"}, "2026-05-09T00:00:00Z")
+
+        with pytest.raises(ValueError, match="already recorded"):
+            state.start_batch("msgbatch_second", {"b": "y"}, "2026-05-09T01:00:00Z")
+
+    def test_clear_batch_drops_record(self) -> None:
+        state = EnhanceState()
+        state.start_batch("msgbatch_42", {"a": "subagent:foo"}, "2026-05-09T00:00:00Z")
+        assert state.has_batch()
+
+        state.clear_batch()
+        assert state.batch is None
+        assert not state.has_batch()
+        # And start_batch is allowed again after a clear
+        state.start_batch("msgbatch_43", {"a": "subagent:foo"}, "2026-05-09T01:00:00Z")
+        assert state.batch is not None
+        assert state.batch.batch_id == "msgbatch_43"
+
+    def test_to_dict_omits_batch_when_none(self) -> None:
+        """A batchless state round-trips to the same JSON pre-Phase-5a wrote."""
+        state = EnhanceState()
+        payload = state.to_dict()
+        assert "batch" not in payload
+
+    def test_to_dict_includes_batch_when_present(self) -> None:
+        state = EnhanceState()
+        state.start_batch(
+            "msgbatch_42",
+            {"a": "subagent:foo"},
+            "2026-05-09T00:00:00+00:00",
+        )
+
+        payload = state.to_dict()
+        assert payload["batch"] == {
+            "batch_id": "msgbatch_42",
+            "submitted_at": "2026-05-09T00:00:00+00:00",
+            "custom_id_map": {"a": "subagent:foo"},
+        }
+
+    def test_round_trip_preserves_batch(self) -> None:
+        original = EnhanceState()
+        original.start_batch(
+            "msgbatch_42",
+            {"a": "subagent:foo", "b": "skill:bar"},
+            "2026-05-09T00:00:00+00:00",
+        )
+
+        restored = EnhanceState.from_dict(original.to_dict())
+        assert restored.has_batch()
+        assert restored.batch is not None
+        assert restored.batch.batch_id == "msgbatch_42"
+        assert restored.batch.custom_id_map == {
+            "a": "subagent:foo",
+            "b": "skill:bar",
+        }
+
+    def test_from_dict_drops_malformed_batch(self) -> None:
+        """A malformed ``batch`` payload degrades to ``None`` (no in-flight record)."""
+        # Missing batch_id → drop
+        state = EnhanceState.from_dict({"batch": {"submitted_at": "x"}})
+        assert state.batch is None
+        # batch field is not a dict → drop
+        state = EnhanceState.from_dict({"batch": "garbage"})
+        assert state.batch is None
+        # Missing batch field → still None (forward-compat with pre-5a writers)
+        state = EnhanceState.from_dict({"completed": {}})
+        assert state.batch is None
+
+    def test_pre_phase_5a_state_file_loads_unchanged(self) -> None:
+        """A state file produced by the Phase 3c writer must keep working."""
+        legacy_payload = {
+            "version": 1,
+            "last_run": "2026-04-01T00:00:00+00:00",
+            "completed": {
+                "claude-md": {
+                    "hash": "sha256:abc",
+                    "model": "claude-sonnet",
+                    "timestamp": "2026-04-01T00:00:00+00:00",
+                },
+            },
+        }
+        state = EnhanceState.from_dict(legacy_payload)
+        assert "claude-md" in state.completed
+        assert state.batch is None
+        assert not state.has_batch()

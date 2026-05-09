@@ -674,3 +674,97 @@ class TestContentTunerLoggerBehavior:
         assert result.content == original  # Same value
         assert result.dry_run
         assert result.changes == ["[DRY RUN] No changes made"]
+
+
+class TestContentTunerBuildBatchRequest:
+    """Pin ``build_batch_request`` builds the same payload ``tune`` sends."""
+
+    @pytest.fixture
+    def tuner(self) -> ContentTuner:
+        return ContentTuner(MagicMock(spec=AIOrchestrator))
+
+    def test_request_carries_custom_id_prompt_and_tool(
+        self,
+        tuner: ContentTuner,
+    ) -> None:
+        """The request envelope keeps every field the orchestrator needs."""
+        req = tuner.build_batch_request(
+            custom_id="subagent:architecture",
+            source_content="# Original\n\nbody",
+            source_context="Source repo",
+            target_context="Target repo",
+        )
+        assert req.custom_id == "subagent:architecture"
+        assert "Original" in req.prompt
+        assert req.tool_schema["name"] == "report_tuning"
+
+    def test_system_blocks_match_what_tune_would_send(
+        self,
+        tuner: ContentTuner,
+    ) -> None:
+        """Cache prefix is identical between sync and batch — pin it."""
+        req = tuner.build_batch_request(
+            custom_id="subagent:a",
+            source_content="X",
+            source_context="A",
+            target_context="B",
+        )
+        sync_blocks = ContentTuner._build_system_blocks("A", "B", None)
+        assert req.system_blocks == sync_blocks
+
+    def test_preserve_sections_flow_through(
+        self,
+        tuner: ContentTuner,
+    ) -> None:
+        req = tuner.build_batch_request(
+            custom_id="subagent:a",
+            source_content="X",
+            source_context="A",
+            target_context="B",
+            preserve_sections=["Identity", "Workflow"],
+        )
+        joined = " ".join(str(b["text"]) for b in req.system_blocks)
+        assert '"Identity"' in joined
+        assert '"Workflow"' in joined
+
+    def test_empty_custom_id_rejected(self, tuner: ContentTuner) -> None:
+        with pytest.raises(ValueError, match="custom_id cannot be empty"):
+            tuner.build_batch_request(
+                custom_id="   ",
+                source_content="X",
+                source_context="A",
+                target_context="B",
+            )
+
+    def test_input_validation_mirrors_tune(self, tuner: ContentTuner) -> None:
+        """Same content / context validation runs on the batch path."""
+        with pytest.raises(ValueError, match="Source context"):
+            tuner.build_batch_request(
+                custom_id="ok",
+                source_content="X",
+                source_context="",
+                target_context="B",
+            )
+
+
+class TestContentTunerParseBatchResult:
+    """Pin ``parse_batch_tuning_result`` lifts a batch result correctly."""
+
+    def test_returns_tuning_result_with_content_and_changes(self) -> None:
+        tool_result = ToolUseResult(
+            tool_name="report_tuning",
+            tool_input={
+                "tuned_content": "# Adapted\n",
+                "changes": ["Renamed FastAPI to Django", "Updated paths"],
+            },
+            token_usage=TokenUsage(input_tokens=100, output_tokens=50),
+            model="claude",
+            message_id="msg_1",
+        )
+
+        result = ContentTuner.parse_batch_tuning_result(tool_result)
+        assert result.content == "# Adapted\n"
+        assert result.changes == ["Renamed FastAPI to Django", "Updated paths"]
+        assert result.token_usage_input == 100
+        assert result.token_usage_output == 50
+        assert not result.dry_run

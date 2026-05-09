@@ -54,6 +54,32 @@ STATE_FILE_RELATIVE = ".claude/.enhance-state.json"
 
 
 @dataclass(frozen=True)
+class BatchProgress:
+    """In-flight batch metadata persisted across ``green enhance`` calls.
+
+    Phase 5a — present iff a batch was submitted but not yet
+    fetched. The CLI's resume path checks for this on every
+    invocation so an interrupted run can be picked up without
+    re-submitting (which would burn cost on duplicate work).
+
+    Attributes:
+        batch_id: Anthropic identifier returned by
+            :meth:`AIOrchestrator.submit_tool_use_batch`. Empty in a
+            default-constructed state — :meth:`EnhanceState.has_batch`
+            treats that as "no batch in flight".
+        submitted_at: ISO-8601 UTC timestamp of submission. Diagnostic
+            only.
+        custom_id_map: ``custom_id`` → target name. Lets the resume
+            path correlate per-request results back to the targets
+            the original submission was tracking.
+    """
+
+    batch_id: str = ""
+    submitted_at: str = ""
+    custom_id_map: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class TargetCompletion:
     """Completion record for a single ``green enhance`` target.
 
@@ -89,6 +115,42 @@ class EnhanceState:
     version: int = STATE_FILE_VERSION
     last_run: str = ""
     completed: dict[str, TargetCompletion] = field(default_factory=dict)
+    batch: BatchProgress | None = None
+
+    def has_batch(self) -> bool:
+        """``True`` if a submitted-but-not-yet-fetched batch is recorded."""
+        return self.batch is not None and bool(self.batch.batch_id)
+
+    def start_batch(
+        self,
+        batch_id: str,
+        custom_id_map: dict[str, str],
+        submitted_at: str,
+    ) -> None:
+        """Record a freshly-submitted batch.
+
+        Refuses to overwrite an existing in-flight batch — the caller
+        must :meth:`clear_batch` first, signalling that the prior run
+        was reconciled. Without this guard a re-run of
+        ``green enhance --batch`` would silently abandon the previous
+        batch's results and the user would pay twice.
+        """
+        if self.has_batch():
+            msg = (
+                "An in-flight batch is already recorded; clear it via "
+                "clear_batch() before starting another."
+            )
+            raise ValueError(msg)
+        self.batch = BatchProgress(
+            batch_id=batch_id,
+            submitted_at=submitted_at,
+            custom_id_map=dict(custom_id_map),
+        )
+        self.last_run = submitted_at
+
+    def clear_batch(self) -> None:
+        """Drop the in-flight batch record after results are reconciled."""
+        self.batch = None
 
     def is_unchanged(self, target: str, current_hash: str) -> bool:
         """Return ``True`` if ``target`` was last tuned at ``current_hash``.
@@ -128,7 +190,7 @@ class EnhanceState:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-friendly mapping."""
-        return {
+        payload: dict[str, Any] = {
             "version": self.version,
             "last_run": self.last_run,
             "completed": {
@@ -140,6 +202,13 @@ class EnhanceState:
                 for target, rec in self.completed.items()
             },
         }
+        if self.batch is not None and self.batch.batch_id:
+            payload["batch"] = {
+                "batch_id": self.batch.batch_id,
+                "submitted_at": self.batch.submitted_at,
+                "custom_id_map": dict(self.batch.custom_id_map),
+            }
+        return payload
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> EnhanceState:
@@ -157,6 +226,7 @@ class EnhanceState:
             ),
             last_run=str(payload.get("last_run", "") or ""),
             completed=_parse_completed_records(payload.get("completed")),
+            batch=_parse_batch_progress(payload.get("batch")),
         )
 
 
@@ -195,6 +265,33 @@ def _parse_completed_records(raw: object) -> dict[str, TargetCompletion]:
         if record is not None:
             completed[str(name)] = record
     return completed
+
+
+def _parse_batch_progress(raw: object) -> BatchProgress | None:
+    """Parse an optional ``batch`` payload, returning ``None`` when absent.
+
+    A malformed batch record degrades to "no batch in flight",
+    matching the rest of the state-file philosophy: worst case, the
+    caller re-submits — a duplicate batch is recoverable, an
+    aborted run from a parse failure is not.
+    """
+    if not isinstance(raw, dict):
+        return None
+    batch_id = _valid_hash(raw.get("batch_id"))
+    if batch_id is None:
+        return None
+    return BatchProgress(
+        batch_id=batch_id,
+        submitted_at=str(raw.get("submitted_at", "") or ""),
+        custom_id_map=_parse_custom_id_map(raw.get("custom_id_map")),
+    )
+
+
+def _parse_custom_id_map(raw: object) -> dict[str, str]:
+    """Coerce a stored ``custom_id_map`` into the typed shape, dropping garbage."""
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items()}
 
 
 def state_path_for(project_path: Path) -> Path:
