@@ -24,6 +24,15 @@ from start_green_stay_green.ai.types import ToolUseResult
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+__all__ = [
+    "BatchError",
+    "BatchPoll",
+    "BatchResultsBundle",
+    "BatchSubmission",
+    "ToolUseBatchRequest",
+    "parse_batch_result_entry",
+]
+
 
 @dataclass(frozen=True)
 class ToolUseBatchRequest:

@@ -40,6 +40,8 @@ import json
 from typing import Any
 from typing import TYPE_CHECKING
 
+from start_green_stay_green.ai.types import GenerationError
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
@@ -52,6 +54,18 @@ STATE_FILE_VERSION = 1
 # it under ``.claude/`` matches the existing convention for tool
 # scratch state and keeps a future ``.gitignore`` rule narrow.
 STATE_FILE_RELATIVE = ".claude/.enhance-state.json"
+
+
+class BatchStateError(GenerationError):
+    """Raised on a state-machine violation in :class:`EnhanceState`.
+
+    Subclasses :class:`GenerationError` so callers handling AI-domain
+    failures with a single ``except GenerationError`` clause catch
+    state-file misuse without separate plumbing. Currently raised
+    by :meth:`EnhanceState.start_batch` when a caller tries to
+    overwrite an in-flight batch without first calling
+    :meth:`EnhanceState.clear_batch`.
+    """
 
 
 @dataclass(frozen=True)
@@ -206,13 +220,19 @@ class EnhanceState:
         was reconciled. Without this guard a re-run of
         ``green enhance --batch`` would silently abandon the previous
         batch's results and the user would pay twice.
+
+        Raises:
+            BatchStateError: When an in-flight batch is already
+                recorded. Subclasses :class:`GenerationError` so
+                callers can ``except GenerationError`` to catch all
+                AI-domain failures uniformly.
         """
         if self.has_batch():
             msg = (
                 "An in-flight batch is already recorded; clear it via "
                 "clear_batch() before starting another."
             )
-            raise ValueError(msg)
+            raise BatchStateError(msg)
         self.batch = BatchProgress(
             batch_id=batch_id,
             submitted_at=submitted_at,

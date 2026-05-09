@@ -46,9 +46,15 @@ if TYPE_CHECKING:
 
     from start_green_stay_green.utils.timing import TimingReport
 
-# Re-export shared types so existing
+# Re-export shared types from ``ai.types`` so existing
 # ``from start_green_stay_green.ai.orchestrator import ToolUseResult``
-# imports keep working after the Phase-5a relocation to ``ai.types``.
+# imports keep working after the Phase-5a relocation. The names
+# below look unused locally but ARE the public API surface of this
+# module — do not remove without a coordinated migration of every
+# downstream call site (and the corresponding tests). The
+# back-compat contract is asserted by
+# tests/unit/ai/test_orchestrator.py — any removal here without
+# that test update will fail import-time mypy in callers.
 __all__ = [
     "AIOrchestrator",
     "GenerationError",
@@ -564,8 +570,13 @@ class AIOrchestrator:
         response. The block's ``input`` (already validated against the
         tool's ``input_schema`` server-side) is the structured payload
         the caller wants.
+
+        Delegates the request-envelope construction to
+        :meth:`_tool_request_params` so the sync and batch paths
+        share one source of truth — a future change to ``system``,
+        ``tool_choice``, or ``max_tokens`` shape lands in one place.
         """
-        tool_name = str(tool_schema["name"])
+        params = self._tool_request_params(prompt, system_blocks, tool_schema)
         # The Anthropic SDK exposes ``system``, ``tools``, and
         # ``tool_choice`` as deeply-nested TypedDict unions. Threading
         # those through the generic ``dict[str, object]`` shapes we
@@ -573,19 +584,7 @@ class AIOrchestrator:
         # internal types just to satisfy mypy, with no runtime
         # benefit. The SDK validates the payload server-side; we
         # type-ignore the single call site instead.
-        response = await client.messages.create(  # type: ignore[call-overload]
-            model=self.model,
-            max_tokens=_MAX_TOKENS,
-            system=system_blocks,
-            tools=[tool_schema],
-            tool_choice={"type": "tool", "name": tool_name},
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-        )
+        response = await client.messages.create(**params)  # type: ignore[call-overload]
 
         tool_block = next(
             (b for b in response.content if isinstance(b, ToolUseBlock)),
@@ -935,34 +934,54 @@ class AIOrchestrator:
 
         The Anthropic Batches API expects a list of
         ``{"custom_id": ..., "params": {...}}`` dicts where ``params``
-        is a normal ``messages.create`` body. The body fields here
-        mirror :meth:`_call_tool_api_async` so the per-request
-        contract is identical between sync and batch paths.
-
-        Validates ``tool_schema["name"]`` is non-empty before
-        constructing the envelope. The API would reject a missing
-        name with an opaque HTTP 400 wrapped in a generic
-        ``GenerationError``; failing close to the caller with a
-        named-field error is more debuggable.
+        is a normal ``messages.create`` body. ``params`` is built by
+        :meth:`_tool_request_params` — the same helper
+        :meth:`_call_tool_api_async` uses — so sync and batch paths
+        cannot drift apart on envelope shape.
         """
-        raw_name = request.tool_schema.get("name")
-        if not isinstance(raw_name, str) or not raw_name:
-            msg = (
-                f"tool_schema for custom_id {request.custom_id!r} "
-                "must include a non-empty 'name' string"
-            )
-            raise GenerationError(msg)
-        tool_name = raw_name
         return {
             "custom_id": request.custom_id,
-            "params": {
-                "model": self.model,
-                "max_tokens": _MAX_TOKENS,
-                "system": list(request.system_blocks),
-                "tools": [request.tool_schema],
-                "tool_choice": {"type": "tool", "name": tool_name},
-                "messages": [
-                    {"role": "user", "content": request.prompt},
-                ],
-            },
+            "params": self._tool_request_params(
+                request.prompt,
+                request.system_blocks,
+                request.tool_schema,
+                custom_id=request.custom_id,
+            ),
+        }
+
+    def _tool_request_params(
+        self,
+        prompt: str,
+        system_blocks: list[dict[str, object]],
+        tool_schema: dict[str, object],
+        *,
+        custom_id: str = "",
+    ) -> dict[str, object]:
+        """Build the Anthropic ``messages.create`` body shared by sync + batch.
+
+        Every field here is identical between the two transports —
+        a single source of truth so a future change to ``system``,
+        ``tool_choice``, ``max_tokens``, or ``messages`` shape lands
+        once and applies to both. ``custom_id`` is optional context
+        for the validation error (named in the message when present).
+
+        Validates ``tool_schema["name"]`` is non-empty before
+        construction; the API would otherwise reject a missing name
+        with an opaque HTTP 400 wrapped in a generic
+        ``GenerationError``.
+        """
+        raw_name = tool_schema.get("name")
+        if not isinstance(raw_name, str) or not raw_name:
+            qualifier = f" for custom_id {custom_id!r}" if custom_id else ""
+            msg = f"tool_schema{qualifier} must include a non-empty " "'name' string"
+            raise GenerationError(msg)
+        return {
+            "model": self.model,
+            "max_tokens": _MAX_TOKENS,
+            "system": list(system_blocks),
+            "tools": [tool_schema],
+            "tool_choice": {"type": "tool", "name": raw_name},
+            "messages": [
+                {"role": "user", "content": prompt},
+            ],
         }

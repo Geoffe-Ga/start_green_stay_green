@@ -10,7 +10,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from start_green_stay_green.ai.types import GenerationError
 from start_green_stay_green.utils.enhance_state import BatchProgress
+from start_green_stay_green.utils.enhance_state import BatchStateError
 from start_green_stay_green.utils.enhance_state import EnhanceState
 from start_green_stay_green.utils.enhance_state import STATE_FILE_VERSION
 from start_green_stay_green.utils.enhance_state import TargetCompletion
@@ -249,12 +251,15 @@ class TestBatchProgressExtension:
             "2026-05-09T00:00:00Z",
         )
 
-        with pytest.raises(ValueError, match="already recorded"):
+        with pytest.raises(BatchStateError, match="already recorded") as exc:
             state.start_batch(
                 "msgbatch_second",
                 {"subagent:bar": "subagents"},
                 "2026-05-09T01:00:00Z",
             )
+        # Subclasses GenerationError so callers catching the AI-domain
+        # parent class handle state-file violations uniformly.
+        assert isinstance(exc.value, GenerationError)
 
     def test_clear_batch_drops_record(self) -> None:
         state = EnhanceState()

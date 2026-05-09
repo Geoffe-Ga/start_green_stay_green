@@ -1125,8 +1125,11 @@ class TestGenerateToolUseAsync:
             await orchestrator.aclose()
 
         kwargs = mock_client.messages.create.call_args.kwargs
-        # Cache marker survives intact through to the API call.
-        assert kwargs["system"] is system_blocks
+        # Cache marker survives intact through to the API call. Equality
+        # rather than identity because ``_tool_request_params`` makes a
+        # defensive ``list(...)`` copy of the blocks (so callers cannot
+        # mutate the API payload after handing it off).
+        assert kwargs["system"] == system_blocks
         assert kwargs["system"][-1]["cache_control"] == {"type": "ephemeral"}
         # Forced tool_use prevents free-form text drifts.
         assert kwargs["tool_choice"] == {"type": "tool", "name": "report_tuning"}
