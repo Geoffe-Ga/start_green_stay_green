@@ -7,6 +7,7 @@ import pytest
 
 from start_green_stay_green.ai.prompts.manager import PromptManager
 from start_green_stay_green.ai.prompts.manager import PromptTemplateError
+from start_green_stay_green.ai.prompts.manager import get_default_manager
 
 
 class TestPromptManagerInitialization:
@@ -71,6 +72,9 @@ class TestPromptManagerInitialization:
             "quality_scripts",
             "claude_md",
             "project_scaffolding",
+            "claude_md_tune",
+            "ci_enhance",
+            "content_tune",
         } == PromptManager.SUPPORTED_TEMPLATE_TYPES
 
 
@@ -796,9 +800,12 @@ class TestMutationKillers:
             "quality_scripts",
             "claude_md",
             "project_scaffolding",
+            "claude_md_tune",
+            "ci_enhance",
+            "content_tune",
         }
         assert expected == PromptManager.SUPPORTED_TEMPLATE_TYPES
-        assert len(PromptManager.SUPPORTED_TEMPLATE_TYPES) == 5
+        assert len(PromptManager.SUPPORTED_TEMPLATE_TYPES) == 8
 
     def test_supported_template_types_contains_ci_cd(self) -> None:
         """Test SUPPORTED_TEMPLATE_TYPES contains ci_cd."""
@@ -1174,3 +1181,141 @@ class TestPromptManagerExceptionChaining:
         # Nonexistent should raise
         with pytest.raises(PromptTemplateError):
             PromptManager(template_dir=nonexistent_dir)
+
+
+class TestPhase4TemplatesSixComponent:
+    """Each generator-side prompt template carries the 6-component
+    framework (Role / Goal / Context / Output Format / Examples /
+    Requirements). These tests pin that structure so a reviewer
+    cannot accidentally drop a section while iterating.
+    """
+
+    SIX_COMPONENT_HEADINGS = (
+        "## Role",
+        "## Goal",
+        "## Context",
+        "## Output Format",
+        "## Examples",
+        "## Requirements",
+    )
+
+    def test_claude_md_tune_renders_with_all_six_components(self) -> None:
+        """`claude_md_tune` carries all six headings in the rendered prompt."""
+        manager = PromptManager()
+        rendered = manager.render(
+            "claude_md_tune",
+            {
+                "project_name": "alpha",
+                "language": "python",
+                "scripts": ["check-all.sh"],
+                "skills": ["stay-green"],
+                "claude_md_reference": "# Reference\n\nbody",
+                "quality_reference": "thresholds...",
+            },
+        )
+        for heading in self.SIX_COMPONENT_HEADINGS:
+            assert heading in rendered, f"missing {heading} from claude_md_tune"
+
+    def test_ci_enhance_renders_with_all_six_components(self) -> None:
+        """`ci_enhance` carries all six headings in the rendered prompt."""
+        manager = PromptManager()
+        rendered = manager.render(
+            "ci_enhance",
+            {"language": "python", "context": "Python 3.12, pip"},
+        )
+        for heading in self.SIX_COMPONENT_HEADINGS:
+            assert heading in rendered, f"missing {heading} from ci_enhance"
+
+    def test_content_tune_renders_with_all_six_components(self) -> None:
+        """`content_tune` carries all six headings in the rendered prompt."""
+        manager = PromptManager()
+        rendered = manager.render(
+            "content_tune",
+            {
+                "source_context": "Source",
+                "target_context": "Target",
+                "preserve_sections": [],
+            },
+        )
+        for heading in self.SIX_COMPONENT_HEADINGS:
+            assert heading in rendered, f"missing {heading} from content_tune"
+
+    def test_content_tune_renders_preserve_sections_when_supplied(self) -> None:
+        """Optional preserve list flows into the rendered prompt verbatim."""
+        manager = PromptManager()
+        rendered = manager.render(
+            "content_tune",
+            {
+                "source_context": "Source",
+                "target_context": "Target",
+                "preserve_sections": ["Identity", "Workflow"],
+            },
+        )
+        assert "PRESERVE THESE SECTIONS UNCHANGED" in rendered
+        assert "Identity" in rendered
+        assert "Workflow" in rendered
+
+    def test_claude_md_tune_handles_empty_scripts_and_skills(self) -> None:
+        """An empty scripts/skills list does not crash the template."""
+        manager = PromptManager()
+        rendered = manager.render(
+            "claude_md_tune",
+            {
+                "project_name": "alpha",
+                "language": "python",
+                "scripts": [],
+                "skills": [],
+                "claude_md_reference": "# Reference",
+                "quality_reference": "Q",
+            },
+        )
+        assert "(none)" in rendered
+
+    def test_each_phase_4_template_validates(self) -> None:
+        """`validate_template` confirms each new template is loadable."""
+        manager = PromptManager()
+        for name in ("claude_md_tune", "ci_enhance", "content_tune"):
+            assert manager.validate_template(name), f"{name} failed validation"
+
+
+class TestGetDefaultManager:
+    """Lock in the lazy-singleton contract for ``get_default_manager``."""
+
+    def setup_method(self) -> None:
+        """Drop the cache so each test starts with no constructed manager."""
+        get_default_manager.cache_clear()
+
+    def teardown_method(self) -> None:
+        """Drop the cache so production callers in later tests rebuild fresh."""
+        get_default_manager.cache_clear()
+
+    def test_returns_prompt_manager_instance(self) -> None:
+        """First call constructs and returns a real ``PromptManager``."""
+        result = get_default_manager()
+        assert isinstance(result, PromptManager)
+
+    def test_returns_same_instance_on_repeated_calls(self) -> None:
+        """The singleton guarantee — both calls hand back the *same* object.
+
+        Identity check (``is``), not equality. ``PromptManager`` does
+        not override ``__eq__``, so an accidental drop of the
+        ``@functools.lru_cache`` decorator would silently return
+        distinct objects that compare equal by reference but consume
+        separate Jinja2 environments.
+        """
+        first = get_default_manager()
+        second = get_default_manager()
+        assert first is second
+
+    def test_lazy_construction_defers_until_first_call(self) -> None:
+        """Importing the module does not eagerly build a manager.
+
+        Important so tests that use a custom ``template_dir`` can
+        construct their own ``PromptManager`` without paying for the
+        default one. ``cache_info().currsize`` is the public hook
+        ``functools.lru_cache`` exposes for inspecting cache state;
+        zero before the first call, one after.
+        """
+        assert get_default_manager.cache_info().currsize == 0
+        get_default_manager()
+        assert get_default_manager.cache_info().currsize == 1

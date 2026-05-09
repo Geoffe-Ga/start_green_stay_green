@@ -21,10 +21,16 @@ Shipped:
 - Phase 2c (prompt caching via cache-controlled system blocks +
   `tool_use` structured output replacing the regex `CHANGES:` parser;
   `cache_read_input_tokens` / `cache_creation_input_tokens` plumbed
-  through to the timing report) — branch
-  `claude/phase-2c-cache-and-tool-use`.
+  through to the timing report) — PR #311 merged onto main as commit
+  `8c32724`.
+- Phase 4 (prompt-engineering cleanup: `ClaudeMdGenerator`,
+  `CIGenerator`, and `ContentTuner` inline f-string prompts hoisted
+  into `ai/prompts/templates/{claude_md_tune,ci_enhance,content_tune}.jinja2`,
+  each conforming to the 6-component framework; routed through a
+  lazy `get_default_manager()` singleton) — branch
+  `claude/phase-4-prompt-cleanup`.
 
-Remaining: prompt cleanup (4), batch mode (5), UX/docs (6).
+Remaining: batch mode (5), UX/docs (6).
 
 ---
 

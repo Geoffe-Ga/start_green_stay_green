@@ -22,6 +22,7 @@ from jinja2 import Environment
 from jinja2 import StrictUndefined
 import yaml
 
+from start_green_stay_green.ai.prompts.manager import get_default_manager
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.utils.yaml_utils import strip_markdown_fences
 
@@ -332,6 +333,11 @@ The CI workflow MUST:
     def _generate_with_ai(self, context: str) -> GenerationResult:
         """Generate workflow using AI orchestrator.
 
+        The prompt body lives in
+        ``ai/prompts/templates/ci_enhance.jinja2``; this method
+        supplies the context dict and forwards to
+        ``orchestrator.generate``.
+
         Args:
             context: Context information for generation.
 
@@ -346,27 +352,10 @@ The CI workflow MUST:
             msg = "AI orchestrator required for generate_with_ai()"
             raise ValueError(msg)
 
-        prompt = f"""You are a GitHub Actions CI/CD expert. Generate a production-grade
-GitHub Actions workflow file for a {self.language.upper()} project.
-
-Context:
-{context}
-
-Generate a complete, valid GitHub Actions workflow in YAML format that:
-1. MUST define a 'quality' job with linting, security checks, tests, coverage
-2. Can optionally include additional jobs (complexity, build, mutation, etc.)
-3. Uses appropriate language-specific tools and commands
-4. Includes matrix testing for multiple versions
-5. Has proper caching for dependencies
-6. Uploads artifacts and coverage reports
-7. Enforces all quality standards mentioned above
-8. Is ready to be saved as .github/workflows/ci.yml
-
-IMPORTANT: The 'quality' job is REQUIRED and must include test execution.
-Additional jobs like 'test', 'mutation', 'complexity', 'build' are OPTIONAL.
-
-Output ONLY valid YAML - no markdown, no explanations, no code fences.
-Start with 'name:' and end with the last workflow configuration line."""
+        prompt = get_default_manager().render(
+            "ci_enhance",
+            {"language": self.language, "context": context},
+        )
 
         return self.orchestrator.generate(
             prompt=prompt,

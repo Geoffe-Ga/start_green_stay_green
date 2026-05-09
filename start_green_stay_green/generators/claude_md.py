@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 from typing import TYPE_CHECKING
 
+from start_green_stay_green.ai.prompts.manager import get_default_manager
+
 if TYPE_CHECKING:
     from start_green_stay_green.ai.orchestrator import AIOrchestrator
 
@@ -117,65 +119,38 @@ class ClaudeMdGenerator:
         """
         return self.quality_ref_path.read_text(encoding="utf-8")
 
+    @staticmethod
     def _build_generation_prompt(
-        self,
         claude_md_reference: str,
         quality_reference: str,
         project_config: dict[str, Any],
     ) -> str:
-        """Build prompt for CLAUDE.md generation.
+        """Render the ``claude_md_tune`` prompt template.
+
+        The 6-component prompt body lives in
+        ``start_green_stay_green/ai/prompts/templates/claude_md_tune.jinja2``;
+        this method supplies the context dict.
 
         Args:
             claude_md_reference: Reference CLAUDE.md template.
-            quality_reference: MAXIMUM_QUALITY_ENGINEERING.md content.
-            project_config: Project configuration with name, language, scripts, skills.
+            quality_reference: ``MAXIMUM_QUALITY_ENGINEERING.md`` content.
+            project_config: Project configuration with ``project_name``,
+                ``language``, ``scripts``, ``skills``.
 
         Returns:
-            Formatted prompt for AI generation.
+            Fully rendered prompt ready for ``orchestrator.generate``.
         """
-        project_name = project_config.get("project_name", "unknown")
-        language = project_config.get("language", "unknown")
-        scripts = project_config.get("scripts", [])
-        skills = project_config.get("skills", [])
-
-        scripts_text = "\n".join(f"- {script}" for script in scripts)
-        skills_text = "\n".join(f"- {skill}" for skill in skills)
-
-        prompt_intro = (
-            "Generate a customized CLAUDE.md file for a new project based on "
-            "the reference CLAUDE.md template and MAXIMUM QUALITY ENGINEERING "
-            "standards."
+        return get_default_manager().render(
+            "claude_md_tune",
+            {
+                "project_name": project_config.get("project_name", "unknown"),
+                "language": project_config.get("language", "unknown"),
+                "scripts": list(project_config.get("scripts") or []),
+                "skills": list(project_config.get("skills") or []),
+                "claude_md_reference": claude_md_reference,
+                "quality_reference": quality_reference,
+            },
         )
-        return f"""{prompt_intro}
-
-PROJECT CONFIGURATION:
-- Project Name: {project_name}
-- Language: {language}
-- Generated Scripts:
-{scripts_text if scripts else "  (none)"}
-- Generated Skills:
-{skills_text if skills else "  (none)"}
-
-REFERENCE CLAUDE.md TEMPLATE:
-{claude_md_reference}
-
-MAXIMUM QUALITY ENGINEERING STANDARDS (for context):
-{quality_reference}
-
-REQUIREMENTS:
-1. Adapt the reference CLAUDE.md to the target project
-2. Replace generic examples with {language}-specific examples
-3. Document all generated scripts in the Tool Invocation Patterns section
-4. Document all generated skills
-5. Maintain the same structure and organization as the reference
-6. Preserve all critical principles and quality standards
-7. Include project-specific commands for {language}
-8. Ensure the output is valid markdown with proper H1 title
-
-OUTPUT FORMAT:
-Generate the complete customized CLAUDE.md content as valid markdown.
-Start with the H1 title and include all sections from the reference template.
-"""
 
     @staticmethod
     def _has_h1_title(content: str) -> bool:

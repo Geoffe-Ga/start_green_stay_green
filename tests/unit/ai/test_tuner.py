@@ -184,36 +184,46 @@ class TestContentTunerSystemBlocks:
         assert "FastAPI project" in joined
         assert "Django project" in joined
 
-    def test_system_blocks_include_requirements(self) -> None:
-        """Requirements are part of the cached prefix."""
+    def test_system_blocks_include_six_component_headings(self) -> None:
+        """The rendered system prompt carries the 6-component framework."""
         blocks = ContentTuner._build_system_blocks(
             "Source", "Target", preserve_sections=None
         )
         joined = " ".join(str(b["text"]) for b in blocks)
-        assert "REQUIREMENTS:" in joined
+        for heading in (
+            "## Role",
+            "## Goal",
+            "## Context",
+            "## Output Format",
+            "## Examples",
+            "## Requirements",
+        ):
+            assert heading in joined, f"missing {heading} from system prompt"
+        # Specific behavioural directives the model must see.
         assert "Preserve the structure and format" in joined
-        assert "Adapt terminology" in joined
+        assert "report_tuning" in joined
 
     def test_system_blocks_omit_preserve_when_none(self) -> None:
-        """No preserve list → no preserve sentence in the instructions."""
+        """No preserve list → no preserve sentence in the rendered prompt."""
         blocks = ContentTuner._build_system_blocks(
             "Source", "Target", preserve_sections=None
         )
         joined = " ".join(str(b["text"]) for b in blocks)
-        assert "Leave the following sections unchanged" not in joined
+        assert "PRESERVE THESE SECTIONS UNCHANGED" not in joined
 
     def test_system_blocks_include_preserve_list(self) -> None:
-        """Preserve sections appear inline in the instructions block."""
+        """Preserve sections are listed in the rendered prompt."""
         blocks = ContentTuner._build_system_blocks(
             "Source",
             "Target",
             preserve_sections=["Introduction", "License"],
         )
         joined = " ".join(str(b["text"]) for b in blocks)
-        assert (
-            'Leave the following sections unchanged: "Introduction", "License"'
-            in joined
-        )
+        # Each section appears verbatim, regardless of whether the
+        # template renders inline or as a bullet list.
+        assert '"Introduction"' in joined
+        assert '"License"' in joined
+        assert "PRESERVE THESE SECTIONS UNCHANGED" in joined
 
     def test_last_system_block_is_cache_controlled(self) -> None:
         """Cache marker on the final block caches everything before it.
@@ -227,6 +237,10 @@ class TestContentTunerSystemBlocks:
         blocks = ContentTuner._build_system_blocks(
             "Source", "Target", preserve_sections=None
         )
+        # The cache prefix is a single block by design — splitting it
+        # back into two would re-introduce the partition the
+        # consolidation removed, so pin the count.
+        assert len(blocks) == 1
         # Earlier blocks must not be marked or the cache key partition
         # would leak per-call deltas into the cached prefix.
         for block in blocks[:-1]:
@@ -244,9 +258,10 @@ class TestContentTunerSystemBlocks:
         message = ContentTuner._build_user_message("# Original\n\nBody")
         assert "# Original" in message
         assert "Body" in message
-        # Sanity: the system prefix's distinctive markers must NOT
-        # appear here.
-        assert "REQUIREMENTS:" not in message
+        # Sanity: the system prefix's distinctive markers must NOT appear
+        # here — the user message is the per-call delta only.
+        assert "## Role" not in message
+        assert "## Requirements" not in message
         assert "SOURCE CONTEXT:" not in message
 
 
@@ -376,7 +391,8 @@ class TestContentTunerTuneAsync:
         prompt_arg = positional[0]
         assert isinstance(prompt_arg, str)
         # The user message must NOT carry the cached prefix content.
-        assert "REQUIREMENTS:" not in prompt_arg
+        assert "## Role" not in prompt_arg
+        assert "## Requirements" not in prompt_arg
         assert "Original" in prompt_arg
         # System blocks must include both contexts and end with a
         # cache_control marker — the cache-hit guarantee for back-to-
@@ -469,7 +485,9 @@ class TestContentTunerTuneAsync:
 
         keyword = orchestrator.generate_tool_use_async.call_args.kwargs
         joined = " ".join(str(b["text"]) for b in keyword["system_blocks"])
-        assert 'Leave the following sections unchanged: "License", "Credits"' in joined
+        assert "PRESERVE THESE SECTIONS UNCHANGED" in joined
+        assert '"License"' in joined
+        assert '"Credits"' in joined
 
     @pytest.mark.asyncio
     async def test_tune_handles_generation_error(self) -> None:
