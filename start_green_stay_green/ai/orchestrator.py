@@ -939,12 +939,20 @@ class AIOrchestrator:
         mirror :meth:`_call_tool_api_async` so the per-request
         contract is identical between sync and batch paths.
 
-        Uses ``request.tool_schema.get("name", "")`` rather than the
-        bracket form so a malformed schema produces an empty
-        ``tool_choice.name`` (the API rejects it with a clear error)
-        instead of an opaque ``KeyError`` at a future call site.
+        Validates ``tool_schema["name"]`` is non-empty before
+        constructing the envelope. The API would reject a missing
+        name with an opaque HTTP 400 wrapped in a generic
+        ``GenerationError``; failing close to the caller with a
+        named-field error is more debuggable.
         """
-        tool_name = str(request.tool_schema.get("name", ""))
+        raw_name = request.tool_schema.get("name")
+        if not isinstance(raw_name, str) or not raw_name:
+            msg = (
+                f"tool_schema for custom_id {request.custom_id!r} "
+                "must include a non-empty 'name' string"
+            )
+            raise GenerationError(msg)
+        tool_name = raw_name
         return {
             "custom_id": request.custom_id,
             "params": {

@@ -118,6 +118,27 @@ class TestSubmitToolUseBatch:
                 ]
             )
 
+    @pytest.mark.asyncio
+    async def test_missing_tool_schema_name_raises_generation_error(
+        self,
+        orchestrator: AIOrchestrator,
+    ) -> None:
+        """Empty / missing ``tool_schema['name']`` fails close to the caller.
+
+        Without this guard the API would return an opaque HTTP 400
+        wrapped in a generic ``GenerationError("Batch submission
+        failed")`` — much harder to debug than a named-field error
+        that points at the offending request.
+        """
+        bad_request = ToolUseBatchRequest(
+            custom_id="subagent:nameless",
+            prompt="hi",
+            system_blocks=[{"type": "text", "text": "S"}],
+            tool_schema={"input_schema": {"type": "object"}},  # no "name"
+        )
+        with pytest.raises(GenerationError, match="non-empty 'name'"):
+            await orchestrator.submit_tool_use_batch([bad_request])
+
 
 class TestPollBatch:
     """``poll_batch`` snapshots the SDK ``BatchObject`` into ``BatchPoll``."""
@@ -248,6 +269,29 @@ class TestFetchBatchResults:
     ) -> None:
         with pytest.raises(ValueError, match="non-empty batch_id"):
             await orchestrator.fetch_batch_results("")
+
+    @pytest.mark.asyncio
+    async def test_unparseable_entry_propagates_generation_error(
+        self,
+        orchestrator: AIOrchestrator,
+    ) -> None:
+        """A stream entry the parser rejects aborts the fold (current contract).
+
+        ``parse_batch_result_entry`` raises ``GenerationError`` only
+        for shapes so malformed that no ``custom_id`` can be
+        recovered (per-request failures land in ``failures`` instead).
+        Pin the propagation so a future refactor that swallows the
+        error in :meth:`fetch_batch_results` is loud, not silent.
+        """
+        batches = _wire_batches(orchestrator)
+        batches.results = AsyncMock(
+            return_value=[
+                _success_entry("subagent:a"),
+                {"custom_id": "", "result": {}},  # missing custom_id
+            ]
+        )
+        with pytest.raises(GenerationError, match="custom_id"):
+            await orchestrator.fetch_batch_results("msgbatch_x")
 
 
 class TestBatchSDKErrorMapping:

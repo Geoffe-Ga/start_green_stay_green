@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 import json
 from typing import TYPE_CHECKING
 
@@ -344,3 +347,59 @@ class TestBatchProgressExtension:
         assert "claude-md" in state.completed
         assert state.batch is None
         assert not state.has_batch()
+
+
+class TestBatchProgressExpiry:
+    """``is_potentially_expired`` guards against stale 24 h batches."""
+
+    def test_returns_false_when_no_batch_recorded(self) -> None:
+        """A default-constructed BatchProgress can never be expired."""
+        progress = BatchProgress()
+        assert not progress.is_potentially_expired()
+
+    def test_returns_false_within_24h_of_submission(self) -> None:
+        """A 23 h-old batch is still live — defer to the API."""
+
+        submitted = datetime(2026, 5, 9, 0, 0, tzinfo=UTC)
+        progress = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at=submitted.isoformat(),
+            custom_id_map={"subagent:foo": "subagents"},
+        )
+        # 23h59m later — still under the SLA.
+        now = submitted + timedelta(hours=23, minutes=59)
+        assert not progress.is_potentially_expired(now=now)
+
+    def test_returns_true_at_24h_boundary(self) -> None:
+        """Exactly 24h after submission counts as expired (over-report)."""
+
+        submitted = datetime(2026, 5, 9, 0, 0, tzinfo=UTC)
+        progress = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at=submitted.isoformat(),
+            custom_id_map={"subagent:foo": "subagents"},
+        )
+        now = submitted + timedelta(hours=24)
+        assert progress.is_potentially_expired(now=now)
+
+    def test_returns_true_well_past_24h(self) -> None:
+        """A 48 h-old batch is unambiguously expired."""
+
+        submitted = datetime(2026, 5, 9, 0, 0, tzinfo=UTC)
+        progress = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at=submitted.isoformat(),
+            custom_id_map={"subagent:foo": "subagents"},
+        )
+        assert progress.is_potentially_expired(
+            now=submitted + timedelta(hours=48),
+        )
+
+    def test_returns_false_for_unparseable_timestamp(self) -> None:
+        """A malformed ``submitted_at`` defers to the API rather than failing."""
+        progress = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at="not an iso timestamp",
+            custom_id_map={"subagent:foo": "subagents"},
+        )
+        assert not progress.is_potentially_expired()

@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from dataclasses import field
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 import hashlib
 import json
 from typing import Any
@@ -62,13 +63,21 @@ class BatchProgress:
     invocation so an interrupted run can be picked up without
     re-submitting (which would burn cost on duplicate work).
 
+    **Lifecycle**: a ``green enhance --batch`` run flows
+    submit → :meth:`EnhanceState.start_batch` (persist record) →
+    poll → reconcile → :meth:`EnhanceState.clear_batch` (drop
+    record). Phase 5b's CLI must call :meth:`is_potentially_expired`
+    before the poll step so a state file that crossed Anthropic's
+    24 h SLA boundary can be cleared and re-submitted instead of
+    hitting an opaque ``404`` on the stale ``batch_id``.
+
     Attributes:
         batch_id: Anthropic identifier returned by
             :meth:`AIOrchestrator.submit_tool_use_batch`. Empty in a
             default-constructed state — :meth:`EnhanceState.has_batch`
             treats that as "no batch in flight".
-        submitted_at: ISO-8601 UTC timestamp of submission. Diagnostic
-            only.
+        submitted_at: ISO-8601 UTC timestamp of submission. Used as
+            the basis for the 24 h SLA expiry check.
         custom_id_map: Map from each submitted ``custom_id`` to the
             top-level :class:`EnhanceState` ``completed`` target it
             belongs under (e.g. ``"subagent:architecture-review"
@@ -82,6 +91,54 @@ class BatchProgress:
     batch_id: str = ""
     submitted_at: str = ""
     custom_id_map: dict[str, str] = field(default_factory=dict)
+
+    def is_potentially_expired(self, *, now: datetime | None = None) -> bool:
+        """Return ``True`` when this batch may have crossed the 24 h SLA.
+
+        Anthropic batches have a hard ≤24 h server-side TTL; after
+        that the ``batch_id`` is no longer valid and any
+        ``poll_batch`` / ``fetch_batch_results`` call returns a
+        ``404``-class error. Phase 5b's CLI must call this before
+        polling so a stale record can be cleared (and the user
+        prompted to re-submit) instead of bubbling an opaque error.
+
+        Best-effort — uses :attr:`submitted_at` plus the local
+        clock, both of which can drift relative to the Anthropic
+        server. Tuned to over-report (24 h, not 23) so a borderline
+        batch is treated as live and the API gets the final say.
+
+        Args:
+            now: Override the current-time source (testing hook).
+                Defaults to :func:`datetime.now(UTC)`.
+
+        Returns:
+            ``False`` if no batch is recorded, the timestamp is
+            unparseable, or less than 24 h has elapsed; ``True``
+            otherwise.
+        """
+        submitted = self._parsed_submitted_at()
+        if submitted is None:
+            return False
+        current = now if now is not None else datetime.now(UTC)
+        return (current - submitted) >= _BATCH_TTL
+
+    def _parsed_submitted_at(self) -> datetime | None:
+        """Return :attr:`submitted_at` as a tz-aware datetime, or ``None``."""
+        if not self.batch_id or not self.submitted_at:
+            return None
+        try:
+            parsed = datetime.fromisoformat(self.submitted_at)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed
+
+
+# Anthropic Message Batches API server-side TTL. Documented at
+# https://docs.claude.com/en/api/creating-message-batches —
+# batches that have not completed within 24 h are expired.
+_BATCH_TTL: timedelta = timedelta(hours=24)
 
 
 @dataclass(frozen=True)

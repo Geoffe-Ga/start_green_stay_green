@@ -169,6 +169,23 @@ class TestParseBatchResultEntryFailures:
         assert isinstance(outcome, BatchError)
         assert outcome.result_type == "future_status_we_havent_heard_of"
 
+    def test_missing_result_type_attribute_yields_unknown_batcherror(self) -> None:
+        """A ``result`` payload with no ``type`` field at all degrades soft.
+
+        Pins the contract: a SDK shape change that drops ``result.type``
+        produces a recoverable ``BatchError`` (caller can decide), not
+        a ``GenerationError`` that aborts the whole batch reconciliation.
+        """
+        entry = {
+            "custom_id": "subagent:no_type",
+            "result": {"message": {"content": []}},  # no "type" key
+        }
+
+        custom_id, outcome = parse_batch_result_entry(entry)
+        assert custom_id == "subagent:no_type"
+        assert isinstance(outcome, BatchError)
+        assert outcome.result_type == "unknown"
+
     def test_missing_custom_id_raises_generation_error(self) -> None:
         with pytest.raises(GenerationError, match="custom_id"):
             parse_batch_result_entry({"custom_id": "", "result": {}})
