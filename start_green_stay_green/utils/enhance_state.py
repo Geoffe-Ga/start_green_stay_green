@@ -34,10 +34,13 @@ from dataclasses import dataclass
 from dataclasses import field
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 import hashlib
 import json
 from typing import Any
 from typing import TYPE_CHECKING
+
+from start_green_stay_green.ai.types import GenerationError
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -51,6 +54,105 @@ STATE_FILE_VERSION = 1
 # it under ``.claude/`` matches the existing convention for tool
 # scratch state and keeps a future ``.gitignore`` rule narrow.
 STATE_FILE_RELATIVE = ".claude/.enhance-state.json"
+
+
+class BatchStateError(GenerationError):
+    """Raised on a state-machine violation in :class:`EnhanceState`.
+
+    Subclasses :class:`GenerationError` so callers handling AI-domain
+    failures with a single ``except GenerationError`` clause catch
+    state-file misuse without separate plumbing. Currently raised
+    by :meth:`EnhanceState.start_batch` when a caller tries to
+    overwrite an in-flight batch without first calling
+    :meth:`EnhanceState.clear_batch`.
+    """
+
+
+@dataclass(frozen=True)
+class BatchProgress:
+    """In-flight batch metadata persisted across ``green enhance`` calls.
+
+    Phase 5a — present iff a batch was submitted but not yet
+    fetched. The CLI's resume path checks for this on every
+    invocation so an interrupted run can be picked up without
+    re-submitting (which would burn cost on duplicate work).
+
+    **Lifecycle**: a ``green enhance --batch`` run flows
+    submit → :meth:`EnhanceState.start_batch` (persist record) →
+    poll → reconcile → :meth:`EnhanceState.clear_batch` (drop
+    record). Phase 5b's CLI must call :meth:`is_potentially_expired`
+    before the poll step so a state file that crossed Anthropic's
+    24 h SLA boundary can be cleared and re-submitted instead of
+    hitting an opaque ``404`` on the stale ``batch_id``.
+
+    Attributes:
+        batch_id: Anthropic identifier returned by
+            :meth:`AIOrchestrator.submit_tool_use_batch`. Empty in a
+            default-constructed state — :meth:`EnhanceState.has_batch`
+            treats that as "no batch in flight".
+        submitted_at: ISO-8601 UTC timestamp of submission. Used as
+            the basis for the 24 h SLA expiry check.
+        custom_id_map: Map from each submitted ``custom_id`` to the
+            top-level :class:`EnhanceState` ``completed`` target it
+            belongs under (e.g. ``"subagent:architecture-review"
+            → "subagents"``). The direction is **custom_id → target**
+            because the Phase 5b reconciliation path iterates
+            :attr:`BatchResultsBundle.successes` (already keyed by
+            ``custom_id``) and looks each target up directly without
+            inverting the map.
+    """
+
+    batch_id: str = ""
+    submitted_at: str = ""
+    custom_id_map: dict[str, str] = field(default_factory=dict)
+
+    def is_potentially_expired(self, *, now: datetime | None = None) -> bool:
+        """Return ``True`` when this batch may have crossed the 24 h SLA.
+
+        Anthropic batches have a hard ≤24 h server-side TTL; after
+        that the ``batch_id`` is no longer valid and any
+        ``poll_batch`` / ``fetch_batch_results`` call returns a
+        ``404``-class error. Phase 5b's CLI must call this before
+        polling so a stale record can be cleared (and the user
+        prompted to re-submit) instead of bubbling an opaque error.
+
+        Best-effort — uses :attr:`submitted_at` plus the local
+        clock, both of which can drift relative to the Anthropic
+        server. Tuned to over-report (24 h, not 23) so a borderline
+        batch is treated as live and the API gets the final say.
+
+        Args:
+            now: Override the current-time source (testing hook).
+                Defaults to :func:`datetime.now(UTC)`.
+
+        Returns:
+            ``False`` if no batch is recorded, the timestamp is
+            unparseable, or less than 24 h has elapsed; ``True``
+            otherwise.
+        """
+        submitted = self._parsed_submitted_at()
+        if submitted is None:
+            return False
+        current = now if now is not None else datetime.now(UTC)
+        return (current - submitted) >= _BATCH_TTL
+
+    def _parsed_submitted_at(self) -> datetime | None:
+        """Return :attr:`submitted_at` as a tz-aware datetime, or ``None``."""
+        if not self.batch_id or not self.submitted_at:
+            return None
+        try:
+            parsed = datetime.fromisoformat(self.submitted_at)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed
+
+
+# Anthropic Message Batches API server-side TTL. Documented at
+# https://docs.claude.com/en/api/creating-message-batches —
+# batches that have not completed within 24 h are expired.
+_BATCH_TTL: timedelta = timedelta(hours=24)
 
 
 @dataclass(frozen=True)
@@ -77,6 +179,13 @@ class TargetCompletion:
 class EnhanceState:
     """Persistent state for ``green enhance``.
 
+    Mutable by design — the CLI layer drives the lifecycle through
+    :meth:`mark_completed`, :meth:`start_batch`, and :meth:`clear_batch`,
+    which would all need replace-and-reassign workarounds under
+    ``frozen=True``. The on-disk file is the durable contract;
+    in-memory mutation is bounded to the duration of one
+    ``green enhance`` invocation.
+
     Attributes:
         version: Schema version. Always equal to
             :data:`STATE_FILE_VERSION` on round-trip.
@@ -84,11 +193,56 @@ class EnhanceState:
             ``enhance`` invocation that wrote this file.
         completed: Map from target name (e.g. ``"claude-md"``,
             ``"subagents"``) to its :class:`TargetCompletion` record.
+        batch: In-flight :class:`BatchProgress` recorded after a
+            ``--batch`` submission and cleared once results are
+            reconciled. ``None`` when no batch is in flight.
     """
 
     version: int = STATE_FILE_VERSION
     last_run: str = ""
     completed: dict[str, TargetCompletion] = field(default_factory=dict)
+    batch: BatchProgress | None = None
+
+    def has_batch(self) -> bool:
+        """``True`` if a submitted-but-not-yet-fetched batch is recorded."""
+        return self.batch is not None and bool(self.batch.batch_id)
+
+    def start_batch(
+        self,
+        batch_id: str,
+        custom_id_map: dict[str, str],
+        submitted_at: str,
+    ) -> None:
+        """Record a freshly-submitted batch.
+
+        Refuses to overwrite an existing in-flight batch — the caller
+        must :meth:`clear_batch` first, signalling that the prior run
+        was reconciled. Without this guard a re-run of
+        ``green enhance --batch`` would silently abandon the previous
+        batch's results and the user would pay twice.
+
+        Raises:
+            BatchStateError: When an in-flight batch is already
+                recorded. Subclasses :class:`GenerationError` so
+                callers can ``except GenerationError`` to catch all
+                AI-domain failures uniformly.
+        """
+        if self.has_batch():
+            msg = (
+                "An in-flight batch is already recorded; clear it via "
+                "clear_batch() before starting another."
+            )
+            raise BatchStateError(msg)
+        self.batch = BatchProgress(
+            batch_id=batch_id,
+            submitted_at=submitted_at,
+            custom_id_map=dict(custom_id_map),
+        )
+        self.last_run = submitted_at
+
+    def clear_batch(self) -> None:
+        """Drop the in-flight batch record after results are reconciled."""
+        self.batch = None
 
     def is_unchanged(self, target: str, current_hash: str) -> bool:
         """Return ``True`` if ``target`` was last tuned at ``current_hash``.
@@ -128,7 +282,7 @@ class EnhanceState:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-friendly mapping."""
-        return {
+        payload: dict[str, Any] = {
             "version": self.version,
             "last_run": self.last_run,
             "completed": {
@@ -140,6 +294,13 @@ class EnhanceState:
                 for target, rec in self.completed.items()
             },
         }
+        if self.batch is not None and self.batch.batch_id:
+            payload["batch"] = {
+                "batch_id": self.batch.batch_id,
+                "submitted_at": self.batch.submitted_at,
+                "custom_id_map": dict(self.batch.custom_id_map),
+            }
+        return payload
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> EnhanceState:
@@ -157,11 +318,27 @@ class EnhanceState:
             ),
             last_run=str(payload.get("last_run", "") or ""),
             completed=_parse_completed_records(payload.get("completed")),
+            batch=_parse_batch_progress(payload.get("batch")),
         )
 
 
 def _valid_hash(raw: object) -> str | None:
     """Return ``raw`` if it is a non-empty string, else ``None``."""
+    if isinstance(raw, str) and raw:
+        return raw
+    return None
+
+
+def _nonempty_str(raw: object) -> str | None:
+    """Return ``raw`` when it's a non-empty string; else ``None``.
+
+    Same predicate as :func:`_valid_hash` today, but separate by intent:
+    ``_valid_hash`` validates a SHA-256 digest string and a future
+    tightening (e.g. enforcing the ``sha256:`` prefix) would be
+    correct. ``_nonempty_str`` validates an Anthropic-side opaque
+    identifier (``batch_id``) and must NOT add format requirements
+    — the only contract is "must be present and non-empty."
+    """
     if isinstance(raw, str) and raw:
         return raw
     return None
@@ -195,6 +372,33 @@ def _parse_completed_records(raw: object) -> dict[str, TargetCompletion]:
         if record is not None:
             completed[str(name)] = record
     return completed
+
+
+def _parse_batch_progress(raw: object) -> BatchProgress | None:
+    """Parse an optional ``batch`` payload, returning ``None`` when absent.
+
+    A malformed batch record degrades to "no batch in flight",
+    matching the rest of the state-file philosophy: worst case, the
+    caller re-submits — a duplicate batch is recoverable, an
+    aborted run from a parse failure is not.
+    """
+    if not isinstance(raw, dict):
+        return None
+    batch_id = _nonempty_str(raw.get("batch_id"))
+    if batch_id is None:
+        return None
+    return BatchProgress(
+        batch_id=batch_id,
+        submitted_at=str(raw.get("submitted_at", "") or ""),
+        custom_id_map=_parse_custom_id_map(raw.get("custom_id_map")),
+    )
+
+
+def _parse_custom_id_map(raw: object) -> dict[str, str]:
+    """Coerce a stored ``custom_id_map`` into the typed shape, dropping garbage."""
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items()}
 
 
 def state_path_for(project_path: Path) -> Path:

@@ -27,10 +27,19 @@ Shipped:
   `CIGenerator`, and `ContentTuner` inline f-string prompts hoisted
   into `ai/prompts/templates/{claude_md_tune,ci_enhance,content_tune}.jinja2`,
   each conforming to the 6-component framework; routed through a
-  lazy `get_default_manager()` singleton) — branch
-  `claude/phase-4-prompt-cleanup`.
+  lazy `get_default_manager()` singleton) — PR #312 merged onto
+  main as commit `f094695`.
+- Phase 5a (Batches API primitives: `ai/batch.py` with
+  `ToolUseBatchRequest`, `BatchSubmission`, `BatchPoll`,
+  `BatchError`, `BatchResultsBundle`, `parse_batch_result_entry`;
+  three new orchestrator methods `submit_tool_use_batch`,
+  `poll_batch`, `fetch_batch_results`; `ContentTuner.build_batch_request`
+  + `parse_batch_tuning_result`; `EnhanceState.batch` + `BatchProgress`;
+  shared `ai/types.py` to break the orchestrator ↔ batch cycle;
+  ADR-001-batch-enhance.md) — branch
+  `claude/phase-5-batch-mode`. CLI wiring deferred to Phase 5b.
 
-Remaining: batch mode (5), UX/docs (6).
+Remaining: batch CLI wiring (5b), UX/docs (6).
 
 ---
 

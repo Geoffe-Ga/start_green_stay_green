@@ -674,3 +674,128 @@ class TestContentTunerLoggerBehavior:
         assert result.content == original  # Same value
         assert result.dry_run
         assert result.changes == ["[DRY RUN] No changes made"]
+
+
+class TestContentTunerBuildBatchRequest:
+    """Pin ``build_batch_request`` builds the same payload ``tune`` sends."""
+
+    @pytest.fixture
+    def tuner(self) -> ContentTuner:
+        return ContentTuner(MagicMock(spec=AIOrchestrator))
+
+    def test_request_carries_custom_id_prompt_and_tool(
+        self,
+        tuner: ContentTuner,
+    ) -> None:
+        """The request envelope keeps every field the orchestrator needs."""
+        req = tuner.build_batch_request(
+            custom_id="subagent:architecture",
+            source_content="# Original\n\nbody",
+            source_context="Source repo",
+            target_context="Target repo",
+        )
+        assert req.custom_id == "subagent:architecture"
+        assert "Original" in req.prompt
+        assert req.tool_schema["name"] == "report_tuning"
+
+    def test_system_blocks_match_what_tune_would_send(
+        self,
+        tuner: ContentTuner,
+    ) -> None:
+        """Cache prefix is identical between sync and batch — pin it."""
+        req = tuner.build_batch_request(
+            custom_id="subagent:a",
+            source_content="X",
+            source_context="A",
+            target_context="B",
+        )
+        sync_blocks = ContentTuner._build_system_blocks("A", "B", None)
+        assert req.system_blocks == sync_blocks
+
+    def test_preserve_sections_flow_through(
+        self,
+        tuner: ContentTuner,
+    ) -> None:
+        req = tuner.build_batch_request(
+            custom_id="subagent:a",
+            source_content="X",
+            source_context="A",
+            target_context="B",
+            preserve_sections=["Identity", "Workflow"],
+        )
+        joined = " ".join(str(b["text"]) for b in req.system_blocks)
+        assert '"Identity"' in joined
+        assert '"Workflow"' in joined
+
+    def test_empty_custom_id_rejected(self, tuner: ContentTuner) -> None:
+        with pytest.raises(ValueError, match="custom_id cannot be empty"):
+            tuner.build_batch_request(
+                custom_id="   ",
+                source_content="X",
+                source_context="A",
+                target_context="B",
+            )
+
+    def test_input_validation_mirrors_tune(self, tuner: ContentTuner) -> None:
+        """Same content / context validation runs on the batch path."""
+        with pytest.raises(ValueError, match="Source context"):
+            tuner.build_batch_request(
+                custom_id="ok",
+                source_content="X",
+                source_context="",
+                target_context="B",
+            )
+
+
+class TestContentTunerParseBatchResult:
+    """Pin ``parse_batch_tuning_result`` lifts a batch result correctly."""
+
+    def test_returns_tuning_result_with_content_and_changes(self) -> None:
+        tool_result = ToolUseResult(
+            tool_name="report_tuning",
+            tool_input={
+                "tuned_content": "# Adapted\n",
+                "changes": ["Renamed FastAPI to Django", "Updated paths"],
+            },
+            token_usage=TokenUsage(input_tokens=100, output_tokens=50),
+            model="claude",
+            message_id="msg_1",
+        )
+
+        result = ContentTuner.parse_batch_tuning_result(tool_result)
+        assert result.content == "# Adapted\n"
+        assert result.changes == ["Renamed FastAPI to Django", "Updated paths"]
+        assert result.token_usage_input == 100
+        assert result.token_usage_output == 50
+        assert not result.dry_run
+
+    def test_missing_tuned_content_raises_generation_error(self) -> None:
+        """A malformed ``tool_input`` (missing ``tuned_content``) raises.
+
+        Pins the negative-path behaviour explicitly — the parser is
+        shared with the sync path's ``_parse_tool_use_input``, but a
+        future refactor that bypasses the shared validator on the
+        batch resume path would silently lose this guard if no
+        dedicated test pinned it.
+        """
+        tool_result = ToolUseResult(
+            tool_name="report_tuning",
+            tool_input={"changes": []},  # no ``tuned_content``
+            token_usage=TokenUsage(input_tokens=1, output_tokens=1),
+            model="claude",
+            message_id="msg_bad",
+        )
+        with pytest.raises(GenerationError, match="tuned_content"):
+            ContentTuner.parse_batch_tuning_result(tool_result)
+
+    def test_non_list_changes_raises_generation_error(self) -> None:
+        """``changes`` must be a list — a string-shaped value is rejected."""
+        tool_result = ToolUseResult(
+            tool_name="report_tuning",
+            tool_input={"tuned_content": "x", "changes": "not a list"},
+            token_usage=TokenUsage(input_tokens=1, output_tokens=1),
+            model="claude",
+            message_id="msg_bad",
+        )
+        with pytest.raises(GenerationError, match="list of strings"):
+            ContentTuner.parse_batch_tuning_result(tool_result)

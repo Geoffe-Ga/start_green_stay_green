@@ -6,42 +6,95 @@ Coordinates AI-powered generation tasks using Claude API.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterable
 from dataclasses import dataclass
+from datetime import UTC
+from datetime import datetime
 import time
 from typing import Final
 from typing import Literal
 from typing import TYPE_CHECKING
+from typing import cast
 
 from anthropic import Anthropic
 from anthropic import AsyncAnthropic
 from anthropic.types import TextBlock
 from anthropic.types import ToolUseBlock
 
+from start_green_stay_green.ai.batch import BatchError
+from start_green_stay_green.ai.batch import BatchPoll
+from start_green_stay_green.ai.batch import BatchResultsBundle
+from start_green_stay_green.ai.batch import BatchSubmission
+from start_green_stay_green.ai.batch import ToolUseBatchRequest
+from start_green_stay_green.ai.batch import parse_batch_result_entry
+from start_green_stay_green.ai.types import GenerationError
+from start_green_stay_green.ai.types import GenerationResult
+from start_green_stay_green.ai.types import TokenUsage
+from start_green_stay_green.ai.types import ToolUseResult
 from start_green_stay_green.utils.timing import APICallRecord
 from start_green_stay_green.utils.timing import get_active_report
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from collections.abc import Iterable
     from collections.abc import Iterator
+    from collections.abc import Sequence
+
+    from anthropic.types.messages.batch_create_params import (
+        Request as BatchCreateRequest,
+    )
 
     from start_green_stay_green.utils.timing import TimingReport
 
+# Re-export shared types from ``ai.types`` so existing
+# ``from start_green_stay_green.ai.orchestrator import ToolUseResult``
+# imports keep working after the Phase-5a relocation. The names
+# below look unused locally but ARE the public API surface of this
+# module — do not remove without a coordinated migration of every
+# downstream call site (and the corresponding tests). The
+# back-compat contract is asserted by
+# tests/unit/ai/test_orchestrator.py — any removal here without
+# that test update will fail import-time mypy in callers.
+__all__ = [
+    "AIOrchestrator",
+    "GenerationError",
+    "GenerationResult",
+    "ModelConfig",
+    "PromptTemplateError",
+    "TokenUsage",
+    "ToolUseResult",
+]
 
-class GenerationError(Exception):
-    """Raised when AI generation fails.
 
-    Attributes:
-        cause: Optional underlying exception that caused this error.
+def _count(obj: object, name: str) -> int:
+    """Read a count attribute off ``obj``, defaulting to ``0``.
+
+    SDK response objects expose ``request_counts.processing`` etc. as
+    plain ``int`` attributes; tests pass ``MagicMock`` doubles. Keeps
+    ``poll_batch``'s body short enough to stay grade-A complex.
     """
+    return int(getattr(obj, name, 0) or 0)
 
-    def __init__(self, message: str, *, cause: Exception | None = None) -> None:
-        """Initialize GenerationError.
 
-        Args:
-            message: Error message describing the failure.
-            cause: Optional underlying exception that caused this error.
-        """
-        super().__init__(message)
-        self.cause = cause
+async def _aiter(
+    stream: AsyncIterable[object] | Iterable[object],
+) -> AsyncIterator[object]:
+    """Yield from an async iterable OR a sync iterable.
+
+    The Anthropic SDK's ``messages.batches.results`` returns an
+    async iterator at runtime, but unit tests construct fakes that
+    are easier to write as plain lists. Accept both shapes so the
+    test seam is wide.
+
+    ``isinstance(stream, AsyncIterable)`` narrows the union for
+    mypy on both branches, so neither path needs a ``type: ignore``.
+    """
+    if isinstance(stream, AsyncIterable):
+        async for item in stream:
+            yield item
+        return
+    for item in stream:
+        yield item
 
 
 class PromptTemplateError(Exception):
@@ -59,81 +112,10 @@ class ModelConfig:
     SONNET: Final[str] = "claude-sonnet-4-5-20250929"
 
 
-@dataclass(frozen=True)
-class TokenUsage:
-    """Token usage information from API response.
-
-    Attributes:
-        input_tokens: Number of tokens in the prompt.
-        output_tokens: Number of tokens in the response.
-    """
-
-    input_tokens: int
-    output_tokens: int
-
-    @property
-    def total_tokens(self) -> int:
-        """Calculate total tokens used.
-
-        Returns:
-            Sum of input and output tokens.
-        """
-        return self.input_tokens + self.output_tokens
-
-
-@dataclass(frozen=True)
-class GenerationResult:
-    """Result from AI generation request.
-
-    Attributes:
-        content: Generated content from the AI model.
-        format: Output format (yaml, toml, markdown, bash).
-        token_usage: Token usage statistics for the request.
-        cache_read_tokens: Subset of input tokens served from the
-            prompt cache. ``0`` when caching is disabled or the
-            response did not report this field.
-        cache_creation_tokens: Tokens written to the prompt cache on
-            this call (billed at a higher rate than reads).
-        model: Model identifier used for generation.
-        message_id: Unique identifier for the API message.
-    """
-
-    content: str
-    format: str
-    token_usage: TokenUsage
-    model: str
-    message_id: str
-    cache_read_tokens: int = 0
-    cache_creation_tokens: int = 0
-
-
-@dataclass(frozen=True)
-class ToolUseResult:
-    """Result from a structured (``tool_use``) API call.
-
-    The Claude API returns a JSON object validated against the tool's
-    ``input_schema``; ``tool_input`` is that object verbatim. Replaces
-    free-form text parsing for callers that need typed fields out of
-    the model.
-
-    Attributes:
-        tool_name: Name of the tool the model invoked.
-        tool_input: Parsed JSON input the model passed to the tool.
-        token_usage: Token usage statistics for the request.
-        cache_read_tokens: Subset of input tokens served from the
-            prompt cache.
-        cache_creation_tokens: Tokens written to the prompt cache.
-        model: Model identifier used for generation.
-        message_id: Unique identifier for the API message.
-    """
-
-    tool_name: str
-    tool_input: dict[str, object]
-    token_usage: TokenUsage
-    model: str
-    message_id: str
-    cache_read_tokens: int = 0
-    cache_creation_tokens: int = 0
+# Per-call max_tokens for every Claude request the orchestrator
+# issues — sync, async, tool-use, and batch alike. Single source of
+# truth so a future limit change is one edit instead of four.
+_MAX_TOKENS: Final[int] = 4096
 
 
 @dataclass(frozen=True)
@@ -295,7 +277,7 @@ class AIOrchestrator:
         """
         response = client.messages.create(
             model=self.model,
-            max_tokens=4096,
+            max_tokens=_MAX_TOKENS,
             system=(
                 f"Generate {output_format} output. "
                 "Follow the instructions precisely."
@@ -482,7 +464,7 @@ class AIOrchestrator:
         """Async counterpart of :meth:`_call_api`."""
         response = await client.messages.create(
             model=self.model,
-            max_tokens=4096,
+            max_tokens=_MAX_TOKENS,
             system=(
                 f"Generate {output_format} output. "
                 "Follow the instructions precisely."
@@ -588,8 +570,13 @@ class AIOrchestrator:
         response. The block's ``input`` (already validated against the
         tool's ``input_schema`` server-side) is the structured payload
         the caller wants.
+
+        Delegates the request-envelope construction to
+        :meth:`_tool_request_params` so the sync and batch paths
+        share one source of truth — a future change to ``system``,
+        ``tool_choice``, or ``max_tokens`` shape lands in one place.
         """
-        tool_name = str(tool_schema["name"])
+        params = self._tool_request_params(prompt, system_blocks, tool_schema)
         # The Anthropic SDK exposes ``system``, ``tools``, and
         # ``tool_choice`` as deeply-nested TypedDict unions. Threading
         # those through the generic ``dict[str, object]`` shapes we
@@ -597,19 +584,7 @@ class AIOrchestrator:
         # internal types just to satisfy mypy, with no runtime
         # benefit. The SDK validates the payload server-side; we
         # type-ignore the single call site instead.
-        response = await client.messages.create(  # type: ignore[call-overload]
-            model=self.model,
-            max_tokens=4096,
-            system=system_blocks,
-            tools=[tool_schema],
-            tool_choice={"type": "tool", "name": tool_name},
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-        )
+        response = await client.messages.create(**params)  # type: ignore[call-overload]
 
         tool_block = next(
             (b for b in response.content if isinstance(b, ToolUseBlock)),
@@ -745,3 +720,268 @@ class AIOrchestrator:
         if self._async_client is not None:
             await self._async_client.close()
             self._async_client = None
+
+    async def submit_tool_use_batch(
+        self,
+        requests: Sequence[ToolUseBatchRequest],
+    ) -> BatchSubmission:
+        """Submit ``requests`` as a single Message Batches API call.
+
+        Each :class:`ToolUseBatchRequest` is translated into the
+        Batches-API request envelope (``custom_id`` + ``params``) and
+        the whole list is passed to
+        ``client.messages.batches.create``. Returns the batch id and
+        an echo of the submitted ``custom_id`` order so callers can
+        persist both for a later resume.
+
+        The forced ``tool_choice`` mirrors :meth:`generate_tool_use_async`
+        — the model is required to invoke the supplied tool, so the
+        result message is guaranteed to contain a
+        ``ToolUseBlock``. This keeps the result parser
+        (:func:`parse_batch_result_entry`) simple.
+
+        Args:
+            requests: One or more :class:`ToolUseBatchRequest`
+                payloads. Empty input is rejected (the SDK would reject
+                it server-side; failing locally keeps the error close
+                to the caller).
+
+        Returns:
+            :class:`BatchSubmission` with the new ``batch_id`` and the
+            ``custom_id`` echo list.
+
+        Raises:
+            ValueError: If ``requests`` is empty or contains duplicate
+                ``custom_id`` values.
+            GenerationError: If the API call fails.
+        """
+        custom_ids = self._validate_batch_requests(requests)
+        payload = [self._batch_request_envelope(r) for r in requests]
+        batch = await self._create_batch(payload)
+        return BatchSubmission(
+            batch_id=str(getattr(batch, "id", "") or ""),
+            custom_ids=list(custom_ids),
+            submitted_at=datetime.now(UTC).isoformat(),
+        )
+
+    @staticmethod
+    def _validate_batch_requests(
+        requests: Sequence[ToolUseBatchRequest],
+    ) -> list[str]:
+        """Pre-flight validation; returns the ordered ``custom_id`` list."""
+        if not requests:
+            msg = "submit_tool_use_batch requires at least one request"
+            raise ValueError(msg)
+        custom_ids = [r.custom_id for r in requests]
+        if len(set(custom_ids)) != len(custom_ids):
+            msg = "submit_tool_use_batch requests must have unique custom_id values"
+            raise ValueError(msg)
+        return custom_ids
+
+    async def _create_batch(self, payload: list[dict[str, object]]) -> object:
+        """Wrap the SDK call so callers see ``GenerationError`` on failure.
+
+        The SDK signature is
+        ``create(*, requests: Iterable[batch_create_params.Request])``.
+        We construct each envelope as a ``dict[str, object]`` matching
+        the ``Request`` ``TypedDict`` shape (verified by
+        ``test_request_envelope_carries_tool_choice_and_system``).
+        Mypy cannot prove the dict matches the TypedDict's deeply-nested
+        ``MessageCreateParamsNonStreaming`` shape without re-typing the
+        ``ToolUseBatchRequest.system_blocks`` chain end-to-end, so we
+        use one ``cast()`` at the SDK boundary to assert the contract
+        rather than a ``# type: ignore`` to suppress it. ``cast`` is
+        documented narrowing; ``type: ignore`` is suppression.
+        """
+        client = self._get_async_client()
+        try:
+            return await client.messages.batches.create(
+                requests=cast("Iterable[BatchCreateRequest]", payload),
+            )
+        except Exception as exc:
+            msg = "Batch submission failed"
+            raise GenerationError(msg, cause=exc) from exc
+
+    async def poll_batch(self, batch_id: str) -> BatchPoll:
+        """Return the current state of an in-flight batch.
+
+        Single retrieve call — no internal polling loop. Callers that
+        want a blocking wait drive their own sleep/poll cycle (see the
+        ADR for why the two-call CLI pattern is preferred over a
+        long-running command).
+
+        Args:
+            batch_id: Identifier returned from
+                :meth:`submit_tool_use_batch`.
+
+        Returns:
+            :class:`BatchPoll` with status and per-state counts.
+
+        Raises:
+            ValueError: If ``batch_id`` is empty.
+            GenerationError: If the API call fails.
+        """
+        self._require_batch_id(batch_id, "poll_batch")
+        batch = await self._retrieve_batch(batch_id)
+        return self._batch_poll_from_response(batch_id, batch)
+
+    @staticmethod
+    def _batch_poll_from_response(batch_id: str, batch: object) -> BatchPoll:
+        """Pull the ``BatchPoll`` snapshot fields off a SDK response object."""
+        counts = getattr(batch, "request_counts", None)
+        return BatchPoll(
+            batch_id=batch_id,
+            status=str(getattr(batch, "processing_status", "") or ""),
+            processing_count=_count(counts, "processing"),
+            succeeded_count=_count(counts, "succeeded"),
+            errored_count=_count(counts, "errored"),
+            canceled_count=_count(counts, "canceled"),
+            expired_count=_count(counts, "expired"),
+        )
+
+    async def fetch_batch_results(self, batch_id: str) -> BatchResultsBundle:
+        """Stream a finished batch's results into ``(successes, failures)``.
+
+        Calls ``client.messages.batches.results(batch_id)`` and folds
+        each entry through :func:`parse_batch_result_entry`. Successes
+        land in :attr:`BatchResultsBundle.successes` keyed by
+        ``custom_id``; non-success entries (errored, canceled,
+        expired) land in :attr:`BatchResultsBundle.failures`.
+
+        Args:
+            batch_id: Identifier of an ``ended`` batch.
+
+        Returns:
+            :class:`BatchResultsBundle` with per-``custom_id`` results.
+
+        Raises:
+            ValueError: If ``batch_id`` is empty.
+            GenerationError: If the API call fails or any entry's
+                shape is unrecoverably malformed (per-request
+                failures do *not* raise — they populate ``failures``).
+        """
+        self._require_batch_id(batch_id, "fetch_batch_results")
+        stream = await self._open_results_stream(batch_id)
+        # Collect into local dicts and construct the frozen bundle at
+        # the end. Mutating the bundle's fields in-place after
+        # construction worked (``frozen=True`` doesn't deep-freeze
+        # mutable containers) but read as a contradiction — a reader
+        # seeing ``frozen=True`` reasonably expects the object to be
+        # fully immutable.
+        successes: dict[str, ToolUseResult] = {}
+        failures: dict[str, BatchError] = {}
+        async for entry in _aiter(stream):
+            custom_id, outcome = parse_batch_result_entry(entry)
+            if isinstance(outcome, ToolUseResult):
+                successes[custom_id] = outcome
+            else:
+                failures[custom_id] = outcome
+        return BatchResultsBundle(successes=successes, failures=failures)
+
+    @staticmethod
+    def _require_batch_id(batch_id: str, op: str) -> None:
+        """Reject empty/missing ``batch_id`` close to the caller."""
+        if not batch_id:
+            msg = f"{op} requires a non-empty batch_id"
+            raise ValueError(msg)
+
+    async def _retrieve_batch(self, batch_id: str) -> object:
+        """Wrap the SDK retrieve so callers see ``GenerationError`` on failure."""
+        client = self._get_async_client()
+        try:
+            return await client.messages.batches.retrieve(batch_id)
+        except Exception as exc:
+            msg = f"Batch retrieve failed for {batch_id}"
+            raise GenerationError(msg, cause=exc) from exc
+
+    async def _open_results_stream(
+        self,
+        batch_id: str,
+    ) -> AsyncIterable[object] | Iterable[object]:
+        """Open the batch's result stream as an iterable.
+
+        ``AsyncBatches.results()`` is ``async def`` (a coroutine
+        function — *not* an async-generator function); it returns a
+        coroutine that resolves to an
+        ``AsyncJSONLDecoder[MessageBatchIndividualResponse]``. The
+        decoder is itself an async iterable, hence the
+        ``await`` then ``async for`` pattern in the caller.
+        Verified against ``anthropic`` SDK 0.97.0 by reading
+        ``inspect.iscoroutinefunction(AsyncBatches.results)``.
+
+        Returns the iterable shape ``_aiter`` expects directly, so
+        callers do not have to cast. SDK errors are remapped to
+        :class:`GenerationError` to keep the public surface uniform
+        with the sync path.
+        """
+        client = self._get_async_client()
+        try:
+            stream = await client.messages.batches.results(batch_id)
+        except Exception as exc:
+            msg = f"Batch results stream failed for {batch_id}"
+            raise GenerationError(msg, cause=exc) from exc
+        # The SDK returns an async iterator at runtime; tests pass a
+        # plain list via ``AsyncMock``. Both satisfy the union, so
+        # the cast is a type-check-only narrowing — no isinstance
+        # at runtime.
+        return cast("AsyncIterable[object] | Iterable[object]", stream)
+
+    def _batch_request_envelope(
+        self,
+        request: ToolUseBatchRequest,
+    ) -> dict[str, object]:
+        """Wrap one :class:`ToolUseBatchRequest` in Batches-API shape.
+
+        The Anthropic Batches API expects a list of
+        ``{"custom_id": ..., "params": {...}}`` dicts where ``params``
+        is a normal ``messages.create`` body. ``params`` is built by
+        :meth:`_tool_request_params` — the same helper
+        :meth:`_call_tool_api_async` uses — so sync and batch paths
+        cannot drift apart on envelope shape.
+        """
+        return {
+            "custom_id": request.custom_id,
+            "params": self._tool_request_params(
+                request.prompt,
+                request.system_blocks,
+                request.tool_schema,
+                custom_id=request.custom_id,
+            ),
+        }
+
+    def _tool_request_params(
+        self,
+        prompt: str,
+        system_blocks: list[dict[str, object]],
+        tool_schema: dict[str, object],
+        *,
+        custom_id: str = "",
+    ) -> dict[str, object]:
+        """Build the Anthropic ``messages.create`` body shared by sync + batch.
+
+        Every field here is identical between the two transports —
+        a single source of truth so a future change to ``system``,
+        ``tool_choice``, ``max_tokens``, or ``messages`` shape lands
+        once and applies to both. ``custom_id`` is optional context
+        for the validation error (named in the message when present).
+
+        Validates ``tool_schema["name"]`` is non-empty before
+        construction; the API would otherwise reject a missing name
+        with an opaque HTTP 400 wrapped in a generic
+        ``GenerationError``.
+        """
+        raw_name = tool_schema.get("name")
+        if not isinstance(raw_name, str) or not raw_name:
+            qualifier = f" for custom_id {custom_id!r}" if custom_id else ""
+            msg = f"tool_schema{qualifier} must include a non-empty " "'name' string"
+            raise GenerationError(msg)
+        return {
+            "model": self.model,
+            "max_tokens": _MAX_TOKENS,
+            "system": list(system_blocks),
+            "tools": [tool_schema],
+            "tool_choice": {"type": "tool", "name": raw_name},
+            "messages": [
+                {"role": "user", "content": prompt},
+            ],
+        }

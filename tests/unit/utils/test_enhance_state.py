@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 import json
 from typing import TYPE_CHECKING
 
 import pytest
 
+from start_green_stay_green.ai.types import GenerationError
+from start_green_stay_green.utils.enhance_state import BatchProgress
+from start_green_stay_green.utils.enhance_state import BatchStateError
 from start_green_stay_green.utils.enhance_state import EnhanceState
 from start_green_stay_green.utils.enhance_state import STATE_FILE_VERSION
 from start_green_stay_green.utils.enhance_state import TargetCompletion
@@ -204,3 +210,220 @@ def test_target_completion_is_immutable() -> None:
     rec = TargetCompletion(hash="sha256:abc", model="x", timestamp="y")
     with pytest.raises(AttributeError):
         rec.hash = "sha256:def"  # type: ignore[misc]
+
+
+class TestBatchProgressExtension:
+    """Phase 5a: optional in-flight batch field on ``EnhanceState``."""
+
+    def test_default_state_has_no_batch(self) -> None:
+        state = EnhanceState()
+        assert state.batch is None
+        assert not state.has_batch()
+
+    def test_start_batch_records_id_and_map(self) -> None:
+        state = EnhanceState()
+        state.start_batch(
+            "msgbatch_42",
+            {
+                "subagent:architecture-review": "subagents",
+                "skill:stay-green": "skills",
+            },
+            "2026-05-09T12:00:00+00:00",
+        )
+
+        assert state.has_batch()
+        assert isinstance(state.batch, BatchProgress)
+        assert state.batch.batch_id == "msgbatch_42"
+        # Direction: custom_id (key) → top-level target (value).
+        assert state.batch.custom_id_map == {
+            "subagent:architecture-review": "subagents",
+            "skill:stay-green": "skills",
+        }
+        assert state.batch.submitted_at == "2026-05-09T12:00:00+00:00"
+        # last_run is also bumped so a future read knows when this happened
+        assert state.last_run == "2026-05-09T12:00:00+00:00"
+
+    def test_start_batch_refuses_to_overwrite_in_flight(self) -> None:
+        state = EnhanceState()
+        state.start_batch(
+            "msgbatch_first",
+            {"subagent:foo": "subagents"},
+            "2026-05-09T00:00:00Z",
+        )
+
+        with pytest.raises(BatchStateError, match="already recorded") as exc:
+            state.start_batch(
+                "msgbatch_second",
+                {"subagent:bar": "subagents"},
+                "2026-05-09T01:00:00Z",
+            )
+        # Subclasses GenerationError so callers catching the AI-domain
+        # parent class handle state-file violations uniformly.
+        assert isinstance(exc.value, GenerationError)
+
+    def test_clear_batch_drops_record(self) -> None:
+        state = EnhanceState()
+        state.start_batch(
+            "msgbatch_42",
+            {"subagent:foo": "subagents"},
+            "2026-05-09T00:00:00Z",
+        )
+        assert state.has_batch()
+
+        state.clear_batch()
+        assert state.batch is None
+        assert not state.has_batch()
+        # And start_batch is allowed again after a clear
+        state.start_batch(
+            "msgbatch_43",
+            {"subagent:foo": "subagents"},
+            "2026-05-09T01:00:00Z",
+        )
+        assert state.batch is not None
+        assert state.batch.batch_id == "msgbatch_43"
+
+    def test_to_dict_omits_batch_when_none(self) -> None:
+        """A batchless state round-trips to the same JSON pre-Phase-5a wrote."""
+        state = EnhanceState()
+        payload = state.to_dict()
+        assert "batch" not in payload
+
+    def test_to_dict_includes_batch_when_present(self) -> None:
+        state = EnhanceState()
+        state.start_batch(
+            "msgbatch_42",
+            {"subagent:architecture-review": "subagents"},
+            "2026-05-09T00:00:00+00:00",
+        )
+
+        payload = state.to_dict()
+        assert payload["batch"] == {
+            "batch_id": "msgbatch_42",
+            "submitted_at": "2026-05-09T00:00:00+00:00",
+            "custom_id_map": {"subagent:architecture-review": "subagents"},
+        }
+
+    def test_round_trip_preserves_batch(self) -> None:
+        original = EnhanceState()
+        original.start_batch(
+            "msgbatch_42",
+            {
+                "subagent:architecture-review": "subagents",
+                "skill:stay-green": "skills",
+            },
+            "2026-05-09T00:00:00+00:00",
+        )
+
+        restored = EnhanceState.from_dict(original.to_dict())
+        assert restored.has_batch()
+        assert restored.batch is not None
+        assert restored.batch.batch_id == "msgbatch_42"
+        assert restored.batch.custom_id_map == {
+            "subagent:architecture-review": "subagents",
+            "skill:stay-green": "skills",
+        }
+
+    def test_from_dict_drops_malformed_batch(self) -> None:
+        """A malformed ``batch`` payload degrades to ``None`` (no in-flight record)."""
+        # Missing batch_id → drop
+        state = EnhanceState.from_dict({"batch": {"submitted_at": "x"}})
+        assert state.batch is None
+        # batch field is not a dict → drop
+        state = EnhanceState.from_dict({"batch": "garbage"})
+        assert state.batch is None
+        # Missing batch field → still None (forward-compat with pre-5a writers)
+        state = EnhanceState.from_dict({"completed": {}})
+        assert state.batch is None
+
+    def test_pre_phase_5a_state_file_loads_unchanged(self) -> None:
+        """A state file produced by the Phase 3c writer must keep working."""
+        legacy_payload = {
+            "version": 1,
+            "last_run": "2026-04-01T00:00:00+00:00",
+            "completed": {
+                "claude-md": {
+                    "hash": "sha256:abc",
+                    "model": "claude-sonnet",
+                    "timestamp": "2026-04-01T00:00:00+00:00",
+                },
+            },
+        }
+        state = EnhanceState.from_dict(legacy_payload)
+        assert "claude-md" in state.completed
+        assert state.batch is None
+        assert not state.has_batch()
+
+
+class TestBatchProgressExpiry:
+    """``is_potentially_expired`` guards against stale 24 h batches."""
+
+    def test_returns_false_when_no_batch_recorded(self) -> None:
+        """A default-constructed BatchProgress can never be expired."""
+        progress = BatchProgress()
+        assert not progress.is_potentially_expired()
+
+    def test_returns_false_within_24h_of_submission(self) -> None:
+        """A 23 h-old batch is still live — defer to the API."""
+
+        submitted = datetime(2026, 5, 9, 0, 0, tzinfo=UTC)
+        progress = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at=submitted.isoformat(),
+            custom_id_map={"subagent:foo": "subagents"},
+        )
+        # 23h59m later — still under the SLA.
+        now = submitted + timedelta(hours=23, minutes=59)
+        assert not progress.is_potentially_expired(now=now)
+
+    def test_returns_true_at_24h_boundary(self) -> None:
+        """Exactly 24h after submission counts as expired (over-report)."""
+
+        submitted = datetime(2026, 5, 9, 0, 0, tzinfo=UTC)
+        progress = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at=submitted.isoformat(),
+            custom_id_map={"subagent:foo": "subagents"},
+        )
+        now = submitted + timedelta(hours=24)
+        assert progress.is_potentially_expired(now=now)
+
+    def test_returns_true_well_past_24h(self) -> None:
+        """A 48 h-old batch is unambiguously expired."""
+
+        submitted = datetime(2026, 5, 9, 0, 0, tzinfo=UTC)
+        progress = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at=submitted.isoformat(),
+            custom_id_map={"subagent:foo": "subagents"},
+        )
+        assert progress.is_potentially_expired(
+            now=submitted + timedelta(hours=48),
+        )
+
+    def test_returns_false_for_unparseable_timestamp(self) -> None:
+        """A malformed ``submitted_at`` defers to the API rather than failing."""
+        progress = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at="not an iso timestamp",
+            custom_id_map={"subagent:foo": "subagents"},
+        )
+        assert not progress.is_potentially_expired()
+
+    def test_handles_tz_naive_submitted_at(self) -> None:
+        """A tz-naive ISO string is treated as UTC.
+
+        Pins the ``replace(tzinfo=UTC)`` branch in
+        :meth:`BatchProgress._parsed_submitted_at`. Without this
+        coverage a refactor that drops the tz-naive promotion would
+        produce a ``TypeError: can't subtract offset-naive and
+        offset-aware datetimes`` at runtime — exactly the kind of
+        regression mutation testing is meant to catch.
+        """
+        # Submitted 25h ago in tz-naive form; should still flag expired.
+        now = datetime(2026, 5, 10, 1, 0, tzinfo=UTC)
+        progress = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at="2026-05-09T00:00:00",  # no offset suffix
+            custom_id_map={"subagent:foo": "subagents"},
+        )
+        assert progress.is_potentially_expired(now=now)
