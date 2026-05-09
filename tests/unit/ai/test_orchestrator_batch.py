@@ -238,6 +238,47 @@ class TestBatchSDKErrorMapping:
         with pytest.raises(GenerationError, match="Batch submission failed"):
             await orchestrator.submit_tool_use_batch([_request()])
 
+    @pytest.mark.asyncio
+    async def test_poll_failure_wraps_in_generation_error(
+        self,
+        orchestrator: AIOrchestrator,
+    ) -> None:
+        """``poll_batch`` lifts SDK errors into ``GenerationError`` like submit does.
+
+        Without this test the orchestrator's wrapper around
+        ``client.messages.batches.retrieve`` is uncovered; a refactor
+        that drops the wrapper would silently surface raw SDK
+        exceptions to callers.
+        """
+        batches = _wire_batches(orchestrator)
+        batches.retrieve = AsyncMock(side_effect=RuntimeError("upstream gone"))
+
+        with pytest.raises(
+            GenerationError,
+            match="Batch retrieve failed for msgbatch_x",
+        ):
+            await orchestrator.poll_batch("msgbatch_x")
+
+    @pytest.mark.asyncio
+    async def test_fetch_failure_wraps_in_generation_error(
+        self,
+        orchestrator: AIOrchestrator,
+    ) -> None:
+        """``fetch_batch_results`` lifts stream-open errors into ``GenerationError``.
+
+        Pins the SDK-error → ``GenerationError`` contract for the third
+        SDK-touching method so all three error paths
+        (``submit`` / ``poll`` / ``fetch``) are uniformly covered.
+        """
+        batches = _wire_batches(orchestrator)
+        batches.results = AsyncMock(side_effect=RuntimeError("stream closed"))
+
+        with pytest.raises(
+            GenerationError,
+            match="Batch results stream failed for msgbatch_x",
+        ):
+            await orchestrator.fetch_batch_results("msgbatch_x")
+
 
 def _success_entry(custom_id: str) -> dict[str, Any]:
     """Minimal succeeded-entry dict the parser will lift to a ``ToolUseResult``."""

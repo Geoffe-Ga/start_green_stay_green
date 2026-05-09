@@ -19,6 +19,7 @@ from anthropic import AsyncAnthropic
 from anthropic.types import TextBlock
 from anthropic.types import ToolUseBlock
 
+from start_green_stay_green.ai.batch import BatchError
 from start_green_stay_green.ai.batch import BatchPoll
 from start_green_stay_green.ai.batch import BatchResultsBundle
 from start_green_stay_green.ai.batch import BatchSubmission
@@ -757,7 +758,7 @@ class AIOrchestrator:
             return await client.messages.batches.create(
                 requests=payload,  # type: ignore[arg-type]
             )
-        except Exception as exc:  # pragma: no cover - exercised via integration
+        except Exception as exc:
             msg = "Batch submission failed"
             raise GenerationError(msg, cause=exc) from exc
 
@@ -814,14 +815,21 @@ class AIOrchestrator:
         """
         self._require_batch_id(batch_id, "fetch_batch_results")
         stream = await self._open_results_stream(batch_id)
-        bundle = BatchResultsBundle()
+        # Collect into local dicts and construct the frozen bundle at
+        # the end. Mutating the bundle's fields in-place after
+        # construction worked (``frozen=True`` doesn't deep-freeze
+        # mutable containers) but read as a contradiction — a reader
+        # seeing ``frozen=True`` reasonably expects the object to be
+        # fully immutable.
+        successes: dict[str, ToolUseResult] = {}
+        failures: dict[str, BatchError] = {}
         async for entry in _aiter(stream):
             custom_id, outcome = parse_batch_result_entry(entry)
             if isinstance(outcome, ToolUseResult):
-                bundle.successes[custom_id] = outcome
+                successes[custom_id] = outcome
             else:
-                bundle.failures[custom_id] = outcome
-        return bundle
+                failures[custom_id] = outcome
+        return BatchResultsBundle(successes=successes, failures=failures)
 
     @staticmethod
     def _require_batch_id(batch_id: str, op: str) -> None:
@@ -835,7 +843,7 @@ class AIOrchestrator:
         client = self._get_async_client()
         try:
             return await client.messages.batches.retrieve(batch_id)
-        except Exception as exc:  # pragma: no cover - exercised via integration
+        except Exception as exc:
             msg = f"Batch retrieve failed for {batch_id}"
             raise GenerationError(msg, cause=exc) from exc
 
@@ -844,7 +852,7 @@ class AIOrchestrator:
         client = self._get_async_client()
         try:
             return await client.messages.batches.results(batch_id)
-        except Exception as exc:  # pragma: no cover - exercised via integration
+        except Exception as exc:
             msg = f"Batch results stream failed for {batch_id}"
             raise GenerationError(msg, cause=exc) from exc
 

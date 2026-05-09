@@ -219,16 +219,20 @@ class TestBatchProgressExtension:
         state = EnhanceState()
         state.start_batch(
             "msgbatch_42",
-            {"a": "subagent:foo", "b": "skill:bar"},
+            {
+                "subagent:architecture-review": "subagents",
+                "skill:stay-green": "skills",
+            },
             "2026-05-09T12:00:00+00:00",
         )
 
         assert state.has_batch()
         assert isinstance(state.batch, BatchProgress)
         assert state.batch.batch_id == "msgbatch_42"
+        # Direction: custom_id (key) → top-level target (value).
         assert state.batch.custom_id_map == {
-            "a": "subagent:foo",
-            "b": "skill:bar",
+            "subagent:architecture-review": "subagents",
+            "skill:stay-green": "skills",
         }
         assert state.batch.submitted_at == "2026-05-09T12:00:00+00:00"
         # last_run is also bumped so a future read knows when this happened
@@ -236,21 +240,37 @@ class TestBatchProgressExtension:
 
     def test_start_batch_refuses_to_overwrite_in_flight(self) -> None:
         state = EnhanceState()
-        state.start_batch("msgbatch_first", {"a": "x"}, "2026-05-09T00:00:00Z")
+        state.start_batch(
+            "msgbatch_first",
+            {"subagent:foo": "subagents"},
+            "2026-05-09T00:00:00Z",
+        )
 
         with pytest.raises(ValueError, match="already recorded"):
-            state.start_batch("msgbatch_second", {"b": "y"}, "2026-05-09T01:00:00Z")
+            state.start_batch(
+                "msgbatch_second",
+                {"subagent:bar": "subagents"},
+                "2026-05-09T01:00:00Z",
+            )
 
     def test_clear_batch_drops_record(self) -> None:
         state = EnhanceState()
-        state.start_batch("msgbatch_42", {"a": "subagent:foo"}, "2026-05-09T00:00:00Z")
+        state.start_batch(
+            "msgbatch_42",
+            {"subagent:foo": "subagents"},
+            "2026-05-09T00:00:00Z",
+        )
         assert state.has_batch()
 
         state.clear_batch()
         assert state.batch is None
         assert not state.has_batch()
         # And start_batch is allowed again after a clear
-        state.start_batch("msgbatch_43", {"a": "subagent:foo"}, "2026-05-09T01:00:00Z")
+        state.start_batch(
+            "msgbatch_43",
+            {"subagent:foo": "subagents"},
+            "2026-05-09T01:00:00Z",
+        )
         assert state.batch is not None
         assert state.batch.batch_id == "msgbatch_43"
 
@@ -264,7 +284,7 @@ class TestBatchProgressExtension:
         state = EnhanceState()
         state.start_batch(
             "msgbatch_42",
-            {"a": "subagent:foo"},
+            {"subagent:architecture-review": "subagents"},
             "2026-05-09T00:00:00+00:00",
         )
 
@@ -272,14 +292,17 @@ class TestBatchProgressExtension:
         assert payload["batch"] == {
             "batch_id": "msgbatch_42",
             "submitted_at": "2026-05-09T00:00:00+00:00",
-            "custom_id_map": {"a": "subagent:foo"},
+            "custom_id_map": {"subagent:architecture-review": "subagents"},
         }
 
     def test_round_trip_preserves_batch(self) -> None:
         original = EnhanceState()
         original.start_batch(
             "msgbatch_42",
-            {"a": "subagent:foo", "b": "skill:bar"},
+            {
+                "subagent:architecture-review": "subagents",
+                "skill:stay-green": "skills",
+            },
             "2026-05-09T00:00:00+00:00",
         )
 
@@ -288,8 +311,8 @@ class TestBatchProgressExtension:
         assert restored.batch is not None
         assert restored.batch.batch_id == "msgbatch_42"
         assert restored.batch.custom_id_map == {
-            "a": "subagent:foo",
-            "b": "skill:bar",
+            "subagent:architecture-review": "subagents",
+            "skill:stay-green": "skills",
         }
 
     def test_from_dict_drops_malformed_batch(self) -> None:

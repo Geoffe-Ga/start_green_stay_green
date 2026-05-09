@@ -61,12 +61,15 @@ concerns. Splitting keeps each side small and lets the parser ship
 test doubles (plain dicts) instead of forcing tests to construct SDK
 Pydantic models.
 
-The cycle (`orchestrator` ↔ `batch`) is broken with **lazy local
-imports** inside the parser body — the only place a runtime
-construction of `ToolUseResult`/`TokenUsage` is needed. All other
-references are type annotations behind `from __future__ import
-annotations`, so they evaluate as strings and never trigger the
-cycle.
+The cycle (`orchestrator` needs `ai/batch.py`'s types to declare its
+new methods; `ai/batch.py`'s parser builds `ToolUseResult`/`TokenUsage`
+from result entries) is broken with a third module:
+**`ai/types.py`** holds `GenerationError`, `TokenUsage`,
+`GenerationResult`, and `ToolUseResult`. Both `orchestrator` and
+`batch` import from `ai.types` at the top level — no lazy imports,
+no runtime cycle. `orchestrator.py` re-exports the same names so
+existing `from start_green_stay_green.ai.orchestrator import
+ToolUseResult` callsites across the codebase keep working.
 
 ### D3 — State extension is additive, schema version stays at 1
 

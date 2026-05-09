@@ -69,9 +69,14 @@ class BatchProgress:
             treats that as "no batch in flight".
         submitted_at: ISO-8601 UTC timestamp of submission. Diagnostic
             only.
-        custom_id_map: ``custom_id`` → target name. Lets the resume
-            path correlate per-request results back to the targets
-            the original submission was tracking.
+        custom_id_map: Map from each submitted ``custom_id`` to the
+            top-level :class:`EnhanceState` ``completed`` target it
+            belongs under (e.g. ``"subagent:architecture-review"
+            → "subagents"``). The direction is **custom_id → target**
+            because the Phase 5b reconciliation path iterates
+            :attr:`BatchResultsBundle.successes` (already keyed by
+            ``custom_id``) and looks each target up directly without
+            inverting the map.
     """
 
     batch_id: str = ""
