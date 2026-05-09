@@ -194,6 +194,69 @@ These options work with all commands:
 - `--help`: Show help message and exit
 
 
+### `green enhance` — re-tune an existing project
+
+Re-runs Pass 2 (AI tuning) over a project that already has the
+deterministic scaffold in place. Useful after `green init --offline`
+when you're ready to add the AI-tuned subagents, or after the
+reference subagents in this repo are updated and you want to pull
+the new style into your project.
+
+```bash
+# Re-tune everything in the current directory:
+green enhance
+
+# Subset:
+green enhance --targets claude-md
+
+# Preview the token cost without writing anything:
+green enhance --dry-run
+```
+
+#### Batch mode (Phase 5)
+
+For bulk runs (CI projects, batch enhancement of many repos), the
+Anthropic Message Batches API is 50% cheaper at the cost of a ≤24 h
+SLA. `green enhance --batch` submits subagent tunings via that path
+and exits — re-run the same command to pick up results once the
+batch ends:
+
+```bash
+# Submit:
+green enhance --batch --targets subagents
+# → "Submitted batch msgbatch_42 covering 8 subagent(s).
+#    Re-run `green enhance --batch` to fetch results."
+
+# (later — minutes to hours later) Resume:
+green enhance --batch --targets subagents
+# → "✓ Batch reconciled: 8 agent(s) written, 0 failed."
+```
+
+For a single blocking command (typical in CI), pass `--wait`:
+
+```bash
+green enhance --batch --wait --targets subagents
+# Polls every 30 s until the batch ends or the timeout (default 1h)
+# elapses.
+```
+
+Limits and trade-offs:
+
+* Batch mode currently handles `--targets subagents` only —
+  `claude-md` uses a free-text path that the Batches API does not
+  yet wrap. Mixing the two errors before any API call.
+* Batches expire after 24 h server-side. `green enhance --batch`
+  detects an expired record on the resume side and clears it with
+  a "submit a fresh batch" message rather than producing an opaque
+  error.
+* Per-request failures (`errored` / `canceled` / `expired`) do *not*
+  abort the whole batch — successful agents land on disk, failed
+  ones are listed with their names so the user can re-run.
+
+See [`plans/architecture/ADR-001-batch-enhance.md`](plans/architecture/ADR-001-batch-enhance.md)
+for the full design rationale.
+
+
 ## Documentation
 
 Comprehensive documentation for using Start Green Stay Green:

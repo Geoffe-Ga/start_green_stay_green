@@ -36,10 +36,17 @@ Shipped:
   `poll_batch`, `fetch_batch_results`; `ContentTuner.build_batch_request`
   + `parse_batch_tuning_result`; `EnhanceState.batch` + `BatchProgress`;
   shared `ai/types.py` to break the orchestrator ↔ batch cycle;
-  ADR-001-batch-enhance.md) — branch
-  `claude/phase-5-batch-mode`. CLI wiring deferred to Phase 5b.
+  ADR-001-batch-enhance.md) — PR #313 merged onto main as commit
+  `d43e697`.
+- Phase 5b (CLI wiring: `green enhance --batch` and `--wait` flags;
+  `ai/batch_dispatch.py` orchestration glue;
+  `SubagentsGenerator.build_batch_plan` + `apply_batch_result`;
+  per-target dispatch branch in `cli.py`; subagents-only with a
+  hard error when mixed with `claude-md`; expiry guard + per-agent
+  failure isolation; README `### green enhance` section + ADR
+  Phase-5b notes) — branch `claude/phase-5b-batch-cli`.
 
-Remaining: batch CLI wiring (5b), UX/docs (6).
+Remaining: UX/docs (6).
 
 ---
 

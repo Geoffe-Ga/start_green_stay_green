@@ -147,8 +147,33 @@ test seam wider.
 
 ## Phase 5 Scope
 
-- **5a (this PR)**: orchestrator primitives + tuner request builder
-  + state extension + this ADR. No CLI wiring; no user-visible flag.
-- **5b (follow-up PR)**: `green enhance --batch` flag, the two-call
-  flow, optional `--wait` for in-process polling, README + `--help`
-  copy.
+- **5a (PR #313, merged)**: orchestrator primitives + tuner request
+  builder + state extension + this ADR. No CLI wiring; no
+  user-visible flag.
+- **5b (this PR)**: `green enhance --batch` flag, the two-call flow,
+  optional `--wait` for in-process polling, ``ai/batch_dispatch.py``
+  orchestration glue, README + `--help` copy.
+
+### 5b implementation notes
+
+* **Subagents-only**. Phase 5b's `--batch` only handles the
+  `subagents` target; the sync `claude-md` path uses free-text
+  generation (which the Batches API does not yet wrap). Mixing
+  `--batch` with `--targets claude-md` is rejected before any API
+  call with a message that names the working invocation
+  (`--targets subagents`).
+* **`--wait` semantics**. Default is the two-call pattern from D1
+  above. `--wait` opts into a sleep-then-poll loop bounded by a
+  one-hour timeout; the API SLA is 24 h, so `--wait` is for users
+  who want a single blocking command rather than a CI-friendly
+  resume cursor.
+* **Expiry guard**. Every resume run calls
+  :meth:`BatchProgress.is_potentially_expired` before polling, so a
+  state file that crossed the 24 h SLA is cleared with a clear
+  message ("submit a fresh batch") rather than producing an opaque
+  ``404``.
+* **Per-agent failure isolation**. The `BatchResultsBundle.failures`
+  partition surfaces in the CLI as a follow-up line listing the
+  failed agent names. Phase 5b does *not* auto-retry; the user
+  re-runs `green enhance --batch` to include the failed agents in
+  the next submission. Auto-retry with backoff is a Phase 6 polish.

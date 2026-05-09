@@ -33,6 +33,10 @@ from rich.console import Console
 from rich.panel import Panel
 import typer
 
+from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
+from start_green_stay_green.ai.batch_dispatch import ResumeStatus
+from start_green_stay_green.ai.batch_dispatch import resume_subagent_batch
+from start_green_stay_green.ai.batch_dispatch import submit_subagent_batch
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
 from start_green_stay_green.generators.architecture import (
@@ -2397,6 +2401,204 @@ def _validate_enhance_path(project_path: Path) -> None:
         raise typer.Exit(code=1)
 
 
+_BATCH_SUPPORTED_TARGETS: frozenset[str] = frozenset({"subagents"})
+
+
+def _validate_batch_targets(selected_targets: tuple[str, ...]) -> None:
+    """Reject ``--batch`` when targets it cannot handle are selected.
+
+    Phase 5b only batches subagents (every other target uses a free-
+    text generation path that the Batches API does not yet wrap).
+    Failing fast here — rather than letting the dispatch silently
+    skip claude-md — keeps the user model honest: ``--batch`` either
+    runs the whole selection through the API once, or it errors.
+    """
+    unsupported = tuple(
+        t for t in selected_targets if t not in _BATCH_SUPPORTED_TARGETS
+    )
+    if not unsupported:
+        return
+    supported = ", ".join(sorted(_BATCH_SUPPORTED_TARGETS))
+    msg = (
+        f"[red]Error:[/red] --batch does not support targets "
+        f"{', '.join(unsupported)} (Phase 5a primitives only cover "
+        f"tool_use tunings — sync mode handles the rest). Re-run "
+        f"with --targets {supported} to use batch mode, or drop "
+        f"--batch to keep the sync flow."
+    )
+    console.print(msg)
+    raise typer.Exit(code=1)
+
+
+def _run_enhance_batch(  # noqa: PLR0913 — orchestration glue
+    *,
+    project_path: Path,
+    project_name: str,
+    language: str,
+    orchestrator: AIOrchestrator,
+    file_writer: FileWriter,
+    dry_run: bool,
+    wait: bool,
+) -> None:
+    """Submit-or-resume the subagent batch path.
+
+    Branches on ``state.has_batch()``: if a batch is already
+    in flight (recorded by a prior ``--batch`` invocation), this run
+    polls / fetches; otherwise it builds the per-agent batch plan and
+    submits. ``dry_run`` short-circuits before any API call.
+    """
+    if dry_run:
+        console.print(
+            "[dim]--dry-run with --batch: nothing submitted, "
+            "no state file written.[/dim]"
+        )
+        return
+
+    state = load_state(project_path)
+    if state.has_batch():
+        _resume_subagent_batch_cli(
+            project_path=project_path,
+            orchestrator=orchestrator,
+            state=state,
+            file_writer=file_writer,
+            wait=wait,
+        )
+        return
+    _submit_subagent_batch_cli(
+        project_path=project_path,
+        project_name=project_name,
+        language=language,
+        orchestrator=orchestrator,
+        state=state,
+    )
+
+
+def _submit_subagent_batch_cli(
+    *,
+    project_path: Path,
+    project_name: str,
+    language: str,
+    orchestrator: AIOrchestrator,
+    state: EnhanceState,
+) -> None:
+    """Build the subagent batch plan, submit, and persist."""
+    target_context = (
+        f"Project: {project_name}, "
+        f"Language: {language}, "
+        f"Type: existing project being re-tuned via `green enhance --batch`"
+    )
+    generator = SubagentsGenerator(orchestrator)
+    outcome = run_async(
+        _run_with_orchestrator_close(
+            orchestrator,
+            submit_subagent_batch(
+                orchestrator=orchestrator,
+                generator=generator,
+                target_context=target_context,
+                state=state,
+                project_path=project_path,
+            ),
+        )
+    )
+    console.print(
+        f"[green]✓[/green] Submitted batch [bold]"
+        f"{outcome.submission.batch_id}[/bold] covering "
+        f"{outcome.agent_count} subagent(s). Re-run "
+        f"`green enhance --batch` to fetch results, or pass "
+        f"--wait to block in-process."
+    )
+
+
+def _resume_subagent_batch_cli(
+    *,
+    project_path: Path,
+    orchestrator: AIOrchestrator,
+    state: EnhanceState,
+    file_writer: FileWriter,
+    wait: bool,
+) -> None:
+    """Poll an in-flight batch; on ``ended``, fetch and write."""
+    generator = SubagentsGenerator(orchestrator)
+    outcome = run_async(
+        _run_with_orchestrator_close(
+            orchestrator,
+            resume_subagent_batch(
+                orchestrator=orchestrator,
+                generator=generator,
+                state=state,
+                project_path=project_path,
+                file_writer=file_writer,
+                wait=wait,
+            ),
+        )
+    )
+    _render_batch_resume_outcome(outcome)
+
+
+_BATCH_OUTCOME_STATIC: dict[str, str] = {
+    ResumeStatus.NO_BATCH: (
+        "[yellow]No batch is in flight; nothing to resume.[/yellow]"
+    ),
+    ResumeStatus.EXPIRED: (
+        "[yellow]Previous batch crossed the 24 h SLA and was cleared. "
+        "Re-run `green enhance --batch` to submit a fresh batch.[/yellow]"
+    ),
+    ResumeStatus.TIMED_OUT: (
+        "[yellow]--wait timed out before the batch ended. "
+        "Re-run `green enhance --batch` to pick up later.[/yellow]"
+    ),
+}
+
+
+def _render_batch_resume_outcome(outcome: ResumeOutcome) -> None:
+    """Translate a :class:`ResumeOutcome` into a CLI message.
+
+    Static-message statuses (``NO_BATCH``, ``EXPIRED``, ``TIMED_OUT``)
+    are rendered from the lookup table above. ``IN_PROGRESS`` and
+    ``ENDED`` need ``outcome.poll`` / ``outcome.bundle`` data woven
+    in, so they branch into dedicated helpers. Splitting on these
+    lines keeps the dispatcher itself grade-A under xenon.
+    """
+    static = _BATCH_OUTCOME_STATIC.get(outcome.status)
+    if static is not None:
+        console.print(static)
+        return
+    if outcome.status == ResumeStatus.IN_PROGRESS:
+        _render_batch_in_progress(outcome)
+        return
+    _render_batch_ended(outcome)
+
+
+def _render_batch_in_progress(outcome: ResumeOutcome) -> None:
+    """Render the ``IN_PROGRESS`` status line with poll counts."""
+    poll = outcome.poll
+    if poll is None:
+        return
+    console.print(
+        f"[dim]Batch {poll.batch_id}: still running "
+        f"({poll.processing_count} processing, "
+        f"{poll.succeeded_count} succeeded, "
+        f"{poll.errored_count} errored). Re-run later, or "
+        f"pass --wait to block.[/dim]"
+    )
+
+
+def _render_batch_ended(outcome: ResumeOutcome) -> None:
+    """Render the ``ENDED`` summary plus a failed-agents follow-up."""
+    console.print(
+        f"[green]✓[/green] Batch reconciled: "
+        f"{len(outcome.succeeded_agents)} agent(s) written, "
+        f"{len(outcome.failed_agents)} failed."
+    )
+    if outcome.failed_agents:
+        joined = ", ".join(outcome.failed_agents)
+        console.print(
+            f"[red]Failed agents:[/red] {joined}. Re-run "
+            f"`green enhance --batch` (the failed entries will be "
+            f"included in the next submission)."
+        )
+
+
 @app.command()
 def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
     project_path: Annotated[
@@ -2484,6 +2686,31 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
             help="Overwrite files without prompting. Off by default.",
         ),
     ] = False,
+    batch: Annotated[
+        bool,
+        typer.Option(
+            "--batch",
+            help=(
+                "Submit subagent tunings via the Anthropic Message "
+                "Batches API (50% cheaper, ≤24 h SLA). Use with "
+                "``--targets subagents``. The first run submits and "
+                "exits; re-run to fetch results, or pass ``--wait`` "
+                "to block until done. See ADR-001 for the rationale."
+            ),
+        ),
+    ] = False,
+    wait: Annotated[
+        bool,
+        typer.Option(
+            "--wait",
+            help=(
+                "When used with ``--batch``: block in-process polling "
+                "every 30 s until the batch ends or the timeout is "
+                "reached. Default off (two-call submit-then-resume "
+                "pattern is friendlier for CI)."
+            ),
+        ),
+    ] = False,
 ) -> None:
     r"""Re-run Pass 2 (AI tuning) on an existing green-init project.
 
@@ -2512,6 +2739,11 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         api_key: Optional Claude API key.
         no_interactive: Disable interactive prompts.
         force: Overwrite files without prompting.
+        batch: Submit subagent tunings via the Anthropic Message
+            Batches API. Submit-then-resume two-call flow; pair
+            with ``--wait`` for in-process polling.
+        wait: Block in-process when ``--batch`` is set; polls every
+            30 s until the batch ends or the timeout elapses.
 
     Raises:
         typer.Exit: If the path is invalid, project metadata cannot
@@ -2528,6 +2760,11 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
     )
 
     selected_targets = _resolve_enhance_targets(targets)
+    if batch:
+        _validate_batch_targets(selected_targets)
+    if wait and not batch:
+        console.print("[red]Error:[/red] --wait only applies in --batch mode.")
+        raise typer.Exit(code=1)
     orchestrator = _require_enhance_orchestrator(api_key, no_interactive=no_interactive)
     file_writer = FileWriter(
         project_root=project_path,
@@ -2535,6 +2772,18 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         interactive=False,
         console=console,
     )
+
+    if batch:
+        _run_enhance_batch(
+            project_path=project_path,
+            project_name=resolved_name,
+            language=resolved_language,
+            orchestrator=orchestrator,
+            file_writer=file_writer,
+            dry_run=dry_run,
+            wait=wait,
+        )
+        return
 
     _run_enhance_pipeline(
         project_path=project_path,

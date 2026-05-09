@@ -29,6 +29,7 @@ def test_something(mock_path: Mock) -> None:
 import asyncio
 import json
 from pathlib import Path
+from unittest import mock
 from unittest.mock import MagicMock
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -2375,3 +2376,98 @@ class TestEnhanceDispatchAssertion:
             pytest.raises(RuntimeError, match="undefined helper"),
         ):
             cli._assert_enhance_dispatch_intact()
+
+
+class TestEnhanceBatchCLI:
+    """Phase 5b: ``green enhance --batch`` flag wiring."""
+
+    @staticmethod
+    def _flat(text: str) -> str:
+        return " ".join(text.split())
+
+    @staticmethod
+    def _make_project(tmp_path: Path, *, name: str = "proj") -> Path:
+        project = tmp_path / name
+        project.mkdir()
+        (project / "CLAUDE.md").write_text(
+            f"# Claude Code Project Context: {name}\n\nbaseline.\n",
+            encoding="utf-8",
+        )
+        (project / "pyproject.toml").write_text("[project]\nname='x'\n")
+        (project / ".claude" / "agents").mkdir(parents=True)
+        return project
+
+    def test_batch_with_claude_md_target_exits_with_clear_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--batch --targets claude-md`` is rejected before any API call.
+
+        Phase 5a primitives only handle ``tool_use`` requests; the
+        sync claude-md path uses free-text generation. Failing fast
+        keeps the user model honest.
+        """
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--batch",
+                "--targets",
+                "claude-md",
+            ],
+        )
+
+        assert result.exit_code == 1
+        flat = self._flat(result.stdout)
+        assert "--batch does not support targets claude-md" in flat
+        # Suggests the working invocation rather than just erroring.
+        assert "--targets subagents" in flat
+
+    def test_wait_without_batch_exits(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--wait`` only makes sense paired with ``--batch``."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--wait"],
+        )
+
+        assert result.exit_code == 1
+        assert "--wait only applies in --batch mode" in self._flat(result.stdout)
+
+    def test_batch_dry_run_short_circuits_without_calling_api(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--batch --dry-run`` prints a notice and does NOT submit."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+        # Patch the dispatch helpers so a slip would be loud.
+        with (
+            mock.patch("start_green_stay_green.cli.submit_subagent_batch") as submit,
+            mock.patch("start_green_stay_green.cli.resume_subagent_batch") as resume,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                    "--dry-run",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "--dry-run with --batch" in self._flat(result.stdout)
+        submit.assert_not_called()
+        resume.assert_not_called()
