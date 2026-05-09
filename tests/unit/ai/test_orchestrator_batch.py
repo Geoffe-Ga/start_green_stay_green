@@ -171,6 +171,32 @@ class TestPollBatch:
         with pytest.raises(ValueError, match="non-empty batch_id"):
             await orchestrator.poll_batch("")
 
+    @pytest.mark.asyncio
+    async def test_canceled_and_expired_counts_threaded_through(
+        self,
+        orchestrator: AIOrchestrator,
+    ) -> None:
+        """Phase 5b reconciliation needs canceled/expired distinct from errored."""
+        batches = _wire_batches(orchestrator)
+        batches.retrieve = AsyncMock(
+            return_value=MagicMock(
+                processing_status="ended",
+                request_counts=MagicMock(
+                    processing=0,
+                    succeeded=5,
+                    errored=1,
+                    canceled=2,
+                    expired=3,
+                ),
+            ),
+        )
+
+        poll = await orchestrator.poll_batch("msgbatch_42")
+
+        assert poll.errored_count == 1
+        assert poll.canceled_count == 2
+        assert poll.expired_count == 3
+
 
 class TestFetchBatchResults:
     """``fetch_batch_results`` folds a streamed result iterable into bundle maps."""

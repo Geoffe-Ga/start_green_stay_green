@@ -40,6 +40,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from collections.abc import Sequence
 
+    from anthropic.types.messages.batch_create_params import (
+        Request as BatchCreateRequest,
+    )
+
     from start_green_stay_green.utils.timing import TimingReport
 
 # Re-export shared types so existing
@@ -54,6 +58,16 @@ __all__ = [
     "TokenUsage",
     "ToolUseResult",
 ]
+
+
+def _count(obj: object, name: str) -> int:
+    """Read a count attribute off ``obj``, defaulting to ``0``.
+
+    SDK response objects expose ``request_counts.processing`` etc. as
+    plain ``int`` attributes; tests pass ``MagicMock`` doubles. Keeps
+    ``poll_batch``'s body short enough to stay grade-A complex.
+    """
+    return int(getattr(obj, name, 0) or 0)
 
 
 async def _aiter(
@@ -766,11 +780,24 @@ class AIOrchestrator:
         return custom_ids
 
     async def _create_batch(self, payload: list[dict[str, object]]) -> object:
-        """Wrap the SDK call so callers see ``GenerationError`` on failure."""
+        """Wrap the SDK call so callers see ``GenerationError`` on failure.
+
+        The SDK signature is
+        ``create(*, requests: Iterable[batch_create_params.Request])``.
+        We construct each envelope as a ``dict[str, object]`` matching
+        the ``Request`` ``TypedDict`` shape (verified by
+        ``test_request_envelope_carries_tool_choice_and_system``).
+        Mypy cannot prove the dict matches the TypedDict's deeply-nested
+        ``MessageCreateParamsNonStreaming`` shape without re-typing the
+        ``ToolUseBatchRequest.system_blocks`` chain end-to-end, so we
+        use one ``cast()`` at the SDK boundary to assert the contract
+        rather than a ``# type: ignore`` to suppress it. ``cast`` is
+        documented narrowing; ``type: ignore`` is suppression.
+        """
         client = self._get_async_client()
         try:
             return await client.messages.batches.create(
-                requests=payload,  # type: ignore[arg-type]
+                requests=cast("Iterable[BatchCreateRequest]", payload),
             )
         except Exception as exc:
             msg = "Batch submission failed"
@@ -797,13 +824,20 @@ class AIOrchestrator:
         """
         self._require_batch_id(batch_id, "poll_batch")
         batch = await self._retrieve_batch(batch_id)
+        return self._batch_poll_from_response(batch_id, batch)
+
+    @staticmethod
+    def _batch_poll_from_response(batch_id: str, batch: object) -> BatchPoll:
+        """Pull the ``BatchPoll`` snapshot fields off a SDK response object."""
         counts = getattr(batch, "request_counts", None)
         return BatchPoll(
             batch_id=batch_id,
             status=str(getattr(batch, "processing_status", "") or ""),
-            processing_count=int(getattr(counts, "processing", 0) or 0),
-            succeeded_count=int(getattr(counts, "succeeded", 0) or 0),
-            errored_count=int(getattr(counts, "errored", 0) or 0),
+            processing_count=_count(counts, "processing"),
+            succeeded_count=_count(counts, "succeeded"),
+            errored_count=_count(counts, "errored"),
+            canceled_count=_count(counts, "canceled"),
+            expired_count=_count(counts, "expired"),
         )
 
     async def fetch_batch_results(self, batch_id: str) -> BatchResultsBundle:
@@ -904,8 +938,13 @@ class AIOrchestrator:
         is a normal ``messages.create`` body. The body fields here
         mirror :meth:`_call_tool_api_async` so the per-request
         contract is identical between sync and batch paths.
+
+        Uses ``request.tool_schema.get("name", "")`` rather than the
+        bracket form so a malformed schema produces an empty
+        ``tool_choice.name`` (the API rejects it with a clear error)
+        instead of an opaque ``KeyError`` at a future call site.
         """
-        tool_name = str(request.tool_schema["name"])
+        tool_name = str(request.tool_schema.get("name", ""))
         return {
             "custom_id": request.custom_id,
             "params": {

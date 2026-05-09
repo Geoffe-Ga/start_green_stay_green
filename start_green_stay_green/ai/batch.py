@@ -84,9 +84,15 @@ class BatchPoll:
         processing_count: Requests still being processed.
         succeeded_count: Requests that completed with a usable
             response.
-        errored_count: Requests that failed; these still incur cost
-            and need handling per-target rather than aborting the
-            whole batch.
+        errored_count: Requests that failed for reasons other than
+            user cancel or 24 h SLA expiry.
+        canceled_count: Requests aborted by an explicit batch
+            cancel. Phase 5b reconciliation should leave these alone
+            (the user already chose to drop them).
+        expired_count: Requests that hit the 24 h SLA without
+            completing. Distinct from ``errored`` so the CLI can
+            decide to re-submit only the SLA-breach subset rather
+            than retrying every failure type uniformly.
     """
 
     batch_id: str
@@ -94,6 +100,8 @@ class BatchPoll:
     processing_count: int
     succeeded_count: int
     errored_count: int
+    canceled_count: int = 0
+    expired_count: int = 0
 
     @property
     def is_ended(self) -> bool:
