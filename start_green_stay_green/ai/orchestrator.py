@@ -6,6 +6,7 @@ Coordinates AI-powered generation tasks using Claude API.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterable
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
@@ -33,6 +34,14 @@ from start_green_stay_green.ai.types import ToolUseResult
 from start_green_stay_green.utils.timing import APICallRecord
 from start_green_stay_green.utils.timing import get_active_report
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from collections.abc import Iterable
+    from collections.abc import Iterator
+    from collections.abc import Sequence
+
+    from start_green_stay_green.utils.timing import TimingReport
+
 # Re-export shared types so existing
 # ``from start_green_stay_green.ai.orchestrator import ToolUseResult``
 # imports keep working after the Phase-5a relocation to ``ai.types``.
@@ -45,16 +54,6 @@ __all__ = [
     "TokenUsage",
     "ToolUseResult",
 ]
-
-from collections.abc import AsyncIterable
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from collections.abc import Iterable
-    from collections.abc import Iterator
-    from collections.abc import Sequence
-
-    from start_green_stay_green.utils.timing import TimingReport
 
 
 async def _aiter(
@@ -863,9 +862,19 @@ class AIOrchestrator:
             raise GenerationError(msg, cause=exc) from exc
 
     async def _open_results_stream(
-        self, batch_id: str,
+        self,
+        batch_id: str,
     ) -> AsyncIterable[object] | Iterable[object]:
         """Open the batch's result stream as an iterable.
+
+        ``AsyncBatches.results()`` is ``async def`` (a coroutine
+        function — *not* an async-generator function); it returns a
+        coroutine that resolves to an
+        ``AsyncJSONLDecoder[MessageBatchIndividualResponse]``. The
+        decoder is itself an async iterable, hence the
+        ``await`` then ``async for`` pattern in the caller.
+        Verified against ``anthropic`` SDK 0.97.0 by reading
+        ``inspect.iscoroutinefunction(AsyncBatches.results)``.
 
         Returns the iterable shape ``_aiter`` expects directly, so
         callers do not have to cast. SDK errors are remapped to
