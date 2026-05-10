@@ -193,12 +193,7 @@ issue filed since the fix is already in `main`.
 | Setup-instructions polish      | 2     | #283, #284 |
 | Performance                    | 1     | #256 |
 | Release readiness              | 1     | #152 |
-| CI/deps                        | 0     | (#280, #281, #282 — wait, #282 still open: actions Node 24) |
-
-Correcting the CI/deps count: #282 (`ci(deps): update actions to
-Node.js 24 compatible versions`) is still open and unresolved by the
-recent dependabot wave — node-action-runtime work. Not a regression;
-genuine outstanding item.
+| CI/deps                        | 1     | #282 (actions Node.js 24) still open; #280 and #281 cleared this session |
 
 ## Recommendations
 
