@@ -1540,7 +1540,7 @@ def _resolve_pass2_orchestrator(
             "    2. Set ANTHROPIC_API_KEY env var (or store in keyring "
             "via the next prompt)"
         )
-        console.print("    3. Re-run: sgsg enhance  (no need to re-init)\n")
+        console.print("    3. Re-run: green enhance  (no need to re-init)\n")
     return orchestrator
 
 
