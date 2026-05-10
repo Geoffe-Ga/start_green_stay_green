@@ -53,6 +53,8 @@ If a comment is ambiguous on any component, reply asking for clarification rathe
 
 Use the GitHub MCP tools — never `gh` CLI. The goal is to determine whether a Claude review comment exists for the current HEAD push, and what its verdict is.
 
+**Always re-fetch on entry — even if you think you "just" subscribed.** This skill is the recovery path for missed wake events: any time the user prompts "address feedback" or equivalent, treat that as a hint that a webhook may have dropped silently (see `await-claude-review`'s "silent subscription drop" failure note). Re-fetching is cheap and correct; trusting in-memory state is not.
+
 1. Get HEAD SHA and the push timestamp:
    - `mcp__github__pull_request_read` with `method: "get"` → record `head.sha`.
    - `mcp__github__get_commit` with `sha: head.sha` → record `commit.committer.date` (proxy for the latest push time).

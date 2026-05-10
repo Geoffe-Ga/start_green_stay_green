@@ -61,6 +61,25 @@ Examples that match:
 
 If the regex does not match, treat the comment as malformed: do **not** infer a verdict from prose ("looks good to me" is not a verdict). Surface to the user.
 
+### Iteration-Trigger Marker (Backup Wake Signal)
+
+Repos that run an `iteration-trigger.yml` workflow post a follow-up summary comment as the repo owner once CI is green and the bot has voted. The comment opens with a literal HTML marker:
+
+```
+<!-- iteration-trigger -->
+**CI**: 8/8 Green
+**VERDICT**: LGTM
+**Action**: ...
+```
+
+This serves as a redundant wake event in case the bot's verdict comment fails to deliver. Match on:
+
+- Author is the repo owner (or any non-bot user — adjust per repo).
+- Body starts with `<!-- iteration-trigger -->`.
+- Body contains a line matching, case-insensitive: `^\s*\*\*VERDICT\*\*[:\s]+(LGTM|CHANGES_REQUESTED|COMMENTS)`.
+
+When this comment is the wake event, parse the marker line for the verdict but **also re-fetch the underlying bot Verdict comment** so the caller can act on the full review body, not just the summary.
+
 ## Instructions
 
 ### Step 1: Pin the HEAD You're Waiting For
@@ -86,6 +105,7 @@ Then **stop**. Do not poll. Do not `sleep`. Do not call `pull_request_read get_c
 When a `<github-webhook-activity>` message arrives, decide what kind of event it is:
 
 - **Top-level PR comment from a reviewer bot** (`claude[bot]`, `github-actions[bot]`, or whichever account posts reviews on this repo) → go to Step 4.
+- **Top-level PR comment containing the `<!-- iteration-trigger -->` marker** (posted by the repo owner via the `iteration-trigger` workflow once CI completes green and the bot has posted a verdict) — this is a **backup wake signal** for repos that run that workflow. It is more reliable than the bot's verdict comment because the workflow runs as the human owner and adds a unique marker. Treat it the same as a bot verdict event → go to Step 4. The marker comment itself contains a parseable `**VERDICT**: LGTM | CHANGES_REQUESTED | COMMENTS` line; parse it directly *and* re-fetch the underlying bot Verdict comment so the caller sees the full review body.
 - **Line-level review comment** → not a verdict; if you're tracking thread resolutions for `address-feedback`, handle there. Otherwise stay subscribed and wait for the next event.
 - **CI failure event** → go to Step 5.
 - **Anything else** → stay subscribed; wait for the next event.
@@ -173,3 +193,23 @@ Match by author login (`claude[bot]`, `github-actions[bot]`) AND require the bod
 ### Error: PR merged or closed while waiting
 
 The caller should detect this and call `unsubscribe_pr_activity`. If you see no further events for a long time, ask the user before assuming the PR is still open.
+
+### Failure: Verdict comment posted but session never woke (silent subscription drop)
+
+Observed at least twice in production (PRs #321 round-2 and #322 in this repo): the `claude[bot]` `Verdict:` comment posted within ~1 min of subscribing and CI passed cleanly, but the session was never resumed by a `<github-webhook-activity>` message. The user had to nudge with a fresh prompt to re-engage.
+
+The likely cause is that the underlying webhook transport disconnects when the session goes idle for an extended period (e.g. across context compactions, container hibernation between sessions on Claude Code mobile, or simply long waits with no agent activity). The subscription record on the GitHub MCP server side may persist while the session-side delivery channel is torn down.
+
+**Mitigation when subscribed:**
+
+1. **Treat any user message after a wait as an implicit "catch up" signal.** On every user contact during an in-flight subscription, *re-fetch* the latest comments and check the verdict regardless of whether a webhook event accompanied the message. Do not assume the absence of a webhook event means there's nothing new.
+2. **Watch for the iteration-trigger marker** (`<!-- iteration-trigger -->`) as a redundant wake signal — see Step 3. The `iteration-trigger.yml` workflow in this repo posts a marker comment as the repo owner once CI is green and the bot has voted, specifically to provide a second wake event. If the bot's comment dropped, the marker comment may still arrive.
+3. **Re-subscribe defensively** at the start of any address-feedback flow if you have any reason to suspect the subscription is stale (e.g., the previous wait ran for >5 min with no events). `subscribe_pr_activity` is idempotent on the same PR.
+
+**Mitigation as a repo maintainer (out of skill scope):**
+
+If you control the repo's CI, consider making the `iteration-trigger.yml` (or equivalent) workflow *also* fail a small dummy check run on the head SHA when `VERDICT != LGTM`, since CI **failure** events are in the deliverable set even when comments are not. CI **success** events are not delivered, so a "verdict-as-check-run" approach only helps for the negative path. The cleanest workaround is the marker-comment approach already in place; this skill simply learns to parse it.
+
+### Error: I'm not sure my subscription is alive
+
+`mcp__github__subscribe_pr_activity` is idempotent — calling it again on the same PR refreshes the subscription cheaply. When in doubt (e.g., during recovery after a missed wake), re-subscribe before re-fetching. This costs nothing if the subscription was already alive.
