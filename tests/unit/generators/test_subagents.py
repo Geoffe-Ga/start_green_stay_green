@@ -17,8 +17,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from start_green_stay_green.ai.types import TokenUsage
+from start_green_stay_green.ai.types import ToolUseResult
 from start_green_stay_green.generators.subagents import REFERENCE_AGENTS_DIR
 from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
+from start_green_stay_green.generators.subagents import SubagentBatchEntry
 from start_green_stay_green.generators.subagents import SubagentGenerationResult
 from start_green_stay_green.generators.subagents import SubagentsGenerator
 
@@ -680,3 +683,168 @@ class TestSubagentsParallelism:
 
         await generator.generate_all_agents("ctx")
         assert peak <= 2
+
+
+class TestSubagentsBatchPlan:
+    """Phase 5b: ``build_batch_plan`` + ``apply_batch_result``."""
+
+    def test_build_batch_plan_yields_one_entry_per_required_agent(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
+        """One :class:`SubagentBatchEntry` per file in REQUIRED_AGENTS."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        for source_file in REQUIRED_AGENTS.values():
+            (agents_dir / source_file).write_text(SAMPLE_AGENT_CONTENT)
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+            dry_run=False,
+        )
+
+        plan = generator.build_batch_plan("Test target context")
+
+        assert len(plan) == len(REQUIRED_AGENTS)
+        assert all(isinstance(e, SubagentBatchEntry) for e in plan)
+
+    def test_build_batch_plan_custom_id_convention(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
+        """Custom IDs use the ``subagent:<name>`` shape Phase 5a expects."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        for source_file in REQUIRED_AGENTS.values():
+            (agents_dir / source_file).write_text(SAMPLE_AGENT_CONTENT)
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+        )
+
+        plan = generator.build_batch_plan("ctx")
+        custom_ids = [entry.custom_id for entry in plan]
+
+        # Each custom_id is unique and prefixed with ``subagent:``.
+        assert len(set(custom_ids)) == len(custom_ids)
+        for cid in custom_ids:
+            assert cid.startswith("subagent:")
+
+    def test_build_batch_plan_captures_frontmatter_per_entry(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
+        """Each entry carries its agent's frontmatter for later re-attach."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        for source_file in REQUIRED_AGENTS.values():
+            (agents_dir / source_file).write_text(SAMPLE_AGENT_CONTENT)
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+        )
+
+        plan = generator.build_batch_plan("ctx")
+
+        # SAMPLE_AGENT_CONTENT starts with ``---`` and contains ``name:``.
+        for entry in plan:
+            assert entry.frontmatter.startswith("---")
+            assert "name:" in entry.frontmatter
+
+    def test_apply_batch_result_reattaches_frontmatter(self) -> None:
+        """``apply_batch_result`` rebuilds ``frontmatter\\nbody``."""
+        tool_result = ToolUseResult(
+            tool_name="report_tuning",
+            tool_input={
+                "tuned_content": "# Adapted body\n",
+                "changes": ["renamed FastAPI to Django"],
+            },
+            token_usage=TokenUsage(input_tokens=10, output_tokens=5),
+            model="claude",
+            message_id="msg_x",
+        )
+
+        result = SubagentsGenerator.apply_batch_result(
+            agent_name="chief-architect",
+            frontmatter="---\nname: chief-architect\n---",
+            tool_result=tool_result,
+        )
+
+        assert result.agent_name == "chief-architect"
+        assert result.tuned
+        assert result.content.startswith("---\n")
+        assert "# Adapted body" in result.content
+        assert "renamed FastAPI to Django" in result.changes
+
+    def test_get_agent_frontmatter_returns_yaml_block_unmodified(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
+        """Public sibling of ``apply_batch_result`` for the resume path.
+
+        Replaces two ``noqa: SLF001`` suppressions in
+        ``batch_dispatch.py`` (review feedback on PR #315). The
+        method must return the YAML frontmatter block byte-equivalent
+        to what ``_parse_frontmatter`` would have produced — same
+        leading ``---``, same closing delimiter, no body content.
+        """
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "chief-architect.md").write_text(
+            SAMPLE_AGENT_CONTENT, encoding="utf-8"
+        )
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+        )
+
+        frontmatter = generator.get_agent_frontmatter("chief-architect")
+
+        assert frontmatter.startswith("---")
+        assert "name: test-agent" in frontmatter
+        # Closing delimiter present, body NOT included.
+        assert frontmatter.rstrip().endswith("---")
+        assert "# Test Agent" not in frontmatter
+
+    def test_get_agent_frontmatter_picks_up_local_edits_between_calls(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
+        """Re-read semantics: edit on disk → fresh return value.
+
+        ``_frontmatter_for`` (now folded into this method) was
+        documented to re-read at fetch time so a frontmatter edit
+        between submit and fetch is picked up automatically. This
+        test exercises that contract directly — review feedback
+        flagged that the docstring claimed this guarantee but no
+        test backed it up.
+        """
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        agent_file = agents_dir / "chief-architect.md"
+        agent_file.write_text(SAMPLE_AGENT_CONTENT, encoding="utf-8")
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+        )
+
+        first = generator.get_agent_frontmatter("chief-architect")
+
+        # Edit the source file's frontmatter in place.
+        agent_file.write_text(
+            SAMPLE_AGENT_CONTENT.replace(
+                "name: test-agent", "name: edited-after-submit"
+            ),
+            encoding="utf-8",
+        )
+
+        second = generator.get_agent_frontmatter("chief-architect")
+
+        assert "name: test-agent" in first
+        assert "name: edited-after-submit" in second
+        assert first != second

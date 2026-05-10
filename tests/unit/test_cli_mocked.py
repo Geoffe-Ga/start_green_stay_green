@@ -29,6 +29,7 @@ def test_something(mock_path: Mock) -> None:
 import asyncio
 import json
 from pathlib import Path
+from unittest import mock
 from unittest.mock import MagicMock
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -38,10 +39,15 @@ import typer
 from typer.testing import CliRunner
 
 from start_green_stay_green import cli
+from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
+from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
+from start_green_stay_green.utils.enhance_state import BatchProgress
+from start_green_stay_green.utils.enhance_state import EnhanceState
 from start_green_stay_green.utils.enhance_state import load_state
+from start_green_stay_green.utils.enhance_state import save_state
 
 
 def _make_orch_mock(mock_init: Mock) -> MagicMock:
@@ -2375,3 +2381,189 @@ class TestEnhanceDispatchAssertion:
             pytest.raises(RuntimeError, match="undefined helper"),
         ):
             cli._assert_enhance_dispatch_intact()
+
+
+class TestEnhanceBatchCLI:
+    """Phase 5b: ``green enhance --batch`` flag wiring."""
+
+    @staticmethod
+    def _flat(text: str) -> str:
+        return " ".join(text.split())
+
+    @staticmethod
+    def _make_project(tmp_path: Path, *, name: str = "proj") -> Path:
+        project = tmp_path / name
+        project.mkdir()
+        (project / "CLAUDE.md").write_text(
+            f"# Claude Code Project Context: {name}\n\nbaseline.\n",
+            encoding="utf-8",
+        )
+        (project / "pyproject.toml").write_text("[project]\nname='x'\n")
+        (project / ".claude" / "agents").mkdir(parents=True)
+        return project
+
+    def test_batch_with_claude_md_target_exits_with_clear_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--batch --targets claude-md`` is rejected before any API call.
+
+        Phase 5a primitives only handle ``tool_use`` requests; the
+        sync claude-md path uses free-text generation. Failing fast
+        keeps the user model honest.
+        """
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--batch",
+                "--targets",
+                "claude-md",
+            ],
+        )
+
+        assert result.exit_code == 1
+        flat = self._flat(result.stdout)
+        assert "--batch does not support targets claude-md" in flat
+        # Suggests the working invocation rather than just erroring.
+        assert "--targets subagents" in flat
+
+    def test_wait_without_batch_exits(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--wait`` only makes sense paired with ``--batch``."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--wait"],
+        )
+
+        assert result.exit_code == 1
+        assert "--wait only applies in --batch mode" in self._flat(result.stdout)
+
+    def test_batch_dry_run_short_circuits_without_calling_api(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--batch --dry-run`` prints a notice and does NOT submit."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+        # Patch the dispatch helpers so a slip would be loud.
+        with (
+            mock.patch("start_green_stay_green.cli.submit_subagent_batch") as submit,
+            mock.patch("start_green_stay_green.cli.resume_subagent_batch") as resume,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                    "--dry-run",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "--dry-run with --batch" in self._flat(result.stdout)
+        submit.assert_not_called()
+        resume.assert_not_called()
+
+    def test_batch_submit_api_error_exits_cleanly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``AIGenerationError`` from submit → exit 1 + clear message.
+
+        Review feedback (PR #315): the docstring of
+        :func:`submit_subagent_batch` lists ``GenerationError`` as a
+        documented raise, but the CLI lacked a handler so a real
+        SDK-side failure produced an uncaught traceback. This test
+        pins the post-feedback behaviour: human-readable error, exit
+        code 1, no stack trace bleeding to stdout.
+        """
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+
+        # ``submit_subagent_batch`` raises before any state is written
+        # so there's no in-flight batch on disk after the run.
+        with mock.patch(
+            "start_green_stay_green.cli.submit_subagent_batch",
+            side_effect=AIGenerationError("Anthropic API rejected the batch (mocked)"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                ],
+            )
+
+        assert result.exit_code == 1
+        flat = self._flat(result.stdout)
+        assert "Batch API call failed" in flat
+        # Original error message survives so the user sees what went wrong.
+        assert "Anthropic API rejected the batch (mocked)" in flat
+        # No raw traceback in user-facing output.
+        assert "Traceback" not in result.stdout
+
+    def test_batch_resume_api_error_exits_cleanly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``AIGenerationError`` from resume → exit 1 + clear message."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+        # Pre-seed an in-flight batch so the resume branch is taken.
+        state = EnhanceState()
+        state.batch = BatchProgress(
+            batch_id="msgbatch_pre_seeded",
+            submitted_at="2026-05-09T22:00:00+00:00",
+            custom_id_map={"subagent:alpha": "subagents"},
+        )
+        save_state(project, state)
+
+        with mock.patch(
+            "start_green_stay_green.cli.resume_subagent_batch",
+            side_effect=AIGenerationError("poll failed (mocked)"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                ],
+            )
+
+        assert result.exit_code == 1
+        flat = self._flat(result.stdout)
+        assert "Batch API call failed" in flat
+        assert "poll failed (mocked)" in flat
+
+    def test_render_unknown_status_raises_value_error(self) -> None:
+        """Round-2 review #3: an unrecognised ``ResumeStatus`` constant
+        must fail loudly rather than silently rendering as ``ENDED``.
+
+        Phase 6 might add new statuses. Without this guard, a forgotten
+        update to ``_render_batch_resume_outcome`` would print a
+        misleading "0 agent(s) written, 0 failed" line for any
+        unhandled value.
+        """
+        bad = ResumeOutcome(status="bogus-status")
+
+        with pytest.raises(ValueError, match="Unhandled batch resume status"):
+            cli._render_batch_resume_outcome(bad)

@@ -21,7 +21,9 @@ from start_green_stay_green.generators.base import BaseGenerator
 DEFAULT_MAX_CONCURRENCY = 8
 
 if TYPE_CHECKING:
+    from start_green_stay_green.ai.batch import ToolUseBatchRequest
     from start_green_stay_green.ai.orchestrator import AIOrchestrator
+    from start_green_stay_green.ai.types import ToolUseResult
 
 
 # Default reference directory (can be overridden)
@@ -63,6 +65,35 @@ class SubagentGenerationResult:
     content: str
     tuned: bool
     changes: list[str]
+
+
+@dataclass(frozen=True)
+class SubagentBatchEntry:
+    """One per-agent slot in a Phase 5b batch submission.
+
+    Lets the submit and resume halves of ``green enhance --batch``
+    travel through the orchestrator with everything they need: the
+    Anthropic-side request payload, the agent name (so the result
+    file knows where to land), and the original YAML frontmatter
+    (so :meth:`SubagentsGenerator.apply_batch_result` can rebuild
+    the full agent file once results arrive).
+
+    Attributes:
+        agent_name: Logical name (e.g. ``"chief-architect"``).
+        custom_id: Anthropic ``custom_id`` for this request — by
+            convention ``"subagent:<agent_name>"``. Echoes back in
+            :attr:`BatchResultsBundle.successes` keyed by this id.
+        frontmatter: YAML frontmatter parsed off the source agent
+            file, captured here so it can be re-prepended to the
+            tuned body when the batch result arrives.
+        request: :class:`ToolUseBatchRequest` ready for
+            :meth:`AIOrchestrator.submit_tool_use_batch`.
+    """
+
+    agent_name: str
+    custom_id: str
+    frontmatter: str
+    request: ToolUseBatchRequest
 
 
 class SubagentsGenerator(BaseGenerator):
@@ -303,6 +334,117 @@ class SubagentsGenerator(BaseGenerator):
             *(_run_one(name) for name in agent_names),
         )
         return dict(zip(agent_names, results_list, strict=True))
+
+    def build_batch_plan(
+        self,
+        target_context: str,
+    ) -> list[SubagentBatchEntry]:
+        """Render every required subagent as a per-call batch request.
+
+        The Phase 5b ``green enhance --batch`` flow submits all
+        subagents in one Anthropic Message Batches API call. This
+        helper does the per-agent prep — load source content, parse
+        out the YAML frontmatter, build a
+        :class:`ToolUseBatchRequest` via the tuner — and returns one
+        entry per agent. The frontmatter is captured alongside each
+        request so :meth:`apply_batch_result` can reconstruct the
+        full agent file once the batch returns.
+
+        Args:
+            target_context: Description of target project context.
+
+        Returns:
+            List of :class:`SubagentBatchEntry` records, in the order
+            declared in :data:`REQUIRED_AGENTS`.
+        """
+        plan: list[SubagentBatchEntry] = []
+        for agent_name in REQUIRED_AGENTS:
+            content = self._load_agent_content(agent_name)
+            frontmatter, body = self._parse_frontmatter(content)
+            request = self.tuner.build_batch_request(
+                custom_id=f"subagent:{agent_name}",
+                source_content=body,
+                source_context=SOURCE_AGENT_CONTEXT,
+                target_context=target_context,
+                preserve_sections=[
+                    "## Identity",
+                    "## Scope",
+                    "## Workflow",
+                    "## Skills",
+                    "## Constraints",
+                ],
+            )
+            plan.append(
+                SubagentBatchEntry(
+                    agent_name=agent_name,
+                    custom_id=request.custom_id,
+                    frontmatter=frontmatter,
+                    request=request,
+                )
+            )
+        return plan
+
+    @staticmethod
+    def apply_batch_result(
+        agent_name: str,
+        frontmatter: str,
+        tool_result: ToolUseResult,
+    ) -> SubagentGenerationResult:
+        """Reconstruct a finished subagent file from a batch result.
+
+        Lifts the ``tool_use`` payload via
+        :meth:`ContentTuner.parse_batch_tuning_result` (same parser
+        the sync path uses) and re-attaches the original frontmatter
+        so the resulting file is byte-equivalent to what
+        :meth:`generate_agent` would have produced.
+
+        Args:
+            agent_name: Name of the agent the result is for.
+            frontmatter: YAML frontmatter captured by
+                :meth:`build_batch_plan`.
+            tool_result: One entry from
+                :attr:`BatchResultsBundle.successes`.
+
+        Returns:
+            :class:`SubagentGenerationResult` ready to write to disk.
+        """
+        tuning_result = ContentTuner.parse_batch_tuning_result(tool_result)
+        return SubagentGenerationResult(
+            agent_name=agent_name,
+            content=f"{frontmatter}\n{tuning_result.content}",
+            tuned=True,
+            changes=tuning_result.changes,
+        )
+
+    def get_agent_frontmatter(self, agent_name: str) -> str:
+        """Re-read the source agent's YAML frontmatter at fetch time.
+
+        Public sibling of :meth:`apply_batch_result` for the Phase 5b
+        batch resume path. The dispatch in
+        :mod:`start_green_stay_green.ai.batch_dispatch` calls this
+        rather than reaching into the private ``_load_agent_content``
+        / ``_parse_frontmatter`` helpers — the frontmatter capture is
+        intentionally re-read (not persisted in the state file) so a
+        local edit to the source agent between submit and fetch is
+        picked up automatically.
+
+        Args:
+            agent_name: Name of the agent (must be a
+                :data:`REQUIRED_AGENTS` key).
+
+        Returns:
+            The YAML frontmatter block, terminating delimiter
+            included — ready to prepend to a tuned body.
+
+        Raises:
+            FileNotFoundError: If the source agent file is missing
+                (raised by :meth:`_load_agent_content`).
+            ValueError: If the source file lacks a frontmatter block
+                (raised by :meth:`_parse_frontmatter`).
+        """
+        content = self._load_agent_content(agent_name)
+        frontmatter, _ = self._parse_frontmatter(content)
+        return frontmatter
 
     def generate(self) -> dict[str, Any]:
         """Generate subagents synchronously (not supported).
