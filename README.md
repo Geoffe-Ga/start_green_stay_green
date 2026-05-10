@@ -261,6 +261,53 @@ See [`plans/architecture/ADR-001-batch-enhance.md`](plans/architecture/ADR-001-b
 for the full design rationale.
 
 
+## AI Enhancement
+
+`green` ships a two-pass generation model: a deterministic scaffold
+runs first (no API calls, always succeeds), then a parallel AI polish
+pass tunes the AI-facing artifacts (`CLAUDE.md`, `.claude/agents/*`)
+to the project's specifics. Choose the mode that fits your
+constraints:
+
+| Mode | Wall-clock | API calls | When to use |
+|---|---|---|---|
+| `green init --offline` | ~3 s | 0 | Air-gapped, no key, or you want the scaffold first and the polish later. Identical scaffold to the default mode. |
+| `green init` (default) | ~6–10 s | ≤3 | First-class path. Scaffold + parallel Pass-2 polish in one command. |
+| `green init --no-enhance` | ~3 s | 0 | Same output as `--offline`; convenient when you have a key in the environment but want to skip the polish for this run. |
+| `green enhance` | ~3–6 s | ≤3 | Re-tune the AI artifacts of an existing `green init` project (e.g. after pulling fresh reference subagents from this repo). |
+| `green enhance --batch` | minutes – hours | ≤3 | Same outputs as `green enhance` at 50 % cost via the Anthropic Batches API. Two-call submit-then-resume; pair with `--wait` for a single blocking command. Subagents only. |
+
+Numbers are rough order-of-magnitude on a Mac M-series with the
+default model (`claude-sonnet-4-6`); your mileage varies with
+network and rate-limit conditions. The scaffold half is
+deterministic and offline; only the polish half varies with the
+API.
+
+### What "Pass 2 polish" actually does
+
+| Artifact | Pass 1 (scaffold) | Pass 2 (polish) |
+|---|---|---|
+| `CLAUDE.md` | Generic baseline keyed off `--language` | Tuned around the user's project name + language metadata |
+| `.claude/agents/*.md` | Reference profiles copied as-is | Each profile re-tuned for the target project's domain (FastAPI vs CLI vs library, Python vs TypeScript, etc.) |
+| `.github/workflows/*.yml` | Templated from language presets | (Pass-1 only — no AI rewrite) |
+| `pyproject.toml`, scripts, configs | Templated from language presets | (Pass-1 only — no AI rewrite) |
+
+The "polish" is structurally tool-use against the
+`report_tuning` schema, so output is parseable JSON, not free text;
+results come with a per-agent change list the CLI surfaces on
+completion.
+
+### Switching modes after the fact
+
+* **`--offline` → polished**: re-run `green enhance` (no need to
+  re-init).
+* **Default → re-tune after editing reference subagents**: same —
+  `green enhance`.
+* **Default → cheaper bulk re-tune**: `green enhance --batch
+  --targets subagents`. See the [Batch mode](#batch-mode-phase-5)
+  subsection above.
+
+
 ## Documentation
 
 Comprehensive documentation for using Start Green Stay Green:

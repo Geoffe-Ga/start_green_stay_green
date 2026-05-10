@@ -1536,8 +1536,11 @@ def _resolve_pass2_orchestrator(
         console.print("  - CI/Subagents/CLAUDE.md: Using default templates")
         console.print("\n  To enable AI features:")
         console.print("    1. Get API key: https://console.anthropic.com/")
-        console.print("    2. Run: sgsg init --api-key YOUR_KEY")
-        console.print("    3. Or: Set ANTHROPIC_API_KEY environment variable\n")
+        console.print(
+            "    2. Set ANTHROPIC_API_KEY env var (or store in keyring "
+            "via the next prompt)"
+        )
+        console.print("    3. Re-run: sgsg enhance  (no need to re-init)\n")
     return orchestrator
 
 
@@ -1655,6 +1658,7 @@ def init(  # noqa: PLR0913
                 "Use ANTHROPIC_API_KEY env var or keyring instead."
             ),
             hide_input=True,
+            hidden=True,
         ),
     ] = None,
     offline: Annotated[
@@ -1944,7 +1948,8 @@ def _require_enhance_orchestrator(
         console.print(
             "[red]Error:[/red] `green enhance` requires an Anthropic API "
             "key — there is no deterministic fallback for AI-tuned "
-            "artifacts.\n  Set ANTHROPIC_API_KEY or pass --api-key.",
+            "artifacts.\n  Set ANTHROPIC_API_KEY (or store one in the "
+            "keyring on first run).",
             style="bold",
         )
         raise typer.Exit(code=1)
@@ -2694,6 +2699,7 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
                 "Use ANTHROPIC_API_KEY env var or keyring instead."
             ),
             hide_input=True,
+            hidden=True,
         ),
     ] = None,
     no_interactive: Annotated[

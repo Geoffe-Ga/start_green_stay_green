@@ -1,6 +1,6 @@
 [project]
 name = "start-green-stay-green"
-version = "0.1.0"
+version = "1.0.0"
 description = "A meta-tool for generating quality-controlled, AI-ready repositories"
 authors = [
     {name = "Start Green Stay Green Team", email = "team@startgreenstaygreen.dev"}
@@ -366,7 +366,7 @@ max_average = "A"
 # Commitizen configuration
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.1.0"
+version = "1.0.0"
 tag_format = "v$version"
 version_files = [
     "pyproject.toml:version",
