@@ -100,6 +100,34 @@ class ResumeStatus:
 
 
 @dataclass(frozen=True)
+class BatchWaitConfig:
+    """Wait-mode tuning passed to :func:`resume_subagent_batch`.
+
+    Bundles the three parameters that only matter when the user
+    runs ``green enhance --batch --wait``: whether to wait at all,
+    how often to poll, and the deadline. Grouping them drops
+    :func:`resume_subagent_batch`'s parameter count below the
+    ``PLR0913`` threshold and lets call sites that don't care
+    about wait-mode pass the default.
+
+    Attributes:
+        wait: If ``True``, block (with sleeps) until the batch ends
+            or :attr:`wait_timeout_seconds` passes.
+        poll_interval: Seconds between polls in ``wait`` mode.
+            Default 30 s — the API SLA is 24 h so polling more often
+            costs rate-limit budget without buying meaningful
+            latency.
+        wait_timeout_seconds: Maximum total wait. Defaults to
+            ``3600`` (one hour); callers wanting to wait the full
+            24 h SLA pass ``86400``.
+    """
+
+    wait: bool = False
+    poll_interval: float = _DEFAULT_POLL_INTERVAL_SECONDS
+    wait_timeout_seconds: float = 3600.0
+
+
+@dataclass(frozen=True)
 class ResumeOutcome:
     """What :func:`resume_subagent_batch` reports back to the CLI.
 
@@ -172,24 +200,23 @@ async def submit_subagent_batch(
     return BatchSubmitOutcome(submission=submission, agent_count=len(plan))
 
 
-async def resume_subagent_batch(  # noqa: PLR0913 - CLI integration glue
+async def resume_subagent_batch(  # noqa: PLR0913 - see #316
     *,
     orchestrator: AIOrchestrator,
     generator: SubagentsGenerator,
     state: EnhanceState,
     project_path: Path,
     file_writer: FileWriter | None = None,
-    wait: bool = False,
-    poll_interval: float = _DEFAULT_POLL_INTERVAL_SECONDS,
-    wait_timeout_seconds: float = 3600.0,
+    wait_config: BatchWaitConfig | None = None,
 ) -> ResumeOutcome:
     """Resume an in-flight batch: poll, optionally wait, fetch, write.
 
-    ``wait=False`` (default) returns after a single poll: callers
-    re-run ``green enhance --batch`` to pick up later. ``wait=True``
-    enters a sleep-then-poll loop bounded by ``wait_timeout_seconds``
-    — useful in CI scripts where a single command should block until
-    results land. The CLI surfaces both modes as ``--batch`` and
+    ``wait_config=None`` or ``wait_config.wait=False`` returns after
+    a single poll: callers re-run ``green enhance --batch`` to pick
+    up later. ``wait_config.wait=True`` enters a sleep-then-poll
+    loop bounded by ``wait_config.wait_timeout_seconds`` — useful in
+    CI scripts where a single command should block until results
+    land. The CLI surfaces both modes as ``--batch`` and
     ``--batch --wait``.
 
     Detects an expired batch via
@@ -207,16 +234,13 @@ async def resume_subagent_batch(  # noqa: PLR0913 - CLI integration glue
             here on every meaningful state transition.
         file_writer: Optional dry-run-aware writer. ``None`` in
             production; tests inject one.
-        wait: If ``True``, block (with sleeps) until the batch ends
-            or ``wait_timeout_seconds`` passes.
-        poll_interval: Seconds between polls in ``wait`` mode.
-        wait_timeout_seconds: Maximum total wait. Defaults to
-            ``3600`` (one hour); the API SLA is 24 h, so callers
-            who want to wait the full window pass ``86400``.
+        wait_config: Wait-mode tuning. ``None`` defaults to a
+            single-poll non-blocking check.
 
     Returns:
         :class:`ResumeOutcome` describing what happened.
     """
+    config = wait_config or BatchWaitConfig()
     pre_poll = _check_pre_poll(state, project_path)
     if pre_poll is not None:
         return pre_poll
@@ -229,13 +253,10 @@ async def resume_subagent_batch(  # noqa: PLR0913 - CLI integration glue
     poll = await _poll_until_terminal(
         orchestrator=orchestrator,
         batch_id=state.batch.batch_id,
-        wait=wait,
-        poll_interval=poll_interval,
-        wait_timeout_seconds=wait_timeout_seconds,
+        config=config,
     )
     if not poll.is_ended:
-        status = ResumeStatus.TIMED_OUT if wait else ResumeStatus.IN_PROGRESS
-        return ResumeOutcome(status=status, poll=poll)
+        return _non_terminal_outcome(poll, waiting=config.wait)
 
     return await _reconcile_ended_batch(
         orchestrator=orchestrator,
@@ -245,6 +266,17 @@ async def resume_subagent_batch(  # noqa: PLR0913 - CLI integration glue
         file_writer=file_writer,
         poll=poll,
     )
+
+
+def _non_terminal_outcome(poll: BatchPoll, *, waiting: bool) -> ResumeOutcome:
+    """Map a non-ended poll to its CLI-facing outcome.
+
+    Extracted so :func:`resume_subagent_batch` stays grade-A under
+    xenon — the inline ternary plus the surrounding branches tipped
+    it to grade B.
+    """
+    status = ResumeStatus.TIMED_OUT if waiting else ResumeStatus.IN_PROGRESS
+    return ResumeOutcome(status=status, poll=poll)
 
 
 def _check_pre_poll(
@@ -268,7 +300,7 @@ def _check_pre_poll(
     return None
 
 
-async def _reconcile_ended_batch(  # noqa: PLR0913 - dispatch glue
+async def _reconcile_ended_batch(  # noqa: PLR0913 - dispatch glue, see #316
     *,
     orchestrator: AIOrchestrator,
     generator: SubagentsGenerator,
@@ -312,23 +344,29 @@ async def _poll_until_terminal(
     *,
     orchestrator: AIOrchestrator,
     batch_id: str,
-    wait: bool,
-    poll_interval: float,
-    wait_timeout_seconds: float,
+    config: BatchWaitConfig,
 ) -> BatchPoll:
     """Single poll, or sleep-then-poll until ``ended`` or timeout.
 
     Extracted from :func:`resume_subagent_batch` so the wait-mode
     state machine is independently unit-testable. The deadline is
-    computed once at entry so a slow poll roundtrip cannot push the
-    actual wait past ``wait_timeout_seconds``.
+    computed once at entry so the per-iteration `_now()` check
+    bounds the total wait.
+
+    Note: the deadline check fires *before* the next ``poll_batch``
+    call, so a slow API round-trip mid-loop (rate-limit retry,
+    network timeout) is not itself bounded — total wall time can
+    exceed ``config.wait_timeout_seconds`` by one ``poll_batch``
+    RTT. Acceptable for the default 1 h wait window; callers
+    needing strict bounding should drive the deadline at a higher
+    layer (e.g. ``asyncio.wait_for``).
     """
     poll = await orchestrator.poll_batch(batch_id)
-    if not wait or poll.is_ended:
+    if not config.wait or poll.is_ended:
         return poll
-    deadline = _now() + wait_timeout_seconds
+    deadline = _now() + config.wait_timeout_seconds
     while not poll.is_ended and _now() < deadline:
-        await asyncio.sleep(poll_interval)
+        await asyncio.sleep(config.poll_interval)
         poll = await orchestrator.poll_batch(batch_id)
     return poll
 
@@ -399,12 +437,14 @@ def _write_one_agent(
     tool_result: ToolUseResult,
     target_dir: Path,
     file_writer: FileWriter | None,
-) -> str:
-    """Write one agent's tuned content to disk; return its name.
+) -> None:
+    """Write one agent's tuned content to disk.
 
-    Extracted so :func:`_write_results` is a pair of comprehensions
-    (one over successes, one over failures) without an embedded
-    write block — keeps that function grade-A under xenon.
+    Extracted so :func:`_persist_successes` stays focused on the
+    success-iteration loop without an embedded write block. The
+    caller already has ``agent_name`` in scope (it's the loop key),
+    so this function returns nothing rather than echoing it back —
+    avoids the misleading ``-> str`` annotation flagged by review.
     """
     frontmatter = generator.get_agent_frontmatter(agent_name)
     result = SubagentsGenerator.apply_batch_result(
@@ -417,7 +457,6 @@ def _write_one_agent(
         file_writer.write_file(agent_file, result.content)
     else:
         agent_file.write_text(result.content, encoding="utf-8")
-    return agent_name
 
 
 def _lookup_from_state(state: EnhanceState) -> dict[str, str]:

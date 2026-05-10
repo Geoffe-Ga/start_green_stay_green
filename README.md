@@ -248,7 +248,11 @@ Limits and trade-offs:
 * Batches expire after 24 h server-side. `green enhance --batch`
   detects an expired record on the resume side and clears it with
   a "submit a fresh batch" message rather than producing an opaque
-  error.
+  error. Note: the expiry check runs only at the *start* of a
+  resume call, so when `--wait` blocks across the 24 h boundary
+  the loop will surface as `--wait timed out` rather than `expired`
+  — re-running once afterwards picks up the (now-recognised)
+  expired record and clears it.
 * Per-request failures (`errored` / `canceled` / `expired`) do *not*
   abort the whole batch — successful agents land on disk, failed
   ones are listed with their names so the user can re-run.

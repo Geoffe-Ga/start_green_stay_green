@@ -33,6 +33,7 @@ from rich.console import Console
 from rich.panel import Panel
 import typer
 
+from start_green_stay_green.ai.batch_dispatch import BatchWaitConfig
 from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
 from start_green_stay_green.ai.batch_dispatch import ResumeStatus
 from start_green_stay_green.ai.batch_dispatch import resume_subagent_batch
@@ -2430,7 +2431,7 @@ def _validate_batch_targets(selected_targets: tuple[str, ...]) -> None:
     raise typer.Exit(code=1)
 
 
-def _run_enhance_batch(  # noqa: PLR0913 — orchestration glue
+def _run_enhance_batch(  # noqa: PLR0913 — orchestration glue, see #316
     *,
     project_path: Path,
     project_name: str,
@@ -2537,7 +2538,7 @@ def _resume_subagent_batch_cli(
                 state=state,
                 project_path=project_path,
                 file_writer=file_writer,
-                wait=wait,
+                wait_config=BatchWaitConfig(wait=wait),
             ),
         )
     )
@@ -2581,7 +2582,16 @@ def _render_batch_resume_outcome(outcome: ResumeOutcome) -> None:
     if outcome.status == ResumeStatus.IN_PROGRESS:
         _render_batch_in_progress(outcome)
         return
-    _render_batch_ended(outcome)
+    if outcome.status == ResumeStatus.ENDED:
+        _render_batch_ended(outcome)
+        return
+    # Defensive guard: a future ``ResumeStatus`` constant added
+    # without updating this dispatcher would otherwise silently
+    # render the ENDED message — which prints "0 written, 0 failed"
+    # for a status that means something else entirely. Fail loudly
+    # at the source instead.
+    msg = f"Unhandled batch resume status: {outcome.status!r}"
+    raise ValueError(msg)
 
 
 def _render_batch_in_progress(outcome: ResumeOutcome) -> None:

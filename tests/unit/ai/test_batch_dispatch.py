@@ -24,9 +24,11 @@ from start_green_stay_green.ai.batch import BatchSubmission
 from start_green_stay_green.ai.batch import ToolUseBatchRequest
 from start_green_stay_green.ai.batch_dispatch import BATCH_TARGET_SUBAGENTS
 from start_green_stay_green.ai.batch_dispatch import BatchSubmitOutcome
+from start_green_stay_green.ai.batch_dispatch import BatchWaitConfig
 from start_green_stay_green.ai.batch_dispatch import ResumeStatus
 from start_green_stay_green.ai.batch_dispatch import resume_subagent_batch
 from start_green_stay_green.ai.batch_dispatch import submit_subagent_batch
+from start_green_stay_green.ai.types import GenerationError
 from start_green_stay_green.ai.types import TokenUsage
 from start_green_stay_green.ai.types import ToolUseResult
 from start_green_stay_green.generators.subagents import SubagentBatchEntry
@@ -394,9 +396,11 @@ class TestResumeSubagentBatchWaitMode:
             generator=_fake_generator(),
             state=state,
             project_path=tmp_path,
-            wait=True,
-            poll_interval=0.0,  # tight loop for test speed
-            wait_timeout_seconds=10.0,
+            wait_config=BatchWaitConfig(
+                wait=True,
+                poll_interval=0.0,  # tight loop for test speed
+                wait_timeout_seconds=10.0,
+            ),
         )
 
         assert outcome.status == ResumeStatus.ENDED
@@ -430,12 +434,77 @@ class TestResumeSubagentBatchWaitMode:
             generator=_fake_generator(),
             state=state,
             project_path=tmp_path,
-            wait=True,
-            poll_interval=0.0,
-            wait_timeout_seconds=-1.0,  # already past deadline → exit after one poll
+            wait_config=BatchWaitConfig(
+                wait=True,
+                poll_interval=0.0,
+                wait_timeout_seconds=-1.0,  # already past → exit after one poll
+            ),
         )
 
         assert outcome.status == ResumeStatus.TIMED_OUT
         orchestrator.fetch_batch_results.assert_not_awaited()
         # State retains the in-flight batch so a future run can resume.
         assert state.has_batch()
+
+
+class TestResumeSubagentBatchErrorPropagation:
+    """Resume path: SDK errors mid-wait must preserve in-flight state."""
+
+    @pytest.mark.asyncio
+    async def test_poll_raises_mid_wait_loop_preserves_state(
+        self, tmp_path: Path
+    ) -> None:
+        """Round-2 review observation: an SDK error mid-wait must NOT
+        clear the in-flight batch — a re-run needs the ``batch_id``.
+
+        Pins the contract that ``state.clear_batch`` only fires after
+        a successful ``ENDED`` reconciliation, never before.
+        """
+        state = EnhanceState()
+        state.batch = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at="2026-05-09T21:00:00+00:00",
+            custom_id_map={"subagent:alpha": BATCH_TARGET_SUBAGENTS},
+        )
+        orchestrator = MagicMock()
+        # First poll succeeds (in-progress); second raises.
+        orchestrator.poll_batch = AsyncMock(
+            side_effect=[
+                BatchPoll(
+                    batch_id="msgbatch_42",
+                    status="in_progress",
+                    processing_count=1,
+                    succeeded_count=0,
+                    errored_count=0,
+                ),
+                GenerationError("simulated rate-limit during poll"),
+            ]
+        )
+        orchestrator.fetch_batch_results = AsyncMock()
+
+        with pytest.raises(GenerationError, match="rate-limit"):
+            await resume_subagent_batch(
+                orchestrator=orchestrator,
+                generator=_fake_generator(),
+                state=state,
+                project_path=tmp_path,
+                wait_config=BatchWaitConfig(
+                    wait=True,
+                    poll_interval=0.0,
+                    wait_timeout_seconds=10.0,
+                ),
+            )
+
+        # Critical: in-memory in-flight record survives so a future
+        # call (after the user fixes their API issue and re-runs) can
+        # resume. We do NOT assert on-disk state here — the contract
+        # is that ``save_state`` only fires on a *successful* status
+        # transition (EXPIRED clear, or ENDED reconciliation), so the
+        # raised path leaves the disk untouched. That's the desired
+        # behaviour: the original submit path's persisted state is
+        # still on disk from when the batch was first submitted.
+        assert state.has_batch()
+        assert state.batch is not None
+        assert state.batch.batch_id == "msgbatch_42"
+        # Did NOT fetch — the second poll never returned ``ended``.
+        orchestrator.fetch_batch_results.assert_not_awaited()

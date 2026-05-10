@@ -39,6 +39,7 @@ import typer
 from typer.testing import CliRunner
 
 from start_green_stay_green import cli
+from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
@@ -2552,3 +2553,17 @@ class TestEnhanceBatchCLI:
         flat = self._flat(result.stdout)
         assert "Batch API call failed" in flat
         assert "poll failed (mocked)" in flat
+
+    def test_render_unknown_status_raises_value_error(self) -> None:
+        """Round-2 review #3: an unrecognised ``ResumeStatus`` constant
+        must fail loudly rather than silently rendering as ``ENDED``.
+
+        Phase 6 might add new statuses. Without this guard, a forgotten
+        update to ``_render_batch_resume_outcome`` would print a
+        misleading "0 agent(s) written, 0 failed" line for any
+        unhandled value.
+        """
+        bad = ResumeOutcome(status="bogus-status")
+
+        with pytest.raises(ValueError, match="Unhandled batch resume status"):
+            cli._render_batch_resume_outcome(bad)
