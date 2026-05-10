@@ -508,3 +508,123 @@ class TestResumeSubagentBatchErrorPropagation:
         assert state.batch.batch_id == "msgbatch_42"
         # Did NOT fetch — the second poll never returned ``ended``.
         orchestrator.fetch_batch_results.assert_not_awaited()
+
+
+class TestResumeSubagentBatchPartialFailureIsolation:
+    """Round-3 review: per-agent isolation for local write failures.
+
+    The PR documents per-agent failure isolation in the README. The
+    round-3 reviewer flagged two paths where that contract leaked:
+    a missing source file would abort the whole loop, and an
+    unresolvable ``custom_id`` would silently vanish from both
+    ``succeeded`` and ``failed_agents``. Both now route through the
+    ``locally_failed`` partition.
+    """
+
+    @pytest.mark.asyncio
+    async def test_missing_source_file_does_not_abort_other_agents(
+        self, tmp_path: Path
+    ) -> None:
+        """Source file deleted between submit and fetch → only that
+        agent fails; siblings still land on disk."""
+        state = EnhanceState()
+        state.batch = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at="2026-05-09T21:00:00+00:00",
+            custom_id_map={
+                "subagent:alpha": BATCH_TARGET_SUBAGENTS,
+                "subagent:beta": BATCH_TARGET_SUBAGENTS,
+            },
+        )
+        orchestrator = MagicMock()
+        orchestrator.poll_batch = AsyncMock(
+            return_value=BatchPoll(
+                batch_id="msgbatch_42",
+                status="ended",
+                processing_count=0,
+                succeeded_count=2,
+                errored_count=0,
+            )
+        )
+        orchestrator.fetch_batch_results = AsyncMock(
+            return_value=BatchResultsBundle(
+                successes={
+                    "subagent:alpha": _success("alpha"),
+                    "subagent:beta": _success("beta"),
+                },
+                failures={},
+            )
+        )
+        # Simulate beta's source file having been deleted between
+        # submit and fetch by making get_agent_frontmatter raise.
+        gen = _fake_generator()
+
+        def selective_frontmatter(name: str) -> str:
+            if name == "beta":
+                msg = "source file vanished between submit and fetch"
+                raise FileNotFoundError(msg)
+            return f"---\nname: {name}\n---"
+
+        gen.get_agent_frontmatter.side_effect = selective_frontmatter
+
+        outcome = await resume_subagent_batch(
+            orchestrator=orchestrator,
+            generator=gen,
+            state=state,
+            project_path=tmp_path,
+        )
+
+        assert outcome.status == ResumeStatus.ENDED
+        # Alpha landed; beta is in failed_agents — isolation held.
+        assert outcome.succeeded_agents == ("alpha",)
+        assert outcome.failed_agents == ("beta",)
+        agents_dir = tmp_path / ".claude" / "agents"
+        assert (agents_dir / "alpha.md").exists()
+        assert not (agents_dir / "beta.md").exists()
+
+    @pytest.mark.asyncio
+    async def test_unresolved_custom_id_surfaces_in_failed_agents(
+        self, tmp_path: Path
+    ) -> None:
+        """A custom_id with no known schema lands in ``failed_agents``
+        with an ``unresolved:`` prefix — never silently dropped."""
+        state = EnhanceState()
+        state.batch = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at="2026-05-09T21:00:00+00:00",
+            # Recorded mapping covers only alpha; the rogue custom_id
+            # below isn't in the map and uses a schema we don't know.
+            custom_id_map={"subagent:alpha": BATCH_TARGET_SUBAGENTS},
+        )
+        orchestrator = MagicMock()
+        orchestrator.poll_batch = AsyncMock(
+            return_value=BatchPoll(
+                batch_id="msgbatch_42",
+                status="ended",
+                processing_count=0,
+                succeeded_count=2,
+                errored_count=0,
+            )
+        )
+        orchestrator.fetch_batch_results = AsyncMock(
+            return_value=BatchResultsBundle(
+                successes={
+                    "subagent:alpha": _success("alpha"),
+                    "rogue:unknown-shape": _success("rogue"),
+                },
+                failures={},
+            )
+        )
+
+        outcome = await resume_subagent_batch(
+            orchestrator=orchestrator,
+            generator=_fake_generator(),
+            state=state,
+            project_path=tmp_path,
+        )
+
+        assert outcome.status == ResumeStatus.ENDED
+        assert outcome.succeeded_agents == ("alpha",)
+        # The rogue custom_id is surfaced rather than silently
+        # dropped — synthetic prefix flags the schema-drift bug.
+        assert outcome.failed_agents == ("unresolved:rogue:unknown-shape",)

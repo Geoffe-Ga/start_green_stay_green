@@ -387,22 +387,33 @@ def _write_results(
     that survives a code change to the source agents still produces
     valid output.
 
-    Returns ``(succeeded_agent_names, failed_agent_names)``.
+    Returns ``(succeeded_agent_names, failed_agent_names)``. The
+    ``failed_agent_names`` list combines three sources, all surfaced
+    to the user so the reconciliation summary stays accurate:
+
+    * Per-request failures returned by the API (``bundle.failures``).
+    * Successes the API returned that the local source tree could no
+      longer write (e.g. the source agent file was deleted between
+      submit and fetch — see :func:`_persist_successes`).
+    * Successes whose ``custom_id`` did not match any known schema
+      — flagged with the synthetic prefix ``"unresolved:"`` so the
+      user can file a bug report rather than seeing them silently
+      vanish.
     """
     target_dir.mkdir(parents=True, exist_ok=True)
-    succeeded = _persist_successes(
+    succeeded, locally_failed = _persist_successes(
         bundle=bundle,
         plan_lookup=plan_lookup,
         generator=generator,
         target_dir=target_dir,
         file_writer=file_writer,
     )
-    failed = [
+    api_failed = [
         name
         for custom_id in bundle.failures
         if (name := _agent_name_from_custom_id(custom_id, plan_lookup)) is not None
     ]
-    return succeeded, failed
+    return succeeded, locally_failed + api_failed
 
 
 def _persist_successes(
@@ -412,22 +423,49 @@ def _persist_successes(
     generator: SubagentsGenerator,
     target_dir: Path,
     file_writer: FileWriter | None,
-) -> list[str]:
-    """Write each success to disk; return the agent names in order."""
+) -> tuple[list[str], list[str]]:
+    """Write each success to disk; return ``(written, locally_failed)``.
+
+    Per-agent failure isolation: if writing one agent fails (source
+    file deleted between submit and fetch, custom_id schema we don't
+    recognise) the rest still land on disk. The failed entry's name
+    flows to the caller's ``failed_agents`` so the user sees an
+    accurate count and a retry hint.
+
+    * Unresolved custom IDs (no recognised schema) become
+      ``"unresolved:<custom_id>"`` so they are visible rather than
+      silently dropped — this catches Phase-6 schema-drift bugs
+      early.
+    * :class:`FileNotFoundError` from
+      :meth:`SubagentsGenerator.get_agent_frontmatter` (raised when
+      the source agent file no longer exists at fetch time) is
+      caught here, not at :func:`_write_one_agent` — the helper
+      stays simple and orchestration owns the failure-tracking.
+    """
     written: list[str] = []
+    locally_failed: list[str] = []
     for custom_id, tool_result in bundle.successes.items():
         agent_name = _agent_name_from_custom_id(custom_id, plan_lookup)
         if agent_name is None:
+            locally_failed.append(f"unresolved:{custom_id}")
             continue
-        _write_one_agent(
-            generator=generator,
-            agent_name=agent_name,
-            tool_result=tool_result,
-            target_dir=target_dir,
-            file_writer=file_writer,
-        )
+        try:
+            _write_one_agent(
+                generator=generator,
+                agent_name=agent_name,
+                tool_result=tool_result,
+                target_dir=target_dir,
+                file_writer=file_writer,
+            )
+        except FileNotFoundError:
+            # Source file vanished between submit and fetch — log
+            # the agent as failed and keep going so siblings still
+            # land. The reviewer's per-agent-isolation contract
+            # (round-3 review) holds.
+            locally_failed.append(agent_name)
+            continue
         written.append(agent_name)
-    return written
+    return written, locally_failed
 
 
 def _write_one_agent(
