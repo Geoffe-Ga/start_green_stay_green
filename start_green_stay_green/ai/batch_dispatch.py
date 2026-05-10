@@ -484,13 +484,28 @@ def _write_one_agent(
     so this function returns nothing rather than echoing it back —
     avoids the misleading ``-> str`` annotation flagged by review.
     """
+    agent_file = target_dir / f"{agent_name}.md"
+    # Defense-in-depth: today ``agent_name`` is stripped from a
+    # ``custom_id`` whose source is the code-defined
+    # :data:`REQUIRED_AGENTS` map, so traversal payloads cannot
+    # reach here. The guard protects against a future phase widening
+    # the input to user-supplied custom IDs (e.g. ``skill:<name>``)
+    # — see issue #317. Runs before any content work so a bad name
+    # never reaches ``apply_batch_result``.
+    resolved_target = target_dir.resolve()
+    resolved_file = agent_file.resolve()
+    if not resolved_file.is_relative_to(resolved_target):
+        msg = (
+            f"refusing to write agent {agent_name!r}: path "
+            f"{resolved_file} escapes target dir {resolved_target}"
+        )
+        raise ValueError(msg)
     frontmatter = generator.get_agent_frontmatter(agent_name)
     result = SubagentsGenerator.apply_batch_result(
         agent_name=agent_name,
         frontmatter=frontmatter,
         tool_result=tool_result,
     )
-    agent_file = target_dir / f"{agent_name}.md"
     if file_writer is not None:
         file_writer.write_file(agent_file, result.content)
     else:

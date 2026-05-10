@@ -2471,6 +2471,17 @@ def _run_enhance_batch(  # noqa: PLR0913 — orchestration glue, see #316
                 wait=wait,
             )
             return
+        # ``wait`` is meaningful for the resume branch above, but the
+        # submit call itself never blocks (see ADR-001's two-call
+        # contract). Warn upfront on first-run so users know to pass
+        # ``--wait`` again on the resume call. See issue #319.
+        if wait:
+            console.print(
+                "[dim]--wait has no effect on the first --batch call "
+                "(submit-only by design — see ADR-001). Re-run with "
+                "--wait once the batch is in flight to block until "
+                "results land.[/dim]"
+            )
         _submit_subagent_batch_cli(
             project_path=project_path,
             project_name=project_name,
@@ -2519,8 +2530,8 @@ def _submit_subagent_batch_cli(
         f"[green]✓[/green] Submitted batch [bold]"
         f"{outcome.submission.batch_id}[/bold] covering "
         f"{outcome.agent_count} subagent(s). Re-run "
-        f"`green enhance --batch` to fetch results, or pass "
-        f"--wait to block in-process."
+        f"`green enhance --batch` to fetch results, or with "
+        f"`--wait` to block in-process."
     )
 
 
@@ -2738,7 +2749,9 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
                 "When used with ``--batch``: block in-process polling "
                 "every 30 s until the batch ends or the timeout is "
                 "reached. Default off (two-call submit-then-resume "
-                "pattern is friendlier for CI)."
+                "pattern is friendlier for CI). Has no effect on the "
+                "first ``--batch`` invocation (submit-only); pass "
+                "``--wait`` on the resume call to block."
             ),
         ),
     ] = False,
