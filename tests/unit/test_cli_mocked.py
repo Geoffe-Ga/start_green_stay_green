@@ -682,6 +682,31 @@ class TestLanguageValidation:
         for lang in SUPPORTED_LANGUAGES:
             assert lang in help_text, f"Language '{lang}' missing from help text"
 
+    def test_api_key_flag_hidden_from_init_help(self) -> None:
+        """Deprecated --api-key must not appear in ``green init --help``.
+
+        The flag remains functional (with a runtime ``[DEPRECATED]`` warning)
+        but advertising it in --help would invite users to keep passing
+        secrets via argv where they leak into shell history and ps listings.
+        Locks in ``hidden=True`` on the typer.Option so silent removal
+        regresses this test instead of exposing the flag again.
+        """
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["init", "--help"])
+        assert result.exit_code == 0
+        assert "--api-key" not in result.output
+
+    def test_api_key_flag_hidden_from_enhance_help(self) -> None:
+        """Deprecated --api-key must not appear in ``green enhance --help``.
+
+        Same rationale as ``init``: the flag is kept only as a backwards-
+        compatible execution path, not a discoverable surface.
+        """
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["enhance", "--help"])
+        assert result.exit_code == 0
+        assert "--api-key" not in result.output
+
     @patch("start_green_stay_green.cli._generate_project_files")
     @patch("start_green_stay_green.cli._validate_and_prepare_paths")
     def test_init_accepts_all_supported_languages(
