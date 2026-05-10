@@ -278,10 +278,10 @@ constraints:
 | `green enhance --batch` | minutes – hours | ≤3 | Same outputs as `green enhance` at 50 % cost via the Anthropic Batches API. Two-call submit-then-resume; pair with `--wait` for a single blocking command. Subagents only. |
 
 Numbers are rough order-of-magnitude on a Mac M-series with the
-default model (`claude-sonnet-4-6`); your mileage varies with
-network and rate-limit conditions. The scaffold half is
-deterministic and offline; only the polish half varies with the
-API.
+default Sonnet model (see `green --help` for the current pin); your
+mileage varies with network and rate-limit conditions. The scaffold
+half is deterministic and offline; only the polish half varies with
+the API.
 
 ### What "Pass 2 polish" actually does
 

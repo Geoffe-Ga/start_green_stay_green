@@ -54,7 +54,7 @@ roadmap (Phases 0 → 5b).
 - **Language-specific setup instructions** in `green init` output
   (#279).
 - **`await-claude-review`, `address-feedback`, and Phase-5 skills**
-  imported from `well-worn-tools` (#303, #314).
+  imported from `well-worn-tools` ([#303], [#314]).
 
 ### Changed
 
@@ -117,12 +117,14 @@ for the methodology.
 - All five CI gate scripts (lint, format, typecheck, security,
   complexity) pass; every function grade A under xenon.
 
+[#303]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/303
 [#308]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/308
 [#309]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/309
 [#310]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/310
 [#311]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/311
 [#312]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/312
 [#313]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/313
+[#314]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/314
 [#315]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/315
 [Unreleased]: https://github.com/Geoffe-Ga/start_green_stay_green/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/Geoffe-Ga/start_green_stay_green/releases/tag/v1.0.0
