@@ -2491,6 +2491,47 @@ class TestEnhanceBatchCLI:
         submit.assert_not_called()
         resume.assert_not_called()
 
+    def test_first_run_batch_with_wait_warns_no_op(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``green enhance --batch --wait`` on first-run prints a no-op warning.
+
+        Issue #319: the submit branch silently ignored ``--wait``
+        because the submit call itself never blocks (ADR-001 two-call
+        contract). The user is told upfront so they know to pass
+        ``--wait`` again on the resume call.
+        """
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+
+        fake_outcome = mock.MagicMock()
+        fake_outcome.submission.batch_id = "msgbatch_first_run"
+        fake_outcome.agent_count = 7
+
+        with mock.patch(
+            "start_green_stay_green.cli.submit_subagent_batch",
+            new=mock.AsyncMock(return_value=fake_outcome),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                    "--wait",
+                ],
+            )
+
+        assert result.exit_code == 0, result.stdout
+        flat = self._flat(result.stdout)
+        assert "--wait has no effect on the first --batch call" in flat
+        # The success message still surfaces — warning is additive.
+        assert "Submitted batch" in flat
+        assert "msgbatch_first_run" in flat
+
     def test_batch_submit_api_error_exits_cleanly(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

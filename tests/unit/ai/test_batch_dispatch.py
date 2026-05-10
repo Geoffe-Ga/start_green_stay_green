@@ -26,6 +26,7 @@ from start_green_stay_green.ai.batch_dispatch import BATCH_TARGET_SUBAGENTS
 from start_green_stay_green.ai.batch_dispatch import BatchSubmitOutcome
 from start_green_stay_green.ai.batch_dispatch import BatchWaitConfig
 from start_green_stay_green.ai.batch_dispatch import ResumeStatus
+from start_green_stay_green.ai.batch_dispatch import _write_one_agent
 from start_green_stay_green.ai.batch_dispatch import resume_subagent_batch
 from start_green_stay_green.ai.batch_dispatch import submit_subagent_batch
 from start_green_stay_green.ai.types import GenerationError
@@ -628,3 +629,48 @@ class TestResumeSubagentBatchPartialFailureIsolation:
         # The rogue custom_id is surfaced rather than silently
         # dropped — synthetic prefix flags the schema-drift bug.
         assert outcome.failed_agents == ("unresolved:rogue:unknown-shape",)
+
+
+class TestWriteOneAgentPathContainment:
+    """Defense-in-depth: ``_write_one_agent`` rejects path-traversal names (#317)."""
+
+    def test_rejects_dotdot_traversal_outside_target_dir(self, tmp_path: Path) -> None:
+        """An ``agent_name`` containing ``..`` separators must raise rather
+        than write outside ``target_dir``. The guard is defense-in-depth:
+        today the name comes from a code-defined ``REQUIRED_AGENTS`` map,
+        but a future phase widening the input to user-supplied custom IDs
+        (e.g. ``skill:<name>``) could otherwise allow filesystem escape.
+        See issue #317.
+        """
+        target_dir = tmp_path / "agents"
+        target_dir.mkdir()
+        sentinel = tmp_path / "escape.md"
+        assert not sentinel.exists()
+
+        with pytest.raises(ValueError, match="escapes target dir"):
+            _write_one_agent(
+                generator=_fake_generator(),
+                agent_name="../escape",
+                tool_result=_success("..."),
+                target_dir=target_dir,
+                file_writer=None,
+            )
+        # The guard is the only thing standing between the malicious
+        # name and the filesystem, so prove the file was not written.
+        assert not sentinel.exists()
+
+    def test_accepts_normal_agent_name(self, tmp_path: Path) -> None:
+        """Sanity check: a plain alphanumeric agent name still writes
+        through the guard without raising."""
+        target_dir = tmp_path / "agents"
+        target_dir.mkdir()
+
+        _write_one_agent(
+            generator=_fake_generator(),
+            agent_name="implementation-engineer",
+            tool_result=_success("body"),
+            target_dir=target_dir,
+            file_writer=None,
+        )
+
+        assert (target_dir / "implementation-engineer.md").exists()
