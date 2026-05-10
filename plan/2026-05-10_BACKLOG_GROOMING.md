@@ -81,6 +81,11 @@ No grooming action needed; verified state.
 
 ### Closed prior to this grooming
 
+5 issues closed before this session entered the window — listed for
+completeness. Combined with the 4 issues auto-closed by PR keywords
+above, this totals the **9 already-correctly-closed** issues called
+out in the Statistics block.
+
 | Issue | Resolved by | Note |
 | ----- | ----------- | ---- |
 | #269 — language-specific setup instructions | PR #279 | already closed |
@@ -135,12 +140,11 @@ During this conversation, `mcp__github__subscribe_pr_activity` dropped
 events silently on PRs #321 round-2 (`COMMENTS` verdict) and #322
 round-1 (`LGTM` verdict + iteration-trigger comment). Both events
 were within seconds of subscribing and within the deliverable set per
-the documented contract. Per user direction
-(*"Let's skip this skill business. Maybe Anthropic will make a change
-in Claude code on mobile that keeps the harness wakeable by events
-from GH"*), not filing as a project issue — it's a Claude Code /
-MCP-server reliability concern, not a `start_green_stay_green`
-project concern.
+the documented contract. Per user direction, not filing as a project
+issue — the reliability gap lives in the Claude Code / MCP-server
+transport, not in `start_green_stay_green`, and the expected
+remediation is upstream changes to the Claude Code mobile harness
+rather than project-side mitigation.
 
 ### Pre-existing time-bomb test fixtures (fixed retroactively in PR #324)
 
@@ -186,11 +190,11 @@ issue filed since the fix is already in `main`.
 
 | Theme                          | Count | Notes |
 | ------------------------------ | ----- | ----- |
-| Tech-debt / refactor           | 4     | #307, #325, #326, #283 |
+| Tech-debt / refactor           | 4     | #307, #325, #326, #283 (also cross-listed under setup-instructions) |
 | Dashboard / metrics            | 4     | #154, #159, #206, #217 |
 | Generators (multi-language)    | 2     | #131, #200 |
 | Generators bugs                | 0     | (#193 cleared) |
-| Setup-instructions polish      | 2     | #283, #284 |
+| Setup-instructions polish      | 2     | #283 (cross-listed under tech-debt), #284 |
 | Performance                    | 1     | #256 |
 | Release readiness              | 1     | #152 |
 | CI/deps                        | 1     | #282 (actions Node.js 24) still open; #280 and #281 cleared this session |
