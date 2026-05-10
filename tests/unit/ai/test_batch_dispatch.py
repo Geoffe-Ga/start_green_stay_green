@@ -10,6 +10,8 @@ plumbing (typer flags, console rendering) is covered separately in
 
 from __future__ import annotations
 
+from datetime import UTC
+from datetime import datetime
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -23,6 +25,7 @@ from start_green_stay_green.ai.batch import BatchResultsBundle
 from start_green_stay_green.ai.batch import BatchSubmission
 from start_green_stay_green.ai.batch import ToolUseBatchRequest
 from start_green_stay_green.ai.batch_dispatch import BATCH_TARGET_SUBAGENTS
+from start_green_stay_green.ai.batch_dispatch import BatchPersistenceContext
 from start_green_stay_green.ai.batch_dispatch import BatchSubmitOutcome
 from start_green_stay_green.ai.batch_dispatch import BatchWaitConfig
 from start_green_stay_green.ai.batch_dispatch import ResumeStatus
@@ -40,6 +43,21 @@ from start_green_stay_green.utils.enhance_state import load_state
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+def _recent_submitted_at() -> str:
+    """Return a non-expired ISO-8601 UTC timestamp for batch fixtures.
+
+    Hard-coding ``2026-05-09T21:00:00+00:00`` was a time-bomb: as soon
+    as wall-clock crossed the 24 h SLA window relative to it,
+    :meth:`BatchProgress.is_potentially_expired` flipped to ``True``
+    and tests that exercise the live batch path started flapping into
+    the EXPIRED branch unintentionally. Re-anchoring on
+    :func:`datetime.now` per-test makes the expiry guard test only
+    when explicitly asserted (via ``patch.object`` of
+    ``is_potentially_expired`` itself).
+    """
+    return datetime.now(UTC).isoformat()
 
 
 def _entry(agent_name: str, custom_id: str | None = None) -> SubagentBatchEntry:
@@ -170,8 +188,10 @@ class TestResumeSubagentBatchNoOp:
         outcome = await resume_subagent_batch(
             orchestrator=orchestrator,
             generator=_fake_generator(),
-            state=EnhanceState(),
-            project_path=tmp_path,
+            persistence=BatchPersistenceContext(
+                state=EnhanceState(),
+                project_path=tmp_path,
+            ),
         )
         assert outcome.status == ResumeStatus.NO_BATCH
         # Did NOT call the SDK — no in-flight batch to poll.
@@ -194,8 +214,10 @@ class TestResumeSubagentBatchNoOp:
             outcome = await resume_subagent_batch(
                 orchestrator=orchestrator,
                 generator=_fake_generator(),
-                state=state,
-                project_path=tmp_path,
+                persistence=BatchPersistenceContext(
+                    state=state,
+                    project_path=tmp_path,
+                ),
             )
 
         assert outcome.status == ResumeStatus.EXPIRED
@@ -213,7 +235,7 @@ class TestResumeSubagentBatchInProgress:
         state = EnhanceState()
         state.batch = BatchProgress(
             batch_id="msgbatch_42",
-            submitted_at="2026-05-09T21:00:00+00:00",
+            submitted_at=_recent_submitted_at(),
             custom_id_map={"subagent:alpha": BATCH_TARGET_SUBAGENTS},
         )
         orchestrator = MagicMock()
@@ -231,8 +253,10 @@ class TestResumeSubagentBatchInProgress:
         outcome = await resume_subagent_batch(
             orchestrator=orchestrator,
             generator=_fake_generator(),
-            state=state,
-            project_path=tmp_path,
+            persistence=BatchPersistenceContext(
+                state=state,
+                project_path=tmp_path,
+            ),
         )
 
         assert outcome.status == ResumeStatus.IN_PROGRESS
@@ -254,7 +278,7 @@ class TestResumeSubagentBatchEnded:
         state = EnhanceState()
         state.batch = BatchProgress(
             batch_id="msgbatch_42",
-            submitted_at="2026-05-09T21:00:00+00:00",
+            submitted_at=_recent_submitted_at(),
             custom_id_map={
                 "subagent:alpha": BATCH_TARGET_SUBAGENTS,
                 "subagent:beta": BATCH_TARGET_SUBAGENTS,
@@ -283,8 +307,10 @@ class TestResumeSubagentBatchEnded:
         outcome = await resume_subagent_batch(
             orchestrator=orchestrator,
             generator=_fake_generator(),
-            state=state,
-            project_path=tmp_path,
+            persistence=BatchPersistenceContext(
+                state=state,
+                project_path=tmp_path,
+            ),
         )
 
         assert outcome.status == ResumeStatus.ENDED
@@ -303,7 +329,7 @@ class TestResumeSubagentBatchEnded:
         state = EnhanceState()
         state.batch = BatchProgress(
             batch_id="msgbatch_42",
-            submitted_at="2026-05-09T21:00:00+00:00",
+            submitted_at=_recent_submitted_at(),
             custom_id_map={
                 "subagent:alpha": BATCH_TARGET_SUBAGENTS,
                 "subagent:beta": BATCH_TARGET_SUBAGENTS,
@@ -335,8 +361,10 @@ class TestResumeSubagentBatchEnded:
         outcome = await resume_subagent_batch(
             orchestrator=orchestrator,
             generator=_fake_generator(),
-            state=state,
-            project_path=tmp_path,
+            persistence=BatchPersistenceContext(
+                state=state,
+                project_path=tmp_path,
+            ),
         )
 
         assert outcome.succeeded_agents == ("alpha",)
@@ -356,7 +384,7 @@ class TestResumeSubagentBatchWaitMode:
         state = EnhanceState()
         state.batch = BatchProgress(
             batch_id="msgbatch_42",
-            submitted_at="2026-05-09T21:00:00+00:00",
+            submitted_at=_recent_submitted_at(),
             custom_id_map={"subagent:alpha": BATCH_TARGET_SUBAGENTS},
         )
         orchestrator = MagicMock()
@@ -395,8 +423,10 @@ class TestResumeSubagentBatchWaitMode:
         outcome = await resume_subagent_batch(
             orchestrator=orchestrator,
             generator=_fake_generator(),
-            state=state,
-            project_path=tmp_path,
+            persistence=BatchPersistenceContext(
+                state=state,
+                project_path=tmp_path,
+            ),
             wait_config=BatchWaitConfig(
                 wait=True,
                 poll_interval=0.0,  # tight loop for test speed
@@ -415,7 +445,7 @@ class TestResumeSubagentBatchWaitMode:
         state = EnhanceState()
         state.batch = BatchProgress(
             batch_id="msgbatch_42",
-            submitted_at="2026-05-09T21:00:00+00:00",
+            submitted_at=_recent_submitted_at(),
             custom_id_map={"subagent:alpha": BATCH_TARGET_SUBAGENTS},
         )
         orchestrator = MagicMock()
@@ -433,8 +463,10 @@ class TestResumeSubagentBatchWaitMode:
         outcome = await resume_subagent_batch(
             orchestrator=orchestrator,
             generator=_fake_generator(),
-            state=state,
-            project_path=tmp_path,
+            persistence=BatchPersistenceContext(
+                state=state,
+                project_path=tmp_path,
+            ),
             wait_config=BatchWaitConfig(
                 wait=True,
                 poll_interval=0.0,
@@ -464,7 +496,7 @@ class TestResumeSubagentBatchErrorPropagation:
         state = EnhanceState()
         state.batch = BatchProgress(
             batch_id="msgbatch_42",
-            submitted_at="2026-05-09T21:00:00+00:00",
+            submitted_at=_recent_submitted_at(),
             custom_id_map={"subagent:alpha": BATCH_TARGET_SUBAGENTS},
         )
         orchestrator = MagicMock()
@@ -487,8 +519,10 @@ class TestResumeSubagentBatchErrorPropagation:
             await resume_subagent_batch(
                 orchestrator=orchestrator,
                 generator=_fake_generator(),
-                state=state,
-                project_path=tmp_path,
+                persistence=BatchPersistenceContext(
+                    state=state,
+                    project_path=tmp_path,
+                ),
                 wait_config=BatchWaitConfig(
                     wait=True,
                     poll_interval=0.0,
@@ -531,7 +565,7 @@ class TestResumeSubagentBatchPartialFailureIsolation:
         state = EnhanceState()
         state.batch = BatchProgress(
             batch_id="msgbatch_42",
-            submitted_at="2026-05-09T21:00:00+00:00",
+            submitted_at=_recent_submitted_at(),
             custom_id_map={
                 "subagent:alpha": BATCH_TARGET_SUBAGENTS,
                 "subagent:beta": BATCH_TARGET_SUBAGENTS,
@@ -571,8 +605,10 @@ class TestResumeSubagentBatchPartialFailureIsolation:
         outcome = await resume_subagent_batch(
             orchestrator=orchestrator,
             generator=gen,
-            state=state,
-            project_path=tmp_path,
+            persistence=BatchPersistenceContext(
+                state=state,
+                project_path=tmp_path,
+            ),
         )
 
         assert outcome.status == ResumeStatus.ENDED
@@ -592,7 +628,7 @@ class TestResumeSubagentBatchPartialFailureIsolation:
         state = EnhanceState()
         state.batch = BatchProgress(
             batch_id="msgbatch_42",
-            submitted_at="2026-05-09T21:00:00+00:00",
+            submitted_at=_recent_submitted_at(),
             # Recorded mapping covers only alpha; the rogue custom_id
             # below isn't in the map and uses a schema we don't know.
             custom_id_map={"subagent:alpha": BATCH_TARGET_SUBAGENTS},
@@ -620,8 +656,10 @@ class TestResumeSubagentBatchPartialFailureIsolation:
         outcome = await resume_subagent_batch(
             orchestrator=orchestrator,
             generator=_fake_generator(),
-            state=state,
-            project_path=tmp_path,
+            persistence=BatchPersistenceContext(
+                state=state,
+                project_path=tmp_path,
+            ),
         )
 
         assert outcome.status == ResumeStatus.ENDED

@@ -29,6 +29,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from start_green_stay_green.generators.subagents import SubagentsGenerator
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BATCH_TARGET_SUBAGENTS",
+    "BatchPersistenceContext",
     "BatchSubmitOutcome",
     "ResumeOutcome",
     "ResumeStatus",
@@ -84,19 +86,22 @@ class BatchSubmitOutcome:
     agent_count: int
 
 
-class ResumeStatus:
+class ResumeStatus(StrEnum):
     """Symbolic outcomes from :func:`resume_subagent_batch`.
 
-    Defined as a plain class with class attributes (rather than
-    :class:`enum.Enum`) so callers can compare against bare strings
-    in CLI rendering without importing the enum.
+    :class:`enum.StrEnum` (Python 3.11+) keeps the bare-string
+    ergonomics — members compare equal to their underlying string,
+    so existing tests asserting ``outcome.status == "ended"`` keep
+    passing — while giving mypy the static membership it needs to
+    drive ``assert_never`` exhaustiveness checks at the CLI render
+    site (see :func:`cli._render_batch_resume_outcome`).
     """
 
-    NO_BATCH: str = "no-batch"
-    EXPIRED: str = "expired"
-    IN_PROGRESS: str = "in-progress"
-    ENDED: str = "ended"
-    TIMED_OUT: str = "timed-out"
+    NO_BATCH = "no-batch"
+    EXPIRED = "expired"
+    IN_PROGRESS = "in-progress"
+    ENDED = "ended"
+    TIMED_OUT = "timed-out"
 
 
 @dataclass(frozen=True)
@@ -128,6 +133,37 @@ class BatchWaitConfig:
 
 
 @dataclass(frozen=True)
+class BatchPersistenceContext:
+    """Persistence-side dependencies shared across resume/reconcile.
+
+    Bundles the three parameters that always travel together when a
+    batch ends and needs to land on disk: the state record (cleared
+    after a successful write), the project root (resolves the agent
+    target dir), and the optional file writer (production code uses
+    ``None`` to write directly; the init pipeline overrides with a
+    buffered writer that defers writes). Grouping them drops
+    :func:`resume_subagent_batch` and :func:`_reconcile_ended_batch`
+    below the ``PLR0913`` threshold without splitting concerns. See
+    issue #316.
+
+    Attributes:
+        state: The :class:`EnhanceState` record. Cleared on
+            successful reconciliation; left intact on
+            :data:`ResumeStatus.IN_PROGRESS` / ``TIMED_OUT``.
+        project_path: Project root. The agent target dir is
+            ``project_path / ".claude" / "agents"``.
+        file_writer: ``None`` writes directly via
+            :meth:`pathlib.Path.write_text`; the init pipeline
+            passes a :class:`FileWriter` that buffers writes for
+            transactional rollback.
+    """
+
+    state: EnhanceState
+    project_path: Path
+    file_writer: FileWriter | None = None
+
+
+@dataclass(frozen=True)
 class ResumeOutcome:
     """What :func:`resume_subagent_batch` reports back to the CLI.
 
@@ -145,7 +181,7 @@ class ResumeOutcome:
             non-``ENDED`` statuses.
     """
 
-    status: str
+    status: ResumeStatus
     poll: BatchPoll | None = None
     bundle: BatchResultsBundle | None = None
     succeeded_agents: tuple[str, ...] = ()
@@ -200,13 +236,11 @@ async def submit_subagent_batch(
     return BatchSubmitOutcome(submission=submission, agent_count=len(plan))
 
 
-async def resume_subagent_batch(  # noqa: PLR0913 - see #316
+async def resume_subagent_batch(
     *,
     orchestrator: AIOrchestrator,
     generator: SubagentsGenerator,
-    state: EnhanceState,
-    project_path: Path,
-    file_writer: FileWriter | None = None,
+    persistence: BatchPersistenceContext,
     wait_config: BatchWaitConfig | None = None,
 ) -> ResumeOutcome:
     """Resume an in-flight batch: poll, optionally wait, fetch, write.
@@ -228,12 +262,8 @@ async def resume_subagent_batch(  # noqa: PLR0913 - see #316
         orchestrator: Configured :class:`AIOrchestrator`.
         generator: :class:`SubagentsGenerator` (used to rebuild
             per-agent files via :meth:`apply_batch_result`).
-        state: Loaded :class:`EnhanceState` with an in-flight
-            batch record.
-        project_path: Project root — the state file is updated
-            here on every meaningful state transition.
-        file_writer: Optional dry-run-aware writer. ``None`` in
-            production; tests inject one.
+        persistence: :class:`BatchPersistenceContext` bundling the
+            state record, project root, and optional file writer.
         wait_config: Wait-mode tuning. ``None`` defaults to a
             single-poll non-blocking check.
 
@@ -241,18 +271,18 @@ async def resume_subagent_batch(  # noqa: PLR0913 - see #316
         :class:`ResumeOutcome` describing what happened.
     """
     config = wait_config or BatchWaitConfig()
-    pre_poll = _check_pre_poll(state, project_path)
+    pre_poll = _check_pre_poll(persistence.state, persistence.project_path)
     if pre_poll is not None:
         return pre_poll
     # ``_check_pre_poll`` returns ``None`` only when ``state.batch``
     # exists; the second guard re-narrows the union for mypy without
     # an ``assert`` (which Bandit B101 flags).
-    if state.batch is None:
+    if persistence.state.batch is None:
         return ResumeOutcome(status=ResumeStatus.NO_BATCH)
 
     poll = await _poll_until_terminal(
         orchestrator=orchestrator,
-        batch_id=state.batch.batch_id,
+        batch_id=persistence.state.batch.batch_id,
         config=config,
     )
     if not poll.is_ended:
@@ -261,9 +291,7 @@ async def resume_subagent_batch(  # noqa: PLR0913 - see #316
     return await _reconcile_ended_batch(
         orchestrator=orchestrator,
         generator=generator,
-        state=state,
-        project_path=project_path,
-        file_writer=file_writer,
+        persistence=persistence,
         poll=poll,
     )
 
@@ -300,24 +328,23 @@ def _check_pre_poll(
     return None
 
 
-async def _reconcile_ended_batch(  # noqa: PLR0913 - dispatch glue, see #316
+async def _reconcile_ended_batch(
     *,
     orchestrator: AIOrchestrator,
     generator: SubagentsGenerator,
-    state: EnhanceState,
-    project_path: Path,
-    file_writer: FileWriter | None,
+    persistence: BatchPersistenceContext,
     poll: BatchPoll,
 ) -> ResumeOutcome:
     """Fetch results, write per-agent files, clear batch, build outcome.
 
-    ``state.batch`` is non-``None`` by caller contract (the resume
-    flow only reaches here after the pre-poll guard returned). The
-    runtime check below is a typed re-narrowing for mypy, not a
-    defensive assertion — calling this with no batch is a
-    programming error, but raising rather than asserting keeps
+    ``persistence.state.batch`` is non-``None`` by caller contract
+    (the resume flow only reaches here after the pre-poll guard
+    returned). The runtime check below is a typed re-narrowing for
+    mypy, not a defensive assertion — calling this with no batch is
+    a programming error, but raising rather than asserting keeps
     Bandit B101 quiet.
     """
+    state = persistence.state
     if state.batch is None:
         msg = "_reconcile_ended_batch called without an in-flight batch"
         raise RuntimeError(msg)
@@ -326,11 +353,11 @@ async def _reconcile_ended_batch(  # noqa: PLR0913 - dispatch glue, see #316
         generator=generator,
         bundle=bundle,
         plan_lookup=_lookup_from_state(state),
-        target_dir=project_path / ".claude" / "agents",
-        file_writer=file_writer,
+        target_dir=persistence.project_path / ".claude" / "agents",
+        file_writer=persistence.file_writer,
     )
     state.clear_batch()
-    save_state(project_path, state)
+    save_state(persistence.project_path, state)
     return ResumeOutcome(
         status=ResumeStatus.ENDED,
         poll=poll,
