@@ -20,6 +20,7 @@ from typing import Annotated
 from typing import Any
 from typing import TYPE_CHECKING
 from typing import TypeVar
+from typing import assert_never
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -33,6 +34,7 @@ from rich.console import Console
 from rich.panel import Panel
 import typer
 
+from start_green_stay_green.ai.batch_dispatch import BatchPersistenceContext
 from start_green_stay_green.ai.batch_dispatch import BatchWaitConfig
 from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
 from start_green_stay_green.ai.batch_dispatch import ResumeStatus
@@ -2436,11 +2438,26 @@ def _validate_batch_targets(selected_targets: tuple[str, ...]) -> None:
     raise typer.Exit(code=1)
 
 
-def _run_enhance_batch(  # noqa: PLR0913 — orchestration glue, see #316
+@dataclass(frozen=True)
+class _EnhanceProjectContext:
+    """Project metadata threaded through the enhance dispatchers.
+
+    Bundles the three identifiers that every enhance helper needs to
+    know about the project under tune: where it lives, what it's
+    called, and what language preset to use. Grouping them drops
+    :func:`_run_enhance_batch` and :func:`_submit_subagent_batch_cli`
+    below the ``PLR0913`` threshold without splitting concerns. See
+    issue #316.
+    """
+
+    project_path: Path
+    project_name: str
+    language: str
+
+
+def _run_enhance_batch(
     *,
-    project_path: Path,
-    project_name: str,
-    language: str,
+    project: _EnhanceProjectContext,
     orchestrator: AIOrchestrator,
     file_writer: FileWriter,
     dry_run: bool,
@@ -2460,11 +2477,11 @@ def _run_enhance_batch(  # noqa: PLR0913 — orchestration glue, see #316
         )
         return
 
-    state = load_state(project_path)
+    state = load_state(project.project_path)
     try:
         if state.has_batch():
             _resume_subagent_batch_cli(
-                project_path=project_path,
+                project_path=project.project_path,
                 orchestrator=orchestrator,
                 state=state,
                 file_writer=file_writer,
@@ -2483,9 +2500,7 @@ def _run_enhance_batch(  # noqa: PLR0913 — orchestration glue, see #316
                 "results land.[/dim]"
             )
         _submit_subagent_batch_cli(
-            project_path=project_path,
-            project_name=project_name,
-            language=language,
+            project=project,
             orchestrator=orchestrator,
             state=state,
         )
@@ -2501,16 +2516,14 @@ def _run_enhance_batch(  # noqa: PLR0913 — orchestration glue, see #316
 
 def _submit_subagent_batch_cli(
     *,
-    project_path: Path,
-    project_name: str,
-    language: str,
+    project: _EnhanceProjectContext,
     orchestrator: AIOrchestrator,
     state: EnhanceState,
 ) -> None:
     """Build the subagent batch plan, submit, and persist."""
     target_context = (
-        f"Project: {project_name}, "
-        f"Language: {language}, "
+        f"Project: {project.project_name}, "
+        f"Language: {project.language}, "
         f"Type: existing project being re-tuned via `green enhance --batch`"
     )
     generator = SubagentsGenerator(orchestrator)
@@ -2522,7 +2535,7 @@ def _submit_subagent_batch_cli(
                 generator=generator,
                 target_context=target_context,
                 state=state,
-                project_path=project_path,
+                project_path=project.project_path,
             ),
         )
     )
@@ -2551,9 +2564,11 @@ def _resume_subagent_batch_cli(
             resume_subagent_batch(
                 orchestrator=orchestrator,
                 generator=generator,
-                state=state,
-                project_path=project_path,
-                file_writer=file_writer,
+                persistence=BatchPersistenceContext(
+                    state=state,
+                    project_path=project_path,
+                    file_writer=file_writer,
+                ),
                 wait_config=BatchWaitConfig(wait=wait),
             ),
         )
@@ -2567,7 +2582,7 @@ def _resume_subagent_batch_cli(
 # message, so they branch into ``_render_batch_in_progress`` /
 # ``_render_batch_ended`` instead. Adding them to this dict would
 # silently drop their dynamic data.
-_BATCH_OUTCOME_STATIC: dict[str, str] = {
+_BATCH_OUTCOME_STATIC: dict[ResumeStatus, str] = {
     ResumeStatus.NO_BATCH: (
         "[yellow]No batch is in flight; nothing to resume.[/yellow]"
     ),
@@ -2588,26 +2603,22 @@ def _render_batch_resume_outcome(outcome: ResumeOutcome) -> None:
     Static-message statuses (``NO_BATCH``, ``EXPIRED``, ``TIMED_OUT``)
     are rendered from the lookup table above. ``IN_PROGRESS`` and
     ``ENDED`` need ``outcome.poll`` / ``outcome.bundle`` data woven
-    in, so they branch into dedicated helpers. Splitting on these
-    lines keeps the dispatcher itself grade-A under xenon.
+    in, so they branch into dedicated helpers. The ``case _`` is
+    unreachable today — :data:`ResumeStatus` is a closed
+    :class:`enum.StrEnum` and every member has a branch above — but
+    the :func:`typing.assert_never` keeps mypy honest: adding a new
+    member without updating this dispatcher fails type checking
+    instead of silently falling through.
     """
-    static = _BATCH_OUTCOME_STATIC.get(outcome.status)
-    if static is not None:
-        console.print(static)
-        return
-    if outcome.status == ResumeStatus.IN_PROGRESS:
-        _render_batch_in_progress(outcome)
-        return
-    if outcome.status == ResumeStatus.ENDED:
-        _render_batch_ended(outcome)
-        return
-    # Defensive guard: a future ``ResumeStatus`` constant added
-    # without updating this dispatcher would otherwise silently
-    # render the ENDED message — which prints "0 written, 0 failed"
-    # for a status that means something else entirely. Fail loudly
-    # at the source instead.
-    msg = f"Unhandled batch resume status: {outcome.status!r}"
-    raise ValueError(msg)
+    match outcome.status:
+        case ResumeStatus.NO_BATCH | ResumeStatus.EXPIRED | ResumeStatus.TIMED_OUT:
+            console.print(_BATCH_OUTCOME_STATIC[outcome.status])
+        case ResumeStatus.IN_PROGRESS:
+            _render_batch_in_progress(outcome)
+        case ResumeStatus.ENDED:
+            _render_batch_ended(outcome)
+        case _:
+            assert_never(outcome.status)
 
 
 def _render_batch_in_progress(outcome: ResumeOutcome) -> None:
@@ -2819,9 +2830,11 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
 
     if batch:
         _run_enhance_batch(
-            project_path=project_path,
-            project_name=resolved_name,
-            language=resolved_language,
+            project=_EnhanceProjectContext(
+                project_path=project_path,
+                project_name=resolved_name,
+                language=resolved_language,
+            ),
             orchestrator=orchestrator,
             file_writer=file_writer,
             dry_run=dry_run,

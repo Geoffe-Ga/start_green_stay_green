@@ -2609,16 +2609,25 @@ class TestEnhanceBatchCLI:
         assert "Batch API call failed" in flat
         assert "poll failed (mocked)" in flat
 
-    def test_render_unknown_status_raises_value_error(self) -> None:
-        """Round-2 review #3: an unrecognised ``ResumeStatus`` constant
-        must fail loudly rather than silently rendering as ``ENDED``.
+    def test_render_unknown_status_fails_loudly(self) -> None:
+        """An out-of-enum status must fail loudly rather than silently
+        rendering as ``ENDED``.
 
-        Phase 6 might add new statuses. Without this guard, a forgotten
-        update to ``_render_batch_resume_outcome`` would print a
-        misleading "0 agent(s) written, 0 failed" line for any
-        unhandled value.
+        Phase 6c migrated :class:`ResumeStatus` to :class:`enum.StrEnum`
+        and the dispatcher to a ``match`` statement with
+        :func:`typing.assert_never` — so a future member added without
+        updating ``_render_batch_resume_outcome`` is caught at mypy
+        time, not just at runtime. The runtime guard remains as
+        defense-in-depth: type checkers can be silenced or skipped, so
+        an out-of-enum value reaching the dispatcher still raises
+        ``AssertionError`` from ``assert_never`` rather than producing
+        a misleading "0 written, 0 failed" line.
         """
-        bad = ResumeOutcome(status="bogus-status")
+        # ``# type: ignore[arg-type]`` is exactly how a future
+        # forgotten-case bug would manifest — a developer might silence
+        # mypy here without realising the dispatcher hasn't been
+        # extended. The runtime guard catches it anyway.
+        bad = ResumeOutcome(status="bogus-status")  # type: ignore[arg-type]
 
-        with pytest.raises(ValueError, match="Unhandled batch resume status"):
+        with pytest.raises(AssertionError, match="unreachable"):
             cli._render_batch_resume_outcome(bad)
