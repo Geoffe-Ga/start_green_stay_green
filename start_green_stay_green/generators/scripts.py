@@ -56,6 +56,7 @@ class ScriptsGenerator:
         config: ScriptConfig,
         *,
         file_writer: FileWriter | None = None,
+        project_root: Path | None = None,
     ) -> None:
         """Initialize the Scripts Generator.
 
@@ -64,6 +65,12 @@ class ScriptsGenerator:
             config: ScriptConfig with language and tool settings
             file_writer: Optional FileWriter for additive behavior.
                 If provided, existing files are skipped instead of overwritten.
+            project_root: Optional project root directory. Used to write
+                project-level companion files (such as
+                ``.pip-audit-known-vulnerabilities``) outside the scripts
+                directory. Defaults to ``output_dir`` so that test
+                invocations stay self-contained within their temporary
+                directory.
 
         Raises:
             ValueError: If output_dir is invalid or language is unsupported
@@ -71,6 +78,9 @@ class ScriptsGenerator:
         self.output_dir = Path(output_dir)
         self.config = config
         self._file_writer = file_writer
+        self.project_root = (
+            Path(project_root) if project_root is not None else self.output_dir
+        )
         self._validate_config()
 
     _SAFE_PACKAGE_NAME_RE = re.compile(r"^[a-zA-Z0-9_]+$")
@@ -168,6 +178,9 @@ class ScriptsGenerator:
             "security.sh",
             self._python_security_script(),
         )
+        # Companion data file for pip-audit suppressions — written at the
+        # project root, not added to the scripts dict (it isn't an executable).
+        self._write_pip_audit_known_vulns_template()
         scripts["complexity.sh"] = self._write_script(
             "complexity.sh",
             self._python_complexity_script(),
@@ -1084,7 +1097,23 @@ echo "=== Security Checks (pip-audit) ==="
 if $VERBOSE; then
     echo "Running pip-audit dependency checker..."
 fi
-pip-audit || { echo "✗ pip-audit found issues" >&2; exit 1; }
+
+# Build ignore flags for known transitive dependency vulnerabilities
+# that cannot be fixed (no fix available or deprecated transitive deps).
+# Each entry should have a corresponding tracking issue.
+PIP_AUDIT_ARGS=()
+if [ -f "$PROJECT_ROOT/.pip-audit-known-vulnerabilities" ]; then
+    while IFS= read -r line; do
+        # Strip inline comments and trim whitespace
+        vuln_id="${line%%#*}"
+        vuln_id="${vuln_id%"${vuln_id##*[![:space:]]}"}"
+        # Skip empty lines
+        [[ -z "$vuln_id" ]] && continue
+        PIP_AUDIT_ARGS+=(--ignore-vuln "$vuln_id")
+    done < "$PROJECT_ROOT/.pip-audit-known-vulnerabilities"
+fi
+
+pip-audit "${PIP_AUDIT_ARGS[@]}" || { echo "✗ pip-audit found issues" >&2; exit 1; }
 
 if $FULL; then
     echo "=== Comprehensive Security Scan ==="
@@ -3145,6 +3174,43 @@ case "$SUBCOMMAND" in
         ;;
 esac
 """
+
+    _PIP_AUDIT_KNOWN_VULNS_TEMPLATE = """\
+# Known vulnerabilities in transitive dependencies that cannot be fixed.
+# Each line is a vulnerability ID to ignore via pip-audit --ignore-vuln.
+# Format: VULN_ID  # package - reason - tracking issue
+#
+# Review periodically and remove entries when fixes become available.
+#
+# Example (uncomment and edit):
+# CVE-2025-00000    # example-package - no fix yet - tracking #123
+"""
+
+    def _write_pip_audit_known_vulns_template(self) -> Path | None:
+        """Write a documented empty ``.pip-audit-known-vulnerabilities`` template.
+
+        The template lives next to ``security.sh``'s ``$PROJECT_ROOT`` (the
+        project root in normal CLI usage) so the generated script can locate
+        it via ``$PROJECT_ROOT/.pip-audit-known-vulnerabilities``.
+
+        Returns:
+            Path to the written template, or ``None`` if a file already
+            exists at the destination (preserves user customisations).
+        """
+        template_path = self.project_root / ".pip-audit-known-vulnerabilities"
+        if template_path.exists():
+            return None
+
+        template_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._file_writer is not None:
+            self._file_writer.write_file(
+                template_path, self._PIP_AUDIT_KNOWN_VULNS_TEMPLATE
+            )
+        else:
+            template_path.write_text(
+                self._PIP_AUDIT_KNOWN_VULNS_TEMPLATE, encoding="utf-8"
+            )
+        return template_path
 
     def _write_script(self, filename: str, content: str) -> Path:
         """Write a script file and make it executable.
