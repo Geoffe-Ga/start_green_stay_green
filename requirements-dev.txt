@@ -10,7 +10,7 @@ ruff>=0.2.0,<1.0.0
 black==26.3.1
 isort>=5.13.0,<9.0.0
 mypy>=1.8.0,<2.0.0
-pylint>=3.0.0,<4.0.0
+pylint>=3.0.0,<5.0.0
 prospector>=1.10.0,<2.0.0
 
 # Security analysis
@@ -49,18 +49,18 @@ hypothesis>=6.98.0,<7.0.0
 mutmut>=2.4.0,<4.0.0
 
 # Pre-commit and git hooks
-pre-commit>=3.6.0,<4.0.0
+pre-commit>=3.6.0,<5.0.0
 commitizen>=3.13.0,<4.0.0
 
 # Documentation
 pdoc>=14.0.0,<17.0.0
-sphinx>=7.2.0,<8.0.0
-sphinx-rtd-theme>=2.0.0,<3.0.0
+sphinx>=7.2.0,<10.0.0
+sphinx-rtd-theme>=2.0.0,<4.0.0
 
 # Development utilities
-ipython>=8.20.0,<9.0.0
+ipython>=8.20.0,<10.0.0
 ipdb>=0.13.0,<1.0.0
-importlib-metadata>=7.0.0,<8.0.0
+importlib-metadata>=7.0.0,<10.0.0
 
 # Type stubs for mypy
 types-pyyaml>=6.0.0,<7.0.0

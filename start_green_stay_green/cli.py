@@ -822,6 +822,7 @@ def _generate_scripts_step(
             output_dir=scripts_dir,
             config=scripts_config,
             file_writer=file_writer,
+            project_root=project_path,
         )
         scripts_generator.generate()
     console.print(f"[green]✓[/green] Generated {language} scripts")

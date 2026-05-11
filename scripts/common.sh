@@ -7,6 +7,27 @@
 # 3 separate GUI dialog boxes per pre-commit run when pip accesses PyPI.
 export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring
 
+# Silently upgrade pip if it is older than the minimum CVE-free version.
+# Pip 24.x ships with several known advisories (CVE-2025-8869, CVE-2026-1703,
+# CVE-2026-3219, CVE-2026-6357) that pip-audit flags during local
+# pre-commit runs. CI already upgrades pip on every job. Match that
+# behaviour for contributors with a long-lived .venv so the security hook
+# stays green without manual intervention.
+_upgrade_pip_if_stale() {
+    local min_major=26
+    local current_major
+    current_major=$(pip --version 2>/dev/null | awk '{print $2}' | cut -d. -f1)
+    if [ -z "$current_major" ] || [ "$current_major" -ge "$min_major" ] 2>/dev/null; then
+        return 0
+    fi
+    if [ "${VERBOSE:-false}" = "true" ]; then
+        echo "Upgrading pip (current major < $min_major) to clear known CVEs..."
+        pip install -q --upgrade pip
+    else
+        pip install -q --upgrade pip >/dev/null 2>&1 || true
+    fi
+}
+
 # Ensure venv with required dependencies
 # Usage: ensure_venv
 # Sets global variable: TEMP_VENV_CREATED=true if venv was created
@@ -16,6 +37,7 @@ ensure_venv() {
         if [ "${VERBOSE:-false}" = "true" ]; then
             echo "Using active virtual environment: $VIRTUAL_ENV"
         fi
+        _upgrade_pip_if_stale
         return 0
     fi
 
@@ -26,6 +48,7 @@ ensure_venv() {
         fi
         # shellcheck disable=SC1091
         source .venv/bin/activate
+        _upgrade_pip_if_stale
         return 0
     fi
 
