@@ -1,0 +1,34 @@
+UMBRELLA	umbrella	feat(lang): Achieve full language-support parity across all generators
+EPIC	swift	feat(lang): Add Swift support (watchOS / Apple Watch)
+SUB	swift	foundation	feat(swift): Foundation: registration, CLI & scaffolding
+SUB	swift	quality	feat(swift): Quality tooling: pre-commit, scripts, metrics & architecture
+SUB	swift	ci	feat(swift): CI pipeline: ci.py config + GitHub Actions workflow
+SUB	swift	tests	feat(swift): Tests & coverage: unit / integration / e2e
+SUB	swift	docs	feat(swift): Documentation: CLAUDE.md, README, CLI reference, SPEC
+EPIC	kotlin	feat(lang): Add Kotlin support (Wear OS (Google / Samsung Galaxy Watch 4+))
+SUB	kotlin	foundation	feat(kotlin): Foundation: registration, CLI & scaffolding
+SUB	kotlin	quality	feat(kotlin): Quality tooling: pre-commit, scripts, metrics & architecture
+SUB	kotlin	ci	feat(kotlin): CI pipeline: ci.py config + GitHub Actions workflow
+SUB	kotlin	tests	feat(kotlin): Tests & coverage: unit / integration / e2e
+SUB	kotlin	docs	feat(kotlin): Documentation: CLAUDE.md, README, CLI reference, SPEC
+EPIC	cpp	feat(lang): Add C / C++ support (Tizen (Samsung Galaxy Watch, native))
+SUB	cpp	foundation	feat(cpp): Foundation: registration, CLI & scaffolding
+SUB	cpp	quality	feat(cpp): Quality tooling: pre-commit, scripts, metrics & architecture
+SUB	cpp	ci	feat(cpp): CI pipeline: ci.py config + GitHub Actions workflow
+SUB	cpp	tests	feat(cpp): Tests & coverage: unit / integration / e2e
+SUB	cpp	docs	feat(cpp): Documentation: CLAUDE.md, README, CLI reference, SPEC
+EPIC	java	feat(lang): Complete Java support (Wear OS (legacy Android Wear))
+SUB	java	foundation	feat(java): Foundation: registration, CLI & scaffolding
+SUB	java	quality	feat(java): Quality tooling: pre-commit, scripts, metrics & architecture
+SUB	java	tests	feat(java): Tests & coverage: unit / integration / e2e
+SUB	java	docs	feat(java): Documentation: CLAUDE.md, README, CLI reference, SPEC
+EPIC	csharp	feat(lang): Complete C# support (general .NET)
+SUB	csharp	quality	feat(csharp): Quality tooling: pre-commit, scripts, metrics & architecture
+SUB	csharp	tests	feat(csharp): Tests & coverage: unit / integration / e2e
+SUB	csharp	docs	feat(csharp): Documentation: CLAUDE.md, README, CLI reference, SPEC
+EPIC	ruby	feat(lang): Complete Ruby support (general)
+SUB	ruby	quality	feat(ruby): Quality tooling: pre-commit, scripts, metrics & architecture
+SUB	ruby	tests	feat(ruby): Tests & coverage: unit / integration / e2e
+SUB	ruby	docs	feat(ruby): Documentation: CLAUDE.md, README, CLI reference, SPEC
+SINGLE	go	architecture	feat(go): Architecture-enforcement parity
+SINGLE	rust	architecture	feat(rust): Architecture-enforcement parity
