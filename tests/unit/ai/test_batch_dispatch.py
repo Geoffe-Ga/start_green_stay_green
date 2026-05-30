@@ -315,7 +315,7 @@ class TestResumeSubagentBatchEnded:
 
         assert outcome.status == ResumeStatus.ENDED
         assert outcome.succeeded_agents == ("alpha", "beta")
-        assert outcome.failed_agents == ()
+        assert not outcome.failed_agents
         # Files written.
         agents_dir = tmp_path / ".claude" / "agents"
         assert (agents_dir / "alpha.md").read_text(encoding="utf-8")

@@ -350,7 +350,10 @@ min_confidence = 80
 paths = ["start_green_stay_green"]
 exclude = ["tests/", "reference/", "templates/"]
 ignore_decorators = ["@app.command", "@router.get", "@router.post"]
-ignore_names = []
+# BatchCreateRequest is used only inside a string-literal cast annotation
+# (cast("Iterable[BatchCreateRequest]", payload) in ai/orchestrator.py), which
+# vulture cannot resolve, so it is flagged as an unused import false positive.
+ignore_names = ["BatchCreateRequest"]
 
 # Radon complexity
 [tool.radon]

@@ -66,7 +66,7 @@ class TestTimingReport:
         report.record_api_call(APICallRecord(latency_s=0.5))
 
         assert len(report.api_calls) == 1
-        assert report.steps == []
+        assert not report.steps
 
     def test_aggregate_token_totals(self) -> None:
         report = TimingReport()
@@ -224,5 +224,5 @@ class TestMaybeCollectTimingExceptionPath:
         with pytest.raises(ValueError, match="bare"):
             self._explode_bare()
 
-        assert list(tmp_path.iterdir()) == []
+        assert not list(tmp_path.iterdir())
         assert get_active_report() is None

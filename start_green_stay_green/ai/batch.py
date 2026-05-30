@@ -231,7 +231,7 @@ def _tool_use_result_from_message(message: object) -> ToolUseResult:
     usage = _extract_attr(message, "usage")
     return ToolUseResult(
         tool_name=str(_extract_attr(tool_block, "name") or ""),
-        tool_input=dict(tool_input),
+        tool_input=tool_input.copy(),
         token_usage=TokenUsage(
             input_tokens=_int_attr(usage, "input_tokens"),
             output_tokens=_int_attr(usage, "output_tokens"),
