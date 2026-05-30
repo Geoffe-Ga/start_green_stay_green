@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import TYPE_CHECKING
@@ -178,6 +179,63 @@ class TestStepTimerContext:
 
         assert report.steps[0].name == "explodes"
         assert report.steps[0].duration_s >= 0
+
+
+class TestActiveReportContextIsolation:
+    """The active report is a ``ContextVar`` with per-task isolation."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_tasks_see_their_own_active_report(self) -> None:
+        """Two concurrent tasks each install and observe a distinct report.
+
+        Because ``set_active_report`` mutates a ``ContextVar``, a value set
+        inside one task is invisible to a sibling task running in the same
+        event loop. A process-global singleton would let the last writer
+        clobber the other task's report, so this fails on the old impl.
+        """
+        report_a = TimingReport()
+        report_b = TimingReport()
+        # Barriers force both tasks to interleave: each sets its report,
+        # then waits until the other has also set its own before reading.
+        both_set = asyncio.Event()
+        set_count = 0
+
+        async def _run(report: TimingReport) -> TimingReport | None:
+            nonlocal set_count
+            set_active_report(report)
+            set_count += 1
+            if set_count == 2:  # both tasks have written
+                both_set.set()
+            await both_set.wait()
+            # If the report leaked across tasks, we would observe the
+            # sibling's report (or whichever wrote last).
+            return get_active_report()
+
+        seen_a, seen_b = await asyncio.gather(_run(report_a), _run(report_b))
+
+        assert seen_a is report_a
+        assert seen_b is report_b
+
+    @pytest.mark.asyncio
+    async def test_spawned_task_inherits_parent_active_report(self) -> None:
+        """A task spawned inside an active report inherits it at spawn time.
+
+        This guarantees the Phase 2 ``asyncio.gather`` fan-out still
+        attributes API calls dispatched by child tasks to the parent's
+        report, because ``ContextVar`` copies the context at task creation.
+        """
+        parent_report = TimingReport()
+        set_active_report(parent_report)
+
+        async def _child() -> TimingReport | None:
+            # No explicit set here: the child must inherit the parent's
+            # report from the copied context.
+            return get_active_report()
+
+        first, second = await asyncio.gather(_child(), _child())
+
+        assert first is parent_report
+        assert second is parent_report
 
 
 class TestMaybeCollectTimingExceptionPath:
