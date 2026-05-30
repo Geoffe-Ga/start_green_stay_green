@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+import warnings
 
 if TYPE_CHECKING:
     from start_green_stay_green.ai.orchestrator import AIOrchestrator
@@ -43,17 +44,32 @@ class ArchitectureEnforcementGenerator:
 
     def __init__(
         self,
-        orchestrator: AIOrchestrator,
+        orchestrator: AIOrchestrator | None = None,
         *,
         output_dir: Path | None = None,
     ) -> None:
         """Initialize Architecture Enforcement Generator.
 
         Args:
-            orchestrator: AI orchestrator for content generation.
+            orchestrator: Deprecated. The architecture generator is fully
+                deterministic; this parameter is retained for source
+                compatibility and ignored. New code should omit it.
+                Passing a non-``None`` value emits a
+                :class:`DeprecationWarning` so callers can find the
+                stale wiring before the parameter is removed in the
+                Phase 3 cleanup of the optimization roadmap.
             output_dir: Output directory for generated files.
                 Defaults to plans/architecture.
         """
+        if orchestrator is not None:
+            warnings.warn(
+                "ArchitectureEnforcementGenerator's 'orchestrator' parameter "
+                "is deprecated and will be removed in Phase 3 of the "
+                "optimization roadmap. The generator is fully "
+                "deterministic; pass nothing instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self.orchestrator = orchestrator
         self.output_dir = output_dir or Path("plans/architecture")
 

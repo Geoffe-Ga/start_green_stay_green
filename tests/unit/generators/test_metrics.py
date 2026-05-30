@@ -218,7 +218,8 @@ class TestMetricsGeneratorInit:
             project_name="test",
         )
 
-        generator = MetricsGenerator(orchestrator, config)
+        with pytest.warns(DeprecationWarning, match="'orchestrator' parameter"):
+            generator = MetricsGenerator(orchestrator, config)
 
         assert generator.orchestrator is orchestrator
         assert generator.config is config

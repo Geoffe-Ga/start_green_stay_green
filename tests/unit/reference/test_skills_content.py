@@ -142,13 +142,34 @@ class TestSkillsQuality:
                 len(content) > 1000
             ), f"{skill} too short ({len(content)} chars, need >1000)"
 
-    def test_skills_have_code_examples(self, skills_dir: Path) -> None:
-        """Test skills contain code examples (code blocks)."""
+    def test_skills_have_fenced_code_block_in_tree(self, skills_dir: Path) -> None:
+        """Test each skill tree has a fenced block in SKILL.md or references/.
+
+        The check spans the whole skill directory because prose-focused
+        skills (e.g. user-facing-error-messages) keep their fenced examples
+        in references/ rather than in SKILL.md itself.
+        """
         for skill in REQUIRED_SKILLS:
-            skill_path = skills_dir / skill / "SKILL.md"
-            content = skill_path.read_text()
+            skill_dir = skills_dir / skill
+            candidates = [
+                skill_dir / "SKILL.md",
+                *(skill_dir / "references").glob("*.md"),
+            ]
+            has_fenced_block = any(
+                "```" in path.read_text() for path in candidates if path.is_file()
+            )
 
-            # Check for code blocks (```language or ```)
-            has_code_blocks = "```" in content
+            msg = f"{skill} missing fenced code block in SKILL.md or references/"
+            assert has_fenced_block, msg
 
-            assert has_code_blocks, f"{skill} missing code examples"
+    def test_skills_references_files_non_empty(self, skills_dir: Path) -> None:
+        """Test that any references/ files alongside a SKILL.md are non-empty."""
+        for skill in REQUIRED_SKILLS:
+            references_dir = skills_dir / skill / "references"
+            if not references_dir.is_dir():
+                continue
+            for path in sorted(references_dir.iterdir()):
+                if not path.is_file():
+                    continue
+                msg = f"{skill}: empty reference file {path.name}"
+                assert path.stat().st_size > 0, msg

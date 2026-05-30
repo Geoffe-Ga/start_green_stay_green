@@ -194,6 +194,120 @@ These options work with all commands:
 - `--help`: Show help message and exit
 
 
+### `green enhance` — re-tune an existing project
+
+Re-runs Pass 2 (AI tuning) over a project that already has the
+deterministic scaffold in place. Useful after `green init --offline`
+when you're ready to add the AI-tuned subagents, or after the
+reference subagents in this repo are updated and you want to pull
+the new style into your project.
+
+```bash
+# Re-tune everything in the current directory:
+green enhance
+
+# Subset:
+green enhance --targets claude-md
+
+# Preview the token cost without writing anything:
+green enhance --dry-run
+```
+
+#### Batch mode (Phase 5)
+
+For bulk runs (CI projects, batch enhancement of many repos), the
+Anthropic Message Batches API is 50% cheaper at the cost of a ≤24 h
+SLA. `green enhance --batch` submits subagent tunings via that path
+and exits — re-run the same command to pick up results once the
+batch ends:
+
+```bash
+# Submit:
+green enhance --batch --targets subagents
+# → "Submitted batch msgbatch_42 covering 8 subagent(s).
+#    Re-run `green enhance --batch` to fetch results."
+
+# (later — minutes to hours later) Resume:
+green enhance --batch --targets subagents
+# → "✓ Batch reconciled: 8 agent(s) written, 0 failed."
+```
+
+For a single blocking command (typical in CI), pass `--wait`:
+
+```bash
+green enhance --batch --wait --targets subagents
+# Polls every 30 s until the batch ends or the timeout (default 1h)
+# elapses.
+```
+
+Limits and trade-offs:
+
+* Batch mode currently handles `--targets subagents` only —
+  `claude-md` uses a free-text path that the Batches API does not
+  yet wrap. Mixing the two errors before any API call.
+* Batches expire after 24 h server-side. `green enhance --batch`
+  detects an expired record on the resume side and clears it with
+  a "submit a fresh batch" message rather than producing an opaque
+  error. Note: the expiry check runs only at the *start* of a
+  resume call, so when `--wait` blocks across the 24 h boundary
+  the loop will surface as `--wait timed out` rather than `expired`
+  — re-running once afterwards picks up the (now-recognised)
+  expired record and clears it.
+* Per-request failures (`errored` / `canceled` / `expired`) do *not*
+  abort the whole batch — successful agents land on disk, failed
+  ones are listed with their names so the user can re-run.
+
+See [`plans/architecture/ADR-001-batch-enhance.md`](plans/architecture/ADR-001-batch-enhance.md)
+for the full design rationale.
+
+
+## AI Enhancement
+
+`green` ships a two-pass generation model: a deterministic scaffold
+runs first (no API calls, always succeeds), then a parallel AI polish
+pass tunes the AI-facing artifacts (`CLAUDE.md`, `.claude/agents/*`)
+to the project's specifics. Choose the mode that fits your
+constraints:
+
+| Mode | Wall-clock | API calls | When to use |
+|---|---|---|---|
+| `green init --offline` | ~3 s | 0 | Air-gapped, no key, or you want the scaffold first and the polish later. Identical scaffold to the default mode. |
+| `green init` (default) | ~6–10 s | ≤3 | First-class path. Scaffold + parallel Pass-2 polish in one command. |
+| `green init --no-enhance` | ~3 s | 0 | Same output as `--offline`; convenient when you have a key in the environment but want to skip the polish for this run. |
+| `green enhance` | ~3–6 s | ≤3 | Re-tune the AI artifacts of an existing `green init` project (e.g. after pulling fresh reference subagents from this repo). |
+| `green enhance --batch` | minutes – hours | ≤3 | Same outputs as `green enhance` at 50 % cost via the Anthropic Batches API. Two-call submit-then-resume; pair with `--wait` for a single blocking command. Subagents only. |
+
+Numbers are rough order-of-magnitude on a Mac M-series with the
+default Sonnet model (see `green --help` for the current pin); your
+mileage varies with network and rate-limit conditions. The scaffold
+half is deterministic and offline; only the polish half varies with
+the API.
+
+### What "Pass 2 polish" actually does
+
+| Artifact | Pass 1 (scaffold) | Pass 2 (polish) |
+|---|---|---|
+| `CLAUDE.md` | Generic baseline keyed off `--language` | Tuned around the user's project name + language metadata |
+| `.claude/agents/*.md` | Reference profiles copied as-is | Each profile re-tuned for the target project's domain (FastAPI vs CLI vs library, Python vs TypeScript, etc.) |
+| `.github/workflows/*.yml` | Templated from language presets | (Pass-1 only — no AI rewrite) |
+| `pyproject.toml`, scripts, configs | Templated from language presets | (Pass-1 only — no AI rewrite) |
+
+The "polish" is structurally tool-use against the
+`report_tuning` schema, so output is parseable JSON, not free text;
+results come with a per-agent change list the CLI surfaces on
+completion.
+
+### Switching modes after the fact
+
+* **`--offline` → polished**: re-run `green enhance` (no need to
+  re-init).
+* **Default → re-tune after editing reference subagents**: same —
+  `green enhance`.
+* **Default → cheaper bulk re-tune**: `green enhance --batch
+  --targets subagents`. See the [Batch mode](#batch-mode-phase-5)
+  subsection above.
+
+
 ## Documentation
 
 Comprehensive documentation for using Start Green Stay Green:

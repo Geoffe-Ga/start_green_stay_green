@@ -266,3 +266,88 @@ class TestOrchestratorEndToEndWorkflows:
                 prompt="Valid prompt",
                 output_format="invalid",  # type: ignore[arg-type]
             )
+
+
+@pytest.mark.integration
+class TestOrchestratorAsyncWorkflows:
+    """Coverage for the AsyncAnthropic-backed generate_async path."""
+
+    @pytest.mark.asyncio
+    @patch("start_green_stay_green.ai.orchestrator.AsyncAnthropic")
+    async def test_generate_async_returns_generation_result(
+        self,
+        mock_async_anthropic: MagicMock,
+    ) -> None:
+        """End-to-end: generate_async resolves to a populated GenerationResult."""
+        # The orchestrator caches a single AsyncAnthropic per instance,
+        # so the constructor returns a configured async client.
+        mock_client = MagicMock()
+        mock_async_anthropic.return_value = mock_client
+
+        text_block = create_autospec(TextBlock, instance=True)
+        text_block.text = "{}"
+
+        mock_response = MagicMock()
+        mock_response.id = "msg_async_smoke"
+        mock_response.content = [text_block]
+        mock_response.usage.input_tokens = 12
+        mock_response.usage.output_tokens = 7
+        mock_response.model = ModelConfig.SONNET
+
+        # ``messages.create`` on AsyncAnthropic is a coroutine; the
+        # orchestrator awaits it directly.
+        async def _create(**_kwargs: object) -> MagicMock:
+            return mock_response
+
+        mock_client.messages.create.side_effect = _create
+
+        # ``aclose`` is awaited from ``AIOrchestrator.aclose``; provide
+        # an awaitable so the close path runs cleanly.
+        async def _close() -> None:
+            return None
+
+        mock_client.close.side_effect = _close
+
+        orchestrator = AIOrchestrator(api_key="async-smoke", retry_delay=0.01)
+        try:
+            result = await orchestrator.generate_async(
+                prompt="hello", output_format="markdown"
+            )
+        finally:
+            await orchestrator.aclose()
+
+        assert isinstance(result, GenerationResult)
+        assert result.content == "{}"
+        assert result.token_usage.input_tokens == 12
+        assert result.token_usage.output_tokens == 7
+        # The async client is created exactly once (lazy + cached).
+        mock_async_anthropic.assert_called_once_with(api_key="async-smoke")
+
+    @pytest.mark.asyncio
+    @patch("start_green_stay_green.ai.orchestrator.AsyncAnthropic")
+    async def test_aclose_is_idempotent(
+        self,
+        mock_async_anthropic: MagicMock,
+    ) -> None:
+        """``aclose`` may be called repeatedly without raising."""
+        mock_client = MagicMock()
+        mock_async_anthropic.return_value = mock_client
+
+        async def _close() -> None:
+            return None
+
+        mock_client.close.side_effect = _close
+
+        orchestrator = AIOrchestrator(api_key="async-aclose")
+
+        # No async work was done — ``aclose`` is a no-op.
+        await orchestrator.aclose()
+        await orchestrator.aclose()
+        mock_client.close.assert_not_called()
+
+        # Now allocate the client by calling ``_get_async_client`` and
+        # close it twice.
+        orchestrator._get_async_client()
+        await orchestrator.aclose()
+        await orchestrator.aclose()
+        mock_client.close.assert_called_once()

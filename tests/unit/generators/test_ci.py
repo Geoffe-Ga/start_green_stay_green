@@ -9,8 +9,10 @@ Comprehensive tests for CI pipeline generation covering:
 - Static utility methods
 """
 
+from pathlib import Path
 from unittest.mock import Mock
 
+from jinja2 import UndefinedError
 import pytest
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
@@ -1230,3 +1232,152 @@ jobs:
             versions = config["supported_versions"]
             assert isinstance(versions, list), f"{lang} versions not a list"
             assert len(versions) > 0, f"{lang} versions is empty"
+
+
+class TestCIGeneratorTemplatePath:
+    """Tests for the deterministic, no-API template path (Phase 1)."""
+
+    @pytest.mark.parametrize(
+        "language",
+        ["python", "typescript", "go", "rust"],
+    )
+    def test_generate_from_template_for_supported_language(self, language: str) -> None:
+        """Each canonical language renders without an orchestrator."""
+        generator = CIGenerator(language=language)
+
+        workflow = generator.generate_workflow_from_template()
+
+        assert workflow.is_valid
+        assert workflow.language == language
+        assert workflow.content
+        # Reference templates ship a 'quality' job; validation should pass.
+        assert "quality" in workflow.content
+
+    def test_generate_workflow_uses_template_when_no_orchestrator(self) -> None:
+        """Calling generate_workflow() with no orchestrator picks the template path."""
+        generator = CIGenerator(language="python")
+
+        workflow = generator.generate_workflow()
+
+        assert workflow.is_valid
+        # Output should match what generate_workflow_from_template returns.
+        from_template = generator.generate_workflow_from_template()
+        assert workflow.content == from_template.content
+
+    def test_generate_workflow_falls_back_to_ai_when_orchestrator_provided(
+        self,
+    ) -> None:
+        """When an orchestrator is supplied the legacy AI path is taken."""
+        # Build a minimal valid workflow YAML for the AI mock to return.
+        valid_yaml = (
+            "name: Test\n"
+            "on: [push]\n"
+            "jobs:\n"
+            "  quality:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: echo hi\n"
+        )
+        mock_orchestrator = Mock(spec=AIOrchestrator)
+        mock_orchestrator.generate.return_value = GenerationResult(
+            content=valid_yaml,
+            format="yaml",
+            token_usage=TokenUsage(input_tokens=10, output_tokens=20),
+            model=ModelConfig.SONNET,
+            message_id="msg_test",
+        )
+
+        generator = CIGenerator(mock_orchestrator, "python")
+        workflow = generator.generate_workflow()
+
+        assert workflow.is_valid
+        mock_orchestrator.generate.assert_called_once()
+
+    def test_generate_from_template_raises_for_missing_template(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing reference template raises FileNotFoundError."""
+        # Point reference_dir at an empty directory.
+        generator = CIGenerator(
+            language="python",
+            reference_dir=tmp_path,
+        )
+
+        with pytest.raises(FileNotFoundError, match="reference CI template"):
+            generator.generate_workflow_from_template()
+
+    def test_project_name_substituted_into_template(self, tmp_path: Path) -> None:
+        """A ``<<% project_name %>>`` placeholder renders with the real value."""
+        # Build a synthetic reference template that *does* use the
+        # placeholder. The real reference YAMLs do not yet (intentional —
+        # the API is forward-looking); this fixture proves the wiring
+        # works the moment a maintainer adds it.
+        reference_dir = tmp_path / "ref"
+        reference_dir.mkdir()
+        (reference_dir / "python.yml").write_text(
+            "name: CI for <<% project_name %>>\n"
+            "on: [push]\n"
+            "jobs:\n"
+            "  quality:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: echo <<% project_name %>>\n",
+            encoding="utf-8",
+        )
+
+        generator = CIGenerator(
+            language="python",
+            reference_dir=reference_dir,
+            project_name="my-cool-app",
+        )
+        workflow = generator.generate_workflow()
+
+        assert workflow.is_valid
+        assert "name: CI for my-cool-app" in workflow.content
+        assert "echo my-cool-app" in workflow.content
+        # The placeholder must be fully substituted.
+        assert "<<% project_name %>>" not in workflow.content
+
+    def test_project_name_none_renders_empty_string(self, tmp_path: Path) -> None:
+        """``project_name=None`` coerces to ``""`` rather than the string "None"."""
+        reference_dir = tmp_path / "ref"
+        reference_dir.mkdir()
+        (reference_dir / "python.yml").write_text(
+            "name: CI<<% project_name %>>\n"
+            "on: [push]\n"
+            "jobs:\n"
+            "  quality:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: echo hi\n",
+            encoding="utf-8",
+        )
+
+        generator = CIGenerator(
+            language="python",
+            reference_dir=reference_dir,
+        )
+        workflow = generator.generate_workflow_from_template()
+
+        assert workflow.is_valid
+        # ``None`` would have produced "name: CINone" — that's the bug
+        # the StrictUndefined+coercion change fixed.
+        assert "None" not in workflow.content
+        assert "name: CI\n" in workflow.content
+
+    def test_undeclared_placeholder_raises_strict_undefined(
+        self, tmp_path: Path
+    ) -> None:
+        """Adding a new placeholder without wiring it raises at render time."""
+        reference_dir = tmp_path / "ref"
+        reference_dir.mkdir()
+        (reference_dir / "python.yml").write_text(
+            "name: CI <<% missing_var %>>\n"
+            "jobs:\n  quality:\n    runs-on: ubuntu-latest\n"
+            "    steps:\n      - run: echo hi\n",
+            encoding="utf-8",
+        )
+
+        generator = CIGenerator(language="python", reference_dir=reference_dir)
+        with pytest.raises(UndefinedError):
+            generator.generate_workflow_from_template()

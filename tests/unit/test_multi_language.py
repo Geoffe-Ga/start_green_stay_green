@@ -26,7 +26,7 @@ from start_green_stay_green.cli import _scripts_dir_has_other_language
 from start_green_stay_green.utils.file_writer import FileWriter
 
 _STEP_NAMES = [
-    "_generate_with_orchestrator",
+    "_generate_pass2_polish",
     "_generate_skills_step",
     "_generate_precommit_step",
     "_generate_scripts_step",
@@ -135,7 +135,7 @@ class TestMultiLanguageGeneration:
             # Shared steps called once (not per-language)
             _get_mock("_generate_readme_step").assert_called_once()
             _get_mock("_generate_skills_step").assert_called_once()
-            _get_mock("_generate_with_orchestrator").assert_called_once()
+            _get_mock("_generate_pass2_polish").assert_called_once()
 
     def test_single_language_backward_compatible(self) -> None:
         """Test single language works identically to before."""

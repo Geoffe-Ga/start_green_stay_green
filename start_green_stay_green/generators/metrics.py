@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 from typing import Any
 from typing import TYPE_CHECKING
+import warnings
 
 import yaml
 
@@ -273,12 +274,31 @@ class MetricsGenerator(BaseGenerator):
         """Initialize MetricsGenerator.
 
         Args:
-            orchestrator: Optional AI orchestrator for generation.
-            config: Configuration for metrics generation.
+            orchestrator: Deprecated. The metrics generator is fully
+                deterministic; this parameter is retained for source
+                compatibility (every existing caller passes either an
+                orchestrator or :data:`None` here as the first
+                positional arg) and is ignored. Passing a non-``None``
+                value emits a :class:`DeprecationWarning`. The parameter
+                will be removed in the Phase 3 cleanup of
+                plans/2026-05-03-claude-init-optimization-roadmap.md.
+            config: Configuration for metrics generation. Required;
+                the type system enforces that callers pass a real
+                :class:`MetricsGenerationConfig`.
 
         Raises:
-            ValueError: If configuration is invalid.
+            ValueError: If ``config`` fails its own validation
+                (:meth:`_validate_config`).
         """
+        if orchestrator is not None:
+            warnings.warn(
+                "MetricsGenerator's 'orchestrator' parameter is "
+                "deprecated and will be removed in Phase 3 of the "
+                "optimization roadmap. The generator is fully "
+                "deterministic; pass None instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self.orchestrator = orchestrator
         self.config = config
         self._validate_config()

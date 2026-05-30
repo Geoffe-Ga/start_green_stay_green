@@ -1,25 +1,105 @@
 """Content tuning system for adapting content to target repository context.
 
 Uses Claude Sonnet to adapt copied content while preserving structure.
+The model is invoked via the ``report_tuning`` tool so the response
+arrives as validated JSON (``tuned_content`` + ``changes``) instead of
+free-form text — eliminates the previous regex-based ``CHANGES:``
+parser. The stable instruction prefix is sent as a cache-controlled
+system block so back-to-back per-agent tunes within a single
+``green init`` (or ``green enhance``) hit the prompt cache.
 """
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import logging
 from typing import TYPE_CHECKING
+from typing import TypeVar
+from typing import cast
 
+from start_green_stay_green.ai.batch import ToolUseBatchRequest
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError
+from start_green_stay_green.ai.prompts.manager import get_default_manager
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable
+    from collections.abc import Callable
     from collections.abc import Sequence
+
+    from start_green_stay_green.ai.orchestrator import ToolUseResult
 
 
 logger = logging.getLogger(__name__)
 
-# Constants for response parsing
-_CHANGES_SECTION_PARTS = 2
+
+# Tool definition for the structured-output path. The model is
+# *forced* to invoke this tool (via ``tool_choice``) so the response
+# is always a JSON object matching the schema — no regex parsing.
+_REPORT_TUNING_TOOL: dict[str, object] = {
+    "name": "report_tuning",
+    "description": (
+        "Report the tuned content and a bullet list of changes made "
+        "while adapting the source content to the target context."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "tuned_content": {
+                "type": "string",
+                "description": "The fully adapted content.",
+            },
+            "changes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Short bullet describing each change made. "
+                    "Empty list when no changes were necessary."
+                ),
+            },
+        },
+        "required": ["tuned_content", "changes"],
+    },
+}
+
+
+# Generic over the result type so callers get a precise return type back
+# instead of a blanket ``Any``.
+_T = TypeVar("_T")
+
+
+async def _await_or_offload(
+    call: Callable[..., _T | Awaitable[_T]],
+    *args: object,
+    **kwargs: object,
+) -> _T:
+    """Invoke ``call`` and return its result, awaitable or otherwise.
+
+    Two cases, both real:
+
+    * **Async callable** (``asyncio.iscoroutinefunction`` is ``True``):
+      call it, await the resulting coroutine. This covers both real
+      :class:`anthropic.AsyncAnthropic` paths and :class:`AsyncMock`
+      doubles in tests.
+    * **Sync callable** (the default for :meth:`AIOrchestrator.generate`):
+      offload to a worker thread via :func:`asyncio.to_thread` so a
+      hundreds-of-ms HTTP round-trip does not block the event loop while
+      sibling tunings wait. Tests using ``MagicMock(spec=AIOrchestrator)``
+      land here too — :func:`asyncio.to_thread` happily runs the mock
+      and returns the configured value.
+
+    The previous "autospec MagicMock falls through" branch was removed
+    when the corresponding tests were migrated from
+    ``create_autospec(AIOrchestrator)`` to ``MagicMock(spec=...)``;
+    issue #306 closed.
+    """
+    if asyncio.iscoroutinefunction(call):
+        return await cast("Awaitable[_T]", call(*args, **kwargs))
+    # Sync path: cast narrows ``T | Awaitable[T]`` to ``T`` for the
+    # signature :func:`asyncio.to_thread` expects.
+    sync_call = cast("Callable[..., _T]", call)
+    return await asyncio.to_thread(sync_call, *args, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -96,89 +176,171 @@ class ContentTuner:
             msg = f"{context_name} cannot be empty"
             raise ValueError(msg)
 
-    def _build_tuning_prompt(
+    @staticmethod
+    def _build_system_blocks(
+        source_context: str,
+        target_context: str,
+        preserve_sections: Sequence[str] | None,
+    ) -> list[dict[str, object]]:
+        """Render the cache-controlled system block for a tune call.
+
+        The full prompt body is rendered from
+        ``ai/prompts/templates/content_tune.jinja2``. The single block
+        carries ``cache_control: {"type": "ephemeral"}`` so Anthropic
+        caches the entire prefix for ~5 minutes — back-to-back
+        per-agent tunes within one ``green init`` hit the cache.
+
+        Why a single block (rather than splitting instructions and
+        context across two)? The Anthropic prompt cache keys on the
+        leading prefix; one cached block is the cleanest contract.
+        Per-call deltas (``source_content``) live in the user
+        message, not here.
+
+        Args:
+            source_context: Description of the source repository.
+            target_context: Description of the target repository.
+            preserve_sections: Optional list of section headings the
+                model must leave verbatim.
+
+        Returns:
+            One-element list of system blocks, ready to pass straight
+            to :meth:`AIOrchestrator.generate_tool_use_async`.
+        """
+        prompt = get_default_manager().render(
+            "content_tune",
+            {
+                "source_context": source_context,
+                "target_context": target_context,
+                "preserve_sections": list(preserve_sections or []),
+            },
+        )
+        return [
+            {
+                "type": "text",
+                "text": prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+    @staticmethod
+    def _build_user_message(source_content: str) -> str:
+        """Per-call delta: the only part that varies between subagent tunes.
+
+        Kept tiny on purpose so the cache prefix (system blocks) is as
+        long as possible relative to the per-call body.
+        """
+        return f"CONTENT TO ADAPT:\n{source_content}"
+
+    @staticmethod
+    def _validate_tool_use_input(
+        tool_input: dict[str, object],
+    ) -> tuple[str, list[object]]:
+        """Validate ``tool_input`` shape and return its two required fields.
+
+        Splits validation off from filtering so the parser stays at
+        cyclomatic grade A. The schema enforces both fields at the
+        API layer; this catches malformed payloads from an SDK
+        version mismatch before they cause a confusing ``TypeError``
+        downstream.
+        """
+        raw_content = tool_input.get("tuned_content")
+        if not isinstance(raw_content, str):
+            msg = "report_tuning.tuned_content must be a string"
+            raise GenerationError(msg)
+        raw_changes = tool_input.get("changes", [])
+        if not isinstance(raw_changes, list):
+            msg = "report_tuning.changes must be a list of strings"
+            raise GenerationError(msg)
+        return raw_content, raw_changes
+
+    @classmethod
+    def _parse_tool_use_input(
+        cls,
+        tool_input: dict[str, object],
+    ) -> tuple[str, list[str]]:
+        """Extract ``(tuned_content, changes)`` from the tool's JSON input."""
+        raw_content, raw_changes = cls._validate_tool_use_input(tool_input)
+        changes = [c for c in raw_changes if isinstance(c, str) and c.strip()]
+        return raw_content, changes
+
+    def build_batch_request(
         self,
+        custom_id: str,
         source_content: str,
         source_context: str,
         target_context: str,
         preserve_sections: Sequence[str] | None = None,
-    ) -> str:
-        """Build prompt for tuning operation.
+    ) -> ToolUseBatchRequest:
+        """Render the per-call payload for one tune as a batch request.
+
+        Same inputs as :meth:`tune`, plus a caller-chosen
+        ``custom_id`` that the Anthropic Batches API echoes back so
+        results can be correlated to the originating target. Returns
+        the dataclass :meth:`AIOrchestrator.submit_tool_use_batch`
+        accepts without firing a sync API call — the caller owns the
+        submission.
+
+        The returned request reuses :meth:`_build_system_blocks` and
+        :meth:`_build_user_message` so the cache prefix (and
+        therefore the cache hit ratio) is identical between sync and
+        batch paths.
 
         Args:
+            custom_id: Unique identifier within the batch the caller
+                will submit. Conventional shape:
+                ``"<kind>:<name>"`` (e.g. ``"subagent:architecture"``).
             source_content: Original content to adapt.
             source_context: Description of source repository.
             target_context: Description of target repository.
             preserve_sections: Sections to leave unchanged.
 
         Returns:
-            Formatted prompt for AI tuning.
+            :class:`ToolUseBatchRequest` ready to bundle alongside
+            sibling targets in a single
+            ``submit_tool_use_batch`` call.
+
+        Raises:
+            ValueError: If any input fails the same validation
+                :meth:`tune` applies.
         """
-        preserve_text = ""
-        if preserve_sections:
-            sections = ", ".join(f'"{s}"' for s in preserve_sections)
-            preserve_text = f"\n\nPRESERVE THESE SECTIONS UNCHANGED: {sections}"
+        if not custom_id or not custom_id.strip():
+            msg = "custom_id cannot be empty"
+            raise ValueError(msg)
+        self._validate_content(source_content)
+        self._validate_context(source_context, "Source context")
+        self._validate_context(target_context, "Target context")
 
-        return f"""Adapt the following content from the source repository \
-context to the target repository context.
+        return ToolUseBatchRequest(
+            custom_id=custom_id,
+            prompt=self._build_user_message(source_content),
+            system_blocks=self._build_system_blocks(
+                source_context,
+                target_context,
+                preserve_sections,
+            ),
+            tool_schema=_REPORT_TUNING_TOOL,
+        )
 
-SOURCE CONTEXT:
-{source_context}
+    @classmethod
+    def parse_batch_tuning_result(
+        cls,
+        tool_result: ToolUseResult,
+    ) -> TuningResult:
+        """Lift a ``ToolUseResult`` from a batch into a :class:`TuningResult`.
 
-TARGET CONTEXT:
-{target_context}
-
-REQUIREMENTS:
-- Preserve the structure and format of the original content
-- Adapt terminology, examples, and references to match target context
-- Maintain all section headings and organization
-- Keep the same level of detail and completeness
-- List all changes made at the end{preserve_text}
-
-CONTENT TO ADAPT:
-{source_content}
-
-OUTPUT FORMAT:
-Provide the adapted content followed by a CHANGES section listing what was modified.
-
-Example format:
-[Adapted content here]
-
-CHANGES:
-- Changed "FastAPI" to "Django" in examples
-- Updated repository name references
-- Adapted script paths
-"""
-
-    def _parse_tuning_response(self, response_content: str) -> tuple[str, list[str]]:
-        """Parse AI response to extract content and changes.
-
-        Args:
-            response_content: Raw response from AI.
-
-        Returns:
-            Tuple of (adapted_content, list_of_changes).
+        Same parser :meth:`tune` uses on its sync result, exposed
+        publicly so the batch resume path (which fetches the result
+        long after the originating ``tune`` call would have returned)
+        can build the same downstream dataclass.
         """
-        # Split on CHANGES section
-        parts = response_content.split("CHANGES:", 1)
-
-        if len(parts) == _CHANGES_SECTION_PARTS:
-            content = parts[0].strip()
-            changes_text = parts[1].strip()
-
-            # Parse changes (each line starting with - or *)
-            changes = []
-            for raw_line in changes_text.split("\n"):
-                line = raw_line.strip()
-                if line.startswith(("-", "*")):
-                    changes.append(line.lstrip("-* "))
-                elif line:  # Non-empty line without marker
-                    changes.append(line)
-
-            return content, changes
-
-        # No CHANGES section found, return full content
-        return response_content.strip(), []
+        content, changes = cls._parse_tool_use_input(tool_result.tool_input)
+        return TuningResult(
+            content=content,
+            changes=changes,
+            dry_run=False,
+            token_usage_input=tool_result.token_usage.input_tokens,
+            token_usage_output=tool_result.token_usage.output_tokens,
+        )
 
     async def tune(
         self,
@@ -230,13 +392,10 @@ CHANGES:
                 token_usage_output=0,
             )
 
-        # Build prompt and generate
-        prompt = self._build_tuning_prompt(
-            source_content,
-            source_context,
-            target_context,
-            preserve_sections,
+        system_blocks = self._build_system_blocks(
+            source_context, target_context, preserve_sections
         )
+        user_message = self._build_user_message(source_content)
 
         logger.info(
             "Tuning content (source: %s, target: %s)",
@@ -245,13 +404,20 @@ CHANGES:
         )
 
         try:
-            result = self.orchestrator.generate(prompt, "markdown")
+            tool_result: ToolUseResult = await _await_or_offload(
+                cast(
+                    "Callable[..., Awaitable[ToolUseResult]]",
+                    self.orchestrator.generate_tool_use_async,
+                ),
+                user_message,
+                system_blocks=system_blocks,
+                tool_schema=_REPORT_TUNING_TOOL,
+            )
         except GenerationError:
             logger.exception("Tuning failed")
             raise
 
-        # Parse response
-        content, changes = self._parse_tuning_response(result.content)
+        content, changes = self._parse_tool_use_input(tool_result.tool_input)
 
         logger.info("Tuning complete, %d changes made", len(changes))
         for change in changes:
@@ -261,6 +427,6 @@ CHANGES:
             content=content,
             changes=changes,
             dry_run=False,
-            token_usage_input=result.token_usage.input_tokens,
-            token_usage_output=result.token_usage.output_tokens,
+            token_usage_input=tool_result.token_usage.input_tokens,
+            token_usage_output=tool_result.token_usage.output_tokens,
         )

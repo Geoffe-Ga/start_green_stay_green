@@ -11,13 +11,17 @@ Tests cover:
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 import pytest
 
+from start_green_stay_green.ai.types import TokenUsage
+from start_green_stay_green.ai.types import ToolUseResult
 from start_green_stay_green.generators.subagents import REFERENCE_AGENTS_DIR
 from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
+from start_green_stay_green.generators.subagents import SubagentBatchEntry
 from start_green_stay_green.generators.subagents import SubagentGenerationResult
 from start_green_stay_green.generators.subagents import SubagentsGenerator
 
@@ -563,3 +567,284 @@ async def test_dry_run_mode(
     # Dry run should set tuned=False
     assert not result.tuned
     assert not result.changes
+
+
+class TestSubagentsParallelism:
+    """Verify generate_all_agents fans out concurrently (Phase 2)."""
+
+    @pytest.mark.asyncio
+    async def test_generate_all_agents_runs_in_parallel(
+        self,
+        tmp_path: Path,
+        mocker: MockerFixture,
+    ) -> None:
+        """All eight agent tunings dispatch before any single one returns."""
+        # Populate the reference dir with the eight required agent files.
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        for source_file in REQUIRED_AGENTS.values():
+            (agents_dir / source_file).write_text(SAMPLE_AGENT_CONTENT)
+
+        # Latch that records each call's start order, then waits until
+        # all sibling calls have started before allowing any to return.
+        # If the generator were sequential, only the first call would
+        # ever start.
+        active_calls = 0
+        max_active = 0
+        gate = asyncio.Event()
+
+        async def slow_tune(*_args: object, **_kwargs: object) -> object:
+            nonlocal active_calls, max_active
+            active_calls += 1
+            max_active = max(max_active, active_calls)
+            if active_calls >= len(REQUIRED_AGENTS):
+                gate.set()
+            await gate.wait()
+            active_calls -= 1
+            return mocker.Mock(
+                content="# tuned body",
+                changes=["change"],
+                dry_run=False,
+                token_usage_input=1,
+                token_usage_output=1,
+            )
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+            dry_run=False,
+        )
+        # Replace the tuner's tune with the latch-instrumented stub.
+        generator.tuner = AsyncMock()
+        generator.tuner.tune = slow_tune
+
+        results = await generator.generate_all_agents("test-context")
+
+        # The latch only releases ``gate`` once ``active_calls`` reaches
+        # ``len(REQUIRED_AGENTS)``, so the gather can only return if every
+        # agent was in-flight at the same instant. Asserting the strict
+        # equality (rather than a weaker ``>= 2`` lower bound) makes the
+        # invariant explicit and would catch a regression where the
+        # semaphore was tightened or the gather was serialized.
+        assert set(results) == set(REQUIRED_AGENTS)
+        assert max_active == len(REQUIRED_AGENTS), (
+            f"Expected all {len(REQUIRED_AGENTS)} agents in-flight at once, "
+            f"got max_active={max_active}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_generate_all_agents_respects_semaphore(
+        self,
+        tmp_path: Path,
+        mocker: MockerFixture,
+    ) -> None:
+        """The semaphore caps the number of in-flight tunings."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        for source_file in REQUIRED_AGENTS.values():
+            (agents_dir / source_file).write_text(SAMPLE_AGENT_CONTENT)
+
+        in_flight = 0
+        peak = 0
+        complete: list[asyncio.Event] = []
+
+        async def staged_tune(*_args: object, **_kwargs: object) -> object:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            ev = asyncio.Event()
+            complete.append(ev)
+            # Release one slot at a time once enough tasks queued up.
+            if len(complete) >= 2:
+                # Signal all stalled siblings to finish in order.
+                for waiter in complete:
+                    waiter.set()
+            await ev.wait()
+            in_flight -= 1
+            return mocker.Mock(
+                content="# t",
+                changes=[],
+                dry_run=False,
+                token_usage_input=1,
+                token_usage_output=1,
+            )
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+            dry_run=False,
+            max_concurrency=2,
+        )
+        generator.tuner = AsyncMock()
+        generator.tuner.tune = staged_tune
+
+        await generator.generate_all_agents("ctx")
+        assert peak <= 2
+
+
+class TestSubagentsBatchPlan:
+    """Phase 5b: ``build_batch_plan`` + ``apply_batch_result``."""
+
+    def test_build_batch_plan_yields_one_entry_per_required_agent(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
+        """One :class:`SubagentBatchEntry` per file in REQUIRED_AGENTS."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        for source_file in REQUIRED_AGENTS.values():
+            (agents_dir / source_file).write_text(SAMPLE_AGENT_CONTENT)
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+            dry_run=False,
+        )
+
+        plan = generator.build_batch_plan("Test target context")
+
+        assert len(plan) == len(REQUIRED_AGENTS)
+        assert all(isinstance(e, SubagentBatchEntry) for e in plan)
+
+    def test_build_batch_plan_custom_id_convention(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
+        """Custom IDs use the ``subagent:<name>`` shape Phase 5a expects."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        for source_file in REQUIRED_AGENTS.values():
+            (agents_dir / source_file).write_text(SAMPLE_AGENT_CONTENT)
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+        )
+
+        plan = generator.build_batch_plan("ctx")
+        custom_ids = [entry.custom_id for entry in plan]
+
+        # Each custom_id is unique and prefixed with ``subagent:``.
+        assert len(set(custom_ids)) == len(custom_ids)
+        for cid in custom_ids:
+            assert cid.startswith("subagent:")
+
+    def test_build_batch_plan_captures_frontmatter_per_entry(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
+        """Each entry carries its agent's frontmatter for later re-attach."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        for source_file in REQUIRED_AGENTS.values():
+            (agents_dir / source_file).write_text(SAMPLE_AGENT_CONTENT)
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+        )
+
+        plan = generator.build_batch_plan("ctx")
+
+        # SAMPLE_AGENT_CONTENT starts with ``---`` and contains ``name:``.
+        for entry in plan:
+            assert entry.frontmatter.startswith("---")
+            assert "name:" in entry.frontmatter
+
+    def test_apply_batch_result_reattaches_frontmatter(self) -> None:
+        """``apply_batch_result`` rebuilds ``frontmatter\\nbody``."""
+        tool_result = ToolUseResult(
+            tool_name="report_tuning",
+            tool_input={
+                "tuned_content": "# Adapted body\n",
+                "changes": ["renamed FastAPI to Django"],
+            },
+            token_usage=TokenUsage(input_tokens=10, output_tokens=5),
+            model="claude",
+            message_id="msg_x",
+        )
+
+        result = SubagentsGenerator.apply_batch_result(
+            agent_name="chief-architect",
+            frontmatter="---\nname: chief-architect\n---",
+            tool_result=tool_result,
+        )
+
+        assert result.agent_name == "chief-architect"
+        assert result.tuned
+        assert result.content.startswith("---\n")
+        assert "# Adapted body" in result.content
+        assert "renamed FastAPI to Django" in result.changes
+
+    def test_get_agent_frontmatter_returns_yaml_block_unmodified(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
+        """Public sibling of ``apply_batch_result`` for the resume path.
+
+        Replaces two ``noqa: SLF001`` suppressions in
+        ``batch_dispatch.py`` (review feedback on PR #315). The
+        method must return the YAML frontmatter block byte-equivalent
+        to what ``_parse_frontmatter`` would have produced — same
+        leading ``---``, same closing delimiter, no body content.
+        """
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "chief-architect.md").write_text(
+            SAMPLE_AGENT_CONTENT, encoding="utf-8"
+        )
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+        )
+
+        frontmatter = generator.get_agent_frontmatter("chief-architect")
+
+        assert frontmatter.startswith("---")
+        assert "name: test-agent" in frontmatter
+        # Closing delimiter present, body NOT included.
+        assert frontmatter.rstrip().endswith("---")
+        assert "# Test Agent" not in frontmatter
+
+    def test_get_agent_frontmatter_picks_up_local_edits_between_calls(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
+        """Re-read semantics: edit on disk → fresh return value.
+
+        ``_frontmatter_for`` (now folded into this method) was
+        documented to re-read at fetch time so a frontmatter edit
+        between submit and fetch is picked up automatically. This
+        test exercises that contract directly — review feedback
+        flagged that the docstring claimed this guarantee but no
+        test backed it up.
+        """
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        agent_file = agents_dir / "chief-architect.md"
+        agent_file.write_text(SAMPLE_AGENT_CONTENT, encoding="utf-8")
+
+        mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+        generator = SubagentsGenerator(
+            mocker.Mock(),
+            reference_dir=agents_dir,
+        )
+
+        first = generator.get_agent_frontmatter("chief-architect")
+
+        # Edit the source file's frontmatter in place.
+        agent_file.write_text(
+            SAMPLE_AGENT_CONTENT.replace(
+                "name: test-agent", "name: edited-after-submit"
+            ),
+            encoding="utf-8",
+        )
+
+        second = generator.get_agent_frontmatter("chief-architect")
+
+        assert "name: test-agent" in first
+        assert "name: edited-after-submit" in second
+        assert first != second

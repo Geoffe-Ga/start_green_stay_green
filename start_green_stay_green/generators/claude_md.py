@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 from typing import TYPE_CHECKING
 
+from start_green_stay_green.ai.prompts.manager import get_default_manager
+
 if TYPE_CHECKING:
     from start_green_stay_green.ai.orchestrator import AIOrchestrator
 
@@ -43,7 +45,7 @@ class ClaudeMdGenerator:
 
     def __init__(
         self,
-        orchestrator: AIOrchestrator,
+        orchestrator: AIOrchestrator | None = None,
         *,
         reference_dir: Path | None = None,
         quality_ref_path: Path | None = None,
@@ -51,7 +53,8 @@ class ClaudeMdGenerator:
         """Initialize ClaudeMdGenerator.
 
         Args:
-            orchestrator: AI orchestrator for generation.
+            orchestrator: Optional AI orchestrator. When ``None``, only the
+                deterministic ``generate_baseline`` path is available.
             reference_dir: Directory with CLAUDE.md reference
                 (default: reference/claude).
             quality_ref_path: Path to quality reference
@@ -103,7 +106,7 @@ class ClaudeMdGenerator:
             FileNotFoundError: If CLAUDE.md reference file not found.
         """
         claude_md_path = self.reference_dir / "CLAUDE.md"
-        return claude_md_path.read_text()
+        return claude_md_path.read_text(encoding="utf-8")
 
     def _load_quality_reference(self) -> str:
         """Load MAXIMUM_QUALITY_ENGINEERING.md reference.
@@ -114,67 +117,40 @@ class ClaudeMdGenerator:
         Raises:
             FileNotFoundError: If quality reference file not found.
         """
-        return self.quality_ref_path.read_text()
+        return self.quality_ref_path.read_text(encoding="utf-8")
 
+    @staticmethod
     def _build_generation_prompt(
-        self,
         claude_md_reference: str,
         quality_reference: str,
         project_config: dict[str, Any],
     ) -> str:
-        """Build prompt for CLAUDE.md generation.
+        """Render the ``claude_md_tune`` prompt template.
+
+        The 6-component prompt body lives in
+        ``start_green_stay_green/ai/prompts/templates/claude_md_tune.jinja2``;
+        this method supplies the context dict.
 
         Args:
             claude_md_reference: Reference CLAUDE.md template.
-            quality_reference: MAXIMUM_QUALITY_ENGINEERING.md content.
-            project_config: Project configuration with name, language, scripts, skills.
+            quality_reference: ``MAXIMUM_QUALITY_ENGINEERING.md`` content.
+            project_config: Project configuration with ``project_name``,
+                ``language``, ``scripts``, ``skills``.
 
         Returns:
-            Formatted prompt for AI generation.
+            Fully rendered prompt ready for ``orchestrator.generate``.
         """
-        project_name = project_config.get("project_name", "unknown")
-        language = project_config.get("language", "unknown")
-        scripts = project_config.get("scripts", [])
-        skills = project_config.get("skills", [])
-
-        scripts_text = "\n".join(f"- {script}" for script in scripts)
-        skills_text = "\n".join(f"- {skill}" for skill in skills)
-
-        prompt_intro = (
-            "Generate a customized CLAUDE.md file for a new project based on "
-            "the reference CLAUDE.md template and MAXIMUM QUALITY ENGINEERING "
-            "standards."
+        return get_default_manager().render(
+            "claude_md_tune",
+            {
+                "project_name": project_config.get("project_name", "unknown"),
+                "language": project_config.get("language", "unknown"),
+                "scripts": list(project_config.get("scripts") or []),
+                "skills": list(project_config.get("skills") or []),
+                "claude_md_reference": claude_md_reference,
+                "quality_reference": quality_reference,
+            },
         )
-        return f"""{prompt_intro}
-
-PROJECT CONFIGURATION:
-- Project Name: {project_name}
-- Language: {language}
-- Generated Scripts:
-{scripts_text if scripts else "  (none)"}
-- Generated Skills:
-{skills_text if skills else "  (none)"}
-
-REFERENCE CLAUDE.md TEMPLATE:
-{claude_md_reference}
-
-MAXIMUM QUALITY ENGINEERING STANDARDS (for context):
-{quality_reference}
-
-REQUIREMENTS:
-1. Adapt the reference CLAUDE.md to the target project
-2. Replace generic examples with {language}-specific examples
-3. Document all generated scripts in the Tool Invocation Patterns section
-4. Document all generated skills
-5. Maintain the same structure and organization as the reference
-6. Preserve all critical principles and quality standards
-7. Include project-specific commands for {language}
-8. Ensure the output is valid markdown with proper H1 title
-
-OUTPUT FORMAT:
-Generate the complete customized CLAUDE.md content as valid markdown.
-Start with the H1 title and include all sections from the reference template.
-"""
 
     @staticmethod
     def _has_h1_title(content: str) -> bool:
@@ -209,8 +185,74 @@ Start with the H1 title and include all sections from the reference template.
             msg = "Generated CLAUDE.md is missing H1 title"
             raise ValueError(msg)
 
+    @staticmethod
+    def _baseline_substitutions(project_config: dict[str, Any]) -> dict[str, str]:
+        """Build the token → replacement map for ``_render_baseline``."""
+        scripts = project_config.get("scripts") or []
+        skills = project_config.get("skills") or []
+        return {
+            "{{PROJECT_NAME}}": str(project_config.get("project_name", "your-project")),
+            "{{LANGUAGE}}": str(project_config.get("language", "python")),
+            "{{SCRIPTS}}": "\n".join(f"- {s}" for s in scripts),
+            "{{SKILLS}}": "\n".join(f"- {s}" for s in skills),
+        }
+
+    @classmethod
+    def _render_baseline(
+        cls,
+        reference: str,
+        project_config: dict[str, Any],
+    ) -> str:
+        """Substitute ``{{PLACEHOLDER}}`` tokens in the reference template.
+
+        The reference CLAUDE.md uses double-brace tokens like
+        ``{{PROJECT_NAME}}``. This is a deterministic, dependency-free
+        substitution: unknown tokens are left intact so the resulting file
+        is always inspectable for "what was the user supposed to fill in?".
+        """
+        rendered = reference
+        for token, value in cls._baseline_substitutions(project_config).items():
+            rendered = rendered.replace(token, value)
+        return rendered
+
+    def generate_baseline(
+        self,
+        project_config: dict[str, Any],
+    ) -> ClaudeMdGenerationResult:
+        """Render a CLAUDE.md baseline without any API calls.
+
+        This is the fast, deterministic path used by Pass 1 of the new
+        two-pass init. The result is a complete, valid CLAUDE.md based on
+        the reference template with ``{{PROJECT_NAME}}``-style tokens
+        substituted.
+
+        Args:
+            project_config: Project configuration with keys
+                ``project_name``, ``language``, ``scripts``, ``skills``.
+
+        Returns:
+            ``ClaudeMdGenerationResult`` with zero token usage.
+
+        Raises:
+            ValueError: If the rendered baseline lacks a valid H1 title.
+            FileNotFoundError: If reference files are missing.
+        """
+        self._validate_reference_dir()
+        reference = self._load_claude_md_reference()
+        rendered = self._render_baseline(reference, project_config)
+        self._validate_markdown_structure(rendered)
+        return ClaudeMdGenerationResult(
+            content=rendered,
+            token_usage_input=0,
+            token_usage_output=0,
+        )
+
     def generate(self, project_config: dict[str, Any]) -> ClaudeMdGenerationResult:
         """Generate customized CLAUDE.md for target project.
+
+        When an orchestrator is configured this dispatches to the legacy
+        AI-tuned path. Otherwise it falls back to ``generate_baseline``,
+        guaranteeing a complete file in offline mode.
 
         Args:
             project_config: Project configuration dictionary with keys:
@@ -226,6 +268,9 @@ Start with the H1 title and include all sections from the reference template.
             ValueError: If reference files are invalid.
             FileNotFoundError: If reference files are missing.
         """
+        if self.orchestrator is None:
+            return self.generate_baseline(project_config)
+
         # Validate and load references
         self._validate_reference_dir()
         claude_md_reference = self._load_claude_md_reference()

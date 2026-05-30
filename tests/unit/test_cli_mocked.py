@@ -26,8 +26,10 @@ def test_something(mock_path: Mock) -> None:
 ```
 """
 
+import asyncio
 import json
 from pathlib import Path
+from unittest import mock
 from unittest.mock import MagicMock
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -37,7 +39,30 @@ import typer
 from typer.testing import CliRunner
 
 from start_green_stay_green import cli
+from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
+from start_green_stay_green.ai.orchestrator import AIOrchestrator
+from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
+from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
+from start_green_stay_green.utils.enhance_state import BatchProgress
+from start_green_stay_green.utils.enhance_state import EnhanceState
+from start_green_stay_green.utils.enhance_state import load_state
+from start_green_stay_green.utils.enhance_state import save_state
+
+
+def _make_orch_mock(mock_init: Mock) -> MagicMock:
+    """Build an ``AIOrchestrator`` mock with ``.model`` populated.
+
+    ``MagicMock(spec=AIOrchestrator)`` does not auto-populate the
+    instance attributes set in ``__init__``, so the Phase 3c
+    ``state.mark_completed(..., orchestrator.model)`` path fails
+    without a value here. Wires the mock onto ``mock_init`` and
+    returns it for callers that need to set further attributes.
+    """
+    orch = MagicMock(spec=AIOrchestrator)
+    orch.model = "claude-sonnet-4-5"
+    mock_init.return_value = orch
+    return orch
 
 
 class TestVersionCommand:
@@ -657,6 +682,20 @@ class TestLanguageValidation:
         for lang in SUPPORTED_LANGUAGES:
             assert lang in help_text, f"Language '{lang}' missing from help text"
 
+    def test_api_key_flag_hidden_from_init_help(self) -> None:
+        """Lock in hidden=True on init's --api-key (regresses if re-exposed)."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["init", "--help"])
+        assert result.exit_code == 0
+        assert "--api-key" not in result.output
+
+    def test_api_key_flag_hidden_from_enhance_help(self) -> None:
+        """Lock in hidden=True on enhance's --api-key (regresses if re-exposed)."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["enhance", "--help"])
+        assert result.exit_code == 0
+        assert "--api-key" not in result.output
+
     @patch("start_green_stay_green.cli._generate_project_files")
     @patch("start_green_stay_green.cli._validate_and_prepare_paths")
     def test_init_accepts_all_supported_languages(
@@ -1103,25 +1142,40 @@ class TestGenerateSteps:
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_ci_step(mock_path, "python", mock_orchestrator)
+            cli._generate_ci_step(mock_path, "my-project", "python", mock_orchestrator)
 
-        mock_ci_generator_class.assert_called_with(mock_orchestrator, "python")
+        # ``project_name`` is now threaded through so ``<<% project_name %>>``
+        # placeholders in the reference templates render with the real value.
+        mock_ci_generator_class.assert_called_with(
+            mock_orchestrator, "python", project_name="my-project"
+        )
 
-    def test_generate_ci_step_skips_without_orchestrator(
-        self,
+    @patch("start_green_stay_green.cli.CIGenerator")
+    def test_generate_ci_step_uses_template_without_orchestrator(
+        self, mock_ci_generator_class: Mock
     ) -> None:
-        """Test _generate_ci_step skips without orchestrator."""
+        """_generate_ci_step now runs the template path with no orchestrator."""
+        mock_generator = MagicMock()
+        mock_workflow = MagicMock()
+        mock_workflow.content = "workflow content"
+        mock_generator.generate_workflow.return_value = mock_workflow
+        mock_ci_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_ci_step(mock_path, "python", None)
+            cli._generate_ci_step(mock_path, "no-orch-project", "python", None)
+
+        mock_ci_generator_class.assert_called_with(
+            None, "python", project_name="no-orch-project"
+        )
+        mock_generator.generate_workflow.assert_called_once()
 
     @patch("start_green_stay_green.cli.GitHubActionsReviewGenerator")
-    def test_generate_review_step_with_orchestrator(
+    def test_generate_review_step_runs_unconditionally(
         self, mock_generator_class: Mock
     ) -> None:
-        """Test _generate_review_step with orchestrator."""
-        mock_orchestrator = MagicMock()
+        """_generate_review_step now always renders the template."""
         mock_generator = MagicMock()
         mock_workflow = MagicMock()
         mock_workflow.content = "workflow content"
@@ -1131,18 +1185,30 @@ class TestGenerateSteps:
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_review_step(mock_path, mock_orchestrator)
+            cli._generate_review_step(mock_path)
 
-        mock_generator_class.assert_called_with(mock_orchestrator)
+        # Generator no longer takes an orchestrator argument.
+        mock_generator_class.assert_called_with()
+        mock_generator.generate.assert_called_once()
 
-    def test_generate_review_step_skips_without_orchestrator(
-        self,
+    @patch("start_green_stay_green.cli.GitHubActionsReviewGenerator")
+    def test_generate_review_step_uses_default_file_writer(
+        self, mock_generator_class: Mock
     ) -> None:
-        """Test _generate_review_step skips without orchestrator."""
+        """_generate_review_step works with the default ``file_writer=None``."""
+        mock_generator = MagicMock()
+        mock_workflow = MagicMock()
+        mock_workflow.content = "workflow content"
+        mock_generator.generate.return_value = mock_workflow
+        mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_review_step(mock_path, None)
+            # No file_writer passed — exercises the ``write_text`` branch.
+            cli._generate_review_step(mock_path)
+
+        mock_generator.generate.assert_called_once()
 
     @patch("start_green_stay_green.cli.ClaudeMdGenerator")
     def test_generate_claude_md_step(self, mock_generator_class: Mock) -> None:
@@ -1168,20 +1234,16 @@ class TestGenerateSteps:
 
     @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
     def test_generate_architecture_step(self, mock_generator_class: Mock) -> None:
-        """Test _generate_architecture_step creates generator."""
-        mock_orchestrator = MagicMock()
+        """Test _generate_architecture_step creates generator deterministically."""
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_architecture_step(
-                mock_path,
-                "my-project",
-                "python",
-                mock_orchestrator,
-            )
+            # The orchestrator parameter has been removed; this private
+            # helper now takes only the (path, name, language, writer).
+            cli._generate_architecture_step(mock_path, "my-project", "python")
 
         mock_generator.generate.assert_called()
 
@@ -1196,9 +1258,20 @@ class TestGenerateSteps:
         mock_orchestrator = MagicMock()
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
-        mock_run_async.return_value = {}
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        # ``_generate_subagents_step`` now wraps the gather in
+        # ``_run_with_orchestrator_close``, which returns a coroutine.
+        # The mocked ``run_async`` never awaits it, so we must close it
+        # explicitly to avoid the "coroutine was never awaited" warning.
+        def _consume(coro: object) -> dict[str, object]:
+            close = getattr(coro, "close", None)
+            if callable(close):
+                close()
+            return {}
+
+        mock_run_async.side_effect = _consume
 
         with patch("start_green_stay_green.cli.console"):
             cli._generate_subagents_step(
@@ -1214,7 +1287,7 @@ class TestGenerateSteps:
 class TestGenerateProjectFiles:
     """Test project file generation."""
 
-    @patch("start_green_stay_green.cli._generate_with_orchestrator")
+    @patch("start_green_stay_green.cli._generate_pass2_polish")
     @patch("start_green_stay_green.cli._generate_scripts_step")
     @patch("start_green_stay_green.cli._generate_precommit_step")
     @patch("start_green_stay_green.cli._generate_skills_step")
@@ -1223,7 +1296,7 @@ class TestGenerateProjectFiles:
         mock_skills: Mock,
         mock_precommit: Mock,
         mock_scripts: Mock,
-        mock_generate_orch: Mock,
+        mock_pass2: Mock,
     ) -> None:
         """Test _generate_project_files generates all steps."""
         mock_orchestrator = MagicMock()
@@ -1242,7 +1315,7 @@ class TestGenerateProjectFiles:
         mock_scripts.assert_called()
         mock_precommit.assert_called()
         mock_skills.assert_called()
-        mock_generate_orch.assert_called()
+        mock_pass2.assert_called()
 
     @patch("start_green_stay_green.cli._generate_scripts_step")
     @patch("start_green_stay_green.cli._generate_precommit_step")
@@ -1266,3 +1339,1295 @@ class TestGenerateProjectFiles:
         mock_scripts.assert_called()
         mock_precommit.assert_called()
         mock_skills.assert_called()
+
+
+class TestCopyReferenceSubagents:
+    """Cover the no-API copy path's error handling."""
+
+    def test_raises_filenotfounderror_when_reference_missing(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing reference agent file surfaces a FileNotFoundError."""
+        target_dir = tmp_path / "agents"
+
+        # Patch REFERENCE_AGENTS_DIR to an empty directory so every
+        # required source_file is missing.
+        empty_ref_dir = tmp_path / "empty"
+        empty_ref_dir.mkdir()
+
+        with (
+            patch("start_green_stay_green.cli.REFERENCE_AGENTS_DIR", empty_ref_dir),
+            pytest.raises(FileNotFoundError, match="Reference subagent not found"),
+        ):
+            cli._copy_reference_subagents(target_dir)
+
+    def test_writes_utf8_encoded_content(self, tmp_path: Path) -> None:
+        """Copied agents are written with explicit UTF-8 encoding."""
+        # Build a fake reference dir with a single agent file.
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        # Cover every REQUIRED_AGENTS source_file with a UTF-8 sentinel.
+        sentinel = "# Agent: ✓ — non-ASCII\n"
+
+        for src in REQUIRED_AGENTS.values():
+            (ref_dir / src).write_text(sentinel, encoding="utf-8")
+
+        target_dir = tmp_path / "agents"
+        with patch("start_green_stay_green.cli.REFERENCE_AGENTS_DIR", ref_dir):
+            cli._copy_reference_subagents(target_dir)
+
+        # Round-trip through utf-8 decoding.
+        for agent_name in REQUIRED_AGENTS:
+            target = target_dir / f"{agent_name}.md"
+            assert target.exists()
+            assert target.read_text(encoding="utf-8") == sentinel
+
+    def test_uses_file_writer_when_provided(self, tmp_path: Path) -> None:
+        """The ``file_writer`` branch routes writes through the writer."""
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        sentinel = "# Agent body\n"
+        for src in REQUIRED_AGENTS.values():
+            (ref_dir / src).write_text(sentinel, encoding="utf-8")
+
+        target_dir = tmp_path / "agents"
+        # The FileWriter contract has ``write_file(path, content)``;
+        # use a Mock with that signature so the test asserts the
+        # public boundary, not implementation details.
+        mock_writer = MagicMock()
+
+        with patch("start_green_stay_green.cli.REFERENCE_AGENTS_DIR", ref_dir):
+            cli._copy_reference_subagents(target_dir, file_writer=mock_writer)
+
+        # All eight required agents flowed through the writer; no
+        # files were created via the direct ``write_text`` fallback.
+        assert mock_writer.write_file.call_count == len(REQUIRED_AGENTS)
+        for agent_name in REQUIRED_AGENTS:
+            assert not (target_dir / f"{agent_name}.md").exists()
+
+
+class TestRunWithOrchestratorClose:
+    """``_run_with_orchestrator_close`` must release the async client.
+
+    The wrapper exists specifically so that a parallel-tuning failure
+    inside ``asyncio.gather`` cannot leak the lazily-created
+    :class:`AsyncAnthropic` connection pool. The two tests below pin
+    that contract: ``aclose`` is called on success, and on failure.
+    """
+
+    def test_aclose_called_on_success(self) -> None:
+        """When the wrapped coroutine returns normally, aclose runs."""
+        orchestrator = MagicMock()
+        orchestrator.aclose = MagicMock(return_value=asyncio.sleep(0))
+
+        async def _ok() -> str:
+            return "done"
+
+        result = asyncio.run(cli._run_with_orchestrator_close(orchestrator, _ok()))
+        assert result == "done"
+        orchestrator.aclose.assert_called_once()
+
+    def test_aclose_called_on_exception(self) -> None:
+        """When the wrapped coroutine raises, aclose still runs."""
+        orchestrator = MagicMock()
+        orchestrator.aclose = MagicMock(return_value=asyncio.sleep(0))
+
+        async def _boom() -> str:
+            msg = "tuning failed"
+            raise RuntimeError(msg)
+
+        with pytest.raises(RuntimeError, match="tuning failed"):
+            asyncio.run(cli._run_with_orchestrator_close(orchestrator, _boom()))
+
+        # Even though ``_boom`` raised, the finally block must have
+        # called aclose to release the httpx pool.
+        orchestrator.aclose.assert_called_once()
+
+
+class TestValidatePass2Flags:
+    """Tests for the ``--offline`` / ``--no-enhance`` / ``--api-key`` validator."""
+
+    def test_offline_alone_is_valid(self) -> None:
+        """``--offline`` without conflicting flags passes validation."""
+        cli._validate_pass2_flags(offline=True, no_enhance=False, api_key=None)
+
+    def test_no_enhance_alone_is_valid(self) -> None:
+        """``--no-enhance`` without conflicting flags passes validation."""
+        cli._validate_pass2_flags(offline=False, no_enhance=True, api_key=None)
+
+    def test_no_enhance_with_api_key_is_valid(self) -> None:
+        """``--no-enhance`` plus ``--api-key`` is the documented happy path.
+
+        The user has a key (cached for a future ``green enhance``) but
+        does not want Pass 2 to run on this init.
+        """
+        cli._validate_pass2_flags(offline=False, no_enhance=True, api_key="sk-real-key")
+
+    def test_offline_and_no_enhance_together_rejected(self) -> None:
+        """Combining ``--offline`` and ``--no-enhance`` is redundant — error out."""
+        with patch("start_green_stay_green.cli.console") as mock_console:
+            with pytest.raises(typer.Exit) as exc:
+                cli._validate_pass2_flags(offline=True, no_enhance=True, api_key=None)
+            assert exc.value.exit_code == 1
+            mock_console.print.assert_called_once()
+            msg = mock_console.print.call_args[0][0]
+            assert "redundant" in msg
+
+    def test_offline_with_api_key_rejected(self) -> None:
+        """``--offline`` with ``--api-key`` is contradictory — error out."""
+        with patch("start_green_stay_green.cli.console") as mock_console:
+            with pytest.raises(typer.Exit) as exc:
+                cli._validate_pass2_flags(
+                    offline=True, no_enhance=False, api_key="sk-real-key"
+                )
+            assert exc.value.exit_code == 1
+            mock_console.print.assert_called_once()
+            msg = mock_console.print.call_args[0][0]
+            assert "contradictory" in msg
+
+
+class TestOfflineAndNoEnhanceFlags:
+    """End-to-end behaviour of the two new init flags."""
+
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_offline_skips_orchestrator_initialization(
+        self, mock_init_orch: Mock, tmp_path: Path
+    ) -> None:
+        """``--offline`` short-circuits before ``_initialize_orchestrator``."""
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "init",
+                "--project-name",
+                "offline-smoke",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--offline",
+                "--no-interactive",
+            ],
+        )
+
+        # ``runner.invoke`` swallows exceptions by default, so a broken
+        # ``--offline`` path could still leave ``mock_init_orch.assert_
+        # not_called()`` passing. Anchor the test on a successful exit
+        # first so a regression that crashes mid-init fails loudly.
+        assert result.exit_code == 0, result.stdout
+
+        # The point of --offline: the API-key resolution helper is
+        # never called, so a missing keyring or no env var cannot cause
+        # surprise prompts or warnings.
+        mock_init_orch.assert_not_called()
+
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_no_enhance_resolves_key_but_drops_orchestrator(
+        self, mock_init_orch: Mock, tmp_path: Path
+    ) -> None:
+        """``--no-enhance`` calls ``_initialize_orchestrator`` and discards it."""
+        # Stand up a fake orchestrator so the helper "succeeds".
+        mock_init_orch.return_value = MagicMock(spec=AIOrchestrator)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "init",
+                "--project-name",
+                "no-enhance-smoke",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-enhance",
+                "--no-interactive",
+            ],
+        )
+
+        # Key was resolved (Pass 2 is skipped, but the key is "kept"
+        # for a future ``green enhance``).
+        assert result.exit_code == 0
+        mock_init_orch.assert_called_once()
+        # The on-screen hint about ``green enhance`` should fire.
+        assert "green enhance" in result.stdout
+
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_no_enhance_with_no_api_key_prints_actionable_hint(
+        self, mock_init_orch: Mock, tmp_path: Path
+    ) -> None:
+        """``--no-enhance`` without an API key still tells the user what happened.
+
+        Regression test for the silent-feedback bug: without this
+        branch the user sees neither the legacy "AI features disabled"
+        block (suppressed by ``--no-enhance``) nor the
+        "run ``green enhance`` later" hint, leaving them with no idea
+        what their flag did.
+        """
+        mock_init_orch.return_value = None  # Simulate no key found.
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "init",
+                "--project-name",
+                "no-enhance-no-key",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-enhance",
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mock_init_orch.assert_called_once()
+        # Specifically the "no API key found" branch — separate string
+        # from the key-found branch so a future refactor that collapses
+        # them is loud.
+        assert "no API key found" in result.stdout
+        # And the actionable next-step pointer.
+        assert "ANTHROPIC_API_KEY" in result.stdout
+
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_no_enhance_with_explicit_api_key_is_documented_happy_path(
+        self, mock_init_orch: Mock, tmp_path: Path
+    ) -> None:
+        """``--no-enhance --api-key X`` is the documented "tune later" combo."""
+        mock_init_orch.return_value = MagicMock(spec=AIOrchestrator)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "init",
+                "--project-name",
+                "no-enhance-with-key",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-enhance",
+                "--api-key",
+                "sk-test-key",
+                "--no-interactive",
+            ],
+        )
+
+        # Validator accepts the combo (no exit 1) and the helper is
+        # called with the explicit key.
+        assert result.exit_code == 0
+        mock_init_orch.assert_called_once()
+        # The key-found branch ran (not the no-key branch).
+        assert "run `green enhance`" in result.stdout
+        assert "no API key found" not in result.stdout
+
+    def test_offline_and_no_enhance_together_exits(self, tmp_path: Path) -> None:
+        """Validator surfaces conflict with exit code 1."""
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "init",
+                "--project-name",
+                "conflict",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--offline",
+                "--no-enhance",
+                "--no-interactive",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "redundant" in result.stdout
+
+    def test_offline_with_api_key_together_exits(self, tmp_path: Path) -> None:
+        """Validator surfaces ``--offline --api-key`` conflict at the CLI layer.
+
+        The validator unit test (``TestValidatePass2Flags
+        .test_offline_with_api_key_rejected``) covers the validator
+        in isolation, but typer's option-parsing layer is its own
+        moving part. The symmetric ``--offline --no-enhance`` test
+        above exercises the same path end-to-end; this test is the
+        missing counterpart that locks the ``--offline --api-key``
+        wiring all the way from CLI argv to the validator's exit-1
+        path.
+        """
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "init",
+                "--project-name",
+                "conflict",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--offline",
+                "--api-key",
+                "sk-test-key",
+                "--no-interactive",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "contradictory" in result.stdout
+
+
+class TestEnhanceDetectionHelpers:
+    """Cover the auto-detection helpers used by ``green enhance``."""
+
+    def test_detect_project_name_reads_h1(self, tmp_path: Path) -> None:
+        """``_detect_project_name`` parses the ``Claude Code Project Context`` H1."""
+        (tmp_path / "CLAUDE.md").write_text(
+            "# Claude Code Project Context: my-cool-app\n\nrest of file...\n",
+            encoding="utf-8",
+        )
+        assert cli._detect_project_name(tmp_path) == "my-cool-app"
+
+    def test_detect_project_name_returns_none_without_claude_md(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing CLAUDE.md returns ``None`` (caller falls back to --project-name)."""
+        assert cli._detect_project_name(tmp_path) is None
+
+    def test_detect_project_name_returns_none_for_unmatched_h1(
+        self, tmp_path: Path
+    ) -> None:
+        """Different H1 → ``None`` so we don't grab the wrong string."""
+        (tmp_path / "CLAUDE.md").write_text(
+            "# Some Other Title\n\n",
+            encoding="utf-8",
+        )
+        assert cli._detect_project_name(tmp_path) is None
+
+    def test_detect_project_language_python(self, tmp_path: Path) -> None:
+        """``pyproject.toml`` → python."""
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
+        assert cli._detect_project_language(tmp_path) == "python"
+
+    def test_detect_project_language_typescript(self, tmp_path: Path) -> None:
+        """``package.json`` → typescript."""
+        (tmp_path / "package.json").write_text("{}")
+        assert cli._detect_project_language(tmp_path) == "typescript"
+
+    def test_detect_project_language_returns_none_for_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """No probe matches → ``None``."""
+        assert cli._detect_project_language(tmp_path) is None
+
+
+class TestEnhanceTargetResolution:
+    """Cover ``_resolve_enhance_targets`` and ``_validate_enhance_target``."""
+
+    def test_no_targets_means_all(self) -> None:
+        """``None`` (no flag) selects every canonical target."""
+        assert cli._resolve_enhance_targets(None) == cli._ENHANCE_TARGETS
+
+    def test_empty_list_means_all(self) -> None:
+        """An empty list also means "all" — shouldn't deselect everything."""
+        assert cli._resolve_enhance_targets([]) == cli._ENHANCE_TARGETS
+
+    def test_repeated_flag(self) -> None:
+        """``--targets claude-md --targets subagents`` → both, in canonical order."""
+        assert cli._resolve_enhance_targets(["claude-md", "subagents"]) == (
+            "claude-md",
+            "subagents",
+        )
+
+    def test_comma_separated(self) -> None:
+        """``--targets claude-md,subagents`` → both, in canonical order."""
+        assert cli._resolve_enhance_targets(["claude-md,subagents"]) == (
+            "claude-md",
+            "subagents",
+        )
+
+    def test_canonical_ordering(self) -> None:
+        """Order in input is irrelevant; canonical order wins."""
+        assert cli._resolve_enhance_targets(["subagents", "claude-md"]) == (
+            "claude-md",
+            "subagents",
+        )
+
+    def test_deduplicates(self) -> None:
+        """Duplicate targets are squashed."""
+        assert cli._resolve_enhance_targets(["claude-md", "claude-md,claude-md"]) == (
+            "claude-md",
+        )
+
+    def test_unknown_target_raises(self) -> None:
+        """An unknown target surfaces a typer.BadParameter."""
+        with pytest.raises(typer.BadParameter, match="unknown target"):
+            cli._resolve_enhance_targets(["bogus"])
+
+
+class TestEnhanceCommand:
+    """End-to-end CLI tests for the new ``enhance`` command."""
+
+    @staticmethod
+    def _flat(text: str) -> str:
+        """Collapse whitespace so substring checks survive Rich line-wrapping."""
+        return " ".join(text.split())
+
+    @staticmethod
+    def _make_project(tmp_path: Path, *, name: str, language: str) -> Path:
+        """Build a minimal green-init-shaped directory layout."""
+        project = tmp_path / name
+        project.mkdir()
+        (project / "CLAUDE.md").write_text(
+            f"# Claude Code Project Context: {name}\n\nbaseline content.\n",
+            encoding="utf-8",
+        )
+        # Drop a marker file so language detection works without flags.
+        if language == "python":
+            (project / "pyproject.toml").write_text("[project]\nname='x'\n")
+        elif language == "typescript":
+            (project / "package.json").write_text("{}")
+        # Pre-create the subagents dir so the writer doesn't have to
+        # mkdir during the test (mirrors real init output).
+        (project / ".claude" / "agents").mkdir(parents=True)
+        return project
+
+    def test_missing_path_exits(self, tmp_path: Path) -> None:
+        """Non-existent path exits 1 with an actionable message."""
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(tmp_path / "does-not-exist")],
+        )
+        assert result.exit_code == 1
+        assert "does not exist" in self._flat(result.stdout)
+
+    def test_path_is_a_file_exits(self, tmp_path: Path) -> None:
+        """Pointing at a file (not directory) exits 1."""
+        a_file = tmp_path / "looks-like-a-project"
+        a_file.write_text("not a directory")
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["enhance", str(a_file)])
+        assert result.exit_code == 1
+        assert "is not a directory" in self._flat(result.stdout)
+
+    def test_directory_without_claude_md_exits(self, tmp_path: Path) -> None:
+        """Empty directory without CLAUDE.md exits 1 with the actionable hint."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["enhance", str(tmp_path)])
+        assert result.exit_code == 1
+        assert "does not look like a green-init project" in self._flat(result.stdout)
+
+    def test_unknown_target_exits(self, tmp_path: Path) -> None:
+        """``--targets bogus`` exits non-zero before any API call."""
+        project = self._make_project(tmp_path, name="proj", language="python")
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--targets", "bogus"],
+        )
+        assert result.exit_code != 0
+        # ``typer.BadParameter`` writes to stderr; CliRunner.output
+        # mixes both streams while .stdout omits stderr.
+        assert "unknown target" in self._flat(result.output)
+
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_no_api_key_exits_with_actionable_message(
+        self, mock_init: Mock, tmp_path: Path
+    ) -> None:
+        """``enhance`` cannot run without a key — fail loudly, don't no-op."""
+        mock_init.return_value = None  # No key available.
+        project = self._make_project(tmp_path, name="needs-key", language="python")
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--no-interactive"],
+        )
+        assert result.exit_code == 1
+        flat = self._flat(result.stdout)
+        assert "requires an Anthropic API key" in flat
+        assert "ANTHROPIC_API_KEY" in flat
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_default_runs_every_target(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """No ``--targets`` flag → both helpers are invoked."""
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path, name="full", language="python")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--no-interactive"],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        mock_claude.assert_called_once()
+        mock_subagents.assert_called_once()
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_targets_claude_md_skips_subagents(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """``--targets claude-md`` runs only that target."""
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path, name="claude-only", language="python")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--targets",
+                "claude-md",
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        mock_claude.assert_called_once()
+        mock_subagents.assert_not_called()
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_dry_run_propagates_to_helpers(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """``--dry-run`` flows through to every target helper."""
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path, name="preview", language="python")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--dry-run", "--no-interactive"],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        # Both helpers receive ``dry_run=True``.
+        assert mock_claude.call_args.kwargs["dry_run"] is True
+        assert mock_subagents.call_args.kwargs["dry_run"] is True
+        assert "Dry run complete" in result.stdout
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_explicit_overrides_skip_detection(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """``-n`` and ``-l`` win over auto-detection from the project."""
+        _make_orch_mock(mock_init)
+        # Make the project look like Python + name="auto-name", but
+        # override both at the CLI.
+        project = self._make_project(tmp_path, name="auto-name", language="python")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--project-name",
+                "explicit-name",
+                "--language",
+                "typescript",
+                "--targets",
+                "claude-md",
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        # The helper was called with the *explicit* values, not the
+        # auto-detected ones.
+        call = mock_claude.call_args
+        # positional args: (project_path, project_name, language, orchestrator)
+        assert call.args[1] == "explicit-name"
+        assert call.args[2] == "typescript"
+
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_unknown_language_in_override_exits(
+        self, mock_init: Mock, tmp_path: Path
+    ) -> None:
+        """``-l cobol`` is rejected before any API call."""
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path, name="bad-lang", language="python")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--language",
+                "cobol",
+                "--no-interactive",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Unsupported language" in self._flat(result.stdout)
+
+
+class TestEnhanceSkipUnchanged:
+    """Phase 3c — ``green enhance`` skips targets whose source hash matches state."""
+
+    @staticmethod
+    def _make_project(tmp_path: Path) -> Path:
+        project = tmp_path / "phase-3c-project"
+        project.mkdir()
+        (project / "CLAUDE.md").write_text(
+            "# Claude Code Project Context: phase-3c-project\n", encoding="utf-8"
+        )
+        (project / "pyproject.toml").write_text("[project]\nname='x'\n")
+        (project / ".claude" / "agents").mkdir(parents=True)
+        return project
+
+    @staticmethod
+    def _flat(text: str) -> str:
+        return " ".join(text.split())
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_state_file_written_after_first_enhance(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """First enhance run writes ``.claude/.enhance-state.json`` for both targets."""
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path)
+
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+
+        assert result.exit_code == 0, result.stdout
+
+        state = load_state(project)
+        assert "claude-md" in state.completed
+        assert "subagents" in state.completed
+        # Model name is recorded for diagnostics.
+        assert state.completed["claude-md"].model == "claude-sonnet-4-5"
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_unchanged_target_is_skipped(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Second enhance with no input change skips both target helpers."""
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path)
+
+        runner = CliRunner()
+        # First run — both targets execute, state is written.
+        first = runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+        assert first.exit_code == 0
+        assert mock_claude.call_count == 1
+        assert mock_subagents.call_count == 1
+
+        # Second run — no source changed → both helpers skipped.
+        mock_claude.reset_mock()
+        mock_subagents.reset_mock()
+        second = runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+
+        assert second.exit_code == 0, second.stdout
+        mock_claude.assert_not_called()
+        mock_subagents.assert_not_called()
+        flat = self._flat(second.stdout)
+        assert "CLAUDE.md unchanged" in flat
+        assert "Subagents unchanged" in flat
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_force_overrides_skip(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """``--force`` re-tunes even when the source hash matches."""
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path)
+
+        runner = CliRunner()
+        # Seed state with a successful first run.
+        runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+        mock_claude.reset_mock()
+        mock_subagents.reset_mock()
+
+        # Capture the seeded state's last_run timestamp so we can
+        # verify the force run actually rewrites the record (not just
+        # re-invokes the helpers).
+        seeded_state = load_state(project)
+        seeded_last_run = seeded_state.last_run
+        seeded_claude_ts = seeded_state.completed["claude-md"].timestamp
+
+        # --force → skip is bypassed AND state is updated.
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--no-interactive", "--force"],
+        )
+        assert result.exit_code == 0
+        assert mock_claude.call_count == 1
+        assert mock_subagents.call_count == 1
+
+        # The PR description's claim ("forced re-tunes produce an
+        # idempotent state file") only holds if mark_completed runs
+        # on the force path. Verify by reading the state file after
+        # the force run and asserting both records are present and
+        # carry refreshed timestamps.
+        post_force = load_state(project)
+        assert "claude-md" in post_force.completed
+        assert "subagents" in post_force.completed
+        assert post_force.completed["claude-md"].model == "claude-sonnet-4-5"
+        assert post_force.completed["subagents"].model == "claude-sonnet-4-5"
+        # Timestamps moved forward — rules out the silent "we ran
+        # the helpers but forgot to mark_completed" regression.
+        assert post_force.last_run >= seeded_last_run
+        assert post_force.completed["claude-md"].timestamp >= seeded_claude_ts
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_changed_overrides_skip(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Project name change → CLAUDE.md hash differs → re-tune fires."""
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path)
+
+        runner = CliRunner()
+        # Seed state with the auto-detected project name.
+        runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+        mock_claude.reset_mock()
+        mock_subagents.reset_mock()
+
+        # Override the project name → both target hashes change.
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--project-name",
+                "renamed-project",
+                "--no-interactive",
+            ],
+        )
+        assert result.exit_code == 0
+        assert mock_claude.call_count == 1
+        assert mock_subagents.call_count == 1
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_dry_run_does_not_persist_state(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """``--dry-run`` runs the helpers but doesn't claim a tune happened."""
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--dry-run", "--no-interactive"],
+        )
+
+        assert result.exit_code == 0
+        # The state file must not exist after a dry run; otherwise the
+        # next real run would skip these targets thinking they're up
+        # to date when no actual write happened.
+        state_file = project / ".claude" / ".enhance-state.json"
+        assert not state_file.exists(), state_file.read_text(encoding="utf-8")
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_dry_run_after_seeded_state_leaves_file_untouched(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """A dry run after a real run preserves the existing state file.
+
+        Catches a regression where dry-run logic might bump the
+        ``last_run`` timestamp or otherwise rewrite the file even
+        though no tune actually happened.
+        """
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path)
+        runner = CliRunner()
+
+        # Seed real state.
+        runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+        state_file = project / ".claude" / ".enhance-state.json"
+        seeded_bytes = state_file.read_bytes()
+
+        # Dry run after seeded state — file must be byte-identical.
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--dry-run", "--no-interactive"],
+        )
+        assert result.exit_code == 0
+        assert state_file.read_bytes() == seeded_bytes
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_force_dry_run_combo_does_not_persist_state(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,
+        mock_subagents: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """``--force --dry-run`` invokes helpers but leaves state on disk untouched.
+
+        Both flags are independently respected: ``--force`` bypasses
+        the skip so the helpers run; ``--dry-run`` short-circuits
+        ``_persist_enhance_state`` so no write happens.
+        """
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path)
+        runner = CliRunner()
+
+        runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+        state_file = project / ".claude" / ".enhance-state.json"
+        seeded_bytes = state_file.read_bytes()
+        mock_claude.reset_mock()
+        mock_subagents.reset_mock()
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--force",
+                "--dry-run",
+                "--no-interactive",
+            ],
+        )
+        assert result.exit_code == 0
+        # ``--force`` ran the helpers…
+        assert mock_claude.call_count == 1
+        assert mock_subagents.call_count == 1
+        # …but ``--dry-run`` left the state file byte-identical.
+        assert state_file.read_bytes() == seeded_bytes
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_persist_skipped_when_every_target_is_skipped(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """A run where every target is skipped never calls ``save_state``.
+
+        Pairs with ``test_unchanged_target_is_skipped`` but asserts
+        the implementation detail directly: no spurious ``last_run``
+        bumps from no-op invocations.
+        """
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path)
+        runner = CliRunner()
+
+        # Seed state (real ``save_state``).
+        runner.invoke(cli.app, ["enhance", str(project), "--no-interactive"])
+
+        # Second run — every target skipped. Patch ``save_state`` only
+        # for this invocation so the seed actually persisted.
+        with patch("start_green_stay_green.cli.save_state") as mock_save:
+            result = runner.invoke(
+                cli.app, ["enhance", str(project), "--no-interactive"]
+            )
+        assert result.exit_code == 0
+        mock_save.assert_not_called()
+
+
+class TestEnhanceSourceHashes:
+    """Hash determinism + sensitivity for the per-target hash helpers."""
+
+    def test_claude_md_hash_changes_with_project_name(self) -> None:
+        a = cli._compute_target_source_hash("claude-md", "alpha", "python")
+        b = cli._compute_target_source_hash("claude-md", "beta", "python")
+        assert a != b
+
+    def test_claude_md_hash_changes_with_language(self) -> None:
+        a = cli._compute_target_source_hash("claude-md", "alpha", "python")
+        b = cli._compute_target_source_hash("claude-md", "alpha", "go")
+        assert a != b
+
+    def test_claude_md_hash_is_deterministic(self) -> None:
+        a = cli._compute_target_source_hash("claude-md", "alpha", "python")
+        b = cli._compute_target_source_hash("claude-md", "alpha", "python")
+        assert a == b
+        assert a.startswith("sha256:")
+
+    def test_subagents_hash_changes_with_project_name(self) -> None:
+        a = cli._compute_target_source_hash("subagents", "alpha", "python")
+        b = cli._compute_target_source_hash("subagents", "beta", "python")
+        assert a != b
+
+    def test_subagents_hash_is_deterministic(self) -> None:
+        a = cli._compute_target_source_hash("subagents", "alpha", "python")
+        b = cli._compute_target_source_hash("subagents", "alpha", "python")
+        assert a == b
+
+    def test_unknown_target_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown target"):
+            cli._compute_target_source_hash("bogus", "alpha", "python")
+
+    def test_target_namespace_separation(self) -> None:
+        """Two targets with same metadata must hash differently — no collisions."""
+        a = cli._compute_target_source_hash("claude-md", "alpha", "python")
+        b = cli._compute_target_source_hash("subagents", "alpha", "python")
+        assert a != b
+
+
+class TestReferenceFileWarning:
+    """``_read_reference_or_warn`` returns "" + prints when file missing."""
+
+    def test_missing_file_prints_warning_and_returns_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """Broken-install case: missing ref → warning + empty string.
+
+        Regression test for the silent-empty-hash issue: if a
+        reference file vanishes (moved submodule, partial install)
+        the helper must surface that to the user instead of silently
+        baking the empty hash into the state file and permanently
+        suppressing future re-tunes.
+        """
+        missing = tmp_path / "nope.md"
+        with patch("start_green_stay_green.cli.console") as mock_console:
+            result = cli._read_reference_or_warn(missing, "test label")
+
+        assert result == ""
+        mock_console.print.assert_called_once()
+        # The warning names the file label so a user can tell which
+        # of the several refs is broken.
+        printed = mock_console.print.call_args[0][0]
+        assert "test label" in printed
+        assert "missing" in printed.lower()
+
+    def test_present_file_returns_contents_silently(self, tmp_path: Path) -> None:
+        """The happy path stays silent — no warning when the file exists."""
+        path = tmp_path / "ref.md"
+        path.write_text("hello\n", encoding="utf-8")
+        with patch("start_green_stay_green.cli.console") as mock_console:
+            result = cli._read_reference_or_warn(path, "test label")
+
+        assert result == "hello\n"
+        mock_console.print.assert_not_called()
+
+
+class TestEnhanceDispatchAssertion:
+    """The import-time guard that catches typos in ``_ENHANCE_DISPATCH``."""
+
+    def test_assert_raises_when_helper_is_undefined(self) -> None:
+        """A typo'd helper name in the table is caught at import time."""
+        bogus = cli._EnhanceTargetSpec(
+            skip_message="[dim]nope[/dim]",
+            helper_name="_does_not_exist",
+            hash_helper_name="_hash_claude_md_inputs",
+        )
+        with (
+            patch.dict(cli._ENHANCE_DISPATCH, {"bogus": bogus}, clear=False),
+            pytest.raises(RuntimeError, match="undefined helper"),
+        ):
+            cli._assert_enhance_dispatch_intact()
+
+    def test_assert_raises_when_hash_helper_is_undefined(self) -> None:
+        """The guard also catches typos in ``hash_helper_name``."""
+        bogus = cli._EnhanceTargetSpec(
+            skip_message="[dim]nope[/dim]",
+            helper_name="_enhance_claude_md",
+            hash_helper_name="_does_not_exist",
+        )
+        with (
+            patch.dict(cli._ENHANCE_DISPATCH, {"bogus": bogus}, clear=False),
+            pytest.raises(RuntimeError, match="undefined helper"),
+        ):
+            cli._assert_enhance_dispatch_intact()
+
+
+class TestEnhanceBatchCLI:
+    """Phase 5b: ``green enhance --batch`` flag wiring."""
+
+    @staticmethod
+    def _flat(text: str) -> str:
+        return " ".join(text.split())
+
+    @staticmethod
+    def _make_project(tmp_path: Path, *, name: str = "proj") -> Path:
+        project = tmp_path / name
+        project.mkdir()
+        (project / "CLAUDE.md").write_text(
+            f"# Claude Code Project Context: {name}\n\nbaseline.\n",
+            encoding="utf-8",
+        )
+        (project / "pyproject.toml").write_text("[project]\nname='x'\n")
+        (project / ".claude" / "agents").mkdir(parents=True)
+        return project
+
+    def test_batch_with_claude_md_target_exits_with_clear_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--batch --targets claude-md`` is rejected before any API call.
+
+        Phase 5a primitives only handle ``tool_use`` requests; the
+        sync claude-md path uses free-text generation. Failing fast
+        keeps the user model honest.
+        """
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--batch",
+                "--targets",
+                "claude-md",
+            ],
+        )
+
+        assert result.exit_code == 1
+        flat = self._flat(result.stdout)
+        assert "--batch does not support targets claude-md" in flat
+        # Suggests the working invocation rather than just erroring.
+        assert "--targets subagents" in flat
+
+    def test_wait_without_batch_exits(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--wait`` only makes sense paired with ``--batch``."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+        runner = CliRunner()
+
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--wait"],
+        )
+
+        assert result.exit_code == 1
+        assert "--wait only applies in --batch mode" in self._flat(result.stdout)
+
+    def test_batch_dry_run_short_circuits_without_calling_api(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--batch --dry-run`` prints a notice and does NOT submit."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+        # Patch the dispatch helpers so a slip would be loud.
+        with (
+            mock.patch("start_green_stay_green.cli.submit_subagent_batch") as submit,
+            mock.patch("start_green_stay_green.cli.resume_subagent_batch") as resume,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                    "--dry-run",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "--dry-run with --batch" in self._flat(result.stdout)
+        submit.assert_not_called()
+        resume.assert_not_called()
+
+    def test_first_run_batch_with_wait_warns_no_op(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``green enhance --batch --wait`` on first-run prints a no-op warning.
+
+        Issue #319: the submit branch silently ignored ``--wait``
+        because the submit call itself never blocks (ADR-001 two-call
+        contract). The user is told upfront so they know to pass
+        ``--wait`` again on the resume call.
+        """
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+
+        fake_outcome = mock.MagicMock()
+        fake_outcome.submission.batch_id = "msgbatch_first_run"
+        fake_outcome.agent_count = 7
+
+        with mock.patch(
+            "start_green_stay_green.cli.submit_subagent_batch",
+            new=mock.AsyncMock(return_value=fake_outcome),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                    "--wait",
+                ],
+            )
+
+        assert result.exit_code == 0, result.stdout
+        flat = self._flat(result.stdout)
+        assert "--wait has no effect on the first --batch call" in flat
+        # The success message still surfaces — warning is additive.
+        assert "Submitted batch" in flat
+        assert "msgbatch_first_run" in flat
+
+    def test_batch_submit_api_error_exits_cleanly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``AIGenerationError`` from submit → exit 1 + clear message.
+
+        Review feedback (PR #315): the docstring of
+        :func:`submit_subagent_batch` lists ``GenerationError`` as a
+        documented raise, but the CLI lacked a handler so a real
+        SDK-side failure produced an uncaught traceback. This test
+        pins the post-feedback behaviour: human-readable error, exit
+        code 1, no stack trace bleeding to stdout.
+        """
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+
+        # ``submit_subagent_batch`` raises before any state is written
+        # so there's no in-flight batch on disk after the run.
+        with mock.patch(
+            "start_green_stay_green.cli.submit_subagent_batch",
+            side_effect=AIGenerationError("Anthropic API rejected the batch (mocked)"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                ],
+            )
+
+        assert result.exit_code == 1
+        flat = self._flat(result.stdout)
+        assert "Batch API call failed" in flat
+        # Original error message survives so the user sees what went wrong.
+        assert "Anthropic API rejected the batch (mocked)" in flat
+        # No raw traceback in user-facing output.
+        assert "Traceback" not in result.stdout
+
+    def test_batch_resume_api_error_exits_cleanly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``AIGenerationError`` from resume → exit 1 + clear message."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+        # Pre-seed an in-flight batch so the resume branch is taken.
+        state = EnhanceState()
+        state.batch = BatchProgress(
+            batch_id="msgbatch_pre_seeded",
+            submitted_at="2026-05-09T22:00:00+00:00",
+            custom_id_map={"subagent:alpha": "subagents"},
+        )
+        save_state(project, state)
+
+        with mock.patch(
+            "start_green_stay_green.cli.resume_subagent_batch",
+            side_effect=AIGenerationError("poll failed (mocked)"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                ],
+            )
+
+        assert result.exit_code == 1
+        flat = self._flat(result.stdout)
+        assert "Batch API call failed" in flat
+        assert "poll failed (mocked)" in flat
+
+    def test_render_unknown_status_fails_loudly(self) -> None:
+        """An out-of-enum status must fail loudly rather than silently
+        rendering as ``ENDED``.
+
+        Phase 6c migrated :class:`ResumeStatus` to :class:`enum.StrEnum`
+        and the dispatcher to a ``match`` statement with
+        :func:`typing.assert_never` — so a future member added without
+        updating ``_render_batch_resume_outcome`` is caught at mypy
+        time, not just at runtime. The runtime guard remains as
+        defense-in-depth: type checkers can be silenced or skipped, so
+        an out-of-enum value reaching the dispatcher still raises
+        ``AssertionError`` from ``assert_never`` rather than producing
+        a misleading "0 written, 0 failed" line.
+        """
+        # ``# type: ignore[arg-type]`` is exactly how a future
+        # forgotten-case bug would manifest — a developer might silence
+        # mypy here without realising the dispatcher hasn't been
+        # extended. The runtime guard catches it anyway.
+        bad = ResumeOutcome(status="bogus-status")  # type: ignore[arg-type]
+
+        with pytest.raises(AssertionError, match="unreachable"):
+            cli._render_batch_resume_outcome(bad)

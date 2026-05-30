@@ -15,28 +15,29 @@ class TestArchitectureEnforcementGeneratorInit:
     """Test ArchitectureEnforcementGenerator initialization."""
 
     def test_init_with_orchestrator(self) -> None:
-        """Test initialization with AI orchestrator."""
+        """Passing an orchestrator still works but emits a DeprecationWarning."""
         orchestrator = create_autospec(AIOrchestrator)
-        generator = ArchitectureEnforcementGenerator(orchestrator)
+        with pytest.warns(DeprecationWarning, match="'orchestrator' parameter"):
+            generator = ArchitectureEnforcementGenerator(orchestrator)
 
         assert generator.orchestrator is orchestrator
 
+    def test_init_without_orchestrator_is_silent(self) -> None:
+        """The default (no orchestrator) does not emit a warning."""
+        generator = ArchitectureEnforcementGenerator()
+        assert generator.orchestrator is None
+
     def test_init_with_output_dir(self) -> None:
         """Test initialization with custom output directory."""
-        orchestrator = create_autospec(AIOrchestrator)
         output_dir = Path("/custom/plans/architecture")
 
-        generator = ArchitectureEnforcementGenerator(
-            orchestrator,
-            output_dir=output_dir,
-        )
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
 
         assert generator.output_dir == output_dir
 
     def test_init_with_default_output_dir(self) -> None:
         """Test initialization sets default output directory."""
-        orchestrator = create_autospec(AIOrchestrator)
-        generator = ArchitectureEnforcementGenerator(orchestrator)
+        generator = ArchitectureEnforcementGenerator()
 
         assert generator.output_dir == Path("plans/architecture")
 
@@ -49,12 +50,8 @@ class TestArchitectureEnforcementGeneratorGenerate:
         tmp_path: Path,
     ) -> None:
         """Test generating import-linter config for Python."""
-        orchestrator = create_autospec(AIOrchestrator)
         output_dir = tmp_path / "plans" / "architecture"
-        generator = ArchitectureEnforcementGenerator(
-            orchestrator,
-            output_dir=output_dir,
-        )
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
 
         generator.generate(language="python", project_name="test-project")
 
@@ -78,12 +75,8 @@ class TestArchitectureEnforcementGeneratorGenerate:
         tmp_path: Path,
     ) -> None:
         """Test generating dependency-cruiser config for TypeScript."""
-        orchestrator = create_autospec(AIOrchestrator)
         output_dir = tmp_path / "plans" / "architecture"
-        generator = ArchitectureEnforcementGenerator(
-            orchestrator,
-            output_dir=output_dir,
-        )
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
 
         generator.generate(
             language="typescript",
@@ -96,8 +89,7 @@ class TestArchitectureEnforcementGeneratorGenerate:
 
     def test_generate_raises_on_unsupported_language(self) -> None:
         """Test generate raises ValueError for unsupported languages."""
-        orchestrator = create_autospec(AIOrchestrator)
-        generator = ArchitectureEnforcementGenerator(orchestrator)
+        generator = ArchitectureEnforcementGenerator()
 
         with pytest.raises(ValueError, match="Unsupported language"):
             generator.generate(language="ruby", project_name="test")
@@ -107,12 +99,8 @@ class TestArchitectureEnforcementGeneratorGenerate:
         tmp_path: Path,
     ) -> None:
         """Test README contains usage instructions."""
-        orchestrator = create_autospec(AIOrchestrator)
         output_dir = tmp_path / "plans" / "architecture"
-        generator = ArchitectureEnforcementGenerator(
-            orchestrator,
-            output_dir=output_dir,
-        )
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
 
         generator.generate(language="python", project_name="test-project")
 
@@ -129,12 +117,8 @@ class TestArchitectureEnforcementGeneratorGenerate:
         tmp_path: Path,
     ) -> None:
         """Test run-check.sh is created with executable permissions."""
-        orchestrator = create_autospec(AIOrchestrator)
         output_dir = tmp_path / "plans" / "architecture"
-        generator = ArchitectureEnforcementGenerator(
-            orchestrator,
-            output_dir=output_dir,
-        )
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
 
         generator.generate(language="python", project_name="test-project")
 
@@ -151,12 +135,8 @@ class TestArchitectureEnforcementGeneratorPython:
         tmp_path: Path,
     ) -> None:
         """Test Python config enforces layer separation."""
-        orchestrator = create_autospec(AIOrchestrator)
         output_dir = tmp_path / "plans" / "architecture"
-        generator = ArchitectureEnforcementGenerator(
-            orchestrator,
-            output_dir=output_dir,
-        )
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
 
         generator.generate(language="python", project_name="myapp")
 
@@ -171,12 +151,8 @@ class TestArchitectureEnforcementGeneratorPython:
         tmp_path: Path,
     ) -> None:
         """Test Python config prevents circular dependencies."""
-        orchestrator = create_autospec(AIOrchestrator)
         output_dir = tmp_path / "plans" / "architecture"
-        generator = ArchitectureEnforcementGenerator(
-            orchestrator,
-            output_dir=output_dir,
-        )
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
 
         generator.generate(language="python", project_name="myapp")
 
@@ -195,12 +171,8 @@ class TestArchitectureEnforcementGeneratorTypeScript:
         tmp_path: Path,
     ) -> None:
         """Test TypeScript config enforces layer separation."""
-        orchestrator = create_autospec(AIOrchestrator)
         output_dir = tmp_path / "plans" / "architecture"
-        generator = ArchitectureEnforcementGenerator(
-            orchestrator,
-            output_dir=output_dir,
-        )
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
 
         generator.generate(language="typescript", project_name="myapp")
 
@@ -215,12 +187,8 @@ class TestArchitectureEnforcementGeneratorTypeScript:
         tmp_path: Path,
     ) -> None:
         """Test TypeScript config prevents circular dependencies."""
-        orchestrator = create_autospec(AIOrchestrator)
         output_dir = tmp_path / "plans" / "architecture"
-        generator = ArchitectureEnforcementGenerator(
-            orchestrator,
-            output_dir=output_dir,
-        )
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
 
         generator.generate(language="typescript", project_name="myapp")
 

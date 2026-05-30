@@ -1,0 +1,130 @@
+# Changelog
+
+All notable changes to **Start Green Stay Green** are documented here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+Versions before `1.0.0` were unreleased internal milestones; the
+`1.0.0` line collects every roadmap phase that landed before the
+first tagged release.
+
+## [Unreleased]
+
+Phase 6 follow-ups in progress (issues #316–#319). No user-facing
+changes shipped to this version yet.
+
+## [1.0.0] — 2026-05-10
+
+First tagged release. Bundles the entire claude-init optimization
+roadmap (Phases 0 → 5b).
+
+### Added
+
+- **`green enhance` command** (Phase 3b, [#309]) — re-run Pass 2 (AI
+  tuning) over an existing `green init` project without
+  re-scaffolding. Useful after `--offline` initial runs or after
+  reference subagents change in this repo.
+- **`green enhance --batch` and `--wait` flags** (Phase 5b, [#315]) —
+  submit subagent tunings via the Anthropic Message Batches API for
+  a 50 % cost discount at the price of a ≤24 h SLA. Two-call submit-
+  then-resume by default; `--wait` blocks in-process. See
+  [`plans/architecture/ADR-001-batch-enhance.md`](plans/architecture/ADR-001-batch-enhance.md).
+- **`green init --offline` and `--no-enhance` flags** (Phase 3a,
+  [#308]) — split init into a deterministic Pass 1 scaffold + an
+  optional Pass 2 polish so users without an API key (or who don't
+  want the polish today) get a complete project in ~3 s.
+- **`.claude/.enhance-state.json` resume cursor** (Phase 3c, [#310])
+  — `green enhance` skips targets whose source content hasn't
+  changed since the last successful run; `--force` overrides.
+- **Anthropic Message Batches API primitives** (Phase 5a, [#313]):
+  `submit_tool_use_batch`, `poll_batch`, `fetch_batch_results` on
+  `AIOrchestrator`; `BatchProgress` state extension; new
+  `start_green_stay_green/ai/types.py` shared types module breaking
+  the orchestrator ↔ batch import cycle.
+- **6-component prompt templates** (Phase 4, [#312]) — every
+  generator prompt hoisted into Jinja2 templates under
+  `start_green_stay_green/ai/prompts/templates/`, each conforming to
+  the Role / Goal / Context / Format / Examples / Constraints
+  framework.
+- **Prompt caching + `tool_use` structured output** (Phase 2c,
+  [#311]) — system blocks now carry `cache_control` markers so
+  identical prefixes hit Anthropic's cache; tuning results return
+  via the `report_tuning` tool schema instead of free-text JSON.
+- **Language-specific setup instructions** in `green init` output
+  (#279).
+- **`await-claude-review`, `address-feedback`, and Phase-5 skills**
+  imported from `well-worn-tools` ([#303], [#314]).
+
+### Changed
+
+- **Default `green init` is two-pass** (Phase 3a, [#308]). Pass 1
+  (deterministic scaffold) writes a complete project in ~3 s; Pass 2
+  (AI polish) runs in parallel afterwards. Fall back to Pass 1 only
+  with `--offline` or `--no-enhance`.
+- **AI-orchestrated generation runs in parallel** (Phase 2, [#305])
+  — `asyncio.gather` over the per-target tunings instead of
+  sequential awaits. ~3× speedup on the AI-bound segment.
+- **Generator prompts share a cache prefix** (Phase 2c, [#311]). The
+  system blocks for `claude_md_tune`, `ci_enhance`, and
+  `content_tune` are byte-identical across runs so Anthropic's
+  prompt cache hits; observed ~80 % cache-hit rate on the second
+  invocation in a row.
+- **`green init`'s "Skipped (no API key)" steps removed** (Phase 3a,
+  [#308]) — the new two-pass model means Pass 1 always succeeds and
+  Pass 2 is gated explicitly by `--offline` / `--no-enhance` /
+  presence of `ANTHROPIC_API_KEY`. Behavior change worth calling
+  out: a user without a key now sees a complete (Pass-1-only)
+  project rather than a partially-scaffolded one with explicit
+  skips.
+
+### Deprecated
+
+- **`green init --api-key VALUE`** (since #308). The flag still
+  works but is hidden from `--help` because passing secrets via
+  argv leaks them into shell history and `ps` listings. Use
+  `ANTHROPIC_API_KEY` in the environment or the system keyring
+  (prompted automatically) instead. Removal is targeted for the
+  next minor release.
+
+### Fixed
+
+- TypeScript projects with Prettier no longer fail their own quality
+  gates (#287).
+- Pre-commit version drift on Black (#289).
+- Dependency upgrades for `pyupgrade` / `refurb` Python 3.14 compat
+  (#290).
+- Language deduplication in `_get_setup_instructions` (#288).
+- Dependabot allowed in `claude-review` workflow (#278).
+
+### Performance
+
+- **`green init --offline`**: ~3 s wall clock, 0 API calls.
+- **`green init` (default, two-pass)**: ~6–10 s wall clock, ≤3 API
+  calls (one per Pass-2 target). Down from ~25–40 s pre-Phase-2.
+- **`green enhance`**: ~3–6 s wall clock, ≤3 API calls.
+- **`green enhance --batch`**: minutes – hours wall clock (gated by
+  the Anthropic SLA), ≤3 API calls, 50 % cost vs sync.
+
+Numbers are rough order-of-magnitude on a Mac M-series with the
+default model; see `plans/2026-05-03-claude-init-optimization-roadmap.md`
+for the methodology.
+
+### Tests + quality
+
+- **1783 unit + integration/e2e tests** (was ~1700 pre-roadmap).
+- **Coverage 92.92 %** (threshold 90 %).
+- All five CI gate scripts (lint, format, typecheck, security,
+  complexity) pass; every function grade A under xenon.
+
+[#303]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/303
+[#308]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/308
+[#309]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/309
+[#310]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/310
+[#311]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/311
+[#312]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/312
+[#313]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/313
+[#314]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/314
+[#315]: https://github.com/Geoffe-Ga/start_green_stay_green/pull/315
+[Unreleased]: https://github.com/Geoffe-Ga/start_green_stay_green/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Geoffe-Ga/start_green_stay_green/releases/tag/v1.0.0

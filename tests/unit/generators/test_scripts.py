@@ -256,6 +256,72 @@ class TestScriptsGeneratorPythonGeneration:
             assert "Bandit" in content
             assert "pip-audit" in content
 
+    def test_python_security_script_supports_known_vuln_suppression(self) -> None:
+        """Generated security.sh parses .pip-audit-known-vulnerabilities."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["security.sh"].read_text()
+            assert ".pip-audit-known-vulnerabilities" in content
+            assert "PIP_AUDIT_ARGS=()" in content
+            assert "--ignore-vuln" in content
+            # The expanded args are passed to pip-audit
+            assert 'pip-audit "${PIP_AUDIT_ARGS[@]}"' in content
+
+    def test_python_pip_audit_template_written_to_project_root(self) -> None:
+        """Template `.pip-audit-known-vulnerabilities` lands at project root."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            scripts_dir = project_root / "scripts"
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(
+                scripts_dir,
+                config,
+                project_root=project_root,
+            )
+            generator.generate()
+
+            template = project_root / ".pip-audit-known-vulnerabilities"
+            assert template.exists()
+
+            body = template.read_text(encoding="utf-8")
+            # Template is documented and empty (no active suppressions)
+            assert "Known vulnerabilities" in body
+            assert "pip-audit --ignore-vuln" in body
+            # Every non-comment, non-blank line would be an active suppression.
+            active = [
+                line
+                for line in body.splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+            assert not active
+
+    def test_python_pip_audit_template_preserves_existing_file(self) -> None:
+        """Existing `.pip-audit-known-vulnerabilities` is not overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir)
+            scripts_dir = project_root / "scripts"
+            template = project_root / ".pip-audit-known-vulnerabilities"
+            template.write_text("CVE-2025-99999  # user customisation\n")
+
+            config = ScriptConfig(language="python", package_name="my_package")
+            generator = ScriptsGenerator(
+                scripts_dir,
+                config,
+                project_root=project_root,
+            )
+            generator.generate()
+
+            assert template.read_text() == "CVE-2025-99999  # user customisation\n"
+
     def test_python_complexity_script_contains_radon_xenon(self) -> None:
         """Test Python complexity.sh mentions Radon and Xenon."""
         with tempfile.TemporaryDirectory() as tmpdir:

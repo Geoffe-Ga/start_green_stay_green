@@ -5,6 +5,8 @@ Implements the command-line interface using Typer with rich output formatting.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 import json
@@ -15,16 +17,29 @@ import shlex
 import shutil
 import sys
 from typing import Annotated
+from typing import Any
 from typing import TYPE_CHECKING
+from typing import TypeVar
+from typing import assert_never
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from collections.abc import Coroutine
     from collections.abc import Generator
     from collections.abc import Sequence
+
+    from start_green_stay_green.utils.enhance_state import EnhanceState
 
 from rich.console import Console
 from rich.panel import Panel
 import typer
 
+from start_green_stay_green.ai.batch_dispatch import BatchPersistenceContext
+from start_green_stay_green.ai.batch_dispatch import BatchWaitConfig
+from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
+from start_green_stay_green.ai.batch_dispatch import ResumeStatus
+from start_green_stay_green.ai.batch_dispatch import resume_subagent_batch
+from start_green_stay_green.ai.batch_dispatch import submit_subagent_batch
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
 from start_green_stay_green.generators.architecture import (
@@ -51,13 +66,21 @@ from start_green_stay_green.generators.skills import REFERENCE_SKILLS_DIR
 from start_green_stay_green.generators.skills import REQUIRED_SKILLS
 from start_green_stay_green.generators.structure import StructureConfig
 from start_green_stay_green.generators.structure import StructureGenerator
+from start_green_stay_green.generators.subagents import REFERENCE_AGENTS_DIR
+from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
 from start_green_stay_green.generators.subagents import SubagentsGenerator
 from start_green_stay_green.generators.tests_gen import TestsConfig
 from start_green_stay_green.generators.tests_gen import TestsGenerator
 from start_green_stay_green.utils.async_bridge import run_async
 from start_green_stay_green.utils.credentials import get_api_key_from_keyring
 from start_green_stay_green.utils.credentials import store_api_key_in_keyring
+from start_green_stay_green.utils.enhance_state import hash_inputs
+from start_green_stay_green.utils.enhance_state import load_state
+from start_green_stay_green.utils.enhance_state import save_state
 from start_green_stay_green.utils.file_writer import FileWriter
+from start_green_stay_green.utils.timing import TimingReport
+from start_green_stay_green.utils.timing import set_active_report
+from start_green_stay_green.utils.timing import step_timer
 from start_green_stay_green.utils.yaml_merge import merge_precommit_configs
 
 # Version information
@@ -65,6 +88,9 @@ __version__ = "1.0.0"
 
 # Constants
 MAX_PROJECT_NAME_LENGTH = 100
+
+# Generic return type for the orchestrator-close coroutine wrapper.
+_R = TypeVar("_R")
 
 # Create Typer app with rich markup enabled
 app = typer.Typer(
@@ -581,6 +607,83 @@ def _copy_reference_skills(
             shutil.copytree(source_dir, target_skill_dir, dirs_exist_ok=True)
 
 
+def _copy_reference_subagents(
+    target_dir: Path,
+    file_writer: FileWriter | None = None,
+) -> None:
+    """Copy reference subagent profiles to ``target_dir`` verbatim.
+
+    Used by the no-API path of ``_generate_subagents_step``. Each
+    required agent in ``REQUIRED_AGENTS`` is copied from the source
+    file declared in the mapping to ``<agent_name>.md`` so the file
+    layout matches what the AI-tuned path produces.
+
+    Args:
+        target_dir: Destination ``.claude/agents`` directory.
+        file_writer: Optional ``FileWriter`` for additive behaviour
+            (handles --force / --interactive conflict resolution).
+
+    Raises:
+        FileNotFoundError: If a required reference agent is missing.
+    """
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for agent_name, source_file in REQUIRED_AGENTS.items():
+        source_path = REFERENCE_AGENTS_DIR / source_file
+        if not source_path.exists():
+            msg = f"Reference subagent not found: {source_file}"
+            raise FileNotFoundError(msg)
+        target_path = target_dir / f"{agent_name}.md"
+        # Pin UTF-8 explicitly: agent prose contains characters
+        # (✓, ⊘, em-dashes) that would corrupt under a non-UTF-8 locale
+        # default on Windows.
+        content = source_path.read_text(encoding="utf-8")
+        if file_writer is not None:
+            file_writer.write_file(target_path, content)
+        else:
+            target_path.write_text(content, encoding="utf-8")
+
+
+@contextmanager
+def _maybe_collect_timing(
+    timing_json: Path | None,
+) -> Generator[None]:
+    """Optionally install a :class:`TimingReport` for the wrapped block.
+
+    When ``timing_json`` is ``None`` the manager is a no-op; otherwise a
+    fresh report is installed as the active collector for the duration of
+    the block and written to disk on exit (success or failure).
+    """
+    if timing_json is None:
+        yield
+        return
+    report = TimingReport()
+    set_active_report(report)
+    try:
+        yield
+    finally:
+        timing_json.parent.mkdir(parents=True, exist_ok=True)
+        report.write_json(timing_json)
+        set_active_report(None)
+
+
+async def _run_with_orchestrator_close(
+    orchestrator: AIOrchestrator,
+    coro: Coroutine[Any, Any, _R],
+) -> _R:
+    """Await ``coro`` and release the orchestrator's async client on exit.
+
+    ``AIOrchestrator`` lazily allocates an :class:`AsyncAnthropic` (and
+    therefore an httpx pool) when ``generate_async`` is first invoked.
+    Without an explicit ``aclose`` the pool would leak across calls in
+    long-lived contexts. ``aclose`` is idempotent, so this is safe even
+    when the async client was never created.
+    """
+    try:
+        return await coro
+    finally:
+        await orchestrator.aclose()
+
+
 def _generate_structure_step(
     project_path: Path,
     project_name: str,
@@ -588,7 +691,7 @@ def _generate_structure_step(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate source code structure."""
-    with console.status("Generating source structure..."):
+    with step_timer("structure"), console.status("Generating source structure..."):
         config = StructureConfig(
             project_name=project_name,
             language=language,
@@ -606,7 +709,7 @@ def _generate_dependencies_step(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate dependencies files."""
-    with console.status("Generating dependencies..."):
+    with step_timer("dependencies"), console.status("Generating dependencies..."):
         config = DependencyConfig(
             project_name=project_name,
             language=language,
@@ -624,7 +727,7 @@ def _generate_tests_step(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate tests directory."""
-    with console.status("Generating tests..."):
+    with step_timer("tests"), console.status("Generating tests..."):
         config = TestsConfig(
             project_name=project_name,
             language=language,
@@ -642,7 +745,7 @@ def _generate_readme_step(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate README.md."""
-    with console.status("Generating README..."):
+    with step_timer("readme"), console.status("Generating README..."):
         config = ReadmeConfig(
             project_name=project_name,
             language=language,
@@ -710,7 +813,7 @@ def _generate_scripts_step(
     elif _scripts_dir_has_other_language(scripts_dir, language):
         scripts_dir = scripts_dir / language
 
-    with console.status(f"Generating {language} scripts..."):
+    with step_timer("scripts"), console.status(f"Generating {language} scripts..."):
         scripts_config = ScriptConfig(
             language=language,
             package_name=project_name.replace("-", "_"),
@@ -719,6 +822,7 @@ def _generate_scripts_step(
             output_dir=scripts_dir,
             config=scripts_config,
             file_writer=file_writer,
+            project_root=project_path,
         )
         scripts_generator.generate()
     console.print(f"[green]✓[/green] Generated {language} scripts")
@@ -731,7 +835,7 @@ def _generate_precommit_step(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate pre-commit configuration, merging with existing if present."""
-    with console.status("Generating pre-commit config..."):
+    with step_timer("precommit"), console.status("Generating pre-commit config..."):
         precommit_config = GenerationConfig(
             project_name=project_name,
             language=language,
@@ -807,7 +911,7 @@ def _generate_skills_step(
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate Claude skills."""
-    with console.status("Generating skills..."):
+    with step_timer("skills"), console.status("Generating skills..."):
         skills_dir = project_path / ".claude" / "skills"
         _copy_reference_skills(skills_dir, file_writer=file_writer)
     console.print("[green]✓[/green] Generated skills")
@@ -815,47 +919,61 @@ def _generate_skills_step(
 
 def _generate_ci_step(
     project_path: Path,
+    project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate CI pipeline or skip if no orchestrator."""
-    if orchestrator:
-        with console.status("Generating CI pipeline..."):
-            ci_generator = CIGenerator(orchestrator, language)
-            workflow = ci_generator.generate_workflow()
-            workflows_dir = project_path / ".github" / "workflows"
-            workflows_dir.mkdir(parents=True, exist_ok=True)
-            ci_file = workflows_dir / "ci.yml"
-            if file_writer is not None:
-                file_writer.write_file(ci_file, workflow.content)
-            else:
-                ci_file.write_text(workflow.content)
-        console.print("[green]✓[/green] Generated CI pipeline")
-    else:
-        console.print("[yellow]⊘[/yellow] Skipped CI (no API key)")
+    """Generate the CI pipeline.
+
+    Always runs the deterministic template path so a project is never
+    missing CI just because the user has no API key. ``orchestrator`` is
+    only used to opt into the legacy AI-tuned path for backward
+    compatibility. ``project_name`` is forwarded to the template
+    renderer so any ``<<% project_name %>>`` placeholder lands with
+    the real value rather than the empty string.
+    """
+    with step_timer("ci"), console.status("Generating CI pipeline..."):
+        ci_generator = CIGenerator(
+            orchestrator,
+            language,
+            project_name=project_name,
+        )
+        workflow = ci_generator.generate_workflow()
+        workflows_dir = project_path / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True, exist_ok=True)
+        ci_file = workflows_dir / "ci.yml"
+        if file_writer is not None:
+            file_writer.write_file(ci_file, workflow.content)
+        else:
+            ci_file.write_text(workflow.content, encoding="utf-8")
+    console.print("[green]✓[/green] Generated CI pipeline")
 
 
 def _generate_review_step(
     project_path: Path,
-    orchestrator: AIOrchestrator | None,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate GitHub Actions code review or skip if no orchestrator."""
-    if orchestrator:
-        with console.status("Generating GitHub Actions review..."):
-            review_generator = GitHubActionsReviewGenerator(orchestrator)
-            review_result = review_generator.generate()
-            workflows_dir = project_path / ".github" / "workflows"
-            workflows_dir.mkdir(parents=True, exist_ok=True)
-            workflow_file = workflows_dir / "code-review.yml"
-            if file_writer is not None:
-                file_writer.write_file(workflow_file, review_result["workflow_content"])
-            else:
-                workflow_file.write_text(review_result["workflow_content"])
-        console.print("[green]✓[/green] Generated GitHub Actions review")
-    else:
-        console.print("[yellow]⊘[/yellow] Skipped code review (no API key)")
+    """Generate the GitHub Actions code review workflow.
+
+    The generator is fully template-based — no orchestrator parameter
+    needed. (The orchestrator was previously passed but never used; it
+    has been dropped from this private helper, so the historical
+    ``orchestrator`` argument is gone entirely.)
+    """
+    with step_timer("review"), console.status("Generating GitHub Actions review..."):
+        review_generator = GitHubActionsReviewGenerator()
+        review_result = review_generator.generate()
+        workflows_dir = project_path / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True, exist_ok=True)
+        workflow_file = workflows_dir / "code-review.yml"
+        if file_writer is not None:
+            file_writer.write_file(workflow_file, review_result["workflow_content"])
+        else:
+            workflow_file.write_text(
+                review_result["workflow_content"], encoding="utf-8"
+            )
+    console.print("[green]✓[/green] Generated GitHub Actions review")
 
 
 def _generate_claude_md_step(
@@ -865,58 +983,67 @@ def _generate_claude_md_step(
     orchestrator: AIOrchestrator | None,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate CLAUDE.md or skip if no orchestrator."""
-    if orchestrator:
-        with console.status("Generating CLAUDE.md..."):
-            claude_md_generator = ClaudeMdGenerator(orchestrator)
-            project_config = {
-                "project_name": project_name,
-                "language": language,
-                "scripts": [
-                    "check-all.sh",
-                    "test.sh",
-                    "lint.sh",
-                    "format.sh",
-                    "security.sh",
-                    "mutation.sh",
-                ],
-                "skills": REQUIRED_SKILLS.copy(),
-            }
-            claude_md_result = claude_md_generator.generate(project_config)
-            claude_md_file = project_path / "CLAUDE.md"
-            if file_writer is not None:
-                file_writer.write_file(claude_md_file, claude_md_result.content)
-            else:
-                claude_md_file.write_text(claude_md_result.content)
-        console.print("[green]✓[/green] Generated CLAUDE.md")
-    else:
-        console.print("[yellow]⊘[/yellow] Skipped CLAUDE.md (no API key)")
+    """Generate CLAUDE.md.
+
+    Always runs: with no orchestrator the deterministic baseline is
+    rendered (Phase 1 of the optimization roadmap); with one, the legacy
+    AI-tuned generator is used.
+    """
+    with step_timer("claude_md"), console.status("Generating CLAUDE.md..."):
+        claude_md_generator = ClaudeMdGenerator(orchestrator)
+        project_config = {
+            "project_name": project_name,
+            "language": language,
+            "scripts": [
+                "check-all.sh",
+                "test.sh",
+                "lint.sh",
+                "format.sh",
+                "security.sh",
+                "mutation.sh",
+            ],
+            "skills": REQUIRED_SKILLS.copy(),
+        }
+        claude_md_result = claude_md_generator.generate(project_config)
+        claude_md_file = project_path / "CLAUDE.md"
+        if file_writer is not None:
+            file_writer.write_file(claude_md_file, claude_md_result.content)
+        else:
+            claude_md_file.write_text(claude_md_result.content, encoding="utf-8")
+    console.print("[green]✓[/green] Generated CLAUDE.md")
 
 
 def _generate_architecture_step(
     project_path: Path,
     project_name: str,
     language: str,
-    orchestrator: AIOrchestrator | None,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate architecture rules or skip if no orchestrator."""
-    if not orchestrator:
-        console.print("[yellow]⊘[/yellow] Skipped architecture rules (no API key)")
+    """Generate architecture rules.
+
+    Architecture configuration is fully deterministic (import-linter for
+    Python, dependency-cruiser for TypeScript). Runs regardless of API
+    key availability; only Python and TypeScript projects produce output.
+    The previous ``orchestrator`` argument was unused and has been
+    removed from this private helper.
+    """
+    if language not in {"python", "typescript"}:
+        # The generator only supports these two; surface a dim info line
+        # so users understand why no architecture rules were generated
+        # for, e.g., a Go or Rust project rather than seeing silence.
+        console.print(
+            f"[dim]Architecture rules unavailable for {language} "
+            "(supported: python, typescript)[/dim]"
+        )
         return
 
     arch_dir = project_path / "plans" / "architecture"
-    # ArchitectureEnforcementGenerator writes files internally;
-    # skip the entire step if the output directory already has content.
     if file_writer is not None and file_writer.skip_existing_dir(arch_dir):
         console.print("[green]✓[/green] Architecture rules (preserved existing)")
         return
 
-    with console.status("Generating architecture rules..."):
-        arch_generator = ArchitectureEnforcementGenerator(
-            orchestrator,
-            output_dir=arch_dir,
-        )
+    with step_timer("architecture"), console.status("Generating architecture rules..."):
+        arch_generator = ArchitectureEnforcementGenerator(output_dir=arch_dir)
         arch_generator.generate(language=language, project_name=project_name)
     console.print("[green]✓[/green] Generated architecture rules")
 
@@ -928,29 +1055,45 @@ def _generate_subagents_step(
     orchestrator: AIOrchestrator | None,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate subagents or skip if no orchestrator."""
-    if orchestrator:
-        with console.status("Generating subagents..."):
-            subagents_generator = SubagentsGenerator(orchestrator)
-            project_config_for_agents = (
-                f"Project: {project_name}, "
-                f"Language: {language}, "
-                f"Type: quality-control-tool"
+    """Generate subagents.
+
+    With an orchestrator: tunes each reference subagent for the target
+    project (currently in parallel, see Phase 2). Without an orchestrator:
+    falls back to copying the reference subagents verbatim so a project
+    is never missing its agent profiles.
+    """
+    subagents_output_dir = project_path / ".claude" / "agents"
+    subagents_output_dir.mkdir(parents=True, exist_ok=True)
+
+    if orchestrator is None:
+        with step_timer("subagents"), console.status("Copying reference subagents..."):
+            _copy_reference_subagents(subagents_output_dir, file_writer=file_writer)
+        console.print("[green]✓[/green] Copied reference subagents")
+        return
+
+    with step_timer("subagents"), console.status("Generating subagents..."):
+        subagents_generator = SubagentsGenerator(orchestrator)
+        project_config_for_agents = (
+            f"Project: {project_name}, "
+            f"Language: {language}, "
+            f"Type: quality-control-tool"
+        )
+        # ``_run_with_orchestrator_close`` guarantees the lazily-created
+        # ``AsyncAnthropic`` client is released on the way out, even if
+        # one of the parallel tunings raises.
+        results = run_async(
+            _run_with_orchestrator_close(
+                orchestrator,
+                subagents_generator.generate_all_agents(project_config_for_agents),
             )
-            results = run_async(
-                subagents_generator.generate_all_agents(project_config_for_agents)
-            )
-            subagents_output_dir = project_path / ".claude" / "agents"
-            subagents_output_dir.mkdir(parents=True, exist_ok=True)
-            for agent_name, result in results.items():
-                agent_file = subagents_output_dir / f"{agent_name}.md"
-                if file_writer is not None:
-                    file_writer.write_file(agent_file, result.content)
-                else:
-                    agent_file.write_text(result.content)
-        console.print("[green]✓[/green] Generated subagents")
-    else:
-        console.print("[yellow]⊘[/yellow] Skipped subagents (no API key)")
+        )
+        for agent_name, result in results.items():
+            agent_file = subagents_output_dir / f"{agent_name}.md"
+            if file_writer is not None:
+                file_writer.write_file(agent_file, result.content)
+            else:
+                agent_file.write_text(result.content, encoding="utf-8")
+    console.print("[green]✓[/green] Generated subagents")
 
 
 def _generate_metrics_dashboard_step(
@@ -959,7 +1102,7 @@ def _generate_metrics_dashboard_step(
     language: str,
 ) -> None:
     """Generate live metrics dashboard and workflow."""
-    with console.status("Generating metrics dashboard..."):
+    with step_timer("metrics"), console.status("Generating metrics dashboard..."):
         config = MetricsGenerationConfig(
             language=language,
             project_name=project_name,
@@ -1005,7 +1148,10 @@ def _generate_metrics_dashboard_step(
                 "security_status": "pass",
             },
         }
-        initial_metrics_path.write_text(json.dumps(initial_metrics, indent=2))
+        initial_metrics_path.write_text(
+            json.dumps(initial_metrics, indent=2),
+            encoding="utf-8",
+        )
 
         workflows_dir = project_path / ".github" / "workflows"
         workflows_dir.mkdir(parents=True, exist_ok=True)
@@ -1017,11 +1163,11 @@ def _generate_metrics_dashboard_step(
         if sgsg_workflow.exists():
             target_workflow = workflows_dir / "metrics.yml"
             shutil.copy(sgsg_workflow, target_workflow)
-            workflow_content = target_workflow.read_text()
+            workflow_content = target_workflow.read_text(encoding="utf-8")
             workflow_content = workflow_content.replace(
                 "start-green-stay-green", project_name
             )
-            target_workflow.write_text(workflow_content)
+            target_workflow.write_text(workflow_content, encoding="utf-8")
         else:
             missing_workflow = True
 
@@ -1049,22 +1195,34 @@ def _generate_metrics_dashboard_step(
         )
 
 
-def _generate_with_orchestrator(
+def _generate_pass2_polish(
     project_path: Path,
     project_name: str,
     language: str,
     orchestrator: AIOrchestrator | None,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate AI-powered artifacts (CI, CLAUDE.md, etc.) with progress indicators."""
-    _generate_ci_step(project_path, language, orchestrator, file_writer)
-    _generate_review_step(project_path, orchestrator, file_writer)
+    """Run Pass 2 of the optimization roadmap's two-pass init model.
+
+    Generates the artifacts whose output is *enhanced* by an
+    :class:`AIOrchestrator` when one is available. After Phase 1 every
+    one of these has a deterministic baseline path too, so the function
+    runs unconditionally; the orchestrator is what flips each step
+    between "render template" and "AI-tune the template". When
+    ``orchestrator`` is ``None`` (``--offline`` / ``--no-enhance`` /
+    no API key), every step still runs and produces a complete project
+    via the deterministic path.
+
+    The roadmap (plans/2026-05-03-claude-init-optimization-roadmap.md)
+    calls this Pass 2 to distinguish it from Pass 1's per-language
+    scaffold steps.
+    """
+    _generate_ci_step(project_path, project_name, language, orchestrator, file_writer)
+    _generate_review_step(project_path, file_writer)
     _generate_claude_md_step(
         project_path, project_name, language, orchestrator, file_writer
     )
-    _generate_architecture_step(
-        project_path, project_name, language, orchestrator, file_writer
-    )
+    _generate_architecture_step(project_path, project_name, language, file_writer)
     _generate_subagents_step(
         project_path, project_name, language, orchestrator, file_writer
     )
@@ -1120,9 +1278,10 @@ def _generate_project_files(
         _generate_readme_step(project_path, project_name, primary_language, file_writer)
         _generate_skills_step(project_path, file_writer)
 
-        # AI-powered features use primary language
+        # Pass 2 of the two-pass init model: AI-tunable artifacts.
+        # Uses the primary language for cross-language projects.
         try:
-            _generate_with_orchestrator(
+            _generate_pass2_polish(
                 project_path,
                 project_name,
                 primary_language,
@@ -1325,6 +1484,115 @@ def _validate_conflict_flags(
         raise typer.Exit(code=1)
 
 
+def _resolve_pass2_orchestrator(
+    *,
+    api_key: str | None,
+    offline: bool,
+    no_enhance: bool,
+    no_interactive: bool,
+) -> AIOrchestrator | None:
+    """Decide whether Pass 2 should run, and return the orchestrator if so.
+
+    Encapsulates the three flags that interact to control Pass 2 of the
+    two-pass init model so the ``init`` command stays at complexity
+    grade A. The branches are deliberately mutually-exclusive (the
+    validator guarantees this) so each one returns directly:
+
+    * ``--offline`` → never resolve a key, never instantiate an
+      orchestrator. Returns ``None`` and prints a dim status line so
+      the user sees that Pass 1 alone is running.
+    * ``--no-enhance`` → resolve the key (so it lands in the keyring
+      / env / etc. for a future ``green enhance``) and then discard
+      the orchestrator so Pass 2 is skipped this run.
+    * Otherwise → resolve the key normally; if no key is available
+      print the legacy "AI features disabled" instructions.
+    """
+    if offline:
+        console.print(
+            "[dim]Running in offline mode — Pass 1 only (no API calls).[/dim]"
+        )
+        return None
+
+    orchestrator = _initialize_orchestrator(api_key, no_interactive=no_interactive)
+
+    if no_enhance:
+        # Always print *something* so the user knows --no-enhance had an
+        # effect, regardless of whether a key was resolved. The two
+        # paths differ in what the user can do next: with a key cached,
+        # ``green enhance`` will pick it up; without, they need to set
+        # ANTHROPIC_API_KEY first.
+        if orchestrator is not None:
+            console.print(
+                "[dim]--no-enhance: skipping Pass 2; run `green enhance` "
+                "later to add AI polish.[/dim]"
+            )
+        else:
+            console.print(
+                "[dim]--no-enhance: no API key found; Pass 2 skipped. "
+                "Set ANTHROPIC_API_KEY before running `green enhance`.[/dim]"
+            )
+        return None
+
+    if orchestrator is None:
+        console.print("\n[yellow]![/yellow] AI features disabled")
+        console.print("  - Skills: Using reference templates (no customization)")
+        console.print("  - CI/Subagents/CLAUDE.md: Using default templates")
+        console.print("\n  To enable AI features:")
+        console.print("    1. Get API key: https://console.anthropic.com/")
+        console.print(
+            "    2. Set ANTHROPIC_API_KEY env var (or store in keyring "
+            "via the next prompt)"
+        )
+        console.print("    3. Re-run: green enhance  (no need to re-init)\n")
+    return orchestrator
+
+
+def _validate_pass2_flags(
+    *,
+    offline: bool,
+    no_enhance: bool,
+    api_key: str | None,
+) -> None:
+    """Validate the Pass 2 flag combinations introduced for the two-pass init.
+
+    The flags interact in three ways the user might trip on:
+
+    * ``--offline`` and ``--no-enhance`` are redundant when used together
+      (both skip Pass 2). It is an error to combine them — the user
+      almost certainly meant one or the other.
+    * ``--offline`` with ``--api-key`` is contradictory (the user is
+      both supplying a key and asking to never use it). Treated as an
+      error to surface the mistake loudly.
+    * ``--no-enhance`` with ``--api-key`` is fine — the key gets
+      cached / kept available for a future ``green enhance`` (Phase 3b),
+      it just is not used during this init.
+
+    Args:
+        offline: ``True`` if ``--offline`` was passed.
+        no_enhance: ``True`` if ``--no-enhance`` was passed.
+        api_key: The string value passed to ``--api-key``, or ``None``
+            if the flag was omitted. Truthiness is what matters here:
+            an empty string is treated the same as ``None``.
+
+    Raises:
+        typer.Exit: If a contradictory combination is detected.
+    """
+    if offline and no_enhance:
+        console.print(
+            "[red]Error:[/red] --offline and --no-enhance are redundant; "
+            "pass only one.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+    if offline and api_key:
+        console.print(
+            "[red]Error:[/red] --offline and --api-key are contradictory; "
+            "drop --offline or omit --api-key.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def init(  # noqa: PLR0913
     project_name: Annotated[
@@ -1393,8 +1661,33 @@ def init(  # noqa: PLR0913
                 "Use ANTHROPIC_API_KEY env var or keyring instead."
             ),
             hide_input=True,
+            hidden=True,
         ),
     ] = None,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help=(
+                "Run only Pass 1 of the two-pass init: produce a complete "
+                "project from deterministic templates. No API key is read, "
+                "no network is used, no AI tuning is attempted. Equivalent "
+                "to ``--no-enhance`` plus suppressing every API-key prompt."
+            ),
+        ),
+    ] = False,
+    no_enhance: Annotated[
+        bool,
+        typer.Option(
+            "--no-enhance",
+            help=(
+                "Skip Pass 2 of the two-pass init (the AI-tuned polish over "
+                "CLAUDE.md and subagents). Unlike ``--offline`` the API key "
+                "resolution still runs, so a follow-up ``green enhance`` "
+                "call (Phase 3b) can pick up where this one left off."
+            ),
+        ),
+    ] = False,
     enable_live_dashboard: Annotated[
         bool,
         typer.Option(
@@ -1402,6 +1695,16 @@ def init(  # noqa: PLR0913
             help="Generate live metrics dashboard with auto-updating workflow.",
         ),
     ] = False,
+    timing_json: Annotated[
+        Path | None,
+        typer.Option(
+            "--timing-json",
+            help=(
+                "Write a structured timing/telemetry report to PATH "
+                "(JSON). No effect on default output."
+            ),
+        ),
+    ] = None,
     config: config_file_option = None,
 ) -> None:
     """Initialize a new project with quality controls.
@@ -1421,13 +1724,19 @@ def init(  # noqa: PLR0913
         interactive: Prompt per-file for conflict resolution.
         no_interactive: Non-interactive mode.
         api_key: Optional Claude API key for AI features.
+        offline: Skip API-key resolution and Pass 2 entirely; produces
+            a complete project from deterministic templates only.
+        no_enhance: Skip Pass 2 (AI tuning) but still resolve the API
+            key for a future ``green enhance`` invocation.
         enable_live_dashboard: Generate live metrics dashboard with workflow.
+        timing_json: Optional path to write a timing/telemetry JSON report.
         config: Configuration file path.
 
     Raises:
         typer.Exit: If validation fails or generation errors occur.
     """
     _validate_conflict_flags(force, interactive)
+    _validate_pass2_flags(offline=offline, no_enhance=no_enhance, api_key=api_key)
 
     # Load configuration
     config_data = _load_config_data(config)
@@ -1461,17 +1770,12 @@ def init(  # noqa: PLR0913
         )
         return
 
-    # Initialize optional AI orchestrator (after dry-run check)
-    orchestrator = _initialize_orchestrator(api_key, no_interactive=no_interactive)
-
-    if orchestrator is None:
-        console.print("\n[yellow]![/yellow] AI features disabled")
-        console.print("  - Skills: Using reference templates (no customization)")
-        console.print("  - CI/Subagents/CLAUDE.md: Using default templates")
-        console.print("\n  To enable AI features:")
-        console.print("    1. Get API key: https://console.anthropic.com/")
-        console.print("    2. Run: sgsg init --api-key YOUR_KEY")
-        console.print("    3. Or: Set ANTHROPIC_API_KEY environment variable\n")
+    orchestrator = _resolve_pass2_orchestrator(
+        api_key=api_key,
+        offline=offline,
+        no_enhance=no_enhance,
+        no_interactive=no_interactive,
+    )
 
     # Create project directory
     project_path.mkdir(parents=True, exist_ok=True)
@@ -1484,20 +1788,1070 @@ def init(  # noqa: PLR0913
         console=console,
     )
 
-    # Generate all project files (handles errors internally)
-    _generate_project_files(
-        project_path,
-        resolved_project_name,
-        resolved_languages,
-        orchestrator,
-        file_writer,
+    with _maybe_collect_timing(timing_json):
+        _generate_project_files(
+            project_path,
+            resolved_project_name,
+            resolved_languages,
+            orchestrator,
+            file_writer,
+        )
+        _finalize_init(
+            project_path,
+            resolved_project_name,
+            resolved_languages,
+            enable_live_dashboard=enable_live_dashboard,
+        )
+
+
+_LANGUAGE_PROBES: tuple[tuple[str, str], ...] = (
+    # (filename relative to project root, language). The first match wins.
+    ("pyproject.toml", "python"),
+    ("requirements.txt", "python"),
+    ("package.json", "typescript"),
+    ("go.mod", "go"),
+    ("Cargo.toml", "rust"),
+    ("pom.xml", "java"),
+    ("build.gradle", "java"),
+    ("Gemfile", "ruby"),
+    ("composer.json", "php"),
+    ("Package.swift", "swift"),
+)
+
+# Pattern for the H1 line in a generated CLAUDE.md file.
+# ``# Claude Code Project Context: <project-name>``
+_CLAUDE_MD_TITLE = re.compile(
+    r"^#\s+Claude Code Project Context:\s+(?P<name>.+?)\s*$",
+    re.MULTILINE,
+)
+
+# Targets the ``green enhance`` command knows how to re-tune. Order
+# matches the on-disk layout users expect to see touched.
+_ENHANCE_TARGETS: tuple[str, ...] = ("claude-md", "subagents")
+
+
+def _detect_project_name(project_path: Path) -> str | None:
+    """Return the project name parsed out of an existing CLAUDE.md.
+
+    The init-generated CLAUDE.md baseline starts with
+    ``# Claude Code Project Context: <name>``. Reading the first line
+    matching that pattern is more reliable than guessing from the
+    directory name (the user may have renamed the directory) or from
+    ``pyproject.toml`` (project may be multi-language).
+
+    Returns ``None`` if CLAUDE.md is missing or doesn't have the
+    expected H1 — in which case the caller must require ``-n``.
+    """
+    claude_md = project_path / "CLAUDE.md"
+    if not claude_md.is_file():
+        return None
+    try:
+        content = claude_md.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = _CLAUDE_MD_TITLE.search(content)
+    if match is None:
+        return None
+    return match.group("name").strip() or None
+
+
+def _detect_project_language(project_path: Path) -> str | None:
+    """Return the project's primary language by file probing.
+
+    The probes are ordered: the first hit wins. For multi-language
+    projects this returns whatever shows up first in the canonical
+    list; users can override with ``-l`` if the auto-detected one
+    isn't the one they want re-tuned.
+
+    Returns ``None`` if no probe matched, in which case the caller
+    must require ``-l``.
+    """
+    for filename, language in _LANGUAGE_PROBES:
+        if (project_path / filename).is_file():
+            return language
+    return None
+
+
+def _validate_enhance_target(value: str) -> str:
+    """Normalize and validate one ``--targets`` value.
+
+    Args:
+        value: A single target name from the CLI.
+
+    Returns:
+        The lower-cased target name if it is recognised.
+
+    Raises:
+        typer.BadParameter: If the target is not in
+            :data:`_ENHANCE_TARGETS`.
+    """
+    normalized = value.strip().lower()
+    if normalized not in _ENHANCE_TARGETS:
+        valid = ", ".join(_ENHANCE_TARGETS)
+        msg = f"unknown target {value!r}; choose from: {valid}"
+        raise typer.BadParameter(msg)
+    return normalized
+
+
+def _split_target_pieces(targets: list[str]) -> list[str]:
+    """Flatten ``--targets`` values into individual pieces, dropping empties."""
+    return [
+        piece.strip() for raw in targets for piece in raw.split(",") if piece.strip()
+    ]
+
+
+def _resolve_enhance_targets(targets: list[str] | None) -> tuple[str, ...]:
+    """Resolve the ``--targets`` argument list (possibly comma-separated).
+
+    Accepts both ``--targets claude-md --targets subagents`` and
+    ``--targets claude-md,subagents``. ``None`` (no flag passed) means
+    "tune every target".
+
+    Args:
+        targets: Raw values from the typer option.
+
+    Returns:
+        A tuple of resolved target names in the canonical order
+        defined by :data:`_ENHANCE_TARGETS`.
+
+    Raises:
+        typer.BadParameter: If any target is unknown.
+    """
+    if not targets:
+        return _ENHANCE_TARGETS
+    requested = {_validate_enhance_target(p) for p in _split_target_pieces(targets)}
+    # Preserve canonical order, deduplicating.
+    return tuple(t for t in _ENHANCE_TARGETS if t in requested)
+
+
+def _require_enhance_orchestrator(
+    api_key: str | None,
+    *,
+    no_interactive: bool,
+) -> AIOrchestrator:
+    """Resolve an :class:`AIOrchestrator` for the ``enhance`` command.
+
+    Unlike ``init``, ``enhance`` cannot fall back to a deterministic
+    path — re-tuning is the entire point. If no API key is available,
+    fail fast with an actionable message instead of writing an empty
+    "tuning" that silently no-ops.
+
+    Args:
+        api_key: Optional CLI-supplied key.
+        no_interactive: Skip any keyring prompts.
+
+    Returns:
+        A real ``AIOrchestrator`` ready to dispatch.
+
+    Raises:
+        typer.Exit: With code 1 if no key could be resolved.
+    """
+    orchestrator = _initialize_orchestrator(api_key, no_interactive=no_interactive)
+    if orchestrator is None:
+        console.print(
+            "[red]Error:[/red] `green enhance` requires an Anthropic API "
+            "key — there is no deterministic fallback for AI-tuned "
+            "artifacts.\n  Set ANTHROPIC_API_KEY (or store one in the "
+            "keyring on first run).",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+    return orchestrator
+
+
+# Single source of truth for the script list embedded in the CLAUDE.md prompt.
+_CLAUDE_MD_SCRIPTS: tuple[str, ...] = (
+    "check-all.sh",
+    "test.sh",
+    "lint.sh",
+    "format.sh",
+    "security.sh",
+    "mutation.sh",
+)
+
+
+def _read_reference_or_warn(path: Path, label: str) -> str:
+    """Read a reference file or print a dim warning and return ``""``.
+
+    The hash helpers must remain crash-free even on a broken install
+    (missing submodule, moved file, etc.) — see Phase 3c reviewer
+    note. But silent fallback to an empty string would let the empty
+    hash get persisted, after which every subsequent re-tune skips
+    permanently with no user-visible signal. Print a warning so the
+    user can spot the broken install while still preserving the
+    no-crash contract.
+    """
+    if path.is_file():
+        return path.read_text(encoding="utf-8")
+    console.print(
+        f"[yellow]warning:[/yellow] reference file missing — "
+        f"{label}: {path}\n"
+        f"  This will produce an empty-input hash and may suppress "
+        f"future re-tunes. Check your install."
+    )
+    return ""
+
+
+def _hash_claude_md_inputs(project_name: str, language: str) -> str:
+    """Hash the inputs that drive a ``CLAUDE.md`` re-tune.
+
+    Captures everything that would alter the model's output: the
+    reference template content (so updates to the canonical template
+    invalidate stale tunes), plus the project metadata (name +
+    language + the script and skill lists baked into the prompt).
+    """
+    project_root = Path(__file__).parent.parent
+    reference = project_root / "reference" / "claude" / "CLAUDE.md"
+    template_bytes = _read_reference_or_warn(reference, "CLAUDE.md template")
+    return hash_inputs(
+        [
+            "claude-md\x00",
+            f"project_name={project_name}\x00",
+            f"language={language}\x00",
+            # Declaration order is authoritative — same order the prompt sees.
+            f"scripts={','.join(_CLAUDE_MD_SCRIPTS)}\x00",
+            f"skills={','.join(sorted(REQUIRED_SKILLS))}\x00",
+            "template:\x00",
+            template_bytes,
+        ]
     )
 
-    _finalize_init(
+
+def _hash_subagents_inputs(project_name: str, language: str) -> str:
+    """Hash the inputs that drive a subagents re-tune.
+
+    Captures the union of every required reference subagent's content
+    (so a maintainer-side update to any one of them invalidates the
+    cached tune) plus the target context (project name + language)
+    which flows verbatim into the prompt.
+    """
+    parts: list[str | bytes] = [
+        "subagents\x00",
+        f"project_name={project_name}\x00",
+        f"language={language}\x00",
+    ]
+    # Walk REQUIRED_AGENTS in declaration order so the hash is
+    # deterministic regardless of dict insertion-order quirks.
+    for agent_name, source_file in REQUIRED_AGENTS.items():
+        source_path = REFERENCE_AGENTS_DIR / source_file
+        body = _read_reference_or_warn(source_path, f"subagent '{agent_name}'")
+        parts.append(f"agent={agent_name}\x00")
+        parts.append(body)
+    return hash_inputs(parts)
+
+
+def _compute_target_source_hash(
+    target: str,
+    project_name: str,
+    language: str,
+) -> str:
+    """Look the target up in the registry and call its hash helper."""
+    spec = _ENHANCE_DISPATCH.get(target)
+    if spec is None:
+        msg = f"unknown target: {target}"
+        raise ValueError(msg)
+    hash_helper: Callable[[str, str], str] = globals()[spec.hash_helper_name]
+    return hash_helper(project_name, language)
+
+
+def _enhance_claude_md(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
+    project_path: Path,
+    project_name: str,
+    language: str,
+    orchestrator: AIOrchestrator,
+    *,
+    dry_run: bool,
+    file_writer: FileWriter | None,
+) -> None:
+    """Re-tune ``CLAUDE.md`` against the existing project.
+
+    Mirrors :func:`_generate_claude_md_step`'s tuning path but writes
+    to the existing project rather than a fresh scaffold. ``dry_run``
+    skips the write but still runs the API call so the user sees the
+    full token-usage telemetry (and any errors) they'd see for real.
+    """
+    with step_timer("enhance_claude_md"), console.status("Re-tuning CLAUDE.md..."):
+        claude_md_generator = ClaudeMdGenerator(orchestrator)
+        result = claude_md_generator.generate(
+            {
+                "project_name": project_name,
+                "language": language,
+                "scripts": list(_CLAUDE_MD_SCRIPTS),
+                "skills": REQUIRED_SKILLS.copy(),
+            }
+        )
+        target = project_path / "CLAUDE.md"
+        if dry_run:
+            console.print(
+                f"[dim]--dry-run: would rewrite {target} "
+                f"({len(result.content):,} chars).[/dim]"
+            )
+            return
+        if file_writer is not None:
+            file_writer.write_file(target, result.content)
+        else:
+            target.write_text(result.content, encoding="utf-8")
+    console.print("[green]✓[/green] Re-tuned CLAUDE.md")
+
+
+def _enhance_subagents(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
+    project_path: Path,
+    project_name: str,
+    language: str,
+    orchestrator: AIOrchestrator,
+    *,
+    dry_run: bool,
+    file_writer: FileWriter | None,
+) -> None:
+    """Re-tune every subagent against the existing project.
+
+    Same parallel-fan-out path as Pass 2 of init, but writes back to
+    ``<project>/.claude/agents`` instead of generating it fresh.
+    """
+    target_dir = project_path / ".claude" / "agents"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    with step_timer("enhance_subagents"), console.status("Re-tuning subagents..."):
+        subagents_generator = SubagentsGenerator(orchestrator)
+        target_context = (
+            f"Project: {project_name}, "
+            f"Language: {language}, "
+            f"Type: existing project being re-tuned via `green enhance`"
+        )
+        results = run_async(
+            _run_with_orchestrator_close(
+                orchestrator,
+                subagents_generator.generate_all_agents(target_context),
+            )
+        )
+        if dry_run:
+            console.print(
+                f"[dim]--dry-run: would rewrite {len(results)} agent "
+                f"file(s) in {target_dir}.[/dim]"
+            )
+            return
+        for agent_name, result in results.items():
+            agent_file = target_dir / f"{agent_name}.md"
+            if file_writer is not None:
+                file_writer.write_file(agent_file, result.content)
+            else:
+                agent_file.write_text(result.content, encoding="utf-8")
+    console.print(f"[green]✓[/green] Re-tuned {len(results)} subagents")
+
+
+def _resolve_enhance_name(project_path: Path, override: str | None) -> str:
+    """Resolve the project name for ``enhance``; exit if neither path works."""
+    resolved = override or _detect_project_name(project_path)
+    if resolved is None:
+        console.print(
+            "[red]Error:[/red] could not determine the project name "
+            "from CLAUDE.md. Pass --project-name explicitly.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+    return resolved
+
+
+def _resolve_enhance_language(project_path: Path, override: str | None) -> str:
+    """Resolve the language for ``enhance``; exit if absent or unsupported."""
+    resolved = override or _detect_project_language(project_path)
+    if resolved is None:
+        console.print(
+            "[red]Error:[/red] could not detect the project language. "
+            "Pass --language explicitly.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+    try:
+        validate_language(resolved)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}", style="bold")
+        raise typer.Exit(code=1) from e
+    return resolved
+
+
+def _resolve_enhance_metadata(
+    project_path: Path,
+    *,
+    project_name: str | None,
+    language: str | None,
+) -> tuple[str, str]:
+    """Resolve project name + language for ``enhance``, exiting on failure.
+
+    Auto-detection from the project layout is the default path; the
+    explicit ``--project-name`` and ``--language`` flags win where
+    supplied. Either piece missing (no override + no detected value)
+    is a fatal error so the caller cannot accidentally tune the wrong
+    project metadata into a fresh CLAUDE.md.
+    """
+    return (
+        _resolve_enhance_name(project_path, project_name),
+        _resolve_enhance_language(project_path, language),
+    )
+
+
+@dataclass(frozen=True)
+class _EnhanceTargetSpec:
+    """Per-target wiring for ``green enhance``.
+
+    Single source of truth pairing the skip message, the tune helper,
+    and the source-hash helper for one target. Holding all three in
+    one record means a new target requires exactly one entry in
+    :data:`_ENHANCE_DISPATCH` — there is no separate hash table to
+    forget to update. Helpers are stored by *name* (not function
+    reference) so test ``patch("cli._enhance_…")`` decorations are
+    honoured at call time via ``globals()[name]``.
+    """
+
+    skip_message: str
+    helper_name: str
+    hash_helper_name: str
+
+
+_ENHANCE_DISPATCH: dict[str, _EnhanceTargetSpec] = {
+    "claude-md": _EnhanceTargetSpec(
+        skip_message=(
+            "[dim]CLAUDE.md unchanged since last successful tune — "
+            "skipping (use --force to re-tune anyway).[/dim]"
+        ),
+        helper_name="_enhance_claude_md",
+        hash_helper_name="_hash_claude_md_inputs",
+    ),
+    "subagents": _EnhanceTargetSpec(
+        skip_message=(
+            "[dim]Subagents unchanged since last successful tune — "
+            "skipping (use --force to re-tune anyway).[/dim]"
+        ),
+        helper_name="_enhance_subagents",
+        hash_helper_name="_hash_subagents_inputs",
+    ),
+}
+
+
+def _assert_enhance_dispatch_intact() -> None:
+    """Fail at import time if a dispatch entry references a missing helper.
+
+    The registry looks helpers up by *name* (so test ``patch``
+    decorators can intercept), which trades static-analysis safety
+    for late-binding flexibility. This guard rebuilds the missing
+    safety net at import time so a typo in either ``helper_name`` or
+    ``hash_helper_name`` is caught as soon as the module loads, not
+    at first ``green enhance`` invocation.
+    """
+    missing: list[str] = [
+        name
+        for spec in _ENHANCE_DISPATCH.values()
+        for name in (spec.helper_name, spec.hash_helper_name)
+        if name not in globals()
+    ]
+    if missing:
+        msg = (
+            f"_ENHANCE_DISPATCH references undefined helper(s): "
+            f"{', '.join(missing)}"
+        )
+        raise RuntimeError(msg)
+
+
+_assert_enhance_dispatch_intact()
+
+
+def _dispatch_enhance_targets(  # noqa: PLR0913 — orchestration glue
+    targets: tuple[str, ...],
+    *,
+    project_path: Path,
+    project_name: str,
+    language: str,
+    orchestrator: AIOrchestrator,
+    state: EnhanceState,
+    target_hashes: dict[str, str],
+    dry_run: bool,
+    force: bool,
+    file_writer: FileWriter | None,
+) -> list[str]:
+    """Drive Pass 2 across each selected target with the skip/force logic.
+
+    Returns the list of target names that were skipped because the
+    source hash matched a stored completion. The caller uses that to
+    decide whether the state file is worth re-writing.
+    """
+    skipped: list[str] = []
+    for target in targets:
+        spec = _ENHANCE_DISPATCH[target]
+        target_hash = target_hashes[target]
+        if not force and state.is_unchanged(target, target_hash):
+            console.print(spec.skip_message)
+            skipped.append(target)
+            continue
+        # Late-bound lookup so test ``patch("cli._enhance_claude_md")``
+        # decorations are honoured.
+        helper: Callable[..., None] = globals()[spec.helper_name]
+        helper(
+            project_path,
+            project_name,
+            language,
+            orchestrator,
+            dry_run=dry_run,
+            file_writer=file_writer,
+        )
+        if not dry_run:
+            state.mark_completed(target, target_hash, orchestrator.model)
+    return skipped
+
+
+def _persist_enhance_state(
+    project_path: Path,
+    state: EnhanceState,
+    *,
+    skipped: list[str],
+    selected_targets: tuple[str, ...],
+    dry_run: bool,
+) -> None:
+    """Save the state file unless this run wrote nothing.
+
+    A "nothing happened" run is either a ``--dry-run`` (we ran the
+    API calls but skipped the writes) or a run where every selected
+    target was skipped because its source hash matched. In both
+    cases the prior state on disk is still authoritative.
+    """
+    if dry_run:
+        return
+    if len(skipped) == len(selected_targets):
+        return
+    save_state(project_path, state)
+
+
+def _print_enhance_summary(*, project_name: str, dry_run: bool) -> None:
+    """Print the closing one-liner for an ``enhance`` invocation."""
+    if dry_run:
+        console.print("\n[green]✓[/green] Dry run complete — no files written.")
+    else:
+        console.print(f"\n[green]✓[/green] Enhancement complete: {project_name}")
+
+
+def _run_enhance_pipeline(  # noqa: PLR0913 — orchestration glue
+    *,
+    project_path: Path,
+    project_name: str,
+    language: str,
+    selected_targets: tuple[str, ...],
+    orchestrator: AIOrchestrator,
+    file_writer: FileWriter | None,
+    dry_run: bool,
+    force: bool,
+) -> None:
+    """Execute the full Pass 2 pipeline + persist state on success."""
+    console.print(
+        f"[dim]Enhancing project: {project_name} ({language})"
+        f"  →  targets: {', '.join(selected_targets)}"
+        f"{'  [DRY RUN]' if dry_run else ''}[/dim]"
+    )
+    state = load_state(project_path)
+    target_hashes = {
+        target: _compute_target_source_hash(target, project_name, language)
+        for target in selected_targets
+    }
+    skipped = _dispatch_enhance_targets(
+        selected_targets,
+        project_path=project_path,
+        project_name=project_name,
+        language=language,
+        orchestrator=orchestrator,
+        state=state,
+        target_hashes=target_hashes,
+        dry_run=dry_run,
+        force=force,
+        file_writer=file_writer,
+    )
+    _persist_enhance_state(
         project_path,
-        resolved_project_name,
-        resolved_languages,
-        enable_live_dashboard=enable_live_dashboard,
+        state,
+        skipped=skipped,
+        selected_targets=selected_targets,
+        dry_run=dry_run,
+    )
+    _print_enhance_summary(project_name=project_name, dry_run=dry_run)
+
+
+def _validate_enhance_path(project_path: Path) -> None:
+    """Confirm ``project_path`` looks like a generated green-init project.
+
+    The cheapest reliable signature is the presence of ``CLAUDE.md`` —
+    every init flow writes one (Phase 1 added the deterministic
+    baseline so even ``--offline`` projects have it). Without that
+    file, ``enhance`` has no project to re-tune; fail fast with a
+    pointer to ``green init``.
+
+    Args:
+        project_path: Directory the user passed as the enhance target.
+
+    Raises:
+        typer.Exit: With code 1 if the path is not an enhanceable
+            project.
+    """
+    if not project_path.exists():
+        console.print(
+            f"[red]Error:[/red] {project_path} does not exist.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+    if not project_path.is_dir():
+        console.print(
+            f"[red]Error:[/red] {project_path} is not a directory.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+    if not (project_path / "CLAUDE.md").is_file():
+        console.print(
+            f"[red]Error:[/red] {project_path} does not look like a "
+            "green-init project (no CLAUDE.md found).\n  Run "
+            "`green init` first or pass a different path.",
+            style="bold",
+        )
+        raise typer.Exit(code=1)
+
+
+_BATCH_SUPPORTED_TARGETS: frozenset[str] = frozenset({"subagents"})
+
+
+def _validate_batch_targets(selected_targets: tuple[str, ...]) -> None:
+    """Reject ``--batch`` when targets it cannot handle are selected.
+
+    Phase 5b only batches subagents (every other target uses a free-
+    text generation path that the Batches API does not yet wrap).
+    Failing fast here — rather than letting the dispatch silently
+    skip claude-md — keeps the user model honest: ``--batch`` either
+    runs the whole selection through the API once, or it errors.
+    """
+    unsupported = tuple(
+        t for t in selected_targets if t not in _BATCH_SUPPORTED_TARGETS
+    )
+    if not unsupported:
+        return
+    supported = ", ".join(sorted(_BATCH_SUPPORTED_TARGETS))
+    msg = (
+        f"[red]Error:[/red] --batch does not support targets "
+        f"{', '.join(unsupported)} (Phase 5a primitives only cover "
+        f"tool_use tunings — sync mode handles the rest). Re-run "
+        f"with --targets {supported} to use batch mode, or drop "
+        f"--batch to keep the sync flow."
+    )
+    console.print(msg)
+    raise typer.Exit(code=1)
+
+
+@dataclass(frozen=True)
+class _EnhanceProjectContext:
+    """Project metadata threaded through the enhance dispatchers.
+
+    Bundles the three identifiers that every enhance helper needs to
+    know about the project under tune: where it lives, what it's
+    called, and what language preset to use. Grouping them drops
+    :func:`_run_enhance_batch` and :func:`_submit_subagent_batch_cli`
+    below the ``PLR0913`` threshold without splitting concerns. See
+    issue #316.
+    """
+
+    project_path: Path
+    project_name: str
+    language: str
+
+
+def _run_enhance_batch(
+    *,
+    project: _EnhanceProjectContext,
+    orchestrator: AIOrchestrator,
+    file_writer: FileWriter,
+    dry_run: bool,
+    wait: bool,
+) -> None:
+    """Submit-or-resume the subagent batch path.
+
+    Branches on ``state.has_batch()``: if a batch is already
+    in flight (recorded by a prior ``--batch`` invocation), this run
+    polls / fetches; otherwise it builds the per-agent batch plan and
+    submits. ``dry_run`` short-circuits before any API call.
+    """
+    if dry_run:
+        console.print(
+            "[dim]--dry-run with --batch: nothing submitted, "
+            "no state file written.[/dim]"
+        )
+        return
+
+    state = load_state(project.project_path)
+    try:
+        if state.has_batch():
+            _resume_subagent_batch_cli(
+                project_path=project.project_path,
+                orchestrator=orchestrator,
+                state=state,
+                file_writer=file_writer,
+                wait=wait,
+            )
+            return
+        # ``wait`` is meaningful for the resume branch above, but the
+        # submit call itself never blocks (see ADR-001's two-call
+        # contract). Warn upfront on first-run so users know to pass
+        # ``--wait`` again on the resume call. See issue #319.
+        if wait:
+            console.print(
+                "[dim]--wait has no effect on the first --batch call "
+                "(submit-only by design — see ADR-001). Re-run with "
+                "--wait once the batch is in flight to block until "
+                "results land.[/dim]"
+            )
+        _submit_subagent_batch_cli(
+            project=project,
+            orchestrator=orchestrator,
+            state=state,
+        )
+    except AIGenerationError as ai_err:
+        # Unlike the ``green init`` Pass 2 flow (which downgrades AI
+        # failures to warnings + offline scaffold), the user
+        # explicitly opted into batch mode here — there is no
+        # silent fallback. Surface the API error and exit non-zero
+        # so the user can re-run when ready.
+        console.print(f"[red]Error:[/red] Batch API call failed: {ai_err}")
+        raise typer.Exit(code=1) from ai_err
+
+
+def _submit_subagent_batch_cli(
+    *,
+    project: _EnhanceProjectContext,
+    orchestrator: AIOrchestrator,
+    state: EnhanceState,
+) -> None:
+    """Build the subagent batch plan, submit, and persist."""
+    target_context = (
+        f"Project: {project.project_name}, "
+        f"Language: {project.language}, "
+        f"Type: existing project being re-tuned via `green enhance --batch`"
+    )
+    generator = SubagentsGenerator(orchestrator)
+    outcome = run_async(
+        _run_with_orchestrator_close(
+            orchestrator,
+            submit_subagent_batch(
+                orchestrator=orchestrator,
+                generator=generator,
+                target_context=target_context,
+                state=state,
+                project_path=project.project_path,
+            ),
+        )
+    )
+    console.print(
+        f"[green]✓[/green] Submitted batch [bold]"
+        f"{outcome.submission.batch_id}[/bold] covering "
+        f"{outcome.agent_count} subagent(s). Re-run "
+        f"`green enhance --batch` to fetch results, or with "
+        f"`--wait` to block in-process."
+    )
+
+
+def _resume_subagent_batch_cli(
+    *,
+    project_path: Path,
+    orchestrator: AIOrchestrator,
+    state: EnhanceState,
+    file_writer: FileWriter,
+    wait: bool,
+) -> None:
+    """Poll an in-flight batch; on ``ended``, fetch and write."""
+    generator = SubagentsGenerator(orchestrator)
+    outcome = run_async(
+        _run_with_orchestrator_close(
+            orchestrator,
+            resume_subagent_batch(
+                orchestrator=orchestrator,
+                generator=generator,
+                persistence=BatchPersistenceContext(
+                    state=state,
+                    project_path=project_path,
+                    file_writer=file_writer,
+                ),
+                wait_config=BatchWaitConfig(wait=wait),
+            ),
+        )
+    )
+    _render_batch_resume_outcome(outcome)
+
+
+# Static-message statuses for :func:`_render_batch_resume_outcome`.
+# IN_PROGRESS and ENDED are deliberately absent — they need
+# ``outcome.poll`` / ``outcome.bundle`` data woven into the rendered
+# message, so they branch into ``_render_batch_in_progress`` /
+# ``_render_batch_ended`` instead. Adding them to this dict would
+# silently drop their dynamic data.
+_BATCH_OUTCOME_STATIC: dict[ResumeStatus, str] = {
+    ResumeStatus.NO_BATCH: (
+        "[yellow]No batch is in flight; nothing to resume.[/yellow]"
+    ),
+    ResumeStatus.EXPIRED: (
+        "[yellow]Previous batch crossed the 24 h SLA and was cleared. "
+        "Re-run `green enhance --batch` to submit a fresh batch.[/yellow]"
+    ),
+    ResumeStatus.TIMED_OUT: (
+        "[yellow]--wait timed out before the batch ended. "
+        "Re-run `green enhance --batch` to pick up later.[/yellow]"
+    ),
+}
+
+
+def _render_batch_resume_outcome(outcome: ResumeOutcome) -> None:
+    """Translate a :class:`ResumeOutcome` into a CLI message.
+
+    Static-message statuses (``NO_BATCH``, ``EXPIRED``, ``TIMED_OUT``)
+    are rendered from the lookup table above. ``IN_PROGRESS`` and
+    ``ENDED`` need ``outcome.poll`` / ``outcome.bundle`` data woven
+    in, so they branch into dedicated helpers. The ``case _`` is
+    unreachable today — :data:`ResumeStatus` is a closed
+    :class:`enum.StrEnum` and every member has a branch above — but
+    the :func:`typing.assert_never` keeps mypy honest: adding a new
+    member without updating this dispatcher fails type checking
+    instead of silently falling through.
+    """
+    match outcome.status:
+        case ResumeStatus.NO_BATCH | ResumeStatus.EXPIRED | ResumeStatus.TIMED_OUT:
+            console.print(_BATCH_OUTCOME_STATIC[outcome.status])
+        case ResumeStatus.IN_PROGRESS:
+            _render_batch_in_progress(outcome)
+        case ResumeStatus.ENDED:
+            _render_batch_ended(outcome)
+        case _:
+            assert_never(outcome.status)
+
+
+def _render_batch_in_progress(outcome: ResumeOutcome) -> None:
+    """Render the ``IN_PROGRESS`` status line with poll counts."""
+    poll = outcome.poll
+    if poll is None:
+        return
+    console.print(
+        f"[dim]Batch {poll.batch_id}: still running "
+        f"({poll.processing_count} processing, "
+        f"{poll.succeeded_count} succeeded, "
+        f"{poll.errored_count} errored). Re-run later, or "
+        f"pass --wait to block.[/dim]"
+    )
+
+
+def _render_batch_ended(outcome: ResumeOutcome) -> None:
+    """Render the ``ENDED`` summary plus a failed-agents follow-up."""
+    console.print(
+        f"[green]✓[/green] Batch reconciled: "
+        f"{len(outcome.succeeded_agents)} agent(s) written, "
+        f"{len(outcome.failed_agents)} failed."
+    )
+    if outcome.failed_agents:
+        joined = ", ".join(outcome.failed_agents)
+        console.print(
+            f"[red]Failed agents:[/red] {joined}. Re-run "
+            f"`green enhance --batch` (the failed entries will be "
+            f"included in the next submission)."
+        )
+
+
+@app.command()
+def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
+    project_path: Annotated[
+        Path,
+        typer.Argument(
+            help=(
+                "Path to an existing green-init project. Defaults to the "
+                "current directory. The directory must contain a "
+                "``CLAUDE.md`` produced by `green init`."
+            ),
+            exists=False,
+        ),
+    ] = Path(),
+    project_name: Annotated[
+        str | None,
+        typer.Option(
+            "--project-name",
+            "-n",
+            help=(
+                "Override the auto-detected project name. By default the "
+                "name is parsed out of the existing ``CLAUDE.md``'s H1 "
+                "title."
+            ),
+        ),
+    ] = None,
+    language: Annotated[
+        str | None,
+        typer.Option(
+            "--language",
+            "-l",
+            help=(
+                "Override the auto-detected primary language. By default "
+                "the language is probed from canonical project files "
+                "(pyproject.toml, package.json, go.mod, Cargo.toml, ...)."
+            ),
+        ),
+    ] = None,
+    targets: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--targets",
+            "-t",
+            help=(
+                "Subset of artifacts to re-tune. Repeat the flag or "
+                f"comma-separate. Choices: {', '.join(_ENHANCE_TARGETS)}. "
+                "Default: re-tune everything."
+            ),
+        ),
+    ] = None,
+    *,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help=(
+                "Make the API calls but do not write any files. Useful "
+                "for previewing token cost / changes before committing "
+                "to a re-tune."
+            ),
+        ),
+    ] = False,
+    api_key: Annotated[
+        str | None,
+        typer.Option(
+            "--api-key",
+            help=(
+                "[DEPRECATED] API key is visible in process list. "
+                "Use ANTHROPIC_API_KEY env var or keyring instead."
+            ),
+            hide_input=True,
+            hidden=True,
+        ),
+    ] = None,
+    no_interactive: Annotated[
+        bool,
+        typer.Option(
+            "--no-interactive",
+            help="Run in non-interactive mode (skip keyring prompts).",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Overwrite files without prompting. Off by default.",
+        ),
+    ] = False,
+    batch: Annotated[
+        bool,
+        typer.Option(
+            "--batch",
+            help=(
+                "Submit subagent tunings via the Anthropic Message "
+                "Batches API (50% cheaper, ≤24 h SLA). Use with "
+                "``--targets subagents``. The first run submits and "
+                "exits; re-run to fetch results, or pass ``--wait`` "
+                "to block until done. See ADR-001 for the rationale."
+            ),
+        ),
+    ] = False,
+    wait: Annotated[
+        bool,
+        typer.Option(
+            "--wait",
+            help=(
+                "When used with ``--batch``: block in-process polling "
+                "every 30 s until the batch ends or the timeout is "
+                "reached. Default off (two-call submit-then-resume "
+                "pattern is friendlier for CI). Has no effect on the "
+                "first ``--batch`` invocation (submit-only); pass "
+                "``--wait`` on the resume call to block."
+            ),
+        ),
+    ] = False,
+) -> None:
+    r"""Re-run Pass 2 (AI tuning) on an existing green-init project.
+
+    Phase 3b of the optimization roadmap: gives users who ran
+    ``green init --offline`` (or who have updated their reference
+    skills/subagents) a way to add or refresh the AI-tuned artifacts
+    without re-scaffolding the whole project.
+
+    Examples:
+        \b
+        # Re-tune everything in the current directory:
+        green enhance
+    \b
+        # Re-tune only CLAUDE.md in a specific project:
+        green enhance ./my-app --targets claude-md
+    \b
+        # Preview the token cost without writing anything:
+        green enhance --dry-run
+
+    Args:
+        project_path: Directory of the existing project.
+        project_name: Optional override for auto-detection.
+        language: Optional override for auto-detection.
+        targets: Subset of artifacts to re-tune.
+        dry_run: Run the API calls but skip the writes.
+        api_key: Optional Claude API key.
+        no_interactive: Disable interactive prompts.
+        force: Overwrite files without prompting.
+        batch: Submit subagent tunings via the Anthropic Message
+            Batches API. Submit-then-resume two-call flow; pair
+            with ``--wait`` for in-process polling.
+        wait: Block in-process when ``--batch`` is set; polls every
+            30 s until the batch ends or the timeout elapses.
+
+    Raises:
+        typer.Exit: If the path is invalid, project metadata cannot
+            be inferred, an unknown ``--targets`` value is supplied,
+            or no API key is available.
+    """
+    project_path = project_path.resolve()
+    _validate_enhance_path(project_path)
+
+    resolved_name, resolved_language = _resolve_enhance_metadata(
+        project_path,
+        project_name=project_name,
+        language=language,
+    )
+
+    selected_targets = _resolve_enhance_targets(targets)
+    if batch:
+        _validate_batch_targets(selected_targets)
+    if wait and not batch:
+        console.print("[red]Error:[/red] --wait only applies in --batch mode.")
+        raise typer.Exit(code=1)
+    orchestrator = _require_enhance_orchestrator(api_key, no_interactive=no_interactive)
+    file_writer = FileWriter(
+        project_root=project_path,
+        force=force,
+        interactive=False,
+        console=console,
+    )
+
+    if batch:
+        _run_enhance_batch(
+            project=_EnhanceProjectContext(
+                project_path=project_path,
+                project_name=resolved_name,
+                language=resolved_language,
+            ),
+            orchestrator=orchestrator,
+            file_writer=file_writer,
+            dry_run=dry_run,
+            wait=wait,
+        )
+        return
+
+    _run_enhance_pipeline(
+        project_path=project_path,
+        project_name=resolved_name,
+        language=resolved_language,
+        selected_targets=selected_targets,
+        orchestrator=orchestrator,
+        file_writer=file_writer,
+        dry_run=dry_run,
+        force=force,
     )
 
 
