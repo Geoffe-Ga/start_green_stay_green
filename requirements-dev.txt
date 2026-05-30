@@ -50,7 +50,7 @@ mutmut>=2.4.0,<4.0.0
 
 # Pre-commit and git hooks
 pre-commit>=3.6.0,<5.0.0
-commitizen>=3.13.0,<4.0.0
+commitizen>=3.13.0,<5.0.0
 
 # Documentation
 pdoc>=14.0.0,<17.0.0
