@@ -72,10 +72,11 @@ class TestGetSetupInstructions:
         assert "cargo build" in instructions
 
     def test_swift_includes_swift_build(self) -> None:
-        """Swift setup should build the SPM package."""
+        """Swift setup should resolve dependencies and build the SPM package."""
         instructions = _get_setup_instructions(
             ("swift",), Path("/home/user/swift-proj")
         )
+        assert "swift package resolve" in instructions
         assert "swift build" in instructions
 
     def test_unknown_language_has_sensible_default(self) -> None:

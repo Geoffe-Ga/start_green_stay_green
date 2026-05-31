@@ -42,6 +42,6 @@ class TestPascalCase:
         """A value of only separators yields an empty string."""
         assert pascal_case("_-_") == ""
 
-    def test_does_not_lowercase_interior_capitals_of_word(self) -> None:
+    def test_mixed_case_input_is_normalised(self) -> None:
         """``capitalize`` lowercases the tail, normalising mixed case."""
         assert pascal_case("myProject") == "Myproject"
