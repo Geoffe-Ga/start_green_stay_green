@@ -163,6 +163,99 @@ class TestArchitectureEnforcementGeneratorPython:
         assert "circular" in content.lower() or "cycle" in content.lower()
 
 
+class TestArchitectureEnforcementGeneratorGo:
+    """Test Go-specific architecture rules."""
+
+    def test_generate_go_creates_go_arch_lint_config(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test generating go-arch-lint config for Go."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="go", project_name="test-project")
+
+        # Should create the go-arch-lint config file
+        config_file = output_dir / ".go-arch-lint.yml"
+        assert config_file.exists()
+
+        # Should create README and run script
+        assert (output_dir / "README.md").exists()
+        assert (output_dir / "run-check.sh").exists()
+
+    def test_go_config_enforces_layer_separation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test Go config enforces layered architecture components."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="go", project_name="myapp")
+
+        config = (output_dir / ".go-arch-lint.yml").read_text()
+
+        # Should define the architecture layers as components
+        assert "components" in config.lower()
+        assert "domain" in config.lower()
+        assert "presentation" in config.lower()
+
+    def test_go_config_enforces_domain_independence(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test Go config keeps the domain layer dependency-free."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="go", project_name="myapp")
+
+        config = (output_dir / ".go-arch-lint.yml").read_text()
+
+        # Domain dependency rules must be present (deps section)
+        assert "deps" in config.lower()
+        assert "infrastructure" in config.lower()
+
+    def test_go_readme_mentions_go_arch_lint(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Go README references the go-arch-lint tooling."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="go", project_name="myapp")
+
+        readme = (output_dir / "README.md").read_text()
+        assert "go-arch-lint" in readme
+
+    def test_go_run_script_invokes_go_arch_lint(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Go run-check.sh script invokes go-arch-lint."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="go", project_name="myapp")
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "go-arch-lint" in script
+
+    def test_go_result_reports_go_language(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the result object records the Go language."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        result = generator.generate(language="go", project_name="myapp")
+
+        assert result.language == "go"
+
+
 class TestArchitectureEnforcementGeneratorTypeScript:
     """Test TypeScript-specific architecture rules."""
 

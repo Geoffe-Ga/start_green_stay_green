@@ -1,7 +1,7 @@
 """Architecture enforcement generator.
 
-Generates architecture validation configuration for import-linter (Python)
-and dependency-cruiser (TypeScript).
+Generates architecture validation configuration for import-linter (Python),
+dependency-cruiser (TypeScript), and go-arch-lint (Go).
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ class ArchitectureResult:
     Attributes:
         output_dir: Directory containing generated files.
         files_created: List of files created.
-        language: Target language (python, typescript).
+        language: Target language (python, typescript, go).
     """
 
     output_dir: Path
@@ -30,12 +30,59 @@ class ArchitectureResult:
     language: str
 
 
+@dataclass(frozen=True)
+class _LanguageTooling:
+    """Per-language architecture tooling metadata.
+
+    Attributes:
+        tool: Human-readable name of the enforcement tool.
+        config_file: Name of the generated configuration file.
+        install_cmd: Shell command to install the tool.
+        run_cmd: Shell command to run the architecture check directly.
+        docs_url: URL to the tool's documentation.
+    """
+
+    tool: str
+    config_file: str
+    install_cmd: str
+    run_cmd: str
+    docs_url: str
+
+
+# Maps each supported language to its architecture-enforcement tooling.
+# Keeping the metadata in one place lets the README and run-script
+# generators stay tool-agnostic and avoids per-language branching.
+_LANGUAGE_TOOLING: dict[str, _LanguageTooling] = {
+    "python": _LanguageTooling(
+        tool="import-linter",
+        config_file=".importlinter",
+        install_cmd="pip install import-linter",
+        run_cmd="lint-imports --config .importlinter",
+        docs_url="https://import-linter.readthedocs.io/",
+    ),
+    "typescript": _LanguageTooling(
+        tool="dependency-cruiser",
+        config_file=".dependency-cruiser.js",
+        install_cmd="npm install -g dependency-cruiser",
+        run_cmd="depcruise --config .dependency-cruiser.js src",
+        docs_url="https://github.com/sverweij/dependency-cruiser",
+    ),
+    "go": _LanguageTooling(
+        tool="go-arch-lint",
+        config_file=".go-arch-lint.yml",
+        install_cmd=("go install github.com/fe3dback/go-arch-lint@latest"),
+        run_cmd="go-arch-lint check --arch-file .go-arch-lint.yml",
+        docs_url="https://github.com/fe3dback/go-arch-lint",
+    ),
+}
+
+
 class ArchitectureEnforcementGenerator:
     """Generates architecture enforcement configuration.
 
-    Generates import-linter config for Python and dependency-cruiser
-    config for TypeScript to enforce layer separation and prevent
-    circular dependencies.
+    Generates import-linter config for Python, dependency-cruiser
+    config for TypeScript, and go-arch-lint config for Go to enforce
+    layer separation and prevent circular dependencies.
 
     Attributes:
         orchestrator: AI orchestrator for content generation.
@@ -82,7 +129,7 @@ class ArchitectureEnforcementGenerator:
         """Generate architecture enforcement configuration.
 
         Args:
-            language: Target language (python, typescript).
+            language: Target language (python, typescript, go).
             project_name: Name of the project.
 
         Returns:
@@ -91,7 +138,7 @@ class ArchitectureEnforcementGenerator:
         Raises:
             ValueError: If language is not supported.
         """
-        supported_languages = {"python", "typescript"}
+        supported_languages = {"python", "typescript", "go"}
         if language not in supported_languages:
             msg = f"Unsupported language: {language}"
             raise ValueError(msg)
@@ -105,6 +152,8 @@ class ArchitectureEnforcementGenerator:
             files_created.extend(self._generate_python_config(project_name))
         elif language == "typescript":
             files_created.extend(self._generate_typescript_config(project_name))
+        elif language == "go":
+            files_created.extend(self._generate_go_config(project_name))
 
         # Generate README and run script
         files_created.extend(
@@ -250,6 +299,66 @@ module.exports = {
         dc_path.write_text(config_content)
         return [dc_path]
 
+    def _generate_go_config(self, project_name: str) -> list[Path]:  # noqa: ARG002
+        """Generate go-arch-lint configuration for Go.
+
+        go-arch-lint enforces a component map and dependency rules over Go
+        packages, providing the same layer-separation and domain-independence
+        guarantees as import-linter (Python) and dependency-cruiser
+        (TypeScript).
+
+        Args:
+            project_name: Name of the project.
+
+        Returns:
+            List of files created.
+        """
+        config_path = self.output_dir / ".go-arch-lint.yml"
+
+        # Generate go-arch-lint configuration. Components map onto package
+        # globs; the deps section forbids the domain layer from importing
+        # the application, presentation, and infrastructure layers, keeping
+        # business logic pure and dependency-free.
+        config_content = """version: 3
+workdir: .
+
+components:
+  presentation:
+    in: presentation/**
+  application:
+    in: application/**
+  domain:
+    in: domain/**
+  infrastructure:
+    in: infrastructure/**
+
+# Enforce layered architecture:
+#   presentation -> application -> domain
+# and keep the domain layer independent of outer layers.
+deps:
+  presentation:
+    mayDependOn:
+      - application
+      - domain
+  application:
+    mayDependOn:
+      - domain
+  domain:
+    # Domain layer must remain pure: no dependency on application,
+    # presentation, or infrastructure concerns.
+    mayDependOn: []
+  infrastructure:
+    mayDependOn:
+      - domain
+
+# Forbid imports that would create circular dependencies between layers.
+commonComponents:
+  - domain
+"""
+
+        config_path.write_text(config_content)
+        return [config_path]
+
     def _generate_readme(self, language: str, project_name: str) -> Path:
         """Generate README with usage instructions.
 
@@ -262,17 +371,10 @@ module.exports = {
         """
         readme_path = self.output_dir / "README.md"
 
-        tool = "import-linter" if language == "python" else "dependency-cruiser"
-        install_cmd = (
-            "pip install import-linter"
-            if language == "python"
-            else "npm install -g dependency-cruiser"
-        )
-        run_cmd = (
-            "lint-imports"
-            if language == "python"
-            else "depcruise --config .dependency-cruiser.js src"
-        )
+        tooling = _LANGUAGE_TOOLING[language]
+        tool = tooling.tool
+        install_cmd = tooling.install_cmd
+        run_cmd = tooling.run_cmd
 
         readme_content = f"""# Architecture Enforcement
 
@@ -337,10 +439,12 @@ The domain layer must remain pure:
 Edit the configuration file:
 - Python: `.importlinter`
 - TypeScript: `.dependency-cruiser.js`
+- Go: `.go-arch-lint.yml`
 
 See documentation:
 - Python: https://import-linter.readthedocs.io/
 - TypeScript: https://github.com/sverweij/dependency-cruiser
+- Go: https://github.com/fe3dback/go-arch-lint
 
 ## Integration
 
@@ -375,37 +479,7 @@ Add to CI pipeline:
         """
         script_path = self.output_dir / "run-check.sh"
 
-        if language == "python":
-            script_content = """#!/usr/bin/env bash
-set -euo pipefail
-
-echo "🏛️  Checking Python architecture with import-linter..."
-
-if ! command -v lint-imports &> /dev/null; then
-    echo "❌ import-linter not found. Install with: pip install import-linter"
-    exit 1
-fi
-
-lint-imports --config plans/architecture/.importlinter
-
-echo "✅ Architecture checks passed!"
-"""
-        else:  # typescript
-            script_content = """#!/usr/bin/env bash
-set -euo pipefail
-
-echo "🏛️  Checking TypeScript architecture with dependency-cruiser..."
-
-if ! command -v depcruise &> /dev/null; then
-    echo "❌ dependency-cruiser not found."
-    echo "Install with: npm install -g dependency-cruiser"
-    exit 1
-fi
-
-depcruise --config plans/architecture/.dependency-cruiser.js src
-
-echo "✅ Architecture checks passed!"
-"""
+        script_content = self._build_run_script(language)
 
         script_path.write_text(script_content)
 
@@ -413,3 +487,46 @@ echo "✅ Architecture checks passed!"
         script_path.chmod(0o755)
 
         return script_path
+
+    @staticmethod
+    def _build_run_script(language: str) -> str:
+        """Build the run-check.sh contents for a language.
+
+        Derives the command and the binary-availability guard from the
+        shared :data:`_LANGUAGE_TOOLING` metadata so adding a language
+        requires no changes here.
+
+        Args:
+            language: Target language.
+
+        Returns:
+            The shell script source for run-check.sh.
+        """
+        tooling = _LANGUAGE_TOOLING[language]
+        display = {
+            "python": "Python",
+            "typescript": "TypeScript",
+            "go": "Go",
+        }[language]
+        # The first token of run_cmd is the binary to probe with command -v.
+        binary = tooling.run_cmd.split()[0]
+        # Prefix the relative config path in run_cmd with plans/architecture/
+        # so the script works when invoked from the project root.
+        full_cmd = tooling.run_cmd.replace(
+            tooling.config_file,
+            f"plans/architecture/{tooling.config_file}",
+        )
+        return f"""#!/usr/bin/env bash
+set -euo pipefail
+
+echo "🏛️  Checking {display} architecture with {tooling.tool}..."
+
+if ! command -v {binary} &> /dev/null; then
+    echo "❌ {tooling.tool} not found. Install with: {tooling.install_cmd}"
+    exit 1
+fi
+
+{full_cmd}
+
+echo "✅ Architecture checks passed!"
+"""
