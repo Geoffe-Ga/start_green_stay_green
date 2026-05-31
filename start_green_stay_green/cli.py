@@ -47,7 +47,6 @@ from start_green_stay_green.ai.provider_selection import ProviderUnavailableErro
 from start_green_stay_green.ai.provider_selection import build_provider
 from start_green_stay_green.ai.provider_selection import resolve_api_key_env_var
 from start_green_stay_green.ai.provider_selection import resolve_provider_selection
-from start_green_stay_green.ai.provider_selection import supported_providers
 from start_green_stay_green.generators.architecture import (
     ArchitectureEnforcementGenerator,
 )
@@ -625,9 +624,10 @@ def _resolve_orchestrator_selection(
             env=os.environ,
         )
     except ValueError as e:
-        supported = ", ".join(supported_providers())
+        # ``e`` already names the supported set ("Supported providers: …"),
+        # so we must not append a second copy here (regression: #383).
         console.print(
-            f"[red]Error:[/red] {e} (supported: {supported})",
+            f"[red]Error:[/red] {e}",
             style="bold",
         )
         return None
@@ -2112,10 +2112,10 @@ def _require_enhance_orchestrator(
     )
     if orchestrator is None:
         console.print(
-            "[red]Error:[/red] `green enhance` requires an Anthropic API "
-            "key — there is no deterministic fallback for AI-tuned "
-            "artifacts.\n  Set ANTHROPIC_API_KEY (or store one in the "
-            "keyring on first run).",
+            "[red]Error:[/red] `green enhance` requires an API key for the "
+            "selected provider — there is no deterministic fallback for "
+            "AI-tuned artifacts.\n  Set ANTHROPIC_API_KEY (or store one in "
+            "the keyring on first run).",
             style="bold",
         )
         raise typer.Exit(code=1)

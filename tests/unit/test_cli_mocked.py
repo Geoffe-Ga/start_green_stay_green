@@ -585,6 +585,12 @@ class TestProviderModelSelection:
             )
         assert result is None
         mock_console.print.assert_called()
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        # The supported set must appear exactly once — the underlying
+        # ``ValueError`` already names it, so the CLI must not append a
+        # second ``(supported: …)`` copy (regression: #383).
+        assert printed.count("Supported providers:") == 1
+        assert "(supported:" not in printed
 
     @patch("start_green_stay_green.cli.console")
     @patch(
@@ -1949,7 +1955,10 @@ class TestEnhanceCommand:
         )
         assert result.exit_code == 1
         flat = self._flat(result.stdout)
-        assert "requires an Anthropic API key" in flat
+        # ``enhance`` now accepts ``--provider``/``--model``, so the
+        # no-key message must be provider-neutral (regression: #383).
+        assert "requires an API key for the selected provider" in flat
+        assert "Anthropic API key" not in flat
         assert "ANTHROPIC_API_KEY" in flat
 
     @patch("start_green_stay_green.cli._enhance_subagents")
