@@ -219,6 +219,32 @@ class TestArchitectureEnforcementGeneratorGo:
         assert "deps" in config.lower()
         assert "infrastructure" in config.lower()
 
+    def test_go_config_common_components_comment_is_accurate(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """commonComponents is documented as a whitelist, not a cycle guard.
+
+        ``commonComponents`` in go-arch-lint v3 is a whitelist: every
+        component may import the listed components without an explicit
+        ``deps`` entry. It does not detect circular dependencies, so the
+        config must not claim that it does.
+        """
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="go", project_name="myapp")
+
+        config = (output_dir / ".go-arch-lint.yml").read_text()
+
+        # The misleading cycle-detection claim must be gone.
+        assert "circular dependencies between layers" not in config
+        # An accurate whitelist description must precede commonComponents.
+        assert (
+            "# domain is available to all components without an explicit "
+            "deps entry." in config
+        )
+
     def test_go_readme_mentions_go_arch_lint(
         self,
         tmp_path: Path,
@@ -386,3 +412,26 @@ class TestLanguageTooling:
         assert "--arch.yml-strict" in full_cmd
         assert "plans/architecture/arch.yml" in full_cmd
         assert "plans/architecture/--arch.yml-strict" not in full_cmd
+
+    def test_supported_languages_match_tooling_keys(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """generate() accepts exactly the languages with tooling metadata.
+
+        ``supported_languages`` is derived from ``_LANGUAGE_TOOLING`` so the
+        accepted-language set and the tooling map cannot drift apart. Every
+        tooling key must generate without raising, and a key-less language
+        must be rejected.
+        """
+        generator = ArchitectureEnforcementGenerator(
+            output_dir=tmp_path / "plans" / "architecture"
+        )
+
+        for language in _LANGUAGE_TOOLING:
+            result = generator.generate(language=language, project_name="myapp")
+            assert result.language == language
+
+        assert "rust" not in _LANGUAGE_TOOLING
+        with pytest.raises(ValueError, match="Unsupported language"):
+            generator.generate(language="rust", project_name="myapp")

@@ -147,7 +147,7 @@ class ArchitectureEnforcementGenerator:
         Raises:
             ValueError: If language is not supported.
         """
-        supported_languages = {"python", "typescript", "go"}
+        supported_languages = frozenset(_LANGUAGE_TOOLING)
         if language not in supported_languages:
             msg = f"Unsupported language: {language}"
             raise ValueError(msg)
@@ -363,7 +363,7 @@ deps:
     mayDependOn:
       - domain
 
-# Forbid imports that would create circular dependencies between layers.
+# domain is available to all components without an explicit deps entry.
 commonComponents:
   - domain
 """
