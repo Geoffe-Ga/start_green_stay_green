@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.naming import pascal_case
 
 if TYPE_CHECKING:
     from start_green_stay_green.utils.file_writer import FileWriter
@@ -1228,6 +1229,7 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
         """
         # Convert project name to title case for display
         display_name = self.config.project_name.replace("-", " ").title()
+        type_name = pascal_case(self.config.package_name)
 
         return f"""# {self.config.project_name}
 
@@ -1318,7 +1320,7 @@ This project includes:
 {self.config.project_name}/
 ├── Sources/             # Swift source code (watchOS app target)
 │   └── {self.config.package_name}/
-│       ├── {self._swift_type_name()}App.swift  # SwiftUI @main App entry
+│       ├── {type_name}App.swift  # SwiftUI @main App entry
 │       └── ContentView.swift     # SwiftUI watchOS view
 ├── Tests/               # XCTest test suite
 ├── scripts/             # Quality control scripts
@@ -1358,16 +1360,3 @@ MIT License
 Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green_stay_green)
 - Maximum quality Swift watchOS projects from day one.
 """
-
-    def _swift_type_name(self) -> str:
-        """Convert the package name to a Swift PascalCase type prefix.
-
-        Swift type names use UpperCamelCase, so ``test_project`` becomes
-        ``TestProject``. Both underscores and hyphens are treated as word
-        separators.
-
-        Returns:
-            PascalCase type-name prefix derived from the package name.
-        """
-        words = self.config.package_name.replace("-", "_").split("_")
-        return "".join(word.capitalize() for word in words if word)

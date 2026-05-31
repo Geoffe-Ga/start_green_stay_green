@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.naming import pascal_case
 
 if TYPE_CHECKING:
     from start_green_stay_green.utils.file_writer import FileWriter
@@ -692,26 +693,13 @@ end
 
         return files
 
-    def _swift_type_name(self) -> str:
-        """Convert the package name to a Swift PascalCase type prefix.
-
-        Swift package and type names use UpperCamelCase, so ``test_project``
-        becomes ``TestProject``. Both underscores and hyphens are treated as
-        word separators.
-
-        Returns:
-            PascalCase name derived from the package name.
-        """
-        words = self.config.package_name.replace("-", "_").split("_")
-        return "".join(word.capitalize() for word in words if word)
-
     def _swift_package_swift(self) -> str:
         """Generate the Swift Package Manager manifest for watchOS.
 
         Returns:
             Content for ``Package.swift`` declaring a watchOS app target
         """
-        type_name = self._swift_type_name()
+        type_name = pascal_case(self.config.package_name)
         return f"""// swift-tools-version:5.9
 import PackageDescription
 

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.naming import pascal_case
 
 if TYPE_CHECKING:
     from start_green_stay_green.utils.file_writer import FileWriter
@@ -136,19 +137,6 @@ class StructureGenerator(BaseGenerator):
             "swift": self._generate_swift_structure,
         }
         return generators[self.config.language]()
-
-    def _swift_type_name(self) -> str:
-        """Convert the package name to a Swift PascalCase type prefix.
-
-        Swift type names use UpperCamelCase, so ``test_project`` becomes
-        ``TestProject``. Both underscores and hyphens are treated as word
-        separators.
-
-        Returns:
-            PascalCase type-name prefix derived from the package name.
-        """
-        words = self.config.package_name.replace("-", "_").split("_")
-        return "".join(word.capitalize() for word in words if word)
 
     def _generate_python_structure(self) -> dict[str, Path]:
         """Generate Python project structure.
@@ -749,7 +737,7 @@ gem "rubocop", "~> 1.0"
         source_dir = self.output_dir / "Sources" / self.config.package_name
         source_dir.mkdir(parents=True, exist_ok=True)
 
-        type_name = self._swift_type_name()
+        type_name = pascal_case(self.config.package_name)
 
         # Generate the SwiftUI @main App entry point
         app_key = f"Sources/{self.config.package_name}/{type_name}App.swift"
@@ -822,7 +810,7 @@ struct ContentView: View {{
         Returns:
             Content for ``Package.swift`` declaring a watchOS app target.
         """
-        type_name = self._swift_type_name()
+        type_name = pascal_case(self.config.package_name)
         return f"""// swift-tools-version:5.9
 import PackageDescription
 

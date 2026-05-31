@@ -409,3 +409,34 @@ class TestMultiLanguageTests:
             assert "import XCTest" in content
             assert "XCTestCase" in content
             assert "func test" in content
+
+    def test_swift_test_has_meaningful_assertions(self) -> None:
+        """Swift test exercises behavior, not identical string literals.
+
+        The generated XCTest must instantiate ``ContentView`` and assert the
+        greeting is assembled from the project name, rather than comparing two
+        identical literals (which would detect no defects).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            test_key = "Tests/test_projectTests/test_projectTests.swift"
+            content = files[test_key].read_text()
+
+            # ContentView is instantiated and checked for nil — verifies the
+            # view type compiles and constructs.
+            assert "ContentView()" in content
+            assert "XCTAssertNotNil" in content
+
+            # The greeting is built dynamically from the project name via
+            # string interpolation, so the assertion verifies real logic
+            # rather than comparing two identical literals.
+            assert 'let projectName = "test-project"' in content
+            assert 'let greeting = "Hello from \\(projectName)!"' in content
+            assert 'XCTAssertEqual(greeting, "Hello from test-project!")' in content
