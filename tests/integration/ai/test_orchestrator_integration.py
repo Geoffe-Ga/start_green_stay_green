@@ -1,5 +1,7 @@
 """Integration tests for AI Orchestrator end-to-end workflows."""
 
+from typing import TYPE_CHECKING
+from typing import cast
 from unittest.mock import MagicMock
 from unittest.mock import create_autospec
 from unittest.mock import patch
@@ -13,12 +15,15 @@ from start_green_stay_green.ai.orchestrator import GenerationResult
 from start_green_stay_green.ai.orchestrator import ModelConfig
 from start_green_stay_green.ai.orchestrator import TokenUsage
 
+if TYPE_CHECKING:
+    from start_green_stay_green.ai.providers import AnthropicProvider
+
 
 @pytest.mark.integration
 class TestOrchestratorEndToEndWorkflows:
     """Test complete orchestrator workflows from initialization to generation."""
 
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_full_workflow_with_yaml_generation(
         self,
         mock_anthropic: MagicMock,
@@ -70,8 +75,8 @@ class TestOrchestratorEndToEndWorkflows:
         assert call_kwargs["model"] == ModelConfig.OPUS
         assert call_kwargs["max_tokens"] == 4096
 
-    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.time.sleep")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_resilience_workflow_with_retry_recovery(
         self,
         mock_anthropic: MagicMock,
@@ -116,8 +121,8 @@ class TestOrchestratorEndToEndWorkflows:
         assert mock_client.messages.create.call_count == 2
         assert mock_sleep.call_count == 1
 
-    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.time.sleep")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_failure_workflow_max_retries_exhausted(
         self,
         mock_anthropic: MagicMock,
@@ -152,7 +157,7 @@ class TestOrchestratorEndToEndWorkflows:
         assert mock_client.messages.create.call_count == 3  # 1 + 2 retries
         assert mock_sleep.call_count == 2
 
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_multiple_format_workflow(
         self,
         mock_anthropic: MagicMock,
@@ -205,7 +210,7 @@ class TestOrchestratorEndToEndWorkflows:
         # Verify all formats were generated
         assert mock_client.messages.create.call_count == 4
 
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_configuration_workflow_with_custom_settings(
         self,
         mock_anthropic: MagicMock,
@@ -273,7 +278,7 @@ class TestOrchestratorAsyncWorkflows:
     """Coverage for the AsyncAnthropic-backed generate_async path."""
 
     @pytest.mark.asyncio
-    @patch("start_green_stay_green.ai.orchestrator.AsyncAnthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.AsyncAnthropic")
     async def test_generate_async_returns_generation_result(
         self,
         mock_async_anthropic: MagicMock,
@@ -324,7 +329,7 @@ class TestOrchestratorAsyncWorkflows:
         mock_async_anthropic.assert_called_once_with(api_key="async-smoke")
 
     @pytest.mark.asyncio
-    @patch("start_green_stay_green.ai.orchestrator.AsyncAnthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.AsyncAnthropic")
     async def test_aclose_is_idempotent(
         self,
         mock_async_anthropic: MagicMock,
@@ -347,7 +352,7 @@ class TestOrchestratorAsyncWorkflows:
 
         # Now allocate the client by calling ``_get_async_client`` and
         # close it twice.
-        orchestrator._get_async_client()
+        cast("AnthropicProvider", orchestrator._provider)._get_async_client()
         await orchestrator.aclose()
         await orchestrator.aclose()
         mock_client.close.assert_called_once()
