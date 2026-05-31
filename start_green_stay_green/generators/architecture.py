@@ -38,8 +38,13 @@ class _LanguageTooling:
         tool: Human-readable name of the enforcement tool.
         config_file: Name of the generated configuration file.
         install_cmd: Shell command to install the tool.
-        run_cmd: Shell command to run the architecture check directly.
+        run_cmd: Run-command template with a ``{config_file}`` placeholder
+            (e.g. ``"lint-imports --config {config_file}"``). The placeholder
+            is filled with the (optionally path-prefixed) config filename at
+            the call site, avoiding fragile substring replacement.
         docs_url: URL to the tool's documentation.
+        display_name: Capitalized language label for human-readable output
+            (e.g. ``"Python"``, ``"TypeScript"``, ``"Go"``).
     """
 
     tool: str
@@ -47,6 +52,7 @@ class _LanguageTooling:
     install_cmd: str
     run_cmd: str
     docs_url: str
+    display_name: str
 
 
 # Maps each supported language to its architecture-enforcement tooling.
@@ -57,22 +63,25 @@ _LANGUAGE_TOOLING: dict[str, _LanguageTooling] = {
         tool="import-linter",
         config_file=".importlinter",
         install_cmd="pip install import-linter",
-        run_cmd="lint-imports --config .importlinter",
+        run_cmd="lint-imports --config {config_file}",
         docs_url="https://import-linter.readthedocs.io/",
+        display_name="Python",
     ),
     "typescript": _LanguageTooling(
         tool="dependency-cruiser",
         config_file=".dependency-cruiser.js",
         install_cmd="npm install -g dependency-cruiser",
-        run_cmd="depcruise --config .dependency-cruiser.js src",
+        run_cmd="depcruise --config {config_file} src",
         docs_url="https://github.com/sverweij/dependency-cruiser",
+        display_name="TypeScript",
     ),
     "go": _LanguageTooling(
         tool="go-arch-lint",
         config_file=".go-arch-lint.yml",
         install_cmd=("go install github.com/fe3dback/go-arch-lint@latest"),
-        run_cmd="go-arch-lint check --arch-file .go-arch-lint.yml",
+        run_cmd="go-arch-lint check --arch-file {config_file}",
         docs_url="https://github.com/fe3dback/go-arch-lint",
+        display_name="Go",
     ),
 }
 
@@ -299,6 +308,9 @@ module.exports = {
         dc_path.write_text(config_content)
         return [dc_path]
 
+    # ARG002: project_name is unused but kept for API parity with
+    # _generate_python_config / _generate_typescript_config so the
+    # generate() dispatch can call every _generate_*_config uniformly.
     def _generate_go_config(self, project_name: str) -> list[Path]:  # noqa: ARG002
         """Generate go-arch-lint configuration for Go.
 
@@ -374,7 +386,9 @@ commonComponents:
         tooling = _LANGUAGE_TOOLING[language]
         tool = tooling.tool
         install_cmd = tooling.install_cmd
-        run_cmd = tooling.run_cmd
+        # Manual invocation runs from the config directory, so the bare
+        # config filename is correct here (no plans/architecture/ prefix).
+        run_cmd = tooling.run_cmd.format(config_file=tooling.config_file)
 
         readme_content = f"""# Architecture Enforcement
 
@@ -503,23 +517,19 @@ Add to CI pipeline:
             The shell script source for run-check.sh.
         """
         tooling = _LANGUAGE_TOOLING[language]
-        display = {
-            "python": "Python",
-            "typescript": "TypeScript",
-            "go": "Go",
-        }[language]
         # The first token of run_cmd is the binary to probe with command -v.
         binary = tooling.run_cmd.split()[0]
-        # Prefix the relative config path in run_cmd with plans/architecture/
-        # so the script works when invoked from the project root.
-        full_cmd = tooling.run_cmd.replace(
-            tooling.config_file,
-            f"plans/architecture/{tooling.config_file}",
+        # Fill the {config_file} placeholder with the path-prefixed config so
+        # the script works when invoked from the project root. Using the
+        # template (rather than substring replacement) keeps the substitution
+        # immune to accidental collisions with other tokens in run_cmd.
+        full_cmd = tooling.run_cmd.format(
+            config_file=f"plans/architecture/{tooling.config_file}",
         )
         return f"""#!/usr/bin/env bash
 set -euo pipefail
 
-echo "🏛️  Checking {display} architecture with {tooling.tool}..."
+echo "🏛️  Checking {tooling.display_name} architecture with {tooling.tool}..."
 
 if ! command -v {binary} &> /dev/null; then
     echo "❌ {tooling.tool} not found. Install with: {tooling.install_cmd}"

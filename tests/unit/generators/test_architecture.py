@@ -9,6 +9,8 @@ from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.generators.architecture import (
     ArchitectureEnforcementGenerator,
 )
+from start_green_stay_green.generators.architecture import _LANGUAGE_TOOLING
+from start_green_stay_green.generators.architecture import _LanguageTooling
 
 
 class TestArchitectureEnforcementGeneratorInit:
@@ -255,6 +257,35 @@ class TestArchitectureEnforcementGeneratorGo:
 
         assert result.language == "go"
 
+    def test_go_run_script_uses_display_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Go run-check.sh announces the 'Go' display name."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="go", project_name="myapp")
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "Checking Go architecture" in script
+
+    def test_go_run_script_prefixes_config_path(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Go run-check.sh points at the plans/architecture config."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="go", project_name="myapp")
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert (
+            "go-arch-lint check --arch-file plans/architecture/.go-arch-lint.yml"
+            in script
+        )
+
 
 class TestArchitectureEnforcementGeneratorTypeScript:
     """Test TypeScript-specific architecture rules."""
@@ -290,3 +321,68 @@ class TestArchitectureEnforcementGeneratorTypeScript:
 
         # Should check for circular dependencies
         assert "circular" in content.lower() or "cycle" in content.lower()
+
+
+class TestLanguageTooling:
+    """Test the shared _LanguageTooling / _LANGUAGE_TOOLING metadata."""
+
+    @pytest.mark.parametrize(
+        ("language", "expected_display"),
+        [
+            ("python", "Python"),
+            ("typescript", "TypeScript"),
+            ("go", "Go"),
+        ],
+    )
+    def test_each_tooling_carries_a_display_name(
+        self, language: str, expected_display: str
+    ) -> None:
+        """Display name is a single-source-of-truth field on the dataclass."""
+        assert _LANGUAGE_TOOLING[language].display_name == expected_display
+
+    @pytest.mark.parametrize("language", ["python", "typescript", "go"])
+    def test_run_cmd_is_a_config_file_template(self, language: str) -> None:
+        """run_cmd holds a {config_file} placeholder, not a literal path."""
+        tooling = _LANGUAGE_TOOLING[language]
+        assert "{config_file}" in tooling.run_cmd
+        # Filling the template reproduces the bare-config invocation.
+        filled = tooling.run_cmd.format(config_file=tooling.config_file)
+        assert tooling.config_file in filled
+        assert "{config_file}" not in filled
+
+    def test_build_run_script_uses_display_name_not_a_dict(self) -> None:
+        """_build_run_script reads display_name from the dataclass."""
+        for language in _LANGUAGE_TOOLING:
+            script = ArchitectureEnforcementGenerator._build_run_script(language)
+            assert _LANGUAGE_TOOLING[language].display_name in script
+
+    def test_build_run_script_prefixes_config_via_template(self) -> None:
+        """The plans/architecture prefix is inserted via the template."""
+        for language, tooling in _LANGUAGE_TOOLING.items():
+            script = ArchitectureEnforcementGenerator._build_run_script(language)
+            assert f"plans/architecture/{tooling.config_file}" in script
+
+    def test_template_prefix_immune_to_substring_collision(self) -> None:
+        """A config filename that is a prefix of a flag is filled correctly.
+
+        The template approach must not misfire when ``config_file`` happens
+        to be a substring of another token in ``run_cmd`` — something the
+        old ``str.replace`` approach was vulnerable to.
+        """
+        tooling = _LanguageTooling(
+            tool="phony-lint",
+            config_file="arch.yml",
+            install_cmd="install phony-lint",
+            # 'arch.yml' is also a substring of the '--arch.yml-strict' flag.
+            run_cmd="phony-lint --arch.yml-strict check {config_file}",
+            docs_url="https://example.com",
+            display_name="Phony",
+        )
+        full_cmd = tooling.run_cmd.format(
+            config_file=f"plans/architecture/{tooling.config_file}",
+        )
+        # Only the {config_file} placeholder is expanded; the look-alike
+        # flag token is left untouched.
+        assert "--arch.yml-strict" in full_cmd
+        assert "plans/architecture/arch.yml" in full_cmd
+        assert "plans/architecture/--arch.yml-strict" not in full_cmd
