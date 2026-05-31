@@ -9,6 +9,8 @@ parser side is covered separately in ``test_batch.py``.
 from __future__ import annotations
 
 from typing import Any
+from typing import TYPE_CHECKING
+from typing import cast
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 
@@ -22,6 +24,9 @@ from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError
 from start_green_stay_green.ai.orchestrator import ToolUseResult
 
+if TYPE_CHECKING:
+    from start_green_stay_green.ai.providers import AnthropicProvider
+
 
 def _wire_batches(orchestrator: AIOrchestrator) -> MagicMock:
     """Replace the cached async client with a mock exposing ``messages.batches``.
@@ -32,7 +37,7 @@ def _wire_batches(orchestrator: AIOrchestrator) -> MagicMock:
     instance is created.
     """
     client = MagicMock()
-    orchestrator._async_client = client
+    cast("AnthropicProvider", orchestrator._provider)._async_client = client
     batches: MagicMock = client.messages.batches
     return batches
 
