@@ -12,6 +12,7 @@ Phase 0 of the optimization roadmap relies on this module to baseline
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from dataclasses import field
 import json
@@ -203,33 +204,33 @@ class TimingReport:
         )
 
 
-# Process-global active report. Correct for both sequential ``green init``
-# and the Phase 2 ``asyncio.gather`` fan-out (every concurrent subagent
-# task should accumulate into the same report). Issue #307 tracks
-# migrating this to ``contextvars.ContextVar`` before Phase 3 / Phase 5
-# introduce per-task timing scopes that need independent reports.
-_active_report: TimingReport | None = None
-_active_lock = threading.Lock()
+# Active report held in a ``ContextVar`` rather than a process-global. A
+# ``ContextVar`` copies its value into each task's context at spawn time,
+# so the Phase 2 ``asyncio.gather`` fan-out still attributes every child
+# task's API calls to the parent's report, while concurrent tasks that
+# install their own report (Phase 3 / Phase 5 per-task timing scopes)
+# stay isolated from one another.
+_active_report: ContextVar[TimingReport | None] = ContextVar(
+    "_active_report", default=None
+)
 
 
 def get_active_report() -> TimingReport | None:
     """Return the currently active ``TimingReport``, if any."""
-    with _active_lock:
-        return _active_report
+    return _active_report.get()
 
 
 def set_active_report(report: TimingReport | None) -> None:
-    """Install ``report`` as the active collector for this process.
+    """Install ``report`` as the active collector for the current context.
 
-    Pass ``None`` to disable collection. Calling this from concurrent
-    threads is safe; the most recent caller wins.
+    Pass ``None`` to disable collection. The value is scoped to the
+    current ``contextvars`` context: tasks spawned afterwards inherit it,
+    but sibling tasks (and other threads) are unaffected.
 
     Args:
         report: The report to install, or ``None`` to clear.
     """
-    global _active_report  # noqa: PLW0603 — module-level singleton by design
-    with _active_lock:
-        _active_report = report
+    _active_report.set(report)
 
 
 @contextmanager

@@ -1,6 +1,8 @@
 """Unit tests for AI Orchestrator data classes and core functionality."""
 
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
+from typing import cast
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import Mock
@@ -21,6 +23,9 @@ from start_green_stay_green.ai.orchestrator import TokenUsage
 from start_green_stay_green.ai.orchestrator import ToolUseResult
 from start_green_stay_green.utils.timing import TimingReport
 from start_green_stay_green.utils.timing import set_active_report
+
+if TYPE_CHECKING:
+    from start_green_stay_green.ai.providers import AnthropicProvider
 
 
 class TestTokenUsage:
@@ -266,7 +271,7 @@ class TestAIOrchestrator:
         # Verify it's a float, not accidentally converted to int
         assert isinstance(orchestrator.retry_delay, float)
 
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_with_valid_prompt_returns_result(
         self,
         mock_anthropic: Mock,
@@ -322,7 +327,7 @@ class TestAIOrchestrator:
                 output_format="invalid_format",  # type: ignore[arg-type]
             )
 
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_supports_all_output_formats(
         self,
         mock_anthropic: Mock,
@@ -354,7 +359,7 @@ class TestAIOrchestrator:
             )
             assert result.format == fmt
 
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_api_error_raises_generation_error(
         self,
         mock_anthropic: Mock,
@@ -372,7 +377,7 @@ class TestAIOrchestrator:
         with pytest.raises(GenerationError, match="Failed to generate content"):
             orchestrator.generate(prompt="Generate config", output_format="yaml")
 
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_creates_client_with_api_key(
         self,
         mock_anthropic: Mock,
@@ -401,8 +406,8 @@ class TestAIOrchestrator:
         mock_anthropic.assert_called_once_with(api_key="my-secret-key")
 
     @pytest.mark.flaky_in_ci
-    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.time.sleep")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_retries_on_failure(
         self,
         mock_anthropic: Mock,
@@ -442,8 +447,8 @@ class TestAIOrchestrator:
         # Should have slept twice (after each failure)
         assert mock_sleep.call_count == 2
 
-    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.time.sleep")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_exponential_backoff(
         self,
         mock_anthropic: Mock,
@@ -480,8 +485,8 @@ class TestAIOrchestrator:
         # Verify exponential backoff: 1.0, 2.0 seconds
         mock_sleep.assert_has_calls([call(1.0), call(2.0)])
 
-    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.time.sleep")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_max_retries_exceeded(
         self,
         mock_anthropic: Mock,
@@ -504,7 +509,7 @@ class TestAIOrchestrator:
         # Should have slept 2 times (after first 2 failures)
         assert mock_sleep.call_count == 2
 
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_no_retry_on_success(
         self,
         mock_anthropic: Mock,
@@ -625,8 +630,8 @@ class TestMutationKillers:
         with pytest.raises(ValueError, match="API key cannot be empty"):
             AIOrchestrator(api_key="\t\n  ")
 
-    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.time.sleep")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_retry_delay_exact_exponential_backoff(
         self,
         mock_anthropic: Mock,
@@ -684,8 +689,8 @@ class TestMutationKillers:
         # Verify these are NOT linear backoff (would be [1.0, 2.0, 3.0])
         assert sleep_calls != [1.0, 2.0, 3.0]
 
-    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.time.sleep")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_retry_count_exact(
         self,
         mock_anthropic: Mock,
@@ -717,8 +722,8 @@ class TestMutationKillers:
         # Should sleep exactly max_retries times (after each failure except last)
         assert mock_sleep.call_count == 2
 
-    @patch("start_green_stay_green.ai.orchestrator.time.sleep")
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.time.sleep")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_with_max_retries_zero(
         self,
         mock_anthropic: Mock,
@@ -747,7 +752,7 @@ class TestMutationKillers:
         # Should never sleep (no retries)
         mock_sleep.assert_not_called()
 
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_with_non_text_block_raises(
         self,
         mock_anthropic: Mock,
@@ -777,7 +782,7 @@ class TestMutationKillers:
         ):
             orchestrator.generate(prompt="Test", output_format="yaml")
 
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generation_result_fields_exact_values(
         self,
         mock_anthropic: Mock,
@@ -851,7 +856,7 @@ class TestMutationKillers:
         assert "claude-opus" in ModelConfig.OPUS
         assert "claude-sonnet" in ModelConfig.SONNET
 
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_prompt_format_in_api_call(
         self,
         mock_anthropic: Mock,
@@ -954,7 +959,7 @@ class TestMutationKillers:
         Location: orchestrator.py:186
         """
         with patch(
-            "start_green_stay_green.ai.orchestrator.Anthropic"
+            "start_green_stay_green.ai.providers.anthropic_provider.Anthropic"
         ) as mock_anthropic:
             mock_client = MagicMock()
             mock_anthropic.return_value = mock_client
@@ -977,7 +982,7 @@ class TestMutationKillers:
             assert "TextBlock" in str(exc_info.value)
             assert "response" in str(exc_info.value)
 
-    @patch("start_green_stay_green.ai.orchestrator.Anthropic")
+    @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_last_error_initialized_to_none_not_empty_string(
         self,
         mock_anthropic: Mock,
@@ -1074,7 +1079,7 @@ class TestGenerateToolUseAsync:
                 tool_input={"tuned_content": "hello", "changes": ["one"]},
             )
         )
-        orchestrator._async_client = mock_client
+        cast("AnthropicProvider", orchestrator._provider)._async_client = mock_client
 
         try:
             result = await orchestrator.generate_tool_use_async(
@@ -1105,7 +1110,7 @@ class TestGenerateToolUseAsync:
                 tool_input={"tuned_content": "x", "changes": []},
             )
         )
-        orchestrator._async_client = mock_client
+        cast("AnthropicProvider", orchestrator._provider)._async_client = mock_client
 
         system_blocks: list[dict[str, object]] = [
             {"type": "text", "text": "instructions"},
@@ -1150,7 +1155,7 @@ class TestGenerateToolUseAsync:
         text_block.text = "wrong shape"
         text_response.content = [text_block]
         mock_client = _make_async_client(text_response)
-        orchestrator._async_client = mock_client
+        cast("AnthropicProvider", orchestrator._provider)._async_client = mock_client
 
         try:
             with pytest.raises(GenerationError, match="ToolUseBlock"):
@@ -1180,7 +1185,7 @@ class TestGenerateToolUseAsync:
                 cache_creation=80,
             )
         )
-        orchestrator._async_client = mock_client
+        cast("AnthropicProvider", orchestrator._provider)._async_client = mock_client
 
         try:
             await orchestrator.generate_tool_use_async(
@@ -1205,7 +1210,7 @@ class TestGenerateToolUseAsync:
                 cache_creation=7,
             )
         )
-        orchestrator._async_client = mock_client
+        cast("AnthropicProvider", orchestrator._provider)._async_client = mock_client
 
         try:
             result = await orchestrator.generate_tool_use_async(
@@ -1258,7 +1263,7 @@ class TestCacheTelemetryOnTextPath:
         text_block.text = "hi"
         text_response.content = [text_block]
         mock_client = _make_async_client(text_response)
-        orchestrator._async_client = mock_client
+        cast("AnthropicProvider", orchestrator._provider)._async_client = mock_client
 
         try:
             result = await orchestrator.generate_async("hello", "markdown")
