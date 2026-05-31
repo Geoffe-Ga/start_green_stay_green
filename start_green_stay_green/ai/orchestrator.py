@@ -760,7 +760,7 @@ class AIOrchestrator:
         batch = await self._create_batch(payload)
         return BatchSubmission(
             batch_id=str(getattr(batch, "id", "") or ""),
-            custom_ids=list(custom_ids),
+            custom_ids=custom_ids.copy(),
             submitted_at=datetime.now(UTC).isoformat(),
         )
 
@@ -978,7 +978,7 @@ class AIOrchestrator:
         return {
             "model": self.model,
             "max_tokens": _MAX_TOKENS,
-            "system": list(system_blocks),
+            "system": system_blocks.copy(),
             "tools": [tool_schema],
             "tool_choice": {"type": "tool", "name": raw_name},
             "messages": [

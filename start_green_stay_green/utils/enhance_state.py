@@ -236,7 +236,7 @@ class EnhanceState:
         self.batch = BatchProgress(
             batch_id=batch_id,
             submitted_at=submitted_at,
-            custom_id_map=dict(custom_id_map),
+            custom_id_map=custom_id_map.copy(),
         )
         self.last_run = submitted_at
 

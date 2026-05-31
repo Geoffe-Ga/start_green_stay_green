@@ -53,7 +53,7 @@ def _success_entry(
                         "input": tool_input or {"tuned_content": "X", "changes": ["c"]},
                     },
                 ],
-                "usage": usage if usage is not None else dict(_DEFAULT_USAGE),
+                "usage": usage if usage is not None else _DEFAULT_USAGE.copy(),
             },
         },
     }
@@ -259,8 +259,8 @@ class TestBatchResultsBundle:
 
     def test_default_constructor_yields_empty_maps(self) -> None:
         bundle = BatchResultsBundle()
-        assert bundle.successes == {}
-        assert bundle.failures == {}
+        assert not bundle.successes
+        assert not bundle.failures
         assert bundle.total == 0
 
 

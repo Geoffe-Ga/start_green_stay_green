@@ -2035,8 +2035,7 @@ def _hash_subagents_inputs(project_name: str, language: str) -> str:
     for agent_name, source_file in REQUIRED_AGENTS.items():
         source_path = REFERENCE_AGENTS_DIR / source_file
         body = _read_reference_or_warn(source_path, f"subagent '{agent_name}'")
-        parts.append(f"agent={agent_name}\x00")
-        parts.append(body)
+        parts.extend((f"agent={agent_name}\x00", body))
     return hash_inputs(parts)
 
 

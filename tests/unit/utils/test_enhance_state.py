@@ -71,7 +71,7 @@ class TestEnhanceState:
         state = EnhanceState()
         assert state.version == STATE_FILE_VERSION
         assert state.last_run == ""
-        assert state.completed == {}
+        assert not state.completed
 
     def test_is_unchanged_returns_false_for_unknown_target(self) -> None:
         """A target that has never been tuned can never be "unchanged"."""
@@ -141,7 +141,7 @@ class TestEnhanceState:
     def test_from_dict_handles_missing_completed(self) -> None:
         """``completed`` absent from payload → empty dict, no crash."""
         loaded = EnhanceState.from_dict({"version": 1})
-        assert loaded.completed == {}
+        assert not loaded.completed
 
 
 class TestStateRoundTripOnDisk:
@@ -159,7 +159,7 @@ class TestStateRoundTripOnDisk:
     def test_load_state_returns_empty_when_file_missing(self, tmp_path: Path) -> None:
         """No state file → empty state (so first runs aren't flagged as changes)."""
         loaded = load_state(tmp_path)
-        assert loaded.completed == {}
+        assert not loaded.completed
 
     def test_load_state_returns_empty_on_invalid_json(self, tmp_path: Path) -> None:
         """Garbage in the state file degrades to empty state, not a crash."""
@@ -168,7 +168,7 @@ class TestStateRoundTripOnDisk:
         path.write_text("not valid json {", encoding="utf-8")
 
         loaded = load_state(tmp_path)
-        assert loaded.completed == {}
+        assert not loaded.completed
 
     def test_load_state_returns_empty_when_payload_is_not_dict(
         self, tmp_path: Path
@@ -179,7 +179,7 @@ class TestStateRoundTripOnDisk:
         path.write_text("[1, 2, 3]", encoding="utf-8")
 
         loaded = load_state(tmp_path)
-        assert loaded.completed == {}
+        assert not loaded.completed
 
     def test_save_state_creates_parent_directory(self, tmp_path: Path) -> None:
         """``.claude/`` is created on first save (no init step required)."""

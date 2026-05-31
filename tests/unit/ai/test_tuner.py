@@ -285,7 +285,7 @@ class TestContentTunerToolUseParsing:
             {"tuned_content": "Unchanged", "changes": []}
         )
         assert content == "Unchanged"
-        assert changes == []
+        assert not changes
 
     def test_drops_blank_change_strings(self) -> None:
         """Blank/non-string entries in ``changes`` are silently dropped."""
@@ -303,7 +303,7 @@ class TestContentTunerToolUseParsing:
         _content, changes = ContentTuner._parse_tool_use_input(
             {"tuned_content": "Body"}
         )
-        assert changes == []
+        assert not changes
 
     def test_non_string_content_raises_generation_error(self) -> None:
         """A bogus ``tuned_content`` type is a hard error, not a silent fallback.

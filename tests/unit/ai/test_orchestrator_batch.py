@@ -239,7 +239,7 @@ class TestFetchBatchResults:
 
         assert isinstance(bundle, BatchResultsBundle)
         assert set(bundle.successes) == {"subagent:a", "subagent:b"}
-        assert bundle.failures == {}
+        assert not bundle.failures
         assert isinstance(bundle.successes["subagent:a"], ToolUseResult)
 
     @pytest.mark.asyncio
