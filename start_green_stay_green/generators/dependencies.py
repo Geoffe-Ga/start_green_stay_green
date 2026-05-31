@@ -57,10 +57,11 @@ class DependenciesGenerator(BaseGenerator):
     pyproject.toml) with appropriate dependencies and tool configurations for the
     target project's language and tooling.
 
-    All 7 supported languages (python, typescript, go, rust, java, csharp, ruby)
-    are available at the generator level. Note that java, csharp, and ruby are
-    not yet supported by the full CLI pipeline (``sgsg init``) because
-    PreCommitGenerator does not yet handle those languages.
+    All 8 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift) are available at the generator level. Note that java, csharp,
+    ruby, and swift are not yet supported by the full CLI pipeline
+    (``sgsg init``) because PreCommitGenerator does not yet handle those
+    languages.
 
     Attributes:
         output_dir: Directory where dependency files will be written
@@ -133,6 +134,7 @@ class DependenciesGenerator(BaseGenerator):
             "java": self._generate_java_dependencies,
             "csharp": self._generate_csharp_dependencies,
             "ruby": self._generate_ruby_dependencies,
+            "swift": self._generate_swift_dependencies,
         }
         return generators[self.config.language]()
 
@@ -672,4 +674,61 @@ group :development, :test do
   gem "rubocop", "~> 1.57"
   gem "simplecov", "~> 0.22"
 end
+"""
+
+    def _generate_swift_dependencies(self) -> dict[str, Path]:
+        """Generate Swift dependency files.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        # Generate the Swift Package Manager manifest
+        files["Package.swift"] = self._write_file(
+            "Package.swift",
+            self._swift_package_swift(),
+        )
+
+        return files
+
+    def _swift_type_name(self) -> str:
+        """Convert the package name to a Swift PascalCase type prefix.
+
+        Swift package and type names use UpperCamelCase, so ``test_project``
+        becomes ``TestProject``. Both underscores and hyphens are treated as
+        word separators.
+
+        Returns:
+            PascalCase name derived from the package name.
+        """
+        words = self.config.package_name.replace("-", "_").split("_")
+        return "".join(word.capitalize() for word in words if word)
+
+    def _swift_package_swift(self) -> str:
+        """Generate the Swift Package Manager manifest for watchOS.
+
+        Returns:
+            Content for ``Package.swift`` declaring a watchOS app target
+        """
+        type_name = self._swift_type_name()
+        return f"""// swift-tools-version:5.9
+import PackageDescription
+
+let package = Package(
+    name: "{type_name}",
+    platforms: [
+        .watchOS(.v10)
+    ],
+    products: [
+        .library(name: "{type_name}", targets: ["{self.config.package_name}"])
+    ],
+    targets: [
+        .target(name: "{self.config.package_name}"),
+        .testTarget(
+            name: "{self.config.package_name}Tests",
+            dependencies: ["{self.config.package_name}"]
+        )
+    ]
+)
 """

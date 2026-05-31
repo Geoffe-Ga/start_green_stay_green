@@ -57,10 +57,11 @@ class ReadmeGenerator(BaseGenerator):
     description, installation instructions, usage guide, and documentation
     for the quality tools included in the project.
 
-    All 7 supported languages (python, typescript, go, rust, java, csharp, ruby)
-    are available at the generator level. Note that java, csharp, and ruby are
-    not yet supported by the full CLI pipeline (``sgsg init``) because
-    PreCommitGenerator does not yet handle those languages.
+    All 8 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift) are available at the generator level. Note that java, csharp,
+    ruby, and swift are not yet supported by the full CLI pipeline
+    (``sgsg init``) because PreCommitGenerator does not yet handle those
+    languages.
 
     Attributes:
         output_dir: Directory where README.md will be created
@@ -159,6 +160,7 @@ class ReadmeGenerator(BaseGenerator):
             "java": self._generate_java_readme,
             "csharp": self._generate_csharp_readme,
             "ruby": self._generate_ruby_readme,
+            "swift": self._generate_swift_readme,
         }
         return {"README.md": generators[self.config.language]()}
 
@@ -1208,3 +1210,164 @@ MIT License
 Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green_stay_green)
 - Maximum quality Ruby projects from day one.
 """
+
+    def _generate_swift_readme(self) -> Path:
+        """Generate Swift README.md.
+
+        Returns:
+            Path to generated README.md
+        """
+        readme_path = self.output_dir / "README.md"
+        return self._write_readme(readme_path, self._swift_readme_content())
+
+    def _swift_readme_content(self) -> str:
+        """Generate Swift README.md content.
+
+        Returns:
+            Content for README.md
+        """
+        # Convert project name to title case for display
+        display_name = self.config.project_name.replace("-", " ").title()
+
+        return f"""# {self.config.project_name}
+
+{display_name} - A quality-controlled Swift watchOS project generated with
+Start Green Stay Green.
+
+## Description
+
+This project was generated with maximum quality standards from day one, including:
+
+- ✅ Apple Watch (watchOS) app target built with SwiftUI and WatchKit
+- ✅ Swift Package Manager manifest (Package.swift)
+- ✅ Comprehensive testing infrastructure (XCTest with 90%+ coverage requirement)
+- ✅ Code quality tools (SwiftLint, swift-format)
+- ✅ Security scanning (Swift Package audit)
+- ✅ Type safety (Swift's strong typing system)
+- ✅ Pre-commit hooks (quality checks)
+- ✅ CI/CD pipeline (GitHub Actions)
+- ✅ AI-assisted development (Claude Code skills and subagents)
+
+## Installation
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd {self.config.project_name}
+
+# Resolve package dependencies
+swift package resolve
+
+# Install pre-commit hooks
+pre-commit install
+```
+
+## Usage
+
+Build and run the watchOS Hello World app:
+
+```bash
+swift build
+```
+
+Open the package in Xcode to run the SwiftUI app on the Apple Watch
+simulator:
+
+```bash
+open Package.swift
+```
+
+Expected output (in the watchOS app UI):
+```
+Hello from {self.config.project_name}!
+```
+
+## Development
+
+### Running Quality Checks
+
+```bash
+# Build the package
+swift build
+
+# Run all tests
+swift test
+
+# Run tests with code coverage
+swift test --enable-code-coverage
+
+# Run the linter
+swiftlint
+
+# Format code
+swift-format format --in-place --recursive Sources Tests
+```
+
+### Quality Tools
+
+This project includes:
+
+- **XCTest**: Built-in testing framework with 90%+ coverage requirement
+- **SwiftLint**: Style and convention linter for Swift
+- **swift-format**: Official Swift code formatter
+- **Swift Package Manager**: Dependency management and build tooling
+
+### Project Structure
+
+```
+{self.config.project_name}/
+├── Sources/             # Swift source code (watchOS app target)
+│   └── {self.config.package_name}/
+│       ├── {self._swift_type_name()}App.swift  # SwiftUI @main App entry
+│       └── ContentView.swift     # SwiftUI watchOS view
+├── Tests/               # XCTest test suite
+├── scripts/             # Quality control scripts
+├── .github/workflows/   # CI/CD pipelines
+├── .claude/             # AI subagents and skills
+└── Package.swift        # Swift Package Manager manifest
+```
+
+### Testing
+
+```bash
+# Run all tests
+swift test
+
+# Run tests with code coverage
+swift test --enable-code-coverage
+
+# Run a specific test
+swift test --filter TestName
+```
+
+### Code Quality
+
+This project maintains MAXIMUM QUALITY standards:
+
+- **Test Coverage**: ≥90% required
+- **Type Safety**: 100% compile-time type checking
+- **All Linters**: Must pass with zero violations
+- **Code Style**: Enforced by swift-format
+
+## License
+
+MIT License
+
+## Attribution
+
+Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green_stay_green)
+- Maximum quality Swift watchOS projects from day one.
+"""
+
+    def _swift_type_name(self) -> str:
+        """Convert the package name to a Swift PascalCase type prefix.
+
+        Swift type names use UpperCamelCase, so ``test_project`` becomes
+        ``TestProject``. Both underscores and hyphens are treated as word
+        separators.
+
+        Returns:
+            PascalCase type-name prefix derived from the package name.
+        """
+        words = self.config.package_name.replace("-", "_").split("_")
+        return "".join(word.capitalize() for word in words if word)

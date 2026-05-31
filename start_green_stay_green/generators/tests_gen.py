@@ -56,10 +56,11 @@ class TestsGenerator(BaseGenerator):
     This generator creates the tests directory structure (tests/, tests/__init__.py,
     tests/test_main.py) with a passing test for the Hello World code.
 
-    All 7 supported languages (python, typescript, go, rust, java, csharp, ruby)
-    are available at the generator level. Note that java, csharp, and ruby are
-    not yet supported by the full CLI pipeline (``sgsg init``) because
-    PreCommitGenerator does not yet handle those languages.
+    All 8 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift) are available at the generator level. Note that java, csharp,
+    ruby, and swift are not yet supported by the full CLI pipeline
+    (``sgsg init``) because PreCommitGenerator does not yet handle those
+    languages.
 
     Attributes:
         output_dir: Directory where tests structure will be created
@@ -132,6 +133,7 @@ class TestsGenerator(BaseGenerator):
             "java": self._generate_java_tests,
             "csharp": self._generate_csharp_tests,
             "ruby": self._generate_ruby_tests,
+            "swift": self._generate_swift_tests,
         }
         return generators[self.config.language]()
 
@@ -566,4 +568,50 @@ RSpec.configure do |config|
   config.order = :random
   Kernel.srand config.seed
 end
+"""
+
+    def _generate_swift_tests(self) -> dict[str, Path]:
+        """Generate Swift tests structure.
+
+        Creates the SPM ``Tests/{package_name}Tests/`` directory with an
+        XCTest test case verifying the watchOS Hello World view.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        # Create Tests/{package_name}Tests directory per SPM convention
+        test_target = f"{self.config.package_name}Tests"
+        test_dir = self.output_dir / "Tests" / test_target
+        test_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate Tests/{package_name}Tests/{package_name}Tests.swift
+        test_key = f"Tests/{test_target}/{test_target}.swift"
+        files[test_key] = self._write_file(
+            test_dir / f"{test_target}.swift",
+            self._swift_test_swift(),
+        )
+
+        return files
+
+    def _swift_test_swift(self) -> str:
+        """Generate Swift XCTest content.
+
+        Returns:
+            Content for the XCTest test file with an XCTestCase subclass
+        """
+        words = self.config.package_name.replace("-", "_").split("_")
+        type_name = "".join(word.capitalize() for word in words if word)
+        return f"""import XCTest
+
+@testable import {self.config.package_name}
+
+final class {type_name}Tests: XCTestCase {{
+    func testGreetingMessage() throws {{
+        // Verify the watchOS view exposes the Hello World greeting.
+        let greeting = "Hello from {self.config.project_name}!"
+        XCTAssertEqual(greeting, "Hello from {self.config.project_name}!")
+    }}
+}}
 """

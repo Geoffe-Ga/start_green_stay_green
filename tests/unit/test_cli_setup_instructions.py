@@ -71,6 +71,13 @@ class TestGetSetupInstructions:
         instructions = _get_setup_instructions(("rust",), Path("/home/user/rust-proj"))
         assert "cargo build" in instructions
 
+    def test_swift_includes_swift_build(self) -> None:
+        """Swift setup should build the SPM package."""
+        instructions = _get_setup_instructions(
+            ("swift",), Path("/home/user/swift-proj")
+        )
+        assert "swift build" in instructions
+
     def test_unknown_language_has_sensible_default(self) -> None:
         """Unknown languages should still get pre-commit + check-all."""
         instructions = _get_setup_instructions(("ruby",), Path("/home/user/ruby-proj"))

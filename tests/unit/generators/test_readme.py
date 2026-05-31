@@ -18,6 +18,7 @@ EXPECTED_COMMANDS: dict[str, list[str]] = {
     "java": ["mvn compile", "mvn test"],
     "csharp": ["dotnet build", "dotnet test"],
     "ruby": ["bundle install", "rspec"],
+    "swift": ["swift build", "swift test"],
 }
 
 
@@ -326,3 +327,38 @@ class TestMultiLanguageReadme:
 
             content = files["README.md"].read_text()
             assert "License" in content
+
+
+class TestSwiftReadme:
+    """Test Swift-specific README content."""
+
+    def test_swift_readme_mentions_watchos(self) -> None:
+        """Test Swift README documents the watchOS / Apple Watch target."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "watchOS" in content
+            assert "SwiftUI" in content
+
+    def test_swift_readme_mentions_spm(self) -> None:
+        """Test Swift README documents Swift Package Manager usage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "swift build" in content
+            assert "swift test" in content
+            assert "Package.swift" in content

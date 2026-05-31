@@ -19,6 +19,7 @@ EXPECTED_SOURCE_DIRS: dict[str, str] = {
     "java": "src",
     "csharp": "src",
     "ruby": "lib",
+    "swift": "Sources",
 }
 
 # Expected entry point files per language
@@ -30,6 +31,7 @@ EXPECTED_ENTRY_POINTS: dict[str, str] = {
     "java": "src/main/java/test_project/Main.java",
     "csharp": "src/Program.cs",
     "ruby": "lib/test_project.rb",
+    "swift": "Sources/test_project/TestProjectApp.swift",
 }
 
 
@@ -48,6 +50,7 @@ EXPECTED_CONFIG_FILES: dict[str, list[str]] = {
     "java": ["pom.xml"],
     "csharp": [],
     "ruby": ["Gemfile"],
+    "swift": ["Package.swift"],
 }
 
 
@@ -450,6 +453,59 @@ class TestMultiLanguageStructure:
             assert "Gemfile" in files
             content = files["Gemfile"].read_text()
             assert "source" in content
+
+    def test_swift_creates_package_swift(self) -> None:
+        """Test Swift generates an SPM Package.swift manifest."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            assert "Package.swift" in files
+            content = files["Package.swift"].read_text()
+            assert "swift-tools-version" in content
+            assert "PackageDescription" in content
+
+    def test_swift_creates_watchos_app_entry(self) -> None:
+        """Test Swift generates a SwiftUI App entry point for watchOS."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            app_key = "Sources/test_project/TestProjectApp.swift"
+            assert app_key in files
+            content = files[app_key].read_text()
+            # watchOS app uses SwiftUI's @main App + WatchKit integration
+            assert "@main" in content
+            assert "import SwiftUI" in content
+            assert "App" in content
+
+    def test_swift_creates_content_view(self) -> None:
+        """Test Swift generates a SwiftUI ContentView with the greeting."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            view_key = "Sources/test_project/ContentView.swift"
+            assert view_key in files
+            content = files[view_key].read_text()
+            assert "import SwiftUI" in content
+            assert "View" in content
+            assert "Hello from test-project!" in content
 
 
 class TestTypeScriptConfigGeneration:
