@@ -15,6 +15,7 @@ from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
 from start_green_stay_green.utils.naming import pascal_case
+from start_green_stay_green.utils.swift import package_swift
 
 if TYPE_CHECKING:
     from start_green_stay_green.utils.file_writer import FileWriter
@@ -807,27 +808,11 @@ struct ContentView: View {{
     def _swift_package_swift(self) -> str:
         """Generate the Swift Package Manager manifest for watchOS.
 
+        Delegates to the shared :func:`~start_green_stay_green.utils.swift.\
+package_swift` helper so the structure and dependency generators emit an
+        identical manifest from one source of truth.
+
         Returns:
             Content for ``Package.swift`` declaring a watchOS app target.
         """
-        type_name = pascal_case(self.config.package_name)
-        return f"""// swift-tools-version:5.9
-import PackageDescription
-
-let package = Package(
-    name: "{type_name}",
-    platforms: [
-        .watchOS(.v10)
-    ],
-    products: [
-        .library(name: "{type_name}", targets: ["{self.config.package_name}"])
-    ],
-    targets: [
-        .target(name: "{self.config.package_name}"),
-        .testTarget(
-            name: "{self.config.package_name}Tests",
-            dependencies: ["{self.config.package_name}"]
-        )
-    ]
-)
-"""
+        return package_swift(self.config.package_name)

@@ -9,6 +9,7 @@ import pytest
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.structure import StructureConfig
 from start_green_stay_green.generators.structure import StructureGenerator
+from start_green_stay_green.utils.swift import package_swift
 
 # Expected source directories per language
 EXPECTED_SOURCE_DIRS: dict[str, str] = {
@@ -469,6 +470,35 @@ class TestMultiLanguageStructure:
             content = files["Package.swift"].read_text()
             assert "swift-tools-version" in content
             assert "PackageDescription" in content
+
+    def test_swift_package_swift_has_no_library_product(self) -> None:
+        """A watchOS app target is not a library, so no products block is emitted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["Package.swift"].read_text()
+            assert ".library" not in content
+            assert "products:" not in content
+
+    def test_swift_package_swift_uses_shared_helper(self) -> None:
+        """Structure generator delegates manifest rendering to the shared helper."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["Package.swift"].read_text()
+            assert content == package_swift("test_project")
 
     def test_swift_creates_watchos_app_entry(self) -> None:
         """Test Swift generates a SwiftUI App entry point for watchOS."""

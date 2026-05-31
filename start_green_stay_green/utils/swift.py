@@ -1,0 +1,46 @@
+"""Swift Package Manager manifest helpers.
+
+Provides a single source of truth for the ``Package.swift`` manifest emitted
+by the Swift scaffold so the structure and dependency generators cannot drift
+apart. The scaffold targets a watchOS SwiftUI *application*, which is not a
+distributable library, so the manifest deliberately omits a ``products:``
+block (targets-only is the conventional shape for an app scaffold).
+"""
+
+from __future__ import annotations
+
+from start_green_stay_green.utils.naming import pascal_case
+
+
+def package_swift(package_name: str) -> str:
+    """Render the ``Package.swift`` manifest for the watchOS app scaffold.
+
+    Args:
+        package_name: The snake/kebab package identifier used for the SPM
+            target and test target names. The PascalCase form is derived for
+            the package's display name.
+
+    Returns:
+        The full contents of a ``Package.swift`` manifest declaring a
+        watchOS app target and its XCTest test target. No ``products:``
+        block is emitted because an app target is not a distributable
+        library.
+    """
+    type_name = pascal_case(package_name)
+    return f"""// swift-tools-version:5.9
+import PackageDescription
+
+let package = Package(
+    name: "{type_name}",
+    platforms: [
+        .watchOS(.v10)
+    ],
+    targets: [
+        .target(name: "{package_name}"),
+        .testTarget(
+            name: "{package_name}Tests",
+            dependencies: ["{package_name}"]
+        )
+    ]
+)
+"""

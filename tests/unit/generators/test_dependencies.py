@@ -9,6 +9,7 @@ import pytest
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.dependencies import DependenciesGenerator
 from start_green_stay_green.generators.dependencies import DependencyConfig
+from start_green_stay_green.utils.swift import package_swift
 
 # Expected primary dependency file per language
 EXPECTED_DEP_FILES: dict[str, list[str]] = {
@@ -378,3 +379,32 @@ class TestMultiLanguageDependencies:
             assert "import PackageDescription" in content
             assert "Package(" in content
             assert ".watchOS" in content
+
+    def test_swift_package_swift_has_no_library_product(self) -> None:
+        """A watchOS app target is not a library, so no products block is emitted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = DependencyConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = DependenciesGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["Package.swift"].read_text()
+            assert ".library" not in content
+            assert "products:" not in content
+
+    def test_swift_package_swift_uses_shared_helper(self) -> None:
+        """Dependencies generator delegates manifest rendering to the shared helper."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = DependencyConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = DependenciesGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["Package.swift"].read_text()
+            assert content == package_swift("test_project")
