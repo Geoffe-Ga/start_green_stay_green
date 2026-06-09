@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.swift import package_swift
 
 if TYPE_CHECKING:
     from start_green_stay_green.utils.file_writer import FileWriter
@@ -57,10 +58,11 @@ class DependenciesGenerator(BaseGenerator):
     pyproject.toml) with appropriate dependencies and tool configurations for the
     target project's language and tooling.
 
-    All 7 supported languages (python, typescript, go, rust, java, csharp, ruby)
-    are available at the generator level. Note that java, csharp, and ruby are
-    not yet supported by the full CLI pipeline (``sgsg init``) because
-    PreCommitGenerator does not yet handle those languages.
+    All 8 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift) are available at the generator level. Note that java, csharp,
+    ruby, and swift are not yet supported by the full CLI pipeline
+    (``sgsg init``) because PreCommitGenerator does not yet handle those
+    languages.
 
     Attributes:
         output_dir: Directory where dependency files will be written
@@ -133,6 +135,7 @@ class DependenciesGenerator(BaseGenerator):
             "java": self._generate_java_dependencies,
             "csharp": self._generate_csharp_dependencies,
             "ruby": self._generate_ruby_dependencies,
+            "swift": self._generate_swift_dependencies,
         }
         return generators[self.config.language]()
 
@@ -673,3 +676,31 @@ group :development, :test do
   gem "simplecov", "~> 0.22"
 end
 """
+
+    def _generate_swift_dependencies(self) -> dict[str, Path]:
+        """Generate Swift dependency files.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        # Generate the Swift Package Manager manifest
+        files["Package.swift"] = self._write_file(
+            "Package.swift",
+            self._swift_package_swift(),
+        )
+
+        return files
+
+    def _swift_package_swift(self) -> str:
+        """Generate the Swift Package Manager manifest for watchOS.
+
+        Delegates to the shared :func:`~start_green_stay_green.utils.swift.\
+package_swift` helper so the structure and dependency generators emit an
+        identical manifest from one source of truth.
+
+        Returns:
+            Content for ``Package.swift`` declaring a watchOS app target
+        """
+        return package_swift(self.config.package_name)

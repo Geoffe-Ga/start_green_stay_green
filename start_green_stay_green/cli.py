@@ -1319,6 +1319,7 @@ _LANG_SETUP_STEPS: dict[str, list[str]] = {
     "typescript": ["npm install"],
     "go": ["go mod download"],
     "rust": ["cargo build"],
+    "swift": ["swift package resolve", "swift build"],
 }
 
 

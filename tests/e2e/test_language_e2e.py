@@ -3,9 +3,9 @@
 Tests the complete sgsg init flow for supported languages, verifying
 that the CLI produces valid project structures end-to-end.
 
-Note: java, csharp, and ruby are supported at the generator level but
+Note: swift, java, csharp, and ruby are supported at the generator level but
 the full CLI pipeline (PreCommitGenerator) only supports python, typescript,
-go, and rust currently. Those 3 languages are tested at the unit/integration
+go, and rust currently. Those 4 languages are tested at the unit/integration
 level via test_language_generators.py.
 
 All tests use an environment with API keys stripped and a null keyring

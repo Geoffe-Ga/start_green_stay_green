@@ -18,6 +18,7 @@ EXPECTED_COMMANDS: dict[str, list[str]] = {
     "java": ["mvn compile", "mvn test"],
     "csharp": ["dotnet build", "dotnet test"],
     "ruby": ["bundle install", "rspec"],
+    "swift": ["swift build", "swift test"],
 }
 
 
@@ -326,3 +327,109 @@ class TestMultiLanguageReadme:
 
             content = files["README.md"].read_text()
             assert "License" in content
+
+
+class TestSwiftReadme:
+    """Test Swift-specific README content."""
+
+    def test_swift_readme_mentions_watchos(self) -> None:
+        """Test Swift README documents the watchOS / Apple Watch target."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "watchOS" in content
+            assert "SwiftUI" in content
+
+    def test_swift_readme_mentions_spm(self) -> None:
+        """Test Swift README documents Swift Package Manager usage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "swift build" in content
+            assert "swift test" in content
+            assert "Package.swift" in content
+
+    def test_swift_readme_only_checkmarks_generated_features(self) -> None:
+        """Swift README must not ✅ features the scaffold does not generate.
+
+        Swift is a foundation-only scaffold: pre-commit hooks, CI/CD, and the
+        SwiftLint/swift-format toolchain are deferred. The README must not
+        advertise them with a ✅ checkmark.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+
+            # Features that ARE generated may carry a checkmark.
+            assert "- ✅" in content
+            assert "Swift Package Manager manifest" in content
+
+            # Unwired features must never be claimed with a ✅ checkmark.
+            unwired = (
+                "SwiftLint",
+                "swift-format",
+                "Pre-commit hooks",
+                "CI/CD pipeline",
+                "Security scanning",
+            )
+            for feature in unwired:
+                assert (
+                    f"✅ {feature}" not in content
+                ), f"README falsely advertises unwired feature: {feature}"
+                # The checkmark must not appear on the same line either.
+                for line in content.splitlines():
+                    if feature in line:
+                        assert (
+                            "✅" not in line
+                        ), f"Unwired feature {feature!r} marked with ✅"
+
+    def test_swift_readme_lists_unwired_features_as_planned(self) -> None:
+        """Deferred Swift tooling is disclosed under a 'Planned' section."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "Planned / coming soon" in content
+            assert "SwiftLint" in content
+            assert "CI/CD pipeline" in content
+
+    def test_swift_readme_does_not_instruct_pre_commit_install(self) -> None:
+        """README must not tell users to install non-existent pre-commit hooks."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "pre-commit install" not in content
