@@ -68,9 +68,9 @@ class ReadmeGenerator(BaseGenerator):
     All 10 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin, cpp) are available at the generator level. Note that
     the full CLI pipeline (``sgsg init``) skips its quality-tooling steps
-    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
-    and cpp; C/C++ tooling arrives with #362/#363. Kotlin runs the full
-    pipeline (quality tooling #357, CI #358).
+    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, and
+    ruby; Kotlin (quality tooling #357, CI #358) and C/C++ (quality tooling
+    #362, CI #363) run the full pipeline.
 
     Attributes:
         output_dir: Directory where README.md will be created
@@ -1234,6 +1234,15 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
     def _swift_readme_content(self) -> str:
         """Generate Swift README.md content.
 
+        Only artifacts the scaffold actually generates carry a checkmark.
+        With the #352 quality toolchain (SwiftLint/swift-format,
+        pre-commit hooks, quality scripts, llvm-cov coverage gate,
+        SwiftLint custom-rule architecture enforcement) and the #353 CI
+        pipeline both generated, every roadmap item is real and the
+        'Planned / coming soon' section is gone (fixed with #365, where
+        the stale disclosure was caught alongside the identical C/C++
+        flip).
+
         Returns:
             Content for README.md
         """
@@ -1259,15 +1268,10 @@ are generated today:
 - ✅ Quality scripts (./scripts/check-all.sh with a 90%+ coverage gate)
 - ✅ Security & dead-code scanning (Periphery via ./scripts/security.sh)
 - ✅ Architecture enforcement (SwiftLint custom rules)
+- ✅ CI/CD pipeline (.github/workflows/ci.yml — macOS runners, quality
+  job with the ≥90% llvm-cov coverage gate, Swift 5.9, 5.10, and 6.0
+  test matrix, watchOS-simulator build-and-test job)
 - ✅ This README
-
-### Planned / coming soon
-
-These quality features are part of the Start Green Stay Green roadmap for
-Swift but are **not yet generated** by this scaffold — do not assume they
-are configured:
-
-- CI/CD pipeline (GitHub Actions)
 
 ## Installation
 
@@ -1324,8 +1328,8 @@ swift test --enable-code-coverage
 ./scripts/check-all.sh
 ```
 
-> **Note:** A CI pipeline (GitHub Actions) is on the roadmap but not yet
-> configured by this scaffold. See *Planned / coming soon* above.
+> **Note:** CI runs these same gates on every push and pull request via
+> the generated GitHub Actions pipeline (see *Quality Tools* below).
 
 ### Quality Tools
 
@@ -1338,6 +1342,10 @@ This scaffold currently includes:
 - **Periphery**: Dead-code detection (./scripts/security.sh)
 - **Pre-commit hooks**: swift-format, SwiftLint, gitleaks, detect-secrets
 - **Architecture rules**: SwiftLint custom rules (plans/architecture/)
+- **CI pipeline**: GitHub Actions (.github/workflows/ci.yml) on macOS
+  runners — quality job (swift-format, SwiftLint, gitleaks, ≥90%
+  llvm-cov coverage gate), tests on Swift 5.9, 5.10, and 6.0, and a
+  watchOS-simulator build-and-test job
 
 ### Project Structure
 
@@ -1374,9 +1382,8 @@ This scaffold is a MAXIMUM QUALITY Swift project. Today it provides:
 - **Complexity gate**: SwiftLint errors on cyclomatic complexity >10
 - **Formatting & linting**: swift-format and SwiftLint, locally and in
   pre-commit
-
-A CI pipeline is planned (see *Planned / coming soon* above) and is not yet
-wired into this scaffold.
+- **CI enforcement**: every gate above also runs in GitHub Actions on
+  every push and pull request, across the Swift 5.9/5.10/6.0 matrix
 
 ## License
 
@@ -1583,11 +1590,13 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
         With the #362 quality toolchain (clang-format/clang-tidy/cppcheck,
         pre-commit hooks, quality scripts with the lcov coverage gate,
         lizard complexity, flawfinder, include-boundary architecture
-        checker) generated, only the CI pipeline (#363) remains under
-        "Planned / coming soon". The Tizen Studio split is documented
-        explicitly: unit tests build with plain CMake + Conan, while
+        checker) and the #363 CI pipeline both generated, every roadmap
+        item is real and the 'Planned / coming soon' section is gone
+        (#365). The Tizen Studio split is documented explicitly: unit
+        tests build with plain CMake + Conan (locally and in CI), while
         ``.tpk`` packaging needs the Tizen Studio CLI, which cannot be
-        generated or installed by the scaffold.
+        generated or installed by the scaffold — or provisioned on a CI
+        runner.
 
         Returns:
             Content for README.md
@@ -1622,15 +1631,10 @@ This C/C++ scaffold is the foundation of a quality-controlled Tizen native
 - ✅ Complexity gate (lizard, cyclomatic complexity ≤10 in `./scripts/lint.sh`)
 - ✅ Security scanning (flawfinder via `./scripts/security.sh`)
 - ✅ Architecture enforcement (include-boundary checker, `plans/architecture/`)
+- ✅ CI/CD pipeline (`.github/workflows/ci.yml` — ubuntu runners, quality
+  job running the generated scripts with the lcov coverage gate, and a
+  build-and-test matrix on both gcc and clang)
 - ✅ This README
-
-### Planned / coming soon
-
-These quality features are part of the Start Green Stay Green roadmap for
-C/C++ but are **not yet generated** by this scaffold — do not assume they
-are configured:
-
-- CI/CD pipeline (GitHub Actions)
 
 ## The two builds (read this first)
 
@@ -1638,12 +1642,15 @@ This project deliberately splits into two builds:
 
 1. **Pure logic + unit tests — plain CMake + Conan, no Tizen Studio.**
    `CMakeLists.txt` builds only the `greeting` library and its Catch2
-   tests, so the tests run on any host (and any future CI runner).
+   tests, so the tests run on any host — including the generated CI
+   pipeline's ubuntu runners.
 2. **The watch app itself — Tizen Studio.** `src/main.cpp` needs the
    Tizen native SDK headers (`watch_app.h`, EFL), and the installable
    `.tpk` package is produced by the Tizen Studio CLI
    (`tizen build-native` / `tizen package`). Tizen Studio is **not**
-   generated or installed by this scaffold — install it from
+   generated or installed by this scaffold — and is distributed only as
+   a manual GUI installer no CI runner can provision, so `.tpk`
+   packaging stays a local step. Install it from
    https://developer.tizen.org/development/tizen-studio and import this
    project.
 
@@ -1702,9 +1709,10 @@ ctest --test-dir build
 ./scripts/check-all.sh
 ```
 
-> **Note:** The CI/CD pipeline is on the roadmap but not yet generated by
-> this scaffold (see *Planned / coming soon* above); run
-> `./scripts/check-all.sh` locally until it lands.
+> **Note:** CI runs these same gates on every push and pull request via
+> the generated GitHub Actions pipeline (see *Quality Tools* below). The
+> quality job invokes the generated scripts themselves, so CI can never
+> drift from what `./scripts/check-all.sh` enforces locally.
 
 ### Quality Tools
 
@@ -1722,6 +1730,10 @@ This scaffold currently includes:
 - **Pre-commit hooks**: clang-format, clang-tidy, cppcheck, gitleaks,
   detect-secrets
 - **Architecture rules**: include-boundary checker (`plans/architecture/`)
+- **CI pipeline**: GitHub Actions (`.github/workflows/ci.yml`) on ubuntu
+  runners — quality job (clang-format, clang-tidy + cppcheck + lizard,
+  gitleaks, lcov coverage gate, flawfinder via the generated scripts),
+  plus a build-and-test job on both gcc and clang
 
 ### Project Structure
 
@@ -1765,9 +1777,8 @@ This scaffold is a MAXIMUM QUALITY C/C++ project. Today it provides:
 - **Complexity gate**: lizard fails on cyclomatic complexity >10
 - **Formatting & static analysis**: clang-format, clang-tidy, and
   cppcheck, locally and in pre-commit
-
-CI enforcement of these gates is planned (see *Planned / coming soon*
-above) and is not yet wired into this scaffold.
+- **CI enforcement**: every gate above also runs in GitHub Actions on
+  every push and pull request, on both gcc and clang
 
 ## License
 

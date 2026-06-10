@@ -553,6 +553,43 @@ for real generated output and the
 [CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
 the full Kotlin toolchain table.
 
+### Example 7: C/C++ (Tizen) Project
+
+```bash
+# Prerequisites: CMake ≥3.20, Conan 2, and a C11/C17 or C++17/C++20
+# compiler (the scaffold pins C++17), plus the quality toolchain for the
+# generated pre-commit hooks (clang-tidy ships in the keg-only llvm
+# formula on macOS; Debian/Ubuntu: apt-get install clang-format
+# clang-tidy cppcheck lcov):
+brew install clang-format llvm cppcheck lcov
+pip install lizard flawfinder
+
+start-green-stay-green init \
+  --project-name wrist-pulse \
+  --language cpp \
+  --no-interactive
+
+cd wrist-pulse
+conan install . --output-folder=build --build=missing
+cmake -B build -S . \
+    -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build
+pre-commit install
+./scripts/check-all.sh  # clang-format, clang-tidy + cppcheck + lizard, ctest + ≥90% lcov coverage, flawfinder
+```
+
+The generated CI pipeline runs on ubuntu runners with a gcc/clang
+build-and-test matrix and a quality job that invokes the generated
+scripts themselves (≥90% lcov coverage gate included). The scaffold
+deliberately splits into two builds: unit tests need only CMake + Conan,
+while packaging the installable `.tpk` watch app requires the Tizen
+Studio CLI (a manual install — see the generated README). See
+[examples/cpp/](examples/cpp/) for real generated output and the
+[CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
+the full C/C++ toolchain table.
+
 ## Project Structure
 
 After running `start-green-stay-green init`, your project will have:
@@ -724,6 +761,7 @@ All contributions must:
 - ✅ Multi-language `--language` support (#254)
 - ✅ Swift (watchOS) language support — scaffold, quality tooling, CI, tests (#351, #352, #353, #354)
 - ✅ Kotlin (Wear OS) language support — scaffold, quality tooling, CI, tests (#356, #357, #358, #359)
+- ✅ C/C++ (Tizen native) language support — scaffold, quality tooling, CI, tests (#361, #362, #363, #364)
 
 ### Planned
 

@@ -87,7 +87,7 @@ conflict resolution, YAML-aware pre-commit merging, and multi-language
 - **Maximum Quality**: No shortcuts, comprehensive tooling, strict enforcement
 - **AI-First**: Designed for AI-assisted development with minimal human intervention
 - **Composable**: Modular generators for each quality component
-- **Multi-Language**: Python, TypeScript, Go, Rust, Swift, Kotlin support
+- **Multi-Language**: Python, TypeScript, Go, Rust, Swift, Kotlin, C/C++ support
 - **Reproducible**: Deterministic generation of identical quality infrastructure
 
 **Component Structure**:

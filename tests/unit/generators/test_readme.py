@@ -366,11 +366,12 @@ class TestSwiftReadme:
             assert "Package.swift" in content
 
     def test_swift_readme_only_checkmarks_generated_features(self) -> None:
-        """Swift README must not ✅ features the scaffold does not generate.
+        """Swift README ✅-marks the full generated pipeline.
 
         After #352 the quality toolchain (SwiftLint, swift-format,
-        pre-commit hooks, quality scripts) IS generated and may carry a
-        checkmark; the CI/CD pipeline (#353) remains deferred and must not.
+        pre-commit hooks, quality scripts) IS generated, and after #353
+        the CI pipeline is too — every one of them must carry a
+        checkmark.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ReadmeConfig(
@@ -383,30 +384,24 @@ class TestSwiftReadme:
 
             content = files["README.md"].read_text()
 
-            # Features that ARE generated may carry a checkmark.
             assert "- ✅" in content
             assert "Swift Package Manager manifest" in content
-            wired = ("SwiftLint", "swift-format", "Pre-commit hooks")
+            wired = ("SwiftLint", "swift-format", "Pre-commit hooks", "CI/CD pipeline")
             for feature in wired:
                 assert any(
                     "✅" in line and feature in line for line in content.splitlines()
                 ), f"README must advertise wired feature: {feature}"
 
-            # Unwired features must never be claimed with a ✅ checkmark.
-            unwired = ("CI/CD pipeline",)
-            for feature in unwired:
-                assert (
-                    f"✅ {feature}" not in content
-                ), f"README falsely advertises unwired feature: {feature}"
-                # The checkmark must not appear on the same line either.
-                for line in content.splitlines():
-                    if feature in line:
-                        assert (
-                            "✅" not in line
-                        ), f"Unwired feature {feature!r} marked with ✅"
+    def test_swift_readme_advertises_generated_ci_pipeline(self) -> None:
+        """The CI pipeline (#353) is generated — no 'Planned' disclosure left.
 
-    def test_swift_readme_lists_unwired_features_as_planned(self) -> None:
-        """Deferred Swift tooling is disclosed under a 'Planned' section."""
+        The Swift README kept its truthful 'Planned / coming soon' CI
+        disclosure after #353 actually started generating
+        .github/workflows/ci.yml — stale ever since. Fixed alongside the
+        identical C/C++ flip (#365): the README must document the real
+        pipeline (macOS runners, Swift 5.9/5.10/6.0 version matrix,
+        watchOS simulator job) and drop the planned section.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ReadmeConfig(
                 project_name="test-project",
@@ -417,8 +412,10 @@ class TestSwiftReadme:
             files = generator.generate()
 
             content = files["README.md"].read_text()
-            assert "Planned / coming soon" in content
-            assert "CI/CD pipeline" in content
+            assert "Planned / coming soon" not in content
+            assert ".github/workflows/ci.yml" in content
+            assert "5.9, 5.10, and 6.0" in content
+            assert "macOS" in content
 
     def test_swift_readme_instructs_pre_commit_install(self) -> None:
         """README tells users to install the now-generated pre-commit hooks.
@@ -582,36 +579,44 @@ class TestCppReadme:
             assert "Galaxy Watch" in content
             assert "org.example.testproject" in content
 
-    def test_cpp_readme_discloses_planned_tooling(self) -> None:
-        """README lists the deferred CI pipeline (#363) as planned."""
+    def test_cpp_readme_advertises_generated_ci_pipeline(self) -> None:
+        """The CI pipeline (#363) is generated — no 'Planned' disclosure left.
+
+        Inverted from the #361/#362 scaffolds, which truthfully deferred
+        CI under a 'Planned / coming soon' section. #363 generates
+        .github/workflows/ci.yml, so the README must document it as real
+        (ubuntu runners, gcc/clang compiler matrix) and drop the planned
+        section (#365).
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             content = self._readme_content(tmpdir)
-            assert "Planned / coming soon" in content
-            assert "not yet generated" in content
-            assert "CI/CD pipeline" in content
+            assert "Planned / coming soon" not in content
+            assert ".github/workflows/ci.yml" in content
+            assert "gcc and clang" in content
+            assert "ubuntu" in content
 
     def test_cpp_readme_only_checkmarks_generated_features(self) -> None:
-        """cpp README must not ✅ features the scaffold does not generate.
+        """cpp README ✅-marks the full generated pipeline.
 
         After #362 the quality toolchain (clang-format/clang-tidy/cppcheck,
-        pre-commit hooks, quality scripts, architecture rules) IS generated
-        and may carry a checkmark; the CI/CD pipeline (#363) remains
-        deferred and must not.
+        pre-commit hooks, quality scripts, architecture rules) IS generated,
+        and after #363 the CI pipeline is too — every one of them must
+        carry a checkmark.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             content = self._readme_content(tmpdir)
 
-            wired = ("clang-format", "clang-tidy", "Pre-commit hooks", "lizard")
+            wired = (
+                "clang-format",
+                "clang-tidy",
+                "Pre-commit hooks",
+                "lizard",
+                "CI/CD pipeline",
+            )
             for feature in wired:
                 assert any(
                     "✅" in line and feature in line for line in content.splitlines()
                 ), f"README must advertise wired feature: {feature}"
-
-            unwired = ("CI/CD pipeline",)
-            for feature in unwired:
-                assert not any(
-                    "✅" in line and feature in line for line in content.splitlines()
-                ), f"README must not checkmark planned feature: {feature}"
 
     def test_cpp_readme_instructs_pre_commit_install(self) -> None:
         """README tells users to install the now-generated pre-commit hooks.

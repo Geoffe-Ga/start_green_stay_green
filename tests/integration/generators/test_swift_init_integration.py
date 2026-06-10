@@ -176,3 +176,21 @@ class TestSwiftInitQualityConfigs:
         """scripts/test.sh runs swift test with code coverage enabled."""
         test_script = (swift_project / "scripts" / "test.sh").read_text()
         assert "swift test --enable-code-coverage" in test_script
+
+
+class TestSwiftInitReadme:
+    """Assert the generated README stays truthful (#365 boundaries)."""
+
+    def test_readme_advertises_generated_ci_pipeline(self, swift_project: Path) -> None:
+        """README documents the now-generated CI pipeline (#353) as real.
+
+        The ci.yml the README advertises must actually exist next to it
+        — the truthfulness contract that previously kept CI under a
+        'Planned / coming soon' section. The Swift README stayed stale
+        after #353 landed CI; fixed alongside the identical C/C++ flip
+        (#365).
+        """
+        readme = (swift_project / "README.md").read_text()
+        assert "Planned / coming soon" not in readme
+        assert ".github/workflows/ci.yml" in readme
+        assert (swift_project / ".github" / "workflows" / "ci.yml").is_file()

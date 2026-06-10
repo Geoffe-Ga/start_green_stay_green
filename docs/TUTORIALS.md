@@ -14,7 +14,7 @@ start-green-stay-green init
 
 This will prompt you for:
 - **Project name**: Name of your new project (alphanumeric, hyphens, underscores)
-- **Primary language**: python, typescript, go, rust, swift, or kotlin
+- **Primary language**: python, typescript, go, rust, swift, kotlin, or cpp
 
 Example session:
 ```bash

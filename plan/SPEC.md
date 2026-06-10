@@ -39,8 +39,8 @@ The core insight: Claude Code can produce excellent code **if given strict guard
 ### Supported Target Languages
 
 The tool generates quality infrastructure for projects in any of the following languages.
-**Implemented today**: Python, TypeScript, Go, Rust, Swift (watchOS), and
-Kotlin (Wear OS). The remaining rows are planned.
+**Implemented today**: Python, TypeScript, Go, Rust, Swift (watchOS),
+Kotlin (Wear OS), and C/C++ (Tizen native). The remaining rows are planned.
 
 | Language | Package Manager | Test Framework | Linter | Formatter |
 |----------|----------------|----------------|--------|-----------|
@@ -50,6 +50,7 @@ Kotlin (Wear OS). The remaining rows are planned.
 | Rust | cargo | cargo test | clippy | rustfmt |
 | Swift | Swift Package Manager (SPM), Swift 5.9/5.10/6.0 | XCTest (`swift test` + llvm-cov coverage) | SwiftLint | swift-format |
 | Kotlin | Gradle (Kotlin DSL), Kotlin 2.0 on JDK 17/21 | JUnit (`./gradlew test` + Kover ≥90% coverage) | detekt + ktlint | ktlint |
+| C/C++ (Tizen native) | CMake ≥3.20 + Conan 2 (C++17 pinned) | Catch2 (`ctest` + gcov/lcov ≥90% coverage) | clang-tidy + cppcheck + lizard | clang-format |
 | Java | maven/gradle | junit | checkstyle | google-java-format |
 | C# | nuget/dotnet | xunit/nunit | roslyn | dotnet format |
 | Ruby | bundler | rspec | rubocop | rubocop |
@@ -1439,7 +1440,7 @@ project:
   description: "A brief description"
 
 languages:
-  # Supported: python, typescript, javascript, go, rust, java, csharp, swift, ruby, php, kotlin
+  # Supported: python, typescript, javascript, go, rust, java, csharp, swift, ruby, php, kotlin, cpp
   primary: python
   secondary:
     - typescript
