@@ -1468,6 +1468,11 @@ class TestSwiftReferenceTemplate:
         assert "No Apple Watch simulator found" in content
         assert "No xcodebuild scheme found" in content
         assert "^[0-9A-Fa-f-]{36}$" in content
+        # The scheme is character-class validated like the UDID...
+        assert "^[A-Za-z0-9._ -]+$" in content
+        # ...and discovery accepts both xcodebuild -list -json shapes
+        # (.workspace for app packages, .project for plain projects).
+        assert ".workspace.schemes // .project.schemes" in content
 
     def test_coverage_gate_does_not_rerun_swift_test(
         self, swift_workflow: CIWorkflow

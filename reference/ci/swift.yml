@@ -139,9 +139,17 @@ jobs:
       # scheme must be a real, non-empty name.
       - name: Discover scheme and simulator
         run: |
-          SCHEME="$(xcodebuild -list -json | jq -r '.workspace.schemes[0] // empty')"
+          # xcodebuild -list -json nests schemes under .workspace for
+          # app-package targets but under .project for plain SPM/Xcode
+          # projects, so both shapes are accepted.
+          SCHEME="$(xcodebuild -list -json \
+            | jq -r '(.workspace.schemes // .project.schemes)[0] // empty')"
           if [ -z "$SCHEME" ] || [ "$SCHEME" = "null" ]; then
             echo "::error::No xcodebuild scheme found. Does the package define any products?"
+            exit 1
+          fi
+          if ! printf '%s' "$SCHEME" | grep -Eq '^[A-Za-z0-9._ -]+$'; then
+            echo "::error::Scheme name '$SCHEME' contains unexpected characters; refusing to export it."
             exit 1
           fi
           UDID="$(xcrun simctl list devices available --json \
