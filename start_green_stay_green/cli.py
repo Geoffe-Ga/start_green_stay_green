@@ -1623,6 +1623,10 @@ _LANG_SETUP_STEPS: dict[str, list[str]] = {
         "cmake --build build",
         "ctest --test-dir build",
     ],
+    # Plain Maven builds and tests the pure-logic half of the legacy
+    # Android Wear scaffold; the watch APK needs Android tooling
+    # (Android Studio / Gradle), which init cannot install (#366).
+    "java": ["mvn test"],
 }
 
 

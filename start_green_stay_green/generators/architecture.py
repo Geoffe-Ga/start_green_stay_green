@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 import warnings
 
-from start_green_stay_green.utils.kotlin import android_package
+from start_green_stay_green.utils.java import android_package
 
 if TYPE_CHECKING:
     from collections.abc import Callable

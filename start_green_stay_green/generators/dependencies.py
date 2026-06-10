@@ -18,6 +18,15 @@ from start_green_stay_green.utils.cpp import CATCH2_VERSION
 from start_green_stay_green.utils.cpp import CMAKE_MINIMUM_VERSION
 from start_green_stay_green.utils.cpp import CPP_STANDARD
 from start_green_stay_green.utils.cpp import cpp_identifier
+from start_green_stay_green.utils.java import CHECKSTYLE_PLUGIN_VERSION
+from start_green_stay_green.utils.java import JACOCO_VERSION
+from start_green_stay_green.utils.java import JAVA_RELEASE
+from start_green_stay_green.utils.java import JUNIT4_VERSION
+from start_green_stay_green.utils.java import MAVEN_COMPILER_PLUGIN_VERSION
+from start_green_stay_green.utils.java import PMD_PLUGIN_VERSION
+from start_green_stay_green.utils.java import SPOTBUGS_PLUGIN_VERSION
+from start_green_stay_green.utils.java import SUREFIRE_VERSION
+from start_green_stay_green.utils.java import android_package
 from start_green_stay_green.utils.kotlin import ACTIVITY_COMPOSE_VERSION
 from start_green_stay_green.utils.kotlin import AGP_VERSION
 from start_green_stay_green.utils.kotlin import COMPOSE_BOM_VERSION
@@ -27,7 +36,6 @@ from start_green_stay_green.utils.kotlin import KONSIST_VERSION
 from start_green_stay_green.utils.kotlin import KOTLIN_VERSION
 from start_green_stay_green.utils.kotlin import KOVER_VERSION
 from start_green_stay_green.utils.kotlin import WEAR_COMPOSE_VERSION
-from start_green_stay_green.utils.kotlin import android_package
 from start_green_stay_green.utils.swift import package_swift
 
 if TYPE_CHECKING:
@@ -74,10 +82,10 @@ class DependenciesGenerator(BaseGenerator):
 
     All 10 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin, cpp) are available at the generator level. Note that
-    the full CLI pipeline (``sgsg init``) skips its quality-tooling steps
-    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, and
-    ruby; C/C++ quality tooling landed with #362 and only its CI step
-    (#363) still skips.
+    the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
+    architecture, and metrics steps for java (#367), csharp, and ruby —
+    the CI workflow step covers every language. Kotlin (#357/#358) and
+    C/C++ (#362/#363) run the full pipeline.
 
     Attributes:
         output_dir: Directory where dependency files will be written
@@ -545,14 +553,24 @@ nursery = "warn"
 """
 
     def _generate_java_dependencies(self) -> dict[str, Path]:
-        """Generate Java dependency files.
+        """Generate the Maven manifest for the legacy Wear scaffold (#366).
+
+        Emits ``pom.xml``, the build for the PURE-LOGIC half of the
+        two-build split (``src/main/java`` + ``src/test/java``): JUnit 4
+        tests via Surefire, the JaCoCo coverage gate, and the
+        Checkstyle/PMD/SpotBugs plugins the generated CI workflow
+        (``reference/ci/java.yml``) invokes. The Wear OS app module under
+        ``app/`` needs the Android SDK and the androidx.wear AAR, which
+        plain Maven cannot consume (the android-maven-plugin is
+        unmaintained), so the APK build is deliberately NOT scaffolded —
+        the pom comment and the README disclose it, mirroring the Tizen
+        Studio precedent (#361).
 
         Returns:
             Dictionary mapping file names to file paths
         """
         files: dict[str, Path] = {}
 
-        # Generate pom.xml for Maven projects
         files["pom.xml"] = self._write_file(
             "pom.xml",
             self._java_pom_xml(),
@@ -561,12 +579,29 @@ nursery = "warn"
         return files
 
     def _java_pom_xml(self) -> str:
-        """Generate Java pom.xml content.
+        """Generate Java ``pom.xml`` content.
 
         Returns:
-            Content for pom.xml with project info and dependencies
+            Content for the pure-logic Maven build: JUnit 4 + Surefire,
+            the JaCoCo agent/report executions with a >=90% line-coverage
+            rule (configured at plugin level so the CI's standalone
+            ``mvn jacoco:check`` invocation picks it up too), and the
+            Checkstyle (google_checks), PMD, and SpotBugs plugins
+            matching the generated CI workflow's ``mvn`` commands.
         """
         return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maven build for the PURE-LOGIC half of this project: src/main/java
+  and src/test/java only. It backs every mvn command in the generated
+  CI workflow (.github/workflows/ci.yml): test, jacoco:report,
+  jacoco:check, checkstyle:check, pmd:check, spotbugs:check.
+
+  THE TWO BUILDS: the Wear OS app module under app/ needs the Android
+  SDK and the androidx.wear AAR, which plain Maven cannot consume (the
+  android-maven-plugin is unmaintained). Build the watch APK with
+  Android tooling (Android Studio / Gradle) instead - this generator
+  does not scaffold that build. See the README section "The two builds".
+-->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
@@ -579,21 +614,20 @@ nursery = "warn"
     <packaging>jar</packaging>
 
     <name>{self.config.project_name}</name>
-    <description>A quality-controlled Java project</description>
+    <description>Pure-logic build for the {self.config.project_name} \
+Wear OS app</description>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.release>{JAVA_RELEASE}</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <junit.version>5.10.0</junit.version>
     </properties>
 
     <dependencies>
-        <!-- Test dependencies -->
+        <!-- JUnit 4: the Android-ecosystem unit-test convention. -->
         <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>${{junit.version}}</version>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>{JUNIT4_VERSION}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -603,12 +637,76 @@ nursery = "warn"
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version>
+                <version>{MAVEN_COMPILER_PLUGIN_VERSION}</version>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.1.2</version>
+                <version>{SUREFIRE_VERSION}</version>
+            </plugin>
+            <!-- Coverage gate: the plugin-level rules configuration is
+                 the single home of the >=90% bound, applied both to the
+                 lifecycle-bound check execution and to the CI's
+                 standalone `mvn jacoco:check` invocation. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>{JACOCO_VERSION}</version>
+                <configuration>
+                    <rules>
+                        <rule>
+                            <element>BUNDLE</element>
+                            <limits>
+                                <limit>
+                                    <counter>LINE</counter>
+                                    <value>COVEREDRATIO</value>
+                                    <minimum>0.90</minimum>
+                                </limit>
+                            </limits>
+                        </rule>
+                    </rules>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>check</id>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>{CHECKSTYLE_PLUGIN_VERSION}</version>
+                <configuration>
+                    <configLocation>google_checks.xml</configLocation>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-pmd-plugin</artifactId>
+                <version>{PMD_PLUGIN_VERSION}</version>
+            </plugin>
+            <!-- Declared so the CI's `mvn spotbugs:check` resolves: the
+                 com.github.spotbugs plugin group is not in Maven's
+                 default plugin-prefix search path. -->
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+                <version>{SPOTBUGS_PLUGIN_VERSION}</version>
             </plugin>
         </plugins>
     </build>

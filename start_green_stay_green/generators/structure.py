@@ -17,8 +17,8 @@ from start_green_stay_green.generators.base import validate_language
 from start_green_stay_green.utils.cpp import TIZEN_API_VERSION
 from start_green_stay_green.utils.cpp import cpp_identifier
 from start_green_stay_green.utils.cpp import tizen_app_id
-from start_green_stay_green.utils.kotlin import android_package
-from start_green_stay_green.utils.kotlin import android_package_path
+from start_green_stay_green.utils.java import android_package
+from start_green_stay_green.utils.java import android_package_path
 from start_green_stay_green.utils.naming import pascal_case
 from start_green_stay_green.utils.swift import package_swift
 
@@ -65,9 +65,10 @@ class StructureGenerator(BaseGenerator):
 
     All 10 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin, cpp) are available at the generator level. Note that
-    the full CLI pipeline (``sgsg init``) skips its quality-tooling steps
-    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
-    and cpp; C/C++ tooling arrives with #362/#363.
+    the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
+    architecture, and metrics steps for java (#367), csharp, and ruby —
+    the CI workflow step covers every language. Kotlin (#357/#358) and
+    C/C++ (#362/#363) run the full pipeline.
 
     Attributes:
         output_dir: Directory where structure will be created
@@ -553,71 +554,217 @@ edition = "2021"
 """
 
     def _generate_java_structure(self) -> dict[str, Path]:
-        """Generate Java project structure.
+        """Generate the Java legacy Android Wear project structure (#366).
+
+        Creates the two-build split layout proven by the C/C++ Tizen
+        scaffold (#361): the pure-logic ``Greeting`` class under
+        ``src/main/java/`` is compiled and unit-tested by the Maven build
+        (``pom.xml``, owned by
+        :class:`~start_green_stay_green.generators.dependencies.DependenciesGenerator`),
+        while the watch-app module under ``app/src/main/`` — the
+        ``AndroidManifest.xml`` with the watch ``uses-feature`` and
+        standalone metadata, a ``MainActivity`` rendered through an
+        ``androidx.wear.widget.BoxInsetLayout`` layout, and the layout
+        XML itself — needs the Android SDK and is built with Android
+        tooling (Android Studio / Gradle) the generator does not scaffold.
 
         Returns:
             Dictionary mapping file names to file paths
         """
         files: dict[str, Path] = {}
 
-        # Create src/main/java/{package_name} directory
-        java_dir = self.output_dir / "src" / "main" / "java" / self.config.package_name
-        java_dir.mkdir(parents=True, exist_ok=True)
+        package_path = android_package_path(self.config.package_name)
 
-        # Generate Main.java
-        main_key = f"src/main/java/{self.config.package_name}/Main.java"
-        files[main_key] = self._write_file(
-            java_dir / "Main.java",
-            self._java_main_java(),
+        # Pure logic: compiled and tested by the Maven build (pom.xml).
+        logic_dir = self.output_dir / "src" / "main" / "java" / package_path
+        logic_dir.mkdir(parents=True, exist_ok=True)
+        files[f"src/main/java/{package_path}/Greeting.java"] = self._write_file(
+            logic_dir / "Greeting.java",
+            self._java_greeting_java(),
         )
 
-        # Generate pom.xml
-        pom_key = "pom.xml"
-        files[pom_key] = self._write_file(
-            self.output_dir / "pom.xml",
-            self._java_pom_xml(),
+        # Wear OS app module: built with Android tooling, not Maven.
+        main_dir = self.output_dir / "app" / "src" / "main"
+        source_dir = main_dir / "java" / package_path
+        layout_dir = main_dir / "res" / "layout"
+        source_dir.mkdir(parents=True, exist_ok=True)
+        layout_dir.mkdir(parents=True, exist_ok=True)
+
+        files["app/src/main/AndroidManifest.xml"] = self._write_file(
+            main_dir / "AndroidManifest.xml",
+            self._java_android_manifest(),
+        )
+        files[f"app/src/main/java/{package_path}/MainActivity.java"] = self._write_file(
+            source_dir / "MainActivity.java",
+            self._java_main_activity(),
+        )
+        files["app/src/main/res/layout/activity_main.xml"] = self._write_file(
+            layout_dir / "activity_main.xml",
+            self._java_activity_layout(),
         )
 
         return files
 
-    def _java_main_java(self) -> str:
-        """Generate Java Main.java content.
+    def _java_greeting_java(self) -> str:
+        """Generate the pure-logic ``Greeting.java``.
 
         Returns:
-            Content for Main.java with Hello World
+            Content for the greeting assembly class. It has no Android
+            imports, so the Maven build (``pom.xml``) compiles and
+            unit-tests it on any host — including the generated CI
+            pipeline's runners — without the Android SDK.
         """
-        return f"""package {self.config.package_name};
+        package = android_package(self.config.package_name)
+        return f"""package {package};
 
-public class Main {{
-    public static void main(String[] args) {{
-        System.out.println("Hello from {self.config.project_name}!");
+/**
+ * Assembles the greeting shown on the watch face.
+ *
+ * <p>Pure logic with no Android imports: the Maven build (pom.xml)
+ * compiles and unit-tests this class on any host without the Android
+ * SDK. The Wear OS app module under app/ consumes it too — see the
+ * README section "The two builds".</p>
+ */
+public final class Greeting {{
+
+    private Greeting() {{
+        // Static utility class: not instantiable.
+    }}
+
+    /**
+     * Returns the greeting assembled from the project name.
+     *
+     * @param projectName the name to greet from
+     * @return the assembled greeting, e.g. {{@code "Hello from wear!"}}
+     */
+    public static String greet(final String projectName) {{
+        return "Hello from " + projectName + "!";
     }}
 }}
 """
 
-    def _java_pom_xml(self) -> str:
-        """Generate Java pom.xml content.
+    def _java_android_manifest(self) -> str:
+        """Generate the legacy Android Wear ``AndroidManifest.xml``.
 
         Returns:
-            Content for pom.xml
+            Manifest content declaring the watch hardware feature (the
+            ``wear`` device profile), the wearable shared library, the
+            standalone-app metadata (installable without a phone
+            companion), and the launcher ``MainActivity``. Unlike the
+            Kotlin scaffold (#356) the ``package`` attribute is declared
+            here: no Gradle manifests are generated for the Java app
+            module (see the two-builds split), so the manifest is the
+            single home of the application ID.
         """
-        return f"""<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
-                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
+        package = android_package(self.config.package_name)
+        return f"""<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy Android Wear manifest. The package attribute doubles as the
+     application ID: the generator scaffolds no Gradle build for the app
+     module (see the README section "The two builds"), so there is no
+     build.gradle namespace to declare it in. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="{package}">
 
-    <groupId>{self.config.package_name}</groupId>
-    <artifactId>{self.config.package_name}</artifactId>
-    <version>0.1.0</version>
+    <!-- Wear device profile: this app installs only on watches. -->
+    <uses-feature android:name="android.hardware.type.watch" />
 
-    <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    </properties>
-</project>
+    <application
+        android:label="{self.config.project_name}"
+        android:theme="@android:style/Theme.DeviceDefault">
+
+        <!-- Wearable shared library (legacy Android Wear). -->
+        <uses-library
+            android:name="com.google.android.wearable"
+            android:required="true" />
+
+        <!-- Standalone Wear OS app: installable without a phone companion. -->
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+"""
+
+    def _java_main_activity(self) -> str:
+        """Generate the legacy Android Wear ``MainActivity.java``.
+
+        Uses a plain :class:`android.app.Activity` rendering the
+        ``androidx.wear.widget.BoxInsetLayout`` layout — the maintained
+        view-based path for legacy Java watch apps, since
+        ``WearableActivity`` is deprecated. The greeting is assembled by
+        the pure-logic ``Greeting`` class so the generated JUnit 4
+        scaffold exercises real logic on the JVM without an emulator.
+
+        Returns:
+            Content for the Wear OS entry-point activity source file.
+        """
+        package = android_package(self.config.package_name)
+        return f"""package {package};
+
+import android.app.Activity;
+import android.os.Bundle;
+import android.widget.TextView;
+
+/**
+ * Wear OS entry point for {self.config.project_name} (legacy Android Wear).
+ *
+ * <p>Renders res/layout/activity_main.xml, whose root is an
+ * androidx.wear.widget.BoxInsetLayout — the maintained view-based
+ * layout for round watch faces (WearableActivity is deprecated).</p>
+ *
+ * <p>THE TWO BUILDS: this file needs the Android SDK and the
+ * androidx.wear AAR, so it is built with Android tooling
+ * (Android Studio / Gradle) — NOT by the Maven build, which covers
+ * only the pure logic in src/main/java/. When assembling the Android
+ * build, add src/main/java/ as a source root so this activity can
+ * resolve {{@link Greeting}}. See the README section "The two builds".</p>
+ */
+public class MainActivity extends Activity {{
+
+    @Override
+    protected void onCreate(final Bundle savedInstanceState) {{
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        final TextView greetingView = findViewById(R.id.greeting);
+        greetingView.setText(Greeting.greet("{self.config.project_name}"));
+    }}
+}}
+"""
+
+    def _java_activity_layout(self) -> str:
+        """Generate ``res/layout/activity_main.xml`` for the Wear app.
+
+        Returns:
+            Layout XML rooted at ``androidx.wear.widget.BoxInsetLayout``,
+            which keeps the greeting ``TextView`` inside the visible
+            square of round watch faces (``boxedEdges="all"``).
+        """
+        return """<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy Android Wear layout: BoxInsetLayout (androidx.wear.widget)
+     keeps content inside the visible square of round watch faces. -->
+<androidx.wear.widget.BoxInsetLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <TextView
+        android:id="@+id/greeting"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:textAppearance="@android:style/TextAppearance.DeviceDefault"
+        app:boxedEdges="all" />
+</androidx.wear.widget.BoxInsetLayout>
 """
 
     def _generate_csharp_structure(self) -> dict[str, Path]:

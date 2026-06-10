@@ -19,8 +19,10 @@ from start_green_stay_green.utils.cpp import CMAKE_MINIMUM_VERSION
 from start_green_stay_green.utils.cpp import CPP_STANDARD
 from start_green_stay_green.utils.cpp import cpp_identifier
 from start_green_stay_green.utils.cpp import tizen_app_id
-from start_green_stay_green.utils.kotlin import android_package
-from start_green_stay_green.utils.kotlin import android_package_path
+from start_green_stay_green.utils.java import ANDROIDX_WEAR_VERSION
+from start_green_stay_green.utils.java import JAVA_RELEASE
+from start_green_stay_green.utils.java import android_package
+from start_green_stay_green.utils.java import android_package_path
 from start_green_stay_green.utils.naming import pascal_case
 
 if TYPE_CHECKING:
@@ -67,10 +69,10 @@ class ReadmeGenerator(BaseGenerator):
 
     All 10 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin, cpp) are available at the generator level. Note that
-    the full CLI pipeline (``sgsg init``) skips its quality-tooling steps
-    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, and
-    ruby; Kotlin (quality tooling #357, CI #358) and C/C++ (quality tooling
-    #362, CI #363) run the full pipeline.
+    the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
+    architecture, and metrics steps for java (#367), csharp, and ruby —
+    the CI workflow step covers every language. Kotlin (#357/#358) and
+    C/C++ (#362/#363) run the full pipeline.
 
     Attributes:
         output_dir: Directory where README.md will be created
@@ -787,28 +789,76 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
     def _java_readme_content(self) -> str:
         """Generate Java README.md content.
 
+        Only artifacts the scaffold actually generates carry a checkmark:
+        the legacy Android Wear app skeleton, the pure-logic Maven build
+        (JUnit 4 + Surefire, the JaCoCo coverage gate, and the
+        Checkstyle/PMD/SpotBugs plugins matching the generated CI
+        workflow), and the CI pipeline itself, which ``ci.py`` already
+        generates for java. The #367 quality tooling (pre-commit hooks,
+        quality scripts, metrics dashboard, architecture rules) stays
+        under "Planned / coming soon". The two-builds split is documented
+        explicitly: the pure logic builds and tests with plain Maven
+        anywhere, while the watch APK needs Android tooling (Android
+        Studio / Gradle) the generator does not scaffold — the Tizen
+        Studio precedent (#361).
+
         Returns:
             Content for README.md
         """
-        # Convert project name to title case for display
         display_name = self.config.project_name.replace("-", " ").title()
+        package = android_package(self.config.package_name)
+        package_path = android_package_path(self.config.package_name)
 
         return f"""# {self.config.project_name}
 
-{display_name} - A quality-controlled Java project generated with
-Start Green Stay Green.
+{display_name} - A quality-controlled Java Wear OS (legacy Android Wear)
+project generated with Start Green Stay Green.
 
 ## Description
 
-This project was generated with maximum quality standards from day one, including:
+This Java scaffold is the foundation of a quality-controlled legacy
+Android Wear watch-app project — the maintenance path for existing Java
+watch apps. The following are generated today:
 
-- ✅ Comprehensive testing infrastructure (JUnit with 90%+ coverage requirement)
-- ✅ Code quality tools (Checkstyle, SpotBugs, PMD)
-- ✅ Security scanning (OWASP Dependency Check)
-- ✅ Type safety (Java's strong typing system)
-- ✅ Pre-commit hooks (quality checks)
-- ✅ CI/CD pipeline (GitHub Actions)
-- ✅ AI-assisted development (Claude Code skills and subagents)
+- ✅ Wear OS app skeleton (`app/src/main/`): `AndroidManifest.xml` with
+  the watch `uses-feature` and standalone metadata, a `MainActivity`
+  rendered through an `androidx.wear.widget.BoxInsetLayout` layout
+  (androidx.wear {ANDROIDX_WEAR_VERSION}; `WearableActivity` is
+  deprecated), application ID `{package}`
+- ✅ Pure-logic class (`src/main/java/{package_path}/Greeting.java`)
+  testable without the Android SDK
+- ✅ Maven build (`pom.xml`, Java {JAVA_RELEASE}) for the pure logic:
+  JUnit 4 tests via Surefire, JaCoCo coverage gate (≥90% line), and the
+  Checkstyle/PMD/SpotBugs plugins the CI workflow invokes
+- ✅ JUnit 4 unit-test scaffold
+  (`src/test/java/{package_path}/GreetingTest.java`)
+- ✅ CI/CD pipeline (`.github/workflows/ci.yml` — JDK 17/21 matrix
+  running the same `mvn` quality goals as the local build)
+- ✅ This README
+
+**Planned / coming soon** (quality tooling, #367):
+
+- ⏳ Pre-commit hooks configuration
+- ⏳ Quality scripts (`./scripts/check-all.sh` and friends)
+- ⏳ Metrics dashboard
+- ⏳ Architecture enforcement rules
+
+## The two builds (read this first)
+
+This project deliberately splits into two builds:
+
+1. **Pure logic + unit tests — plain Maven, no Android SDK.** `pom.xml`
+   builds only `src/main/java` and `src/test/java`, so `mvn test` and
+   every CI quality goal run on any host — including the generated CI
+   pipeline's runners.
+2. **The watch app itself — Android tooling.** `app/src/main/` needs the
+   Android SDK and the androidx.wear AAR
+   (`androidx.wear:wear:{ANDROIDX_WEAR_VERSION}`), which plain Maven
+   cannot consume — the android-maven-plugin is unmaintained, so this
+   scaffold does not pretend Maven can produce the APK. Build the app
+   with Android Studio (Gradle), adding `src/main/java/` as a source
+   root so `MainActivity` resolves `Greeting`. That Gradle build is
+   **not** generated by this scaffold.
 
 ## Installation
 
@@ -817,22 +867,22 @@ This project was generated with maximum quality standards from day one, includin
 git clone <repository-url>
 cd {self.config.project_name}
 
-# Build with Maven
-mvn clean install
-
-# Install pre-commit hooks
-pre-commit install
+# Build the pure logic and run its tests (needs JDK {JAVA_RELEASE}+ and Maven)
+mvn test
 ```
 
 ## Usage
 
-Run the Hello World application:
+Run the pure-logic unit tests:
 
 ```bash
-mvn exec:java
+mvn test
 ```
 
-Expected output:
+To see the greeting on a watch, import the project into Android Studio
+and assemble the `app/` module there (see *The two builds*).
+
+Expected output (on the watch face):
 ```
 Hello from {self.config.project_name}!
 ```
@@ -841,78 +891,93 @@ Hello from {self.config.project_name}!
 
 ### Running Quality Checks
 
+These match the generated CI pipeline (`.github/workflows/ci.yml`)
+goal-for-goal:
+
 ```bash
-# Run all tests
+# Run all tests (JUnit 4 via Surefire)
 mvn test
 
-# Run tests with coverage
+# Run tests with the JaCoCo coverage report
 mvn clean test jacoco:report
 
-# Run Checkstyle
-mvn checkstyle:check
+# Enforce the >=90% line-coverage gate
+mvn jacoco:check
 
-# Run SpotBugs
-mvn spotbugs:check
+# Run Checkstyle (google_checks)
+mvn checkstyle:check
 
 # Run PMD
 mvn pmd:check
 
-# Compile project
-mvn compile
-
-# Build project
-mvn clean package
+# Run SpotBugs
+mvn spotbugs:check
 ```
 
 ### Quality Tools
 
-This project includes:
+This scaffold currently includes:
 
-- **JUnit**: Testing framework with 90%+ coverage requirement
-- **JaCoCo**: Code coverage tool
-- **Checkstyle**: Code style checker
-- **SpotBugs**: Static analysis tool for finding bugs
+- **JUnit 4**: Unit-test framework (run by Maven Surefire)
+- **JaCoCo**: Coverage gate ≥90% line coverage (`mvn jacoco:check`;
+  only the Maven-built pure-logic sources count — `app/` needs the
+  Android SDK, sits outside the Maven build, and is honestly outside
+  the coverage denominator too)
+- **Checkstyle**: Code style checker (google_checks)
 - **PMD**: Source code analyzer
-- **Maven**: Build automation and dependency management
+- **SpotBugs**: Static bytecode analysis
+- **CI pipeline**: GitHub Actions (`.github/workflows/ci.yml`) running
+  the same `mvn` goals on a JDK 17/21 matrix
+
+Pre-commit hooks, quality scripts, the metrics dashboard, and
+architecture rules are **not** generated for Java yet (#367).
 
 ### Project Structure
 
 ```
 {self.config.project_name}/
+├── pom.xml                          # Maven build (pure logic only)
 ├── src/
-│   ├── main/java/        # Application source code
-│   └── test/java/        # Test suite
-├── scripts/              # Quality control scripts
-├── .github/workflows/    # CI/CD pipelines
-├── .claude/              # AI subagents and skills
-├── pom.xml               # Maven configuration
-└── checkstyle.xml        # Checkstyle configuration
+│   ├── main/java/{package_path}/
+│   │   └── Greeting.java            # Pure logic: greet()
+│   └── test/java/{package_path}/
+│       └── GreetingTest.java        # JUnit 4 scaffold
+├── app/                             # Wear OS app (Android tooling)
+│   └── src/main/
+│       ├── AndroidManifest.xml      # Watch feature + standalone metadata
+│       ├── java/{package_path}/
+│       │   └── MainActivity.java    # BoxInsetLayout entry point
+│       └── res/layout/
+│           └── activity_main.xml    # androidx.wear.widget layout
+└── .github/workflows/
+    └── ci.yml                       # JDK 17/21 quality matrix
 ```
 
 ### Testing
 
 ```bash
-# Run all tests
+# Run all unit tests
 mvn test
 
-# Run tests with coverage report
-mvn clean test jacoco:report
+# Run a specific test class
+mvn test -Dtest=GreetingTest
 
-# View coverage report
+# View the coverage report after `mvn clean test jacoco:report`
 open target/site/jacoco/index.html
-
-# Run specific test class
-mvn test -Dtest=TestClassName
 ```
 
 ### Code Quality
 
-This project maintains MAXIMUM QUALITY standards:
+This scaffold is a MAXIMUM QUALITY Java project. Today it provides:
 
-- **Test Coverage**: ≥90% required
-- **Type Safety**: 100% compile-time type checking
-- **All Linters**: Must pass with zero violations
-- **Code Style**: Enforced by Checkstyle
+- **Java {JAVA_RELEASE} with compile-time type checking**
+  (`maven.compiler.release`)
+- **JUnit 4 test scaffold**: ready for you to add tests
+- **Coverage gate**: `mvn jacoco:check` enforces ≥90% line coverage
+- **Style and static analysis**: Checkstyle, PMD, and SpotBugs wired
+  into the pom
+- **CI enforcement**: every gate above also runs in GitHub Actions on
+  every push and pull request, on JDK 17 and 21
 
 ## License
 
@@ -921,7 +986,7 @@ MIT License
 ## Attribution
 
 Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green_stay_green)
-- Maximum quality Java projects from day one.
+- Maximum quality Java Wear OS watch projects from day one.
 """
 
     def _generate_csharp_readme(self) -> Path:
