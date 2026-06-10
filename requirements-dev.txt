@@ -45,6 +45,8 @@ pytest-benchmark>=4.0.0,<6.0.0
 pytest-asyncio>=1.0.0,<2.0.0
 pytest-mock>=3.12.0,<4.0.0
 pyyaml>=6.0.1,<7.0.0
+# Safe XML parsing for generated-manifest validity tests (#356)
+defusedxml>=0.7.1,<1.0.0
 
 # Property-based testing
 hypothesis>=6.98.0,<7.0.0
@@ -70,3 +72,4 @@ importlib-metadata>=7.0.0,<10.0.0
 types-pyyaml>=6.0.0,<7.0.0
 types-toml>=0.10.0,<1.0.0
 types-requests>=2.31.0,<3.0.0
+types-defusedxml>=0.7.0,<1.0.0

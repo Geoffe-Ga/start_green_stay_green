@@ -19,6 +19,7 @@ EXPECTED_COMMANDS: dict[str, list[str]] = {
     "csharp": ["dotnet build", "dotnet test"],
     "ruby": ["bundle install", "rspec"],
     "swift": ["swift build", "swift test"],
+    "kotlin": ["./gradlew build", "./gradlew test"],
 }
 
 
@@ -449,3 +450,91 @@ class TestSwiftReadme:
 
             content = files["README.md"].read_text()
             assert "brew install swiftlint swift-format periphery" in content
+
+
+class TestKotlinReadme:
+    """Test Kotlin-specific README content (#356)."""
+
+    @staticmethod
+    def _readme_content(tmpdir: str) -> str:
+        """Generate the kotlin README and return its text.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            The rendered README.md content.
+        """
+        config = ReadmeConfig(
+            project_name="test-project",
+            language="kotlin",
+            package_name="test_project",
+        )
+        files = ReadmeGenerator(Path(tmpdir), config).generate()
+        readme_path: Path = files["README.md"]
+        return readme_path.read_text()
+
+    def test_kotlin_readme_mentions_wear_os_and_compose(self) -> None:
+        """Kotlin README documents the Wear OS / Compose target."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Wear OS" in content
+            assert "Jetpack Compose" in content
+
+    def test_kotlin_readme_documents_gradle_usage(self) -> None:
+        """Kotlin README documents Gradle build and test commands."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "./gradlew build" in content
+            assert "./gradlew test" in content
+            assert "settings.gradle.kts" in content
+
+    def test_kotlin_readme_documents_missing_gradle_wrapper(self) -> None:
+        """README tells users to create the wrapper (it is not generated)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "gradle wrapper" in content
+            assert "not generated" in content.lower()
+
+    def test_kotlin_readme_only_checkmarks_generated_features(self) -> None:
+        """Kotlin README must not checkmark features it does not generate.
+
+        Kotlin is a foundation-only scaffold (#356): quality tooling is
+        #357 and CI is #358, so the README must not advertise them with a
+        checkmark — the same truthfulness rule the Swift README followed
+        in PR #392 before #352/#353 landed.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+
+            # Features that ARE generated may carry a checkmark.
+            assert "- ✅" in content
+
+            # Unwired features must never be claimed with a ✅ checkmark.
+            unwired = (
+                "ktlint",
+                "detekt",
+                "Pre-commit hooks",
+                "CI/CD pipeline",
+                "Security scanning",
+            )
+            for feature in unwired:
+                for line in content.splitlines():
+                    if feature in line:
+                        assert (
+                            "✅" not in line
+                        ), f"Unwired feature {feature!r} marked with ✅"
+
+    def test_kotlin_readme_lists_unwired_features_as_planned(self) -> None:
+        """Deferred Kotlin tooling is disclosed under a 'Planned' section."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Planned / coming soon" in content
+            assert "ktlint" in content
+            assert "CI/CD pipeline" in content
+
+    def test_kotlin_readme_does_not_instruct_pre_commit_install(self) -> None:
+        """README must not tell users to install non-existent hooks."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "pre-commit install" not in content

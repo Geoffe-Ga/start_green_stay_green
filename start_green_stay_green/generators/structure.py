@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.kotlin import android_package
+from start_green_stay_green.utils.kotlin import android_package_path
 from start_green_stay_green.utils.naming import pascal_case
 from start_green_stay_green.utils.swift import package_swift
 
@@ -58,11 +60,11 @@ class StructureGenerator(BaseGenerator):
     This generator creates the source code directory structure (package directory,
     __init__.py, Hello World starter code) for the target project's language.
 
-    All 8 supported languages (python, typescript, go, rust, java, csharp,
-    ruby, swift) are available at the generator level. Note that java, csharp,
-    ruby, and swift are not yet supported by the full CLI pipeline
-    (``sgsg init``) because PreCommitGenerator does not yet handle those
-    languages.
+    All 9 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift, kotlin) are available at the generator level. Note that the
+    full CLI pipeline (``sgsg init``) skips its quality-tooling steps
+    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
+    and kotlin; Kotlin's tooling arrives with #357/#358.
 
     Attributes:
         output_dir: Directory where structure will be created
@@ -136,6 +138,7 @@ class StructureGenerator(BaseGenerator):
             "csharp": self._generate_csharp_structure,
             "ruby": self._generate_ruby_structure,
             "swift": self._generate_swift_structure,
+            "kotlin": self._generate_kotlin_structure,
         }
         return generators[self.config.language]()
 
@@ -828,3 +831,133 @@ package_swift` helper so the structure and dependency generators emit an
             Content for ``Package.swift`` declaring a watchOS app target.
         """
         return package_swift(self.config.package_name)
+
+    def _generate_kotlin_structure(self) -> dict[str, Path]:
+        """Generate the Kotlin Wear OS project structure (#356).
+
+        Creates the Android app module source tree: an ``AndroidManifest.xml``
+        declaring the ``wear`` device profile (watch hardware feature plus the
+        standalone-app metadata) and a ``MainActivity`` built with Jetpack
+        Compose for Wear OS under ``app/src/main/kotlin/``. The Gradle
+        (Kotlin DSL) manifests are owned by
+        :class:`~start_green_stay_green.generators.dependencies.DependenciesGenerator`.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        package_path = android_package_path(self.config.package_name)
+
+        # Create app/src/main/kotlin/<package>/ for the Wear OS app module
+        main_dir = self.output_dir / "app" / "src" / "main"
+        source_dir = main_dir / "kotlin" / package_path
+        source_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate the Wear OS AndroidManifest.xml
+        manifest_key = "app/src/main/AndroidManifest.xml"
+        files[manifest_key] = self._write_file(
+            main_dir / "AndroidManifest.xml",
+            self._kotlin_android_manifest(),
+        )
+
+        # Generate the Compose-for-Wear-OS MainActivity
+        activity_key = f"app/src/main/kotlin/{package_path}/MainActivity.kt"
+        files[activity_key] = self._write_file(
+            source_dir / "MainActivity.kt",
+            self._kotlin_main_activity(),
+        )
+
+        return files
+
+    def _kotlin_android_manifest(self) -> str:
+        """Generate the Wear OS ``AndroidManifest.xml``.
+
+        Returns:
+            Manifest content declaring the watch hardware feature (the
+            ``wear`` device profile), the wearable shared library, the
+            standalone-app metadata (installable without a phone
+            companion), and the launcher ``MainActivity``. The package
+            namespace is declared in ``app/build.gradle.kts`` (AGP 8+
+            convention), not here.
+        """
+        return f"""<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Wear device profile: this app installs only on watches. -->
+    <uses-feature android:name="android.hardware.type.watch" />
+
+    <application
+        android:label="{self.config.project_name}"
+        android:theme="@android:style/Theme.DeviceDefault">
+
+        <uses-library
+            android:name="com.google.android.wearable"
+            android:required="true" />
+
+        <!-- Standalone Wear OS app: installable without a phone companion. -->
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.DeviceDefault">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+"""
+
+    def _kotlin_main_activity(self) -> str:
+        """Generate the Compose-for-Wear-OS ``MainActivity.kt``.
+
+        The greeting is assembled by a top-level ``greeting`` function so
+        the generated JUnit scaffold can exercise real interpolation logic
+        on the JVM without Robolectric or an emulator.
+
+        Returns:
+            Content for the Wear OS entry-point activity source file.
+        """
+        package = android_package(self.config.package_name)
+        return f"""package {package}
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.wear.compose.material.MaterialTheme
+import androidx.wear.compose.material.Text
+
+/** Returns the greeting assembled from the project name. */
+fun greeting(projectName: String): String = "Hello from $projectName!"
+
+/** Wear OS entry point hosting the Compose UI. */
+class MainActivity : ComponentActivity() {{
+    override fun onCreate(savedInstanceState: Bundle?) {{
+        super.onCreate(savedInstanceState)
+        setContent {{ WearApp() }}
+    }}
+}}
+
+/** Root composable: centers the greeting on the round watch face. */
+@Composable
+fun WearApp() {{
+    MaterialTheme {{
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {{
+            Text(text = greeting("{self.config.project_name}"))
+        }}
+    }}
+}}
+"""

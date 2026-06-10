@@ -4,6 +4,7 @@ import ast
 from pathlib import Path
 import tempfile
 
+from defusedxml import ElementTree as DefusedElementTree
 import pytest
 
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
@@ -21,6 +22,7 @@ EXPECTED_SOURCE_DIRS: dict[str, str] = {
     "csharp": "src",
     "ruby": "lib",
     "swift": "Sources",
+    "kotlin": "app",
 }
 
 # Expected entry point files per language
@@ -33,6 +35,7 @@ EXPECTED_ENTRY_POINTS: dict[str, str] = {
     "csharp": "src/Program.cs",
     "ruby": "lib/test_project.rb",
     "swift": "Sources/test_project/TestProjectApp.swift",
+    "kotlin": "app/src/main/kotlin/com/example/test_project/MainActivity.kt",
 }
 
 
@@ -52,6 +55,8 @@ EXPECTED_CONFIG_FILES: dict[str, list[str]] = {
     "csharp": [],
     "ruby": ["Gemfile"],
     "swift": ["Package.swift"],
+    # Gradle manifests are owned by DependenciesGenerator for kotlin.
+    "kotlin": [],
 }
 
 
@@ -558,6 +563,116 @@ class TestMultiLanguageStructure:
             assert "import SwiftUI" in content
             assert "View" in content
             assert "Hello from test-project!" in content
+
+
+class TestKotlinStructure:
+    """Test Kotlin Wear OS structure generation (#356)."""
+
+    def test_kotlin_creates_android_manifest(self) -> None:
+        """Kotlin generates an AndroidManifest.xml for the app module."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="kotlin",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            manifest_key = "app/src/main/AndroidManifest.xml"
+            assert manifest_key in files
+            content = files[manifest_key].read_text()
+            assert "<manifest" in content
+            assert "MainActivity" in content
+
+    def test_kotlin_manifest_declares_wear_device_profile(self) -> None:
+        """The manifest requires the watch hardware feature (Wear OS)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="kotlin",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            content = files["app/src/main/AndroidManifest.xml"].read_text()
+            assert (
+                '<uses-feature android:name="android.hardware.type.watch" />' in content
+            )
+
+    def test_kotlin_manifest_declares_standalone_wear_app(self) -> None:
+        """The manifest marks the app standalone (no phone companion)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="kotlin",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            content = files["app/src/main/AndroidManifest.xml"].read_text()
+            assert "com.google.android.wearable.standalone" in content
+            assert 'android:value="true"' in content
+
+    def test_kotlin_manifest_is_well_formed_xml(self) -> None:
+        """The generated AndroidManifest.xml parses as XML."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="kotlin",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            content = files["app/src/main/AndroidManifest.xml"].read_text()
+            root = DefusedElementTree.fromstring(content)
+            assert root.tag == "manifest"
+
+    def test_kotlin_creates_compose_main_activity(self) -> None:
+        """Kotlin generates a Compose-for-Wear-OS MainActivity."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="kotlin",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            key = "app/src/main/kotlin/com/example/test_project/MainActivity.kt"
+            assert key in files
+            content = files[key].read_text()
+            assert "package com.example.test_project" in content
+            assert "import androidx.wear.compose.material.Text" in content
+            assert "class MainActivity : ComponentActivity()" in content
+            assert "setContent" in content
+
+    def test_kotlin_main_activity_builds_greeting_from_project_name(self) -> None:
+        """The greeting is assembled via a testable top-level function."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="kotlin",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            key = "app/src/main/kotlin/com/example/test_project/MainActivity.kt"
+            content = files[key].read_text()
+            assert 'fun greeting(projectName: String): String = "Hello from ' in content
+            assert 'greeting("test-project")' in content
+
+    def test_kotlin_does_not_write_gradle_manifests(self) -> None:
+        """Gradle manifests belong to DependenciesGenerator, not structure."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="kotlin",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            assert "settings.gradle.kts" not in files
+            assert "build.gradle.kts" not in files
+            assert "app/build.gradle.kts" not in files
 
 
 class TestTypeScriptConfigGeneration:

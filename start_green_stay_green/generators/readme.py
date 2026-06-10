@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.kotlin import android_package
+from start_green_stay_green.utils.kotlin import android_package_path
 from start_green_stay_green.utils.naming import pascal_case
 
 if TYPE_CHECKING:
@@ -58,11 +60,11 @@ class ReadmeGenerator(BaseGenerator):
     description, installation instructions, usage guide, and documentation
     for the quality tools included in the project.
 
-    All 8 supported languages (python, typescript, go, rust, java, csharp,
-    ruby, swift) are available at the generator level. Note that java, csharp,
-    ruby, and swift are not yet supported by the full CLI pipeline
-    (``sgsg init``) because PreCommitGenerator does not yet handle those
-    languages.
+    All 9 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift, kotlin) are available at the generator level. Note that the
+    full CLI pipeline (``sgsg init``) skips its quality-tooling steps
+    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
+    and kotlin; Kotlin's tooling arrives with #357/#358.
 
     Attributes:
         output_dir: Directory where README.md will be created
@@ -162,6 +164,7 @@ class ReadmeGenerator(BaseGenerator):
             "csharp": self._generate_csharp_readme,
             "ruby": self._generate_ruby_readme,
             "swift": self._generate_swift_readme,
+            "kotlin": self._generate_kotlin_readme,
         }
         return {"README.md": generators[self.config.language]()}
 
@@ -1376,4 +1379,162 @@ MIT License
 
 Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green_stay_green)
 - Maximum quality Swift watchOS projects from day one.
+"""
+
+    def _generate_kotlin_readme(self) -> Path:
+        """Generate the Kotlin Wear OS README.md (#356).
+
+        Returns:
+            Path to generated README.md
+        """
+        readme_path = self.output_dir / "README.md"
+        return self._write_readme(readme_path, self._kotlin_readme_content())
+
+    def _kotlin_readme_content(self) -> str:
+        """Generate Kotlin README.md content.
+
+        Mirrors the truthful present/planned split the Swift foundation
+        README used in PR #392: only the artifacts the #356 scaffold
+        actually generates carry a checkmark; quality tooling (#357) and
+        CI (#358) are disclosed as planned.
+
+        Returns:
+            Content for README.md
+        """
+        # Convert project name to title case for display
+        display_name = self.config.project_name.replace("-", " ").title()
+        namespace = android_package(self.config.package_name)
+        package_path = android_package_path(self.config.package_name)
+
+        return f"""# {self.config.project_name}
+
+{display_name} - A quality-controlled Kotlin Wear OS project generated with
+Start Green Stay Green.
+
+## Description
+
+This Kotlin scaffold is the foundation of a quality-controlled Wear OS
+(Galaxy Watch 4+ / Wear OS 3) project. The following are generated today:
+
+- ✅ Wear OS app target built with Jetpack Compose for Wear OS
+  (androidx.wear.compose)
+- ✅ Gradle (Kotlin DSL) manifests (settings.gradle.kts, build.gradle.kts,
+  gradle.properties, app/build.gradle.kts)
+- ✅ AndroidManifest.xml with the `wear` device profile (watch hardware
+  feature + standalone app metadata)
+- ✅ JUnit unit-test scaffold (app/src/test)
+- ✅ This README
+
+### Planned / coming soon
+
+These quality features are part of the Start Green Stay Green roadmap for
+Kotlin but are **not yet generated** by this scaffold — do not assume they
+are configured:
+
+- Code quality tools (ktlint, detekt)
+- Security scanning
+- Pre-commit hooks (quality checks)
+- CI/CD pipeline (GitHub Actions)
+- Enforced 90%+ test coverage gate
+
+## Installation
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd {self.config.project_name}
+
+# The Gradle wrapper (gradlew + its jar) is NOT generated — binary
+# artifacts are never scaffolded. Create it once with a local Gradle
+# install:
+gradle wrapper
+```
+
+## Usage
+
+Build the Wear OS Hello World app:
+
+```bash
+./gradlew build
+```
+
+Run it on a Wear OS emulator or a paired watch via Android Studio
+(Run > Run 'app' with a Wear OS device profile selected).
+
+Expected output (in the watch UI):
+```
+Hello from {self.config.project_name}!
+```
+
+## Development
+
+### Building and Testing
+
+```bash
+# Build the app
+./gradlew build
+
+# Run the JVM unit tests
+./gradlew test
+```
+
+> **Note:** Linting (ktlint/detekt), security scanning, pre-commit hooks,
+> and CI are on the roadmap but not yet configured by this scaffold. See
+> *Planned / coming soon* above.
+
+### Quality Tools
+
+This scaffold currently includes:
+
+- **JUnit**: JVM unit-test scaffold (no emulator required)
+- **Gradle (Kotlin DSL)**: Dependency management and build tooling
+
+### Project Structure
+
+```
+{self.config.project_name}/
+├── settings.gradle.kts      # Root project + :app module wiring
+├── build.gradle.kts         # Plugin versions (AGP, Kotlin, Compose)
+├── gradle.properties        # AndroidX opt-in, JVM settings
+└── app/
+    ├── build.gradle.kts     # Wear OS app module ({namespace})
+    └── src/
+        ├── main/
+        │   ├── AndroidManifest.xml          # wear device profile
+        │   └── kotlin/{package_path}/
+        │       └── MainActivity.kt          # Compose for Wear OS UI
+        └── test/
+            └── kotlin/{package_path}/
+                └── GreetingTest.kt          # JUnit scaffold
+```
+
+### Testing
+
+```bash
+# Run all unit tests
+./gradlew test
+
+# Run a specific test class
+./gradlew test --tests "{namespace}.GreetingTest"
+```
+
+### Code Quality
+
+This scaffold is the foundation for a MAXIMUM QUALITY Kotlin project.
+Today it provides:
+
+- **Type Safety**: 100% compile-time type checking (inherent to Kotlin)
+- **JUnit test scaffold**: ready for you to add tests
+
+Enforced coverage gates, linting, formatting, and CI are planned (see
+*Planned / coming soon* above) and are not yet wired into this scaffold.
+
+## License
+
+MIT License
+
+## Attribution
+
+Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green_stay_green)
+- Maximum quality Kotlin Wear OS projects from day one.
 """

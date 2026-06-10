@@ -1954,6 +1954,18 @@ class TestEnhanceDetectionHelpers:
         (tmp_path / "package.json").write_text("{}")
         assert cli._detect_project_language(tmp_path) == "typescript"
 
+    def test_detect_project_language_kotlin(self, tmp_path: Path) -> None:
+        """``settings.gradle.kts`` → kotlin (#356)."""
+        (tmp_path / "settings.gradle.kts").write_text('rootProject.name = "x"\n')
+        assert cli._detect_project_language(tmp_path) == "kotlin"
+
+    def test_detect_project_language_groovy_gradle_stays_java(
+        self, tmp_path: Path
+    ) -> None:
+        """A Groovy ``build.gradle`` (no .kts) still detects as java."""
+        (tmp_path / "build.gradle").write_text("apply plugin: 'java'\n")
+        assert cli._detect_project_language(tmp_path) == "java"
+
     def test_detect_project_language_returns_none_for_empty(
         self, tmp_path: Path
     ) -> None:

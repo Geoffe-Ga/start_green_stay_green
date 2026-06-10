@@ -72,6 +72,7 @@ LANGUAGE_EXTENSIONS: dict[str, str] = {
     "csharp": ".cs",
     "ruby": ".rb",
     "swift": ".swift",
+    "kotlin": ".kt",
 }
 
 

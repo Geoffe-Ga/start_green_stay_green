@@ -55,6 +55,7 @@ from start_green_stay_green.generators.architecture import (
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.base import validate_language
 from start_green_stay_green.generators.ci import CIGenerator
+from start_green_stay_green.generators.ci import LANGUAGE_CONFIGS as CI_LANGUAGE_CONFIGS
 from start_green_stay_green.generators.claude_md import ClaudeMdGenerationResult
 from start_green_stay_green.generators.claude_md import ClaudeMdGenerator
 from start_green_stay_green.generators.dependencies import DependenciesGenerator
@@ -62,11 +63,17 @@ from start_green_stay_green.generators.dependencies import DependencyConfig
 from start_green_stay_green.generators.github_actions import (
     GitHubActionsReviewGenerator,
 )
+from start_green_stay_green.generators.metrics import (
+    LANGUAGE_TOOLS as METRICS_LANGUAGE_TOOLS,
+)
 from start_green_stay_green.generators.metrics import MetricsGenerationConfig
 from start_green_stay_green.generators.metrics import MetricsGenerator
 from start_green_stay_green.generators.metrics import ci_status
 from start_green_stay_green.generators.metrics import count_ci_jobs
 from start_green_stay_green.generators.metrics import precommit_status
+from start_green_stay_green.generators.precommit import (
+    LANGUAGE_CONFIGS as PRECOMMIT_LANGUAGE_CONFIGS,
+)
 from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import PreCommitGenerator
 from start_green_stay_green.generators.readme import ReadmeConfig
@@ -935,6 +942,15 @@ def _scripts_dir_has_other_language(scripts_dir: Path, language: str) -> bool:
     return current_marker != "" and current_marker not in content
 
 
+# Languages with native quality-script templates in ScriptsGenerator.
+# The generator falls back to *Python* scripts for anything else, which
+# would be wrong for e.g. a Kotlin project, so the init pipeline skips
+# the step instead (Kotlin tooling lands with #357).
+_SCRIPTS_STEP_LANGUAGES: frozenset[str] = frozenset(
+    {"python", "typescript", "go", "rust", "swift"}
+)
+
+
 def _generate_scripts_step(
     project_path: Path,
     project_name: str,
@@ -946,6 +962,9 @@ def _generate_scripts_step(
 
     If scripts/ already contains scripts from a different language,
     automatically uses scripts/{language}/ subdirectory to avoid conflicts.
+    Languages without native script templates (java, csharp, ruby, kotlin)
+    are skipped with an informational message instead of receiving the
+    generator's Python fallback.
 
     Args:
         project_path: Project root directory.
@@ -955,6 +974,13 @@ def _generate_scripts_step(
         subdirectory: If set, write to scripts/{subdirectory}/ instead
             of scripts/. Used for multi-language projects.
     """
+    if language not in _SCRIPTS_STEP_LANGUAGES:
+        console.print(
+            f"[dim]Quality scripts unavailable for {language} "
+            f"(supported: {', '.join(sorted(_SCRIPTS_STEP_LANGUAGES))})[/dim]"
+        )
+        return
+
     scripts_dir = project_path / "scripts"
     if subdirectory:
         scripts_dir = scripts_dir / subdirectory
@@ -982,7 +1008,19 @@ def _generate_precommit_step(
     language: str,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate pre-commit configuration, merging with existing if present."""
+    """Generate pre-commit configuration, merging with existing if present.
+
+    Languages PreCommitGenerator does not support yet (java, csharp, ruby,
+    kotlin — Kotlin hooks land with #357) are skipped with an informational
+    message instead of aborting the whole init run.
+    """
+    if language not in PRECOMMIT_LANGUAGE_CONFIGS:
+        console.print(
+            f"[dim]Pre-commit config unavailable for {language} "
+            f"(supported: {', '.join(PRECOMMIT_LANGUAGE_CONFIGS)})[/dim]"
+        )
+        return
+
     with step_timer("precommit"), console.status("Generating pre-commit config..."):
         precommit_config = GenerationConfig(
             project_name=project_name,
@@ -1079,8 +1117,17 @@ def _generate_ci_step(
     only used to opt into the legacy AI-tuned path for backward
     compatibility. ``project_name`` is forwarded to the template
     renderer so any ``<<% project_name %>>`` placeholder lands with
-    the real value rather than the empty string.
+    the real value rather than the empty string. Languages CIGenerator
+    does not support yet (kotlin CI lands with #358) are skipped with an
+    informational message instead of aborting init.
     """
+    if language not in CI_LANGUAGE_CONFIGS:
+        console.print(
+            f"[dim]CI pipeline unavailable for {language} "
+            f"(supported: {', '.join(CI_LANGUAGE_CONFIGS)})[/dim]"
+        )
+        return
+
     with step_timer("ci"), console.status("Generating CI pipeline..."):
         ci_generator = CIGenerator(
             orchestrator,
@@ -1281,12 +1328,110 @@ def _generate_subagents_step(
     console.print("[green]✓[/green] Generated subagents")
 
 
+def _write_initial_metrics_json(
+    docs_dir: Path,
+    project_name: str,
+    config: MetricsGenerationConfig,
+    precommit_hooks_total: int,
+    ci_jobs_total: int,
+) -> None:
+    """Write the initial ``docs/metrics.json`` payload for the dashboard.
+
+    Args:
+        docs_dir: The project's ``docs/`` directory (must exist).
+        project_name: Name of the project recorded in the payload.
+        config: Metrics generation config supplying the thresholds.
+        precommit_hooks_total: Number of pre-commit hooks configured.
+        ci_jobs_total: Number of CI jobs configured.
+    """
+    initial_metrics = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "project": project_name,
+        "thresholds": {
+            "coverage": config.coverage_threshold,
+            "branch_coverage": config.branch_coverage_threshold,
+            "mutation_score": config.mutation_threshold,
+            "complexity": config.complexity_threshold,
+            "docs_coverage": config.doc_coverage_threshold,
+            "security_issues": 0,
+        },
+        "metrics": {
+            "precommit_status": precommit_status(precommit_hooks_total),
+            "ci_status": ci_status(ci_jobs_total),
+            "coverage": 0.0,
+            "coverage_status": "fail",
+            "branch_coverage": 0.0,
+            "branch_coverage_status": "fail",
+            "mutation_score": 0.0,
+            "mutation_status": "fail",
+            "complexity_avg": 0.0,
+            "complexity_status": "pass",
+            "docs_coverage": 0.0,
+            "docs_status": "fail",
+            "security_issues": 0,
+            "security_status": "pass",
+        },
+    }
+    (docs_dir / "metrics.json").write_text(
+        json.dumps(initial_metrics, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _copy_metrics_assets(project_path: Path, project_name: str) -> tuple[bool, bool]:
+    """Copy the metrics workflow and collection script into the project.
+
+    Args:
+        project_path: Target project root directory.
+        project_name: Project name substituted into the workflow file.
+
+    Returns:
+        ``(missing_workflow, missing_script)`` flags — ``True`` when the
+        corresponding source asset could not be found in the sgsg install.
+    """
+    workflows_dir = project_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+
+    sgsg_root = Path(__file__).parent.parent
+    sgsg_workflow = sgsg_root / ".github" / "workflows" / "metrics.yml"
+    missing_workflow = not sgsg_workflow.exists()
+    if not missing_workflow:
+        target_workflow = workflows_dir / "metrics.yml"
+        shutil.copy(sgsg_workflow, target_workflow)
+        workflow_content = target_workflow.read_text(encoding="utf-8")
+        workflow_content = workflow_content.replace(
+            "start-green-stay-green", project_name
+        )
+        target_workflow.write_text(workflow_content, encoding="utf-8")
+
+    scripts_dir = project_path / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    sgsg_script = sgsg_root / "scripts" / "collect_metrics.py"
+    missing_script = not sgsg_script.exists()
+    if not missing_script:
+        shutil.copy(sgsg_script, scripts_dir / "collect_metrics.py")
+
+    return missing_workflow, missing_script
+
+
 def _generate_metrics_dashboard_step(
     project_path: Path,
     project_name: str,
     language: str,
 ) -> None:
-    """Generate live metrics dashboard and workflow."""
+    """Generate live metrics dashboard and workflow.
+
+    Languages MetricsGenerator does not support yet (kotlin metrics land
+    with #357) are skipped with an informational message instead of
+    aborting init when ``--enable-live-dashboard`` is passed.
+    """
+    if language not in METRICS_LANGUAGE_TOOLS:
+        console.print(
+            f"[dim]Metrics dashboard unavailable for {language} "
+            f"(supported: {', '.join(METRICS_LANGUAGE_TOOLS)})[/dim]"
+        )
+        return
+
     with step_timer("metrics"), console.status("Generating metrics dashboard..."):
         precommit_hooks_total = MetricsGenerator.count_precommit_hooks(
             project_path / ".pre-commit-config.yaml"
@@ -1312,68 +1457,17 @@ def _generate_metrics_dashboard_step(
         docs_dir.mkdir(parents=True, exist_ok=True)
 
         generator.write_dashboard(docs_dir)
-        initial_metrics_path = docs_dir / "metrics.json"
-        initial_metrics = {
-            "timestamp": datetime.now(UTC).isoformat(),
-            "project": project_name,
-            "thresholds": {
-                "coverage": config.coverage_threshold,
-                "branch_coverage": config.branch_coverage_threshold,
-                "mutation_score": config.mutation_threshold,
-                "complexity": config.complexity_threshold,
-                "docs_coverage": config.doc_coverage_threshold,
-                "security_issues": 0,
-            },
-            "metrics": {
-                "precommit_status": precommit_status(precommit_hooks_total),
-                "ci_status": ci_status(ci_jobs_total),
-                "coverage": 0.0,
-                "coverage_status": "fail",
-                "branch_coverage": 0.0,
-                "branch_coverage_status": "fail",
-                "mutation_score": 0.0,
-                "mutation_status": "fail",
-                "complexity_avg": 0.0,
-                "complexity_status": "pass",
-                "docs_coverage": 0.0,
-                "docs_status": "fail",
-                "security_issues": 0,
-                "security_status": "pass",
-            },
-        }
-        initial_metrics_path.write_text(
-            json.dumps(initial_metrics, indent=2),
-            encoding="utf-8",
+        _write_initial_metrics_json(
+            docs_dir,
+            project_name,
+            config,
+            precommit_hooks_total,
+            ci_jobs_total,
         )
 
-        workflows_dir = project_path / ".github" / "workflows"
-        workflows_dir.mkdir(parents=True, exist_ok=True)
-
-        sgsg_root = Path(__file__).parent.parent
-        sgsg_workflow = sgsg_root / ".github" / "workflows" / "metrics.yml"
-        missing_workflow = False
-        missing_script = False
-        if sgsg_workflow.exists():
-            target_workflow = workflows_dir / "metrics.yml"
-            shutil.copy(sgsg_workflow, target_workflow)
-            workflow_content = target_workflow.read_text(encoding="utf-8")
-            workflow_content = workflow_content.replace(
-                "start-green-stay-green", project_name
-            )
-            target_workflow.write_text(workflow_content, encoding="utf-8")
-        else:
-            missing_workflow = True
-
-        scripts_dir = project_path / "scripts"
-        scripts_dir.mkdir(parents=True, exist_ok=True)
-        sgsg_script = sgsg_root / "scripts" / "collect_metrics.py"
-        if sgsg_script.exists():
-            shutil.copy(
-                sgsg_script,
-                scripts_dir / "collect_metrics.py",
-            )
-        else:
-            missing_script = True
+        missing_workflow, missing_script = _copy_metrics_assets(
+            project_path, project_name
+        )
 
     console.print("[green]✓[/green] Generated metrics dashboard")
     if missing_workflow:
@@ -1510,6 +1604,9 @@ _LANG_SETUP_STEPS: dict[str, list[str]] = {
     "go": ["go mod download"],
     "rust": ["cargo build"],
     "swift": ["swift package resolve", "swift build"],
+    # The Gradle wrapper jar is a binary the generator never writes, so
+    # the first step materialises it from a local Gradle install (#356).
+    "kotlin": ["gradle wrapper", "./gradlew build"],
 }
 
 
@@ -2066,6 +2163,10 @@ _LANGUAGE_PROBES: tuple[tuple[str, str], ...] = (
     ("go.mod", "go"),
     ("Cargo.toml", "rust"),
     ("pom.xml", "java"),
+    # Kotlin DSL manifests before Groovy build.gradle: a Wear OS scaffold
+    # (#356) ships settings.gradle.kts / build.gradle.kts only.
+    ("settings.gradle.kts", "kotlin"),
+    ("build.gradle.kts", "kotlin"),
     ("build.gradle", "java"),
     ("Gemfile", "ruby"),
     ("composer.json", "php"),

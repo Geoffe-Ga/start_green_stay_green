@@ -9,6 +9,10 @@ import pytest
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.dependencies import DependenciesGenerator
 from start_green_stay_green.generators.dependencies import DependencyConfig
+from start_green_stay_green.utils.kotlin import AGP_VERSION
+from start_green_stay_green.utils.kotlin import JUNIT_VERSION
+from start_green_stay_green.utils.kotlin import KOTLIN_VERSION
+from start_green_stay_green.utils.kotlin import android_package
 from start_green_stay_green.utils.swift import package_swift
 
 # Expected primary dependency file per language
@@ -21,6 +25,12 @@ EXPECTED_DEP_FILES: dict[str, list[str]] = {
     "csharp": ["test-project.csproj"],
     "ruby": ["Gemfile"],
     "swift": ["Package.swift"],
+    "kotlin": [
+        "settings.gradle.kts",
+        "build.gradle.kts",
+        "gradle.properties",
+        "app/build.gradle.kts",
+    ],
 }
 
 
@@ -408,3 +418,107 @@ class TestMultiLanguageDependencies:
 
             content = files["Package.swift"].read_text()
             assert content == package_swift("test_project")
+
+
+class TestKotlinDependencies:
+    """Test Kotlin Gradle (Kotlin DSL) manifest generation (#356)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Run the dependencies generator for a kotlin test project.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            Mapping of generated relative keys to file paths.
+        """
+        config = DependencyConfig(
+            project_name="test-project",
+            language="kotlin",
+            package_name="test_project",
+        )
+        return DependenciesGenerator(Path(tmpdir), config).generate()
+
+    def test_settings_includes_app_module_and_repositories(self) -> None:
+        """settings.gradle.kts names the root project and includes :app."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["settings.gradle.kts"].read_text()
+            assert 'rootProject.name = "test-project"' in content
+            assert 'include(":app")' in content
+            assert "google()" in content
+            assert "mavenCentral()" in content
+
+    def test_settings_documents_missing_gradle_wrapper(self) -> None:
+        """The wrapper jar is a binary and is not generated; that is disclosed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["settings.gradle.kts"].read_text()
+            assert "gradle wrapper" in content
+            assert "not generated" in content.lower()
+
+    def test_root_build_declares_plugin_versions(self) -> None:
+        """The root build pins AGP, Kotlin, and the Compose compiler plugin."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["build.gradle.kts"].read_text()
+            assert f'id("com.android.application") version "{AGP_VERSION}"' in content
+            assert (
+                f'id("org.jetbrains.kotlin.android") version "{KOTLIN_VERSION}"'
+                in content
+            )
+            assert (
+                'id("org.jetbrains.kotlin.plugin.compose") '
+                f'version "{KOTLIN_VERSION}"' in content
+            )
+            assert "apply false" in content
+
+    def test_app_module_targets_wear_os(self) -> None:
+        """The app module declares Wear Compose dependencies and SDK levels."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["app/build.gradle.kts"].read_text()
+            assert "androidx.wear.compose:compose-material" in content
+            assert "androidx.wear.compose:compose-foundation" in content
+            assert "minSdk = 30" in content
+
+    def test_app_module_uses_shared_android_namespace(self) -> None:
+        """The namespace/applicationId come from the shared kotlin helper."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["app/build.gradle.kts"].read_text()
+            namespace = android_package("test_project")
+            assert f'namespace = "{namespace}"' in content
+            assert f'applicationId = "{namespace}"' in content
+
+    def test_app_module_includes_junit_test_scaffold_dependency(self) -> None:
+        """JUnit is wired so ./gradlew test runs the generated unit test."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["app/build.gradle.kts"].read_text()
+            assert f'testImplementation("junit:junit:{JUNIT_VERSION}")' in content
+
+    def test_gradle_properties_enables_androidx(self) -> None:
+        """gradle.properties opts into AndroidX (required by Compose)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["gradle.properties"].read_text()
+            assert "android.useAndroidX=true" in content
+
+    def test_no_gradle_wrapper_binaries_are_generated(self) -> None:
+        """gradlew / wrapper jars are binaries and must not be scaffolded."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            assert "gradlew" not in files
+            assert "gradlew.bat" not in files
+            assert not (Path(tmpdir) / "gradlew").exists()
+            assert not (Path(tmpdir) / "gradle" / "wrapper").exists()
