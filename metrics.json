@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-10T19:54:50.483784+00:00",
+  "timestamp": "2026-06-10T20:37:49.424983+00:00",
   "project": "start-green-stay-green",
   "thresholds": {
     "coverage": 90,
@@ -13,26 +13,26 @@
     "type_errors": 0
   },
   "metrics": {
-    "coverage": 95.03,
+    "coverage": 95.06,
     "coverage_status": "pass",
     "branch_coverage": 89.01,
     "branch_coverage_status": "pass",
-    "complexity_avg": 2.031019202363368,
+    "complexity_avg": 2.027982326951399,
     "complexity_status": "pass",
-    "maintainability_avg": 74.25,
+    "maintainability_avg": 74.71,
     "maintainability_status": "pass",
     "docs_coverage": 100.0,
     "docs_status": "pass",
-    "security_issues": 0,
-    "security_status": "pass",
+    "security_issues": null,
+    "security_status": "unknown",
     "mutation_score": null,
     "mutation_status": "unknown",
     "lint_violations": 0,
     "lint_status": "pass",
     "type_errors": 0,
     "typecheck_status": "pass",
-    "tests_total": 2354,
-    "tests_passed": 2354,
+    "tests_total": 2381,
+    "tests_passed": 2381,
     "tests_failed": 0,
     "tests_skipped": 0,
     "tests_status": "pass",
@@ -47,7 +47,7 @@
       "passing_jobs": 0,
       "percentage": 0.0,
       "status": "unknown",
-      "run_url": "https://github.com/Geoffe-Ga/start_green_stay_green/actions/runs/27302152713"
+      "run_url": "https://github.com/Geoffe-Ga/start_green_stay_green/actions/runs/27304664072"
     }
   }
 }
