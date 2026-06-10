@@ -130,6 +130,7 @@ Primary programming language for the project.
 - `go` - Go 1.21+
 - `rust` - Rust 1.70+
 - `swift` - Swift 5.9/5.10/6.0 with Swift Package Manager (SPM), watchOS-ready
+- `kotlin` - Kotlin 2.0 with Gradle (Kotlin DSL) on JDK 17/21, Wear OS-ready
 
 **Examples**:
 ```bash
@@ -138,12 +139,13 @@ Primary programming language for the project.
 --language go
 --language rust
 --language swift
+--language kotlin
 ```
 
 **Interactive Fallback**:
 If not provided, will prompt with options:
 ```
-Primary language: [python/typescript/go/rust/swift]
+Primary language: [python/typescript/go/rust/swift/kotlin]
 ```
 
 **Swift Toolchain**:
@@ -166,6 +168,32 @@ watchOS-simulator build-and-test job. Local prerequisites: a Swift
 5.9/5.10/6.0 toolchain with SPM, and
 `brew install swiftlint swift-format gitleaks` for the generated
 pre-commit hooks (`brew install periphery` for dead-code scans).
+
+**Kotlin Toolchain**:
+
+A `--language kotlin` project is a Gradle (Kotlin DSL) Wear OS app
+scaffold (Galaxy Watch 4+ / Wear OS 3, Jetpack Compose for Wear OS)
+wired with this quality toolchain:
+
+| Concern | Tool | Where it runs |
+|---------|------|---------------|
+| Formatting | ktlint (`ktlint --format`) | `scripts/format.sh`, pre-commit, CI |
+| Static analysis + complexity (≤10) | detekt (`detekt.yml`) | `scripts/lint.sh`, pre-commit, CI |
+| Tests | JUnit 4 via `./gradlew test` | `scripts/test.sh`, CI |
+| Coverage (≥90%) | Kover (`koverVerifyDebug` — the bound lives in `app/build.gradle.kts`) | `scripts/test.sh --coverage`, CI |
+| Secret scanning | gitleaks + detect-secrets | pre-commit, CI |
+| Dependency CVE scan | OWASP dependency-check | `scripts/security.sh` |
+| Mutation testing | pitest | periodic quality gate (tracked by the opt-in metrics dashboard) |
+| Architecture rules | Konsist test (`plans/architecture/`) | `plans/architecture/run-check.sh` |
+
+CI runs on ubuntu runners with a JDK 17/21 (Temurin) test matrix, a
+quality job enforcing the Kover ≥90% coverage gate, and a Wear OS
+debug-APK build. The Gradle wrapper is **not generated** (binary
+artifacts are never scaffolded): run `gradle wrapper` once locally; CI
+provisions its own pinned Gradle and stays green either way. Local
+prerequisites: JDK 17+, a local Gradle install, and
+`brew install ktlint detekt` (or your platform's SDK manager) for the
+generated pre-commit hooks.
 
 ##### `--output-dir` / `-o PATH` (Optional)
 
@@ -388,7 +416,7 @@ The `init` command validates:
 - Not a Windows reserved name
 
 **Language**:
-- Must be one of: python, typescript, go, rust, swift
+- Must be one of: python, typescript, go, rust, swift, kotlin
 - Case-insensitive
 
 **Output Directory**:
@@ -603,6 +631,29 @@ pre-commit install
 See the [Swift Toolchain](#--language---l-text-optional) table above for
 the full tool list, and [examples/swift/](../examples/swift/) for real
 generated output.
+
+### Creating a Kotlin (Wear OS) Project
+
+```bash
+# Local prerequisites for the generated pre-commit hooks
+# (JDK 17+ and a local Gradle install are also required)
+brew install gradle ktlint detekt
+
+start-green-stay-green init \
+  --project-name wrist-counter \
+  --language kotlin \
+  --no-interactive
+
+cd wrist-counter
+gradle wrapper   # the wrapper is not generated; materialize it once
+./gradlew build
+pre-commit install
+./scripts/check-all.sh
+```
+
+See the [Kotlin Toolchain](#--language---l-text-optional) table above
+for the full tool list, and [examples/kotlin/](../examples/kotlin/) for
+real generated output.
 
 ### Batch Creating Projects
 

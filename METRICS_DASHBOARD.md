@@ -152,6 +152,7 @@ artifacts = generator.write_all(Path("output"))
 - **Go**: go test -cover, go-mutesting, gocyclo, godoc, gosec
 - **Rust**: cargo-tarpaulin, cargo-mutants, clippy, rustdoc, cargo-audit
 - **Swift**: swift test + llvm-cov, muter, swiftlint, swift-docc, periphery
+- **Kotlin**: kover (./gradlew koverVerifyDebug), pitest, detekt, dokka, OWASP dependency-check
 
 ## Configuration Options
 
@@ -364,7 +365,7 @@ config = MetricsGenerationConfig(
 )
 ```
 
-**Solution**: Use a supported language (python, typescript, javascript, go, rust, swift)
+**Solution**: Use a supported language (python, typescript, javascript, go, rust, swift, kotlin)
 
 ### Invalid Threshold
 
@@ -390,7 +391,7 @@ generator.write_all(Path("nonexistent/path"))  # OK
 
 ## Future Enhancements
 
-1. **More Languages**: Add Swift, Kotlin, PHP support
+1. **More Languages**: Add PHP support
 2. **Custom Metrics**: Allow user-defined metrics
 3. **API Integration**: Fetch real-time metrics from CI/CD
 4. **Trend Charts**: Add time-series visualization
