@@ -20,6 +20,7 @@ EXPECTED_COMMANDS: dict[str, list[str]] = {
     "ruby": ["bundle install", "rspec"],
     "swift": ["swift build", "swift test"],
     "kotlin": ["./gradlew build", "./gradlew test"],
+    "cpp": ["cmake --build build", "ctest --test-dir build"],
 }
 
 
@@ -549,3 +550,68 @@ class TestKotlinReadme:
         with tempfile.TemporaryDirectory() as tmpdir:
             content = self._readme_content(tmpdir)
             assert "./scripts/check-all.sh" in content
+
+
+class TestCppReadme:
+    """Test C/C++ Tizen-specific README content (#361)."""
+
+    @staticmethod
+    def _readme_content(tmpdir: str) -> str:
+        """Generate the cpp README and return its text.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            The rendered README.md content.
+        """
+        config = ReadmeConfig(
+            project_name="test-project",
+            language="cpp",
+            package_name="test_project",
+        )
+        files = ReadmeGenerator(Path(tmpdir), config).generate()
+        readme_path: Path = files["README.md"]
+        return readme_path.read_text()
+
+    def test_cpp_readme_mentions_tizen_watch_target(self) -> None:
+        """cpp README documents the Tizen native Galaxy Watch target."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Tizen" in content
+            assert "Galaxy Watch" in content
+            assert "org.example.testproject" in content
+
+    def test_cpp_readme_discloses_planned_tooling(self) -> None:
+        """README lists #362/#363 tooling as planned, not generated."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Planned / coming soon" in content
+            assert "not yet generated" in content
+
+    def test_cpp_readme_never_checkmarks_planned_tooling(self) -> None:
+        """No planned feature (lint, pre-commit, CI) carries a checkmark."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+
+            planned = ("clang-format", "clang-tidy", "Pre-commit", "CI/CD")
+            for feature in planned:
+                assert not any(
+                    "✅" in line and feature in line for line in content.splitlines()
+                ), f"README must not checkmark planned feature: {feature}"
+
+    def test_cpp_readme_documents_tizen_studio_split(self) -> None:
+        """README explains the plain-CMake vs Tizen Studio build split."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Tizen Studio" in content
+            assert "tizen package" in content
+            assert "no Tizen Studio" in content
+
+    def test_cpp_readme_documents_cmake_conan_commands(self) -> None:
+        """README documents the Conan install and CMake/CTest commands."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "conan install . --output-folder=build --build=missing" in content
+            assert "cmake --build build" in content
+            assert "ctest --test-dir build" in content

@@ -14,6 +14,9 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.cpp import TIZEN_API_VERSION
+from start_green_stay_green.utils.cpp import cpp_identifier
+from start_green_stay_green.utils.cpp import tizen_app_id
 from start_green_stay_green.utils.kotlin import android_package
 from start_green_stay_green.utils.kotlin import android_package_path
 from start_green_stay_green.utils.naming import pascal_case
@@ -60,11 +63,11 @@ class StructureGenerator(BaseGenerator):
     This generator creates the source code directory structure (package directory,
     __init__.py, Hello World starter code) for the target project's language.
 
-    All 9 supported languages (python, typescript, go, rust, java, csharp,
-    ruby, swift, kotlin) are available at the generator level. Note that the
-    full CLI pipeline (``sgsg init``) skips its quality-tooling steps
+    All 10 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift, kotlin, cpp) are available at the generator level. Note that
+    the full CLI pipeline (``sgsg init``) skips its quality-tooling steps
     (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
-    and kotlin; Kotlin's tooling arrives with #357/#358.
+    and cpp; C/C++ tooling arrives with #362/#363.
 
     Attributes:
         output_dir: Directory where structure will be created
@@ -139,6 +142,7 @@ class StructureGenerator(BaseGenerator):
             "ruby": self._generate_ruby_structure,
             "swift": self._generate_swift_structure,
             "kotlin": self._generate_kotlin_structure,
+            "cpp": self._generate_cpp_structure,
         }
         return generators[self.config.language]()
 
@@ -960,4 +964,260 @@ fun WearApp() {{
         }}
     }}
 }}
+"""
+
+    def _generate_cpp_structure(self) -> dict[str, Path]:
+        """Generate the C/C++ Tizen native watch-app structure (#361).
+
+        Creates the Tizen native source tree: a watch-app entry point
+        (``src/main.cpp``, appcore ``watch_app`` lifecycle + EFL UI), a
+        pure-logic translation unit (``src/greeting.cpp`` with its header
+        ``inc/greeting.h``) that the Catch2 scaffold unit-tests without
+        Tizen Studio, the ``tizen-manifest.xml`` watch-application
+        manifest (wearable profile), and resource-placeholder notes under
+        ``res/`` and ``shared/res/``. The CMake/Conan build manifests are
+        owned by
+        :class:`~start_green_stay_green.generators.dependencies.DependenciesGenerator`.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        src_dir = self.output_dir / "src"
+        inc_dir = self.output_dir / "inc"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        inc_dir.mkdir(parents=True, exist_ok=True)
+
+        files["src/main.cpp"] = self._write_file(
+            src_dir / "main.cpp", self._cpp_main_cpp()
+        )
+        files["src/greeting.cpp"] = self._write_file(
+            src_dir / "greeting.cpp", self._cpp_greeting_cpp()
+        )
+        files["inc/greeting.h"] = self._write_file(
+            inc_dir / "greeting.h", self._cpp_greeting_h()
+        )
+        files["tizen-manifest.xml"] = self._write_file(
+            self.output_dir / "tizen-manifest.xml", self._cpp_tizen_manifest()
+        )
+
+        # Resource placeholders: the directories matter to Tizen Studio's
+        # project layout, but icons are binary artifacts the generator
+        # never writes, so a note documents them instead.
+        res_dir = self.output_dir / "res"
+        shared_res_dir = self.output_dir / "shared" / "res"
+        res_dir.mkdir(parents=True, exist_ok=True)
+        shared_res_dir.mkdir(parents=True, exist_ok=True)
+        files["res/README.md"] = self._write_file(
+            res_dir / "README.md", self._cpp_res_note()
+        )
+        files["shared/res/README.md"] = self._write_file(
+            shared_res_dir / "README.md", self._cpp_shared_res_note()
+        )
+
+        return files
+
+    def _cpp_main_cpp(self) -> str:
+        """Generate the Tizen native watch-app entry point ``src/main.cpp``.
+
+        The greeting text is assembled by ``format_greeting()`` in its own
+        translation unit (``src/greeting.cpp``) so the generated Catch2
+        scaffold can exercise real logic with plain CMake + Conan, without
+        the Tizen SDK headers this file needs.
+
+        Returns:
+            Content for the watch-app (appcore) + EFL entry-point source.
+        """
+        namespace = cpp_identifier(self.config.package_name)
+        return f"""// Tizen native watch-app entry point for {self.config.project_name}.
+//
+// NOTE: this file needs the Tizen native SDK headers (watch_app.h, EFL)
+// and is built by Tizen Studio, NOT by the plain CMake build — see
+// CMakeLists.txt and the README for the build split.
+#include <watch_app.h>
+#include <watch_app_efl.h>
+#include <Elementary.h>
+
+#include <cstdio>
+
+#include "greeting.h"
+
+namespace {{
+
+struct appdata_s {{
+    Evas_Object *win = nullptr;
+    Evas_Object *conform = nullptr;
+    Evas_Object *label = nullptr;
+}};
+
+// Renders the greeting and the current time onto the watch face label.
+void update_watch_label(appdata_s *ad, watch_time_h watch_time) {{
+    if (ad->label == nullptr || watch_time == nullptr) {{
+        return;
+    }}
+
+    int hour24 = 0;
+    int minute = 0;
+    watch_time_get_hour24(watch_time, &hour24);
+    watch_time_get_minute(watch_time, &minute);
+
+    const std::string greeting =
+        {namespace}::format_greeting("{self.config.project_name}");
+    char text[256];
+    std::snprintf(text, sizeof(text),
+                  "<align=center>%s<br/>%02d:%02d</align>",
+                  greeting.c_str(), hour24, minute);
+    elm_object_text_set(ad->label, text);
+}}
+
+// Builds the base EFL UI: window, conformant, and the greeting label.
+void create_base_gui(appdata_s *ad, int width, int height) {{
+    watch_app_get_elm_win(&ad->win);
+    evas_object_resize(ad->win, width, height);
+
+    ad->conform = elm_conformant_add(ad->win);
+    evas_object_size_hint_weight_set(ad->conform, EVAS_HINT_EXPAND,
+                                     EVAS_HINT_EXPAND);
+    elm_win_resize_object_add(ad->win, ad->conform);
+    evas_object_show(ad->conform);
+
+    ad->label = elm_label_add(ad->conform);
+    evas_object_resize(ad->label, width, height / 3);
+    evas_object_move(ad->label, 0, height / 3);
+    evas_object_show(ad->label);
+
+    evas_object_show(ad->win);
+}}
+
+bool app_create(int width, int height, void *data) {{
+    auto *ad = static_cast<appdata_s *>(data);
+    create_base_gui(ad, width, height);
+    return true;
+}}
+
+void app_terminate(void * /*data*/) {{
+    // Release any resources acquired in app_create here.
+}}
+
+void app_time_tick(watch_time_h watch_time, void *data) {{
+    auto *ad = static_cast<appdata_s *>(data);
+    update_watch_label(ad, watch_time);
+}}
+
+}}  // namespace
+
+int main(int argc, char *argv[]) {{
+    appdata_s ad;
+    watch_app_lifecycle_callback_s callbacks = {{}};
+    callbacks.create = app_create;
+    callbacks.terminate = app_terminate;
+    callbacks.time_tick = app_time_tick;
+
+    return watch_app_main(argc, argv, &callbacks, &ad);
+}}
+"""
+
+    def _cpp_greeting_h(self) -> str:
+        """Generate the pure-logic header ``inc/greeting.h``.
+
+        Returns:
+            Header declaring ``format_greeting`` in the project namespace.
+            This translation unit has no Tizen dependencies, which is what
+            lets the Catch2 scaffold build with plain CMake + Conan.
+        """
+        namespace = cpp_identifier(self.config.package_name)
+        return f"""// Pure greeting logic for {self.config.project_name}: no Tizen
+// dependencies, so the unit tests build with plain CMake + Conan.
+#pragma once
+
+#include <string>
+
+namespace {namespace} {{
+
+// Returns the greeting assembled from the project name.
+std::string format_greeting(const std::string &project_name);
+
+}}  // namespace {namespace}
+"""
+
+    def _cpp_greeting_cpp(self) -> str:
+        """Generate the pure-logic translation unit ``src/greeting.cpp``.
+
+        Returns:
+            Implementation of ``format_greeting`` (string assembly the
+            Catch2 scaffold exercises).
+        """
+        namespace = cpp_identifier(self.config.package_name)
+        return f"""#include "greeting.h"
+
+namespace {namespace} {{
+
+std::string format_greeting(const std::string &project_name) {{
+    return "Hello from " + project_name + "!";
+}}
+
+}}  // namespace {namespace}
+"""
+
+    def _cpp_tizen_manifest(self) -> str:
+        """Generate the Tizen watch-application ``tizen-manifest.xml``.
+
+        Returns:
+            Well-formed manifest XML declaring the wearable profile, the
+            ``watch-application`` element (app ID from the shared
+            :func:`~start_green_stay_green.utils.cpp.tizen_app_id`
+            helper), and the ``watch_app`` feature. The icon PNG is a
+            binary artifact the generator never writes; an XML comment
+            and ``shared/res/README.md`` document adding it via Tizen
+            Studio.
+        """
+        app_id = tizen_app_id(self.config.package_name)
+        exec_name = cpp_identifier(self.config.package_name)
+        return f"""<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns="http://tizen.org/ns/packages" api-version="{TIZEN_API_VERSION}" \
+package="{app_id}" version="0.1.0">
+    <profile name="wearable" />
+    <watch-application appid="{app_id}" exec="{exec_name}" ambient-support="false">
+        <label>{self.config.project_name}</label>
+        <!-- The icon PNG is a binary artifact and is NOT generated; add
+             shared/res/{exec_name}.png via Tizen Studio before packaging
+             (see shared/res/README.md). -->
+        <icon>{exec_name}.png</icon>
+    </watch-application>
+    <feature name="http://tizen.org/feature/watch_app">true</feature>
+</manifest>
+"""
+
+    def _cpp_res_note(self) -> str:
+        """Generate the ``res/README.md`` resource-placeholder note.
+
+        Returns:
+            Note explaining what belongs in ``res/`` and why it starts
+            empty (binary assets are never generated).
+        """
+        return f"""# res/
+
+Private resources for the {self.config.project_name} Tizen watch app
+(EDC layouts, images, sounds). The directory starts empty because the
+scaffold never generates binary assets; add resources here via Tizen
+Studio as the app grows.
+"""
+
+    def _cpp_shared_res_note(self) -> str:
+        """Generate the ``shared/res/README.md`` icon-placeholder note.
+
+        Returns:
+            Note explaining that the launcher icon referenced by
+            ``tizen-manifest.xml`` is a binary the user must supply.
+        """
+        exec_name = cpp_identifier(self.config.package_name)
+        return f"""# shared/res/
+
+Shared resources for the {self.config.project_name} Tizen watch app.
+
+`tizen-manifest.xml` references the launcher icon `{exec_name}.png`,
+which must live in this directory. Icons are binary artifacts and are
+NOT generated by the scaffold — add one via Tizen Studio (or copy a
+512x512 PNG here) before packaging the `.tpk`.
 """

@@ -27,6 +27,7 @@ SUPPORTED_LANGUAGES: tuple[str, ...] = (
     "ruby",
     "swift",
     "kotlin",
+    "cpp",
 )
 
 

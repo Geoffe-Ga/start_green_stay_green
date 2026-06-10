@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.cpp import cpp_identifier
 from start_green_stay_green.utils.kotlin import android_package
 from start_green_stay_green.utils.kotlin import android_package_path
 from start_green_stay_green.utils.naming import pascal_case
@@ -59,11 +60,11 @@ class TestsGenerator(BaseGenerator):
     This generator creates the tests directory structure (tests/, tests/__init__.py,
     tests/test_main.py) with a passing test for the Hello World code.
 
-    All 9 supported languages (python, typescript, go, rust, java, csharp,
-    ruby, swift, kotlin) are available at the generator level. Note that the
-    full CLI pipeline (``sgsg init``) skips its quality-tooling steps
+    All 10 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift, kotlin, cpp) are available at the generator level. Note that
+    the full CLI pipeline (``sgsg init``) skips its quality-tooling steps
     (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
-    and kotlin; Kotlin's tooling arrives with #357/#358.
+    and cpp; C/C++ tooling arrives with #362/#363.
 
     Attributes:
         output_dir: Directory where tests structure will be created
@@ -138,6 +139,7 @@ class TestsGenerator(BaseGenerator):
             "ruby": self._generate_ruby_tests,
             "swift": self._generate_swift_tests,
             "kotlin": self._generate_kotlin_tests,
+            "cpp": self._generate_cpp_tests,
         }
         return generators[self.config.language]()
 
@@ -692,5 +694,59 @@ greeting("{self.config.project_name}"))
     fun greetingReflectsAnArbitraryName() {{
         assertEquals("Hello from wear!", greeting("wear"))
     }}
+}}
+"""
+
+    def _generate_cpp_tests(self) -> dict[str, Path]:
+        """Generate the C++ Catch2 unit-test scaffold (#361).
+
+        Creates ``tests/test_greeting.cpp``, a Catch2 v3 test that links
+        only the pure-logic ``greeting`` library — it builds with plain
+        CMake + Conan (no Tizen Studio), so later coverage gates (#362)
+        can run it on any CI host.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        tests_dir = self.output_dir / "tests"
+        tests_dir.mkdir(parents=True, exist_ok=True)
+
+        files["tests/test_greeting.cpp"] = self._write_file(
+            tests_dir / "test_greeting.cpp",
+            self._cpp_greeting_test(),
+        )
+
+        return files
+
+    def _cpp_greeting_test(self) -> str:
+        """Generate the Catch2 test content.
+
+        The generated test exercises real behavior rather than comparing
+        two identical string literals: it calls the scaffold's
+        ``format_greeting`` function (string assembly in
+        ``src/greeting.cpp``) with both the project name and an arbitrary
+        name, so the equality assertions verify the assembly logic.
+
+        Returns:
+            Content for the Catch2 test source file.
+        """
+        namespace = cpp_identifier(self.config.package_name)
+        return f"""// Catch2 tests for the pure greeting logic (src/greeting.cpp).
+// Builds with plain CMake + Conan — no Tizen Studio required.
+#include <catch2/catch_test_macros.hpp>
+
+#include "greeting.h"
+
+TEST_CASE("greeting is assembled from the project name", "[greeting]") {{
+    // format_greeting() assembles its argument into the message, so this
+    // verifies real logic rather than comparing two identical literals.
+    REQUIRE({namespace}::format_greeting("{self.config.project_name}") ==
+            "Hello from {self.config.project_name}!");
+}}
+
+TEST_CASE("greeting reflects an arbitrary name", "[greeting]") {{
+    REQUIRE({namespace}::format_greeting("tizen") == "Hello from tizen!");
 }}
 """

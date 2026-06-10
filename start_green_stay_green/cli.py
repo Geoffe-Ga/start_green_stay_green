@@ -1609,6 +1609,18 @@ _LANG_SETUP_STEPS: dict[str, list[str]] = {
     # The Gradle wrapper jar is a binary the generator never writes, so
     # the first step materialises it from a local Gradle install (#356).
     "kotlin": ["gradle wrapper", "./gradlew build"],
+    # Plain CMake + Conan builds the pure-logic library and Catch2 tests;
+    # .tpk packaging needs Tizen Studio, which init cannot install (#361).
+    "cpp": [
+        "conan install . --output-folder=build --build=missing",
+        (
+            "cmake -B build -S . "
+            "-DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake "
+            "-DCMAKE_BUILD_TYPE=Release"
+        ),
+        "cmake --build build",
+        "ctest --test-dir build",
+    ],
 }
 
 
@@ -2173,6 +2185,13 @@ _LANGUAGE_PROBES: tuple[tuple[str, str], ...] = (
     ("Gemfile", "ruby"),
     ("composer.json", "php"),
     ("Package.swift", "swift"),
+    # cpp probes come last: tizen-manifest.xml and conanfile.txt are
+    # unambiguous, but CMakeLists.txt also appears in other ecosystems'
+    # projects (e.g. Rust or Swift packages vendoring native code), so
+    # every more specific manifest above must win first (#361).
+    ("tizen-manifest.xml", "cpp"),
+    ("conanfile.txt", "cpp"),
+    ("CMakeLists.txt", "cpp"),
 )
 
 # Pattern for the H1 line in a generated CLAUDE.md file.

@@ -14,6 +14,10 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.cpp import CATCH2_VERSION
+from start_green_stay_green.utils.cpp import CMAKE_MINIMUM_VERSION
+from start_green_stay_green.utils.cpp import CPP_STANDARD
+from start_green_stay_green.utils.cpp import cpp_identifier
 from start_green_stay_green.utils.kotlin import ACTIVITY_COMPOSE_VERSION
 from start_green_stay_green.utils.kotlin import AGP_VERSION
 from start_green_stay_green.utils.kotlin import COMPOSE_BOM_VERSION
@@ -68,12 +72,11 @@ class DependenciesGenerator(BaseGenerator):
     pyproject.toml) with appropriate dependencies and tool configurations for the
     target project's language and tooling.
 
-    All 9 supported languages (python, typescript, go, rust, java, csharp,
-    ruby, swift, kotlin) are available at the generator level. Note that the
-    full CLI pipeline (``sgsg init``) skips its quality-tooling steps
-    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, and
-    ruby; Kotlin's quality tooling landed with #357 and only its CI step
-    (#358) still skips.
+    All 10 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift, kotlin, cpp) are available at the generator level. Note that
+    the full CLI pipeline (``sgsg init``) skips its quality-tooling steps
+    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
+    and cpp; C/C++ tooling arrives with #362/#363.
 
     Attributes:
         output_dir: Directory where dependency files will be written
@@ -148,6 +151,7 @@ class DependenciesGenerator(BaseGenerator):
             "ruby": self._generate_ruby_dependencies,
             "swift": self._generate_swift_dependencies,
             "kotlin": self._generate_kotlin_dependencies,
+            "cpp": self._generate_cpp_dependencies,
         }
         return generators[self.config.language]()
 
@@ -904,4 +908,103 @@ dependencies {{
     // and it compiles with no further dependency edits.
     testImplementation("com.lemonappdev:konsist:{KONSIST_VERSION}")
 }}
+"""
+
+    def _generate_cpp_dependencies(self) -> dict[str, Path]:
+        """Generate the CMake + Conan manifests for the Tizen scaffold (#361).
+
+        Emits ``CMakeLists.txt`` (pure-logic library + Catch2 test target,
+        buildable WITHOUT Tizen Studio) and ``conanfile.txt`` (Catch2 via
+        Conan 2). ``conanfile.txt`` is used rather than ``conanfile.py``
+        because the scaffold needs only a static requires/generators list
+        — no custom packaging logic — and the txt form is the simpler,
+        declarative option. The ``.tpk`` packaging path (Tizen Studio CLI)
+        is deliberately NOT generated; both manifests and the README
+        disclose it.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        files["CMakeLists.txt"] = self._write_file(
+            "CMakeLists.txt",
+            self._cpp_cmakelists(),
+        )
+        files["conanfile.txt"] = self._write_file(
+            "conanfile.txt",
+            self._cpp_conanfile_txt(),
+        )
+
+        return files
+
+    def _cpp_cmakelists(self) -> str:
+        """Generate ``CMakeLists.txt`` for the Tizen watch-app scaffold.
+
+        Returns:
+            CMake build covering the pure-logic ``greeting`` library and
+            its Catch2 test target only. ``src/main.cpp`` (the Tizen
+            watch_app + EFL entry point) is deliberately excluded: it
+            needs the Tizen native SDK, and ``.tpk`` packaging is done by
+            the Tizen Studio CLI, which the generator can neither create
+            nor install. That split is what keeps the unit tests runnable
+            on any host with CMake + Conan.
+        """
+        project = cpp_identifier(self.config.package_name)
+        return f"""# CMake build for the {self.config.project_name} Tizen watch app.
+#
+# Scope: ONLY the pure-logic library and its Catch2 unit tests. The Tizen
+# watch-app entry point (src/main.cpp) needs the Tizen native SDK headers
+# and the .tpk package is produced by the Tizen Studio CLI
+# (tizen build-native / tizen package), which cannot be generated or
+# installed by this scaffold — see the README. This split keeps the unit
+# tests buildable on any host with CMake + Conan, no Tizen Studio needed:
+#
+#   conan install . --output-folder=build --build=missing
+#   cmake -B build -S . \\
+#       -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake \\
+#       -DCMAKE_BUILD_TYPE=Release
+#   cmake --build build
+#   ctest --test-dir build
+cmake_minimum_required(VERSION {CMAKE_MINIMUM_VERSION})
+project({project} VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD {CPP_STANDARD})
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Pure greeting logic: no Tizen dependencies (src/greeting.cpp + inc/).
+add_library(greeting src/greeting.cpp)
+target_include_directories(greeting PUBLIC inc)
+
+# Catch2 unit tests (dependency managed by Conan, see conanfile.txt).
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Catch2 3 REQUIRED)
+    add_executable(greeting_tests tests/test_greeting.cpp)
+    target_link_libraries(greeting_tests PRIVATE greeting Catch2::Catch2WithMain)
+    include(Catch)
+    catch_discover_tests(greeting_tests)
+endif()
+"""
+
+    def _cpp_conanfile_txt(self) -> str:
+        """Generate ``conanfile.txt`` for the Tizen watch-app scaffold.
+
+        Returns:
+            Conan 2 manifest pinning Catch2 (the test framework) and the
+            CMakeDeps/CMakeToolchain generators that the documented CMake
+            invocation consumes. Only the host-buildable test dependency
+            is listed: the Tizen native SDK is provided by Tizen Studio,
+            not by Conan.
+        """
+        return f"""# Conan 2 manifest for {self.config.project_name}.
+# Catch2 backs the unit-test scaffold (tests/test_greeting.cpp); the
+# Tizen native SDK is provided by Tizen Studio, not by Conan.
+[requires]
+catch2/{CATCH2_VERSION}
+
+[generators]
+CMakeDeps
+CMakeToolchain
 """
