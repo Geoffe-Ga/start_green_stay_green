@@ -793,7 +793,7 @@ All contributions must:
 - ✅ Swift (watchOS) language support — scaffold, quality tooling, CI, tests (#351, #352, #353, #354)
 - ✅ Kotlin (Wear OS) language support — scaffold, quality tooling, CI, tests (#356, #357, #358, #359)
 - ✅ C/C++ (Tizen native) language support — scaffold, quality tooling, CI, tests (#361, #362, #363, #364)
-- ✅ Java (Wear OS legacy) language support — scaffold, quality tooling, CI, tests (#366, #367, #368)
+- ✅ Java (Wear OS legacy) language support — scaffold, quality tooling, CI, tests, docs (#366, #367, #368, #369)
 
 ### Planned
 

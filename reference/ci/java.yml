@@ -76,8 +76,8 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
-      - name: Build with Maven
-        run: mvn clean package -DskipTests
-
-      - name: Verify package
-        run: mvn verify -DskipTests
+      # `verify` runs the full lifecycle through package, so a single
+      # invocation both builds and verifies; a separate package step
+      # would just build twice.
+      - name: Build and verify package
+        run: mvn clean verify -DskipTests

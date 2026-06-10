@@ -2241,14 +2241,17 @@ class TestJavaReferenceTemplate:
         """The build job packages the JAR; the suite ran once in quality.
 
         -DskipTests keeps the single coverage-gated test execution in
-        the quality job (the Swift PR #414 no-double-test-run lesson).
+        the quality job (the Swift PR #414 no-double-test-run lesson),
+        and a single `mvn clean verify` invocation both builds and
+        verifies — verify runs the lifecycle through package, so a
+        separate package step would just build twice.
         """
         parsed = yaml.safe_load(java_workflow.content)
         build_commands = [
             step.get("run", "") for step in parsed["jobs"]["build"]["steps"]
         ]
-        assert any("mvn clean package -DskipTests" in cmd for cmd in build_commands)
-        assert any("mvn verify -DskipTests" in cmd for cmd in build_commands)
+        assert any("mvn clean verify -DskipTests" in cmd for cmd in build_commands)
+        assert not any("mvn clean package -DskipTests" in cmd for cmd in build_commands)
 
     def test_android_packaging_documented_not_stubbed(
         self, java_workflow: CIWorkflow
