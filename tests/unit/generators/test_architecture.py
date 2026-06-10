@@ -1470,16 +1470,43 @@ class TestLanguageTooling:
         assert "{config_file}" not in tooling.run_cmd
         assert f"plans/architecture/{tooling.config_file}" in tooling.install_cmd
 
+    def test_java_install_cmd_resolves_package_matched_path(self) -> None:
+        """Java's install command targets the package-matching directory.
+
+        javac requires ArchitectureTest.java to live in the directory
+        matching its declared package; a flat copy into src/test/java/
+        is a guaranteed compile error (kotlinc tolerates the flat copy,
+        javac does not).
+        """
+        cmd = ArchitectureEnforcementGenerator._resolved_install_cmd(
+            "java", "my-watch-app"
+        )
+        assert "mkdir -p src/test/java/com/example/my_watch_app/architecture" in cmd
+        assert "src/test/java/com/example/my_watch_app/architecture/" in cmd
+        assert "{package_path}" not in cmd
+
+    def test_non_java_install_cmds_pass_through_unchanged(self) -> None:
+        """Languages without the placeholder return their command as-is."""
+        for language in ("python", "kotlin", "cpp"):
+            cmd = ArchitectureEnforcementGenerator._resolved_install_cmd(
+                language, "my-app"
+            )
+            assert cmd == _LANGUAGE_TOOLING[language].install_cmd
+
     def test_build_run_script_uses_display_name_not_a_dict(self) -> None:
         """_build_run_script reads display_name from the dataclass."""
         for language in _LANGUAGE_TOOLING:
-            script = ArchitectureEnforcementGenerator._build_run_script(language)
+            script = ArchitectureEnforcementGenerator._build_run_script(
+                language, "my-app"
+            )
             assert _LANGUAGE_TOOLING[language].display_name in script
 
     def test_build_run_script_prefixes_config_via_template(self) -> None:
         """The plans/architecture prefix is inserted via the template."""
         for language, tooling in _LANGUAGE_TOOLING.items():
-            script = ArchitectureEnforcementGenerator._build_run_script(language)
+            script = ArchitectureEnforcementGenerator._build_run_script(
+                language, "my-app"
+            )
             assert f"plans/architecture/{tooling.config_file}" in script
 
     def test_template_prefix_immune_to_substring_collision(self) -> None:

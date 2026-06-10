@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import warnings
 
 from start_green_stay_green.utils.java import android_package
+from start_green_stay_green.utils.java import android_package_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -157,17 +158,19 @@ _LANGUAGE_TOOLING: dict[str, _LanguageTooling] = {
         display_name="C/C++",
     ),
     "java": _LanguageTooling(
-        # ArchUnit is the canonical Java architecture-testing library
-        # (JUnit-based, the Konsist analogue for Java). Its 'config' is
-        # a test compiled into the project: the Maven run command takes
-        # no config-file flag (run_cmd carries no {config_file}
-        # placeholder), and the one-time wiring step — copy the template
-        # into src/test/java — lives in install_cmd. The archunit test
-        # dependency is already declared in the generated pom.xml
-        # (the #357 manifest-touch precedent).
+        # ArchUnit's 'config' is a test compiled into the project, so
+        # run_cmd carries no {config_file} placeholder and the one-time
+        # wiring lives in install_cmd. The {package_path} placeholder is
+        # resolved per-project by _resolved_install_cmd: javac requires
+        # the file to sit in its package-matching directory (unlike
+        # kotlinc, which tolerates the flat copy the Kotlin entry uses).
         tool="ArchUnit",
         config_file="ArchitectureTest.java",
-        install_cmd="cp plans/architecture/ArchitectureTest.java src/test/java/",
+        install_cmd=(
+            "mkdir -p src/test/java/{package_path} && "
+            "cp plans/architecture/ArchitectureTest.java "
+            "src/test/java/{package_path}/"
+        ),
         run_cmd="mvn test -Dtest=ArchitectureTest",
         docs_url="https://www.archunit.org/",
         display_name="Java",
@@ -977,8 +980,11 @@ if __name__ == "__main__":
 //
 // Wiring (one-time): this file is a template parked in
 // plans/architecture; it only enforces once it lives in a test source
-// set. Copy it in and run:
-//   cp plans/architecture/ArchitectureTest.java src/test/java/
+// set. javac requires the file to sit in the directory matching its
+// declared package, so copy it in and run:
+//   mkdir -p src/test/java/{namespace.replace(".", "/")}/architecture
+//   cp plans/architecture/ArchitectureTest.java \\
+//       src/test/java/{namespace.replace(".", "/")}/architecture/
 //   mvn test -Dtest=ArchitectureTest
 // The archunit test dependency is already declared in pom.xml.
 //
@@ -1066,7 +1072,7 @@ public class ArchitectureTest {{
 
         tooling = _LANGUAGE_TOOLING[language]
         tool = tooling.tool
-        install_cmd = tooling.install_cmd
+        install_cmd = self._resolved_install_cmd(language, project_name)
         # Manual invocation runs from the config directory, so the bare
         # config filename is correct here (no plans/architecture/ prefix).
         run_cmd = tooling.run_cmd.format(config_file=tooling.config_file)
@@ -1170,9 +1176,7 @@ Add to CI pipeline:
         readme_path.write_text(readme_content)
         return readme_path
 
-    def _generate_run_script(
-        self, language: str, project_name: str  # noqa: ARG002
-    ) -> Path:
+    def _generate_run_script(self, language: str, project_name: str) -> Path:
         """Generate executable run-check.sh script.
 
         Args:
@@ -1184,7 +1188,7 @@ Add to CI pipeline:
         """
         script_path = self.output_dir / "run-check.sh"
 
-        script_content = self._build_run_script(language)
+        script_content = self._build_run_script(language, project_name)
 
         script_path.write_text(script_content)
 
@@ -1194,7 +1198,30 @@ Add to CI pipeline:
         return script_path
 
     @staticmethod
-    def _build_run_script(language: str) -> str:
+    def _resolved_install_cmd(language: str, project_name: str) -> str:
+        """Resolve the install command's per-project placeholders.
+
+        Java's install command carries a ``{package_path}`` placeholder:
+        javac requires ``ArchitectureTest.java`` to live in the directory
+        matching its declared package, which derives from the project
+        name. Languages without the placeholder return their command
+        unchanged.
+
+        Args:
+            language: Target language.
+            project_name: Name of the project.
+
+        Returns:
+            The install command with any placeholders resolved.
+        """
+        install_cmd = _LANGUAGE_TOOLING[language].install_cmd
+        if "{package_path}" not in install_cmd:
+            return install_cmd
+        package_path = android_package_path(project_name) + "/architecture"
+        return install_cmd.replace("{package_path}", package_path)
+
+    @staticmethod
+    def _build_run_script(language: str, project_name: str) -> str:
         """Build the run-check.sh contents for a language.
 
         Derives the command and the binary-availability guard from the
@@ -1203,11 +1230,16 @@ Add to CI pipeline:
 
         Args:
             language: Target language.
+            project_name: Name of the project (resolves the install
+                command's per-project placeholders).
 
         Returns:
             The shell script source for run-check.sh.
         """
         tooling = _LANGUAGE_TOOLING[language]
+        install_cmd = ArchitectureEnforcementGenerator._resolved_install_cmd(
+            language, project_name
+        )
         # The first token of run_cmd is the binary to probe with command -v.
         binary = tooling.run_cmd.split()[0]
         # Fill the {config_file} placeholder with the path-prefixed config so
@@ -1223,7 +1255,7 @@ set -euo pipefail
 echo "🏛️  Checking {tooling.display_name} architecture with {tooling.tool}..."
 
 if ! command -v {binary} &> /dev/null; then
-    echo "❌ {tooling.tool} not found. Install with: {tooling.install_cmd}"
+    echo "❌ {tooling.tool} not found. Install with: {install_cmd}"
     exit 1
 fi
 
