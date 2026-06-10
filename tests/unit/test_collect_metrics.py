@@ -12,10 +12,15 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+import collect_metrics
 from collect_metrics import MetricsCollector
 from collect_metrics import main as collect_main
+
+from start_green_stay_green.generators.metrics import count_precommit_hooks
+from start_green_stay_green.generators.metrics import precommit_status
 
 
 class TestMetricsCollector:
@@ -740,6 +745,152 @@ class TestNewMetricMethods:
         assert collector.metrics["complexity_status"] == "unknown"
         assert collector.metrics["maintainability_avg"] is None
         assert collector.metrics["maintainability_status"] == "unknown"
+
+
+class TestCollectPrecommitStatus:
+    """Tests for pre-commit status collection (Issue #154)."""
+
+    def _write_config(self, path: Path, hook_count: int) -> Path:
+        """Write a .pre-commit-config.yaml with ``hook_count`` hooks."""
+        config_path = path / ".pre-commit-config.yaml"
+        config_path.write_text(
+            yaml.dump(
+                {
+                    "repos": [
+                        {
+                            "repo": "local",
+                            "hooks": [{"id": f"hook-{i}"} for i in range(hook_count)],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return config_path
+
+    def test_collect_precommit_status_counts_hooks(self) -> None:
+        """Pre-commit status records total/passing/percentage from config."""
+        with TemporaryDirectory() as tmpdir:
+            config_path = self._write_config(Path(tmpdir), 32)
+            collector = MetricsCollector("test", {})
+
+            collector.collect_precommit_status(config_path)
+
+            status = collector.metrics["precommit_status"]
+            assert status["total_hooks"] == 32
+            assert status["passing_hooks"] == 32
+            assert status["percentage"] == 100.0
+            assert status["status"] == "passing"
+
+    def test_collect_precommit_status_missing_config(self) -> None:
+        """Missing config degrades to zero hooks and unknown status."""
+        collector = MetricsCollector("test", {})
+
+        collector.collect_precommit_status(Path("/nonexistent/.pre-commit-config.yaml"))
+
+        status = collector.metrics["precommit_status"]
+        assert status["total_hooks"] == 0
+        assert status["passing_hooks"] == 0
+        assert status["percentage"] == 0.0
+        assert status["status"] == "unknown"
+
+    def test_collect_precommit_status_malformed_yaml(self) -> None:
+        """Malformed YAML degrades to unknown status without raising."""
+        with TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".pre-commit-config.yaml"
+            config_path.write_text("repos: [unterminated", encoding="utf-8")
+            collector = MetricsCollector("test", {})
+
+            collector.collect_precommit_status(config_path)
+
+            status = collector.metrics["precommit_status"]
+            assert status["total_hooks"] == 0
+            assert status["status"] == "unknown"
+
+    def test_collect_precommit_status_ignores_malformed_repos(self) -> None:
+        """Non-dict repos and hookless repos contribute zero hooks."""
+        with TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".pre-commit-config.yaml"
+            config_path.write_text(
+                yaml.dump(
+                    {
+                        "repos": [
+                            "not-a-mapping",
+                            {"repo": "no-hooks"},
+                            {"repo": "valid", "hooks": [{"id": "a"}, {"id": "b"}]},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            collector = MetricsCollector("test", {})
+
+            collector.collect_precommit_status(config_path)
+
+            status = collector.metrics["precommit_status"]
+            assert status["total_hooks"] == 2
+            assert status["status"] == "passing"
+
+    def test_collect_precommit_status_non_mapping_top_level(self) -> None:
+        """A top-level YAML list yields zero hooks and unknown status."""
+        with TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".pre-commit-config.yaml"
+            config_path.write_text("- a\n- b\n", encoding="utf-8")
+            collector = MetricsCollector("test", {})
+
+            collector.collect_precommit_status(config_path)
+
+            assert collector.metrics["precommit_status"]["total_hooks"] == 0
+
+    def test_uses_canonical_package_hook_counter(self) -> None:
+        """collect_metrics imports the canonical hook counter (no duplication).
+
+        Issue #154 DRY consolidation: the hook-counting helpers must live only
+        in ``start_green_stay_green.generators.metrics``. ``collect_metrics``
+        must import and reuse that canonical ``count_precommit_hooks`` rather
+        than redefining its own ``_load_precommit_repos`` / ``_repo_hook_count``
+        / ``_count_precommit_hooks`` copies.
+        """
+        # The duplicated private helpers must be gone from the script module.
+        assert not hasattr(collect_metrics, "_load_precommit_repos")
+        assert not hasattr(collect_metrics, "_repo_hook_count")
+        assert not hasattr(collect_metrics, "_count_precommit_hooks")
+        # The script re-exports the canonical helper (same object), so
+        # collected status matches the canonical count for the same config.
+        assert collect_metrics.__dict__["count_precommit_hooks"] is (
+            count_precommit_hooks
+        )
+        with TemporaryDirectory() as tmpdir:
+            config_path = self._write_config(Path(tmpdir), 7)
+            collector = MetricsCollector("test", {})
+
+            collector.collect_precommit_status(config_path)
+
+            assert collector.metrics["precommit_status"]["total_hooks"] == (
+                count_precommit_hooks(config_path)
+            )
+
+    def test_collect_precommit_status_delegates_to_shared_builder(self) -> None:
+        """The status dict is built by the canonical ``precommit_status`` helper.
+
+        Issue #154 DRY consolidation: ``collect_precommit_status`` must not
+        re-derive ``has_hooks``/``passing_hooks``/``percentage``/``status``;
+        it must delegate dict construction to the shared
+        ``precommit_status`` builder in the metrics generator module.
+        """
+        with TemporaryDirectory() as tmpdir:
+            config_path = self._write_config(Path(tmpdir), 13)
+            collector = MetricsCollector("test", {})
+
+            with patch.object(
+                collect_metrics,
+                "precommit_status",
+                wraps=precommit_status,
+            ) as spy:
+                collector.collect_precommit_status(config_path)
+
+            spy.assert_called_once_with(13)
+            assert collector.metrics["precommit_status"] == precommit_status(13)
 
 
 class TestMainScriptMode:

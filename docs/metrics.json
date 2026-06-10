@@ -10,6 +10,12 @@
     "security_issues": 0
   },
   "metrics": {
+    "precommit_status": {
+      "total_hooks": 31,
+      "passing_hooks": 31,
+      "percentage": 100.0,
+      "status": "passing"
+    },
     "coverage": 92.62,
     "coverage_status": "pass",
     "branch_coverage": 90.26,

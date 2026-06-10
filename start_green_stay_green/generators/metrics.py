@@ -54,6 +54,100 @@ DANGEROUS_PATHS = {
 }
 
 
+def _load_precommit_repos(config_path: Path) -> list[object]:
+    """Load the ``repos`` list from a pre-commit config, degrading to ``[]``.
+
+    Args:
+        config_path: Path to a ``.pre-commit-config.yaml`` file.
+
+    Returns:
+        The ``repos`` list, or an empty list when the file is absent,
+        unreadable, or malformed.
+    """
+    if not config_path.is_file():
+        return []
+
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return []
+
+    repos = data.get("repos") if isinstance(data, dict) else None
+    return repos if isinstance(repos, list) else []
+
+
+def _repo_hook_count(repo: object) -> int:
+    """Return the number of hooks declared by a single pre-commit repo entry.
+
+    Args:
+        repo: A single entry from the pre-commit ``repos`` list.
+
+    Returns:
+        Hook count for the entry, or ``0`` when it is malformed.
+    """
+    if not isinstance(repo, dict):
+        return 0
+    hooks = repo.get("hooks")
+    return len(hooks) if isinstance(hooks, list) else 0
+
+
+def count_precommit_hooks(config_path: Path) -> int:
+    """Count the total number of hooks in a pre-commit config file.
+
+    Canonical, public hook-counting helper. Sums the ``hooks`` entries
+    across every ``repos`` entry in a ``.pre-commit-config.yaml``. Missing,
+    empty, or malformed configs degrade gracefully to ``0`` so callers (the
+    dashboard generator and ``scripts/collect_metrics.py``) can still render
+    a meaningful Pre-Commit Status card without duplicating this logic.
+
+    Args:
+        config_path: Path to a ``.pre-commit-config.yaml`` file.
+
+    Returns:
+        Total hook count, or ``0`` when the file is absent or has no hooks.
+    """
+    repos = _load_precommit_repos(config_path)
+    return sum(_repo_hook_count(repo) for repo in repos)
+
+
+def precommit_status(
+    total_hooks: int, passing_hooks: int | None = None
+) -> dict[str, object]:
+    """Build the canonical Pre-Commit Status dict for the metrics dashboard.
+
+    Single source of truth (Issue #154 DRY consolidation) for the
+    ``precommit_status`` mapping consumed by the dashboard's Pre-Commit
+    Status card. Both ``start_green_stay_green.cli._initial_precommit_status``
+    and ``scripts/collect_metrics.py`` delegate here instead of rebuilding the
+    ``total_hooks``/``passing_hooks``/``percentage``/``status`` fields
+    themselves.
+
+    When ``total_hooks`` is ``0`` (no ``.pre-commit-config.yaml`` found) the
+    status is ``"unknown"`` so the dashboard renders the gray "N/A" no-data
+    treatment instead of a red FAILING card. Otherwise the status is
+    ``"passing"`` and the percentage reflects ``passing_hooks / total_hooks``.
+
+    Args:
+        total_hooks: Total hooks counted from ``.pre-commit-config.yaml``.
+        passing_hooks: Hooks treated as passing. Defaults to ``total_hooks``
+            (configured hooks are assumed passing for the snapshot).
+
+    Returns:
+        A ``precommit_status`` mapping with ``total_hooks``,
+        ``passing_hooks``, ``percentage`` and ``status`` keys.
+    """
+    if passing_hooks is None:
+        passing_hooks = total_hooks
+    has_hooks = total_hooks > 0
+    percentage = (passing_hooks / total_hooks * 100) if has_hooks else 0.0
+    return {
+        "total_hooks": total_hooks,
+        "passing_hooks": passing_hooks,
+        "percentage": percentage,
+        "status": "passing" if has_hooks else "unknown",
+    }
+
+
 @dataclass(frozen=True)
 class MetricConfig:
     """Configuration for a single quality metric.
@@ -91,6 +185,10 @@ class MetricsGenerationConfig:
         debt_ratio_threshold: Max technical debt ratio (0-100).
         doc_coverage_threshold: Documentation coverage threshold (0-100).
         dependency_freshness_days: Max dependency age in days.
+        precommit_hooks_total: Total number of pre-commit hooks configured
+            (derived from ``.pre-commit-config.yaml``). Rendered as the
+            denominator of the Pre-Commit Status card's ``X/Y Hooks``
+            threshold. Defaults to 0 when no config is available.
         enable_sonarqube: Whether to generate SonarQube config.
         enable_badges: Whether to generate GitHub badges.
         enable_dashboard: Whether to generate dashboard template.
@@ -107,6 +205,7 @@ class MetricsGenerationConfig:
     debt_ratio_threshold: int = 5
     doc_coverage_threshold: int = 95
     dependency_freshness_days: int = 30
+    precommit_hooks_total: int = 0
     enable_sonarqube: bool = False
     enable_badges: bool = True
     enable_dashboard: bool = True
@@ -421,6 +520,26 @@ class MetricsGenerator(BaseGenerator):
         self._validate_non_negative(
             self.config.dependency_freshness_days, "Dependency freshness days"
         )
+        self._validate_non_negative(
+            self.config.precommit_hooks_total, "Pre-commit hooks total"
+        )
+
+    @staticmethod
+    def count_precommit_hooks(config_path: Path) -> int:
+        """Count the total number of hooks in a pre-commit config file.
+
+        Thin wrapper around the canonical module-level
+        :func:`count_precommit_hooks`, retained for callers that reach the
+        helper through the generator class. See that function for behavior.
+
+        Args:
+            config_path: Path to a ``.pre-commit-config.yaml`` file.
+
+        Returns:
+            Total hook count, or ``0`` when the file is absent or has no
+            hooks.
+        """
+        return count_precommit_hooks(config_path)
 
     def _get_tool_for_language(self, metric_type: str) -> str:
         """Get appropriate tool for language and metric type.
@@ -613,6 +732,11 @@ class MetricsGenerator(BaseGenerator):
         # Security: HTML-escape project name to prevent XSS
         safe_project_name = html.escape(self.config.project_name)
 
+        # Pre-Commit Status baseline: render all configured hooks as passing
+        # (``X/Y Hooks``). The JS later overrides this from metrics.json.
+        precommit_total = self.config.precommit_hooks_total
+        precommit_threshold = f"{precommit_total}/{precommit_total} Hooks"
+
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -699,6 +823,10 @@ class MetricsGenerator(BaseGenerator):
             background: #da3633;
             color: #fff;
         }}
+        .status-unknown {{
+            background: #30363d;
+            color: #8b949e;
+        }}
         .footer {{
             text-align: center;
             margin-top: 3rem;
@@ -714,6 +842,18 @@ class MetricsGenerator(BaseGenerator):
         <p class="subtitle">Quality Metrics Dashboard</p>
 
         <div class="metrics-grid">
+            <div class="metric-card" id="precommit-status">
+                <div class="metric-name">Pre-Commit Status</div>
+                <div class="metric-value" id="precommit-value">--</div>
+                <div class="metric-threshold">
+                    Threshold:
+                    <span id="precommit-threshold">{precommit_threshold}</span>
+                </div>
+                <div class="metric-status status-pass" id="precommit-status-badge">
+                    PASSING
+                </div>
+            </div>
+
             <div class="metric-card">
                 <div class="metric-name">Code Coverage</div>
                 <div class="metric-value" id="coverage-value">--</div>
@@ -828,11 +968,14 @@ class MetricsGenerator(BaseGenerator):
             document.getElementById('last-updated').textContent =
                 new Date(data.timestamp).toLocaleString();
 
+            // Pre-Commit Status (index 0): green 100%, yellow 90-99%, red <90%
+            updatePrecommitStatus(metrics.precommit_status);
+
             // Coverage
             if (metrics.coverage !== undefined) {{
                 if (metrics.coverage === null) {{
                     document.getElementById('coverage-value').textContent = 'N/A';
-                    updateStatus('coverage', 'NO DATA', false);
+                    updateStatus('coverage', 'N/A', false);
                 }} else {{
                     updateMetric('coverage', metrics.coverage, '%',
                         metrics.coverage >= thresholds.coverage);
@@ -843,7 +986,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.branch_coverage !== undefined) {{
                 if (metrics.branch_coverage === null) {{
                     document.getElementById('branch-value').textContent = 'N/A';
-                    updateStatus('branch', 'NO DATA', false);
+                    updateStatus('branch', 'N/A', false);
                 }} else {{
                     updateMetric('branch', metrics.branch_coverage, '%',
                         metrics.branch_coverage >= thresholds.branch_coverage);
@@ -854,7 +997,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.complexity_avg !== undefined) {{
                 if (metrics.complexity_avg === null) {{
                     document.getElementById('complexity-value').textContent = 'N/A';
-                    updateStatus('complexity', 'NO DATA', false);
+                    updateStatus('complexity', 'N/A', false);
                 }} else {{
                     updateMetric('complexity', metrics.complexity_avg, '',
                         metrics.complexity_avg <= thresholds.complexity);
@@ -865,7 +1008,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.security_issues !== undefined) {{
                 if (metrics.security_issues === null) {{
                     document.getElementById('security-value').textContent = 'N/A';
-                    updateStatus('security', 'NO DATA', false);
+                    updateStatus('security', 'N/A', false);
                 }} else {{
                     const elem = document.getElementById('security-value');
                     elem.textContent = metrics.security_issues;
@@ -880,7 +1023,7 @@ class MetricsGenerator(BaseGenerator):
                 if (metrics.maintainability_avg === null) {{
                     const mv = document.getElementById('maintainability-value');
                     mv.textContent = 'N/A';
-                    updateStatus('maintainability', 'NO DATA', false);
+                    updateStatus('maintainability', 'N/A', false);
                 }} else {{
                     const t = thresholds.maintainability || 20;
                     updateMetric('maintainability',
@@ -893,7 +1036,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.lint_violations !== undefined) {{
                 if (metrics.lint_violations === null) {{
                     document.getElementById('lint-value').textContent = 'N/A';
-                    updateStatus('lint', 'NO DATA', false);
+                    updateStatus('lint', 'N/A', false);
                 }} else {{
                     const elem = document.getElementById('lint-value');
                     elem.textContent = metrics.lint_violations;
@@ -907,7 +1050,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.type_errors !== undefined) {{
                 if (metrics.type_errors === null) {{
                     document.getElementById('typecheck-value').textContent = 'N/A';
-                    updateStatus('typecheck', 'NO DATA', false);
+                    updateStatus('typecheck', 'N/A', false);
                 }} else {{
                     const elem = document.getElementById('typecheck-value');
                     elem.textContent = metrics.type_errors;
@@ -921,7 +1064,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.tests_total !== undefined) {{
                 if (metrics.tests_total === null) {{
                     document.getElementById('tests-value').textContent = 'N/A';
-                    updateStatus('tests', 'NO DATA', false);
+                    updateStatus('tests', 'N/A', false);
                 }} else {{
                     const elem = document.getElementById('tests-value');
                     const failed = metrics.tests_failed || 0;
@@ -934,6 +1077,52 @@ class MetricsGenerator(BaseGenerator):
             }}
         }}
 
+        function updatePrecommitStatus(precommit) {{
+            const valueElem = document.getElementById('precommit-value');
+            const thresholdElem = document.getElementById('precommit-threshold');
+            const badgeElem =
+                document.getElementById('precommit-status-badge');
+
+            // No-data guard (Issue #154): when there is no precommit data, or
+            // the status is 'unknown' (no .pre-commit-config.yaml), render the
+            // gray N/A treatment BEFORE the percentage thresholds so a 0%
+            // unknown card does not fall through to red FAILING.
+            if (!precommit || precommit.status === 'unknown') {{
+                valueElem.textContent = 'N/A';
+                thresholdElem.textContent = 'No data';
+                badgeElem.textContent = 'N/A';
+                badgeElem.className = 'metric-status status-unknown';
+                return;
+            }}
+
+            const total = precommit.total_hooks || 0;
+            const passing = precommit.passing_hooks || 0;
+            const percentage = (precommit.percentage !== undefined &&
+                precommit.percentage !== null)
+                ? precommit.percentage
+                : (total > 0 ? (passing / total) * 100 : 0);
+
+            valueElem.textContent = percentage.toFixed(0) + '%';
+            thresholdElem.textContent = passing + '/' + total + ' Hooks';
+
+            // Color coding per Issue #154:
+            // green (100%), yellow (90-99%), red (<90%)
+            let statusClass;
+            let statusText;
+            if (percentage >= 100) {{
+                statusClass = 'status-pass';
+                statusText = 'PASSING';
+            }} else if (percentage >= 90) {{
+                statusClass = 'status-warn';
+                statusText = 'WARNING';
+            }} else {{
+                statusClass = 'status-fail';
+                statusText = 'FAILING';
+            }}
+            badgeElem.textContent = statusText;
+            badgeElem.className = 'metric-status ' + statusClass;
+        }}
+
         function updateMetric(name, value, suffix, passing) {{
             const elem = document.getElementById(`${{name}}-value`);
             elem.textContent = value.toFixed(2) + suffix;
@@ -942,8 +1131,17 @@ class MetricsGenerator(BaseGenerator):
 
         function updateStatus(name, text, passing) {{
             const elem = document.getElementById(`${{name}}-status`);
+            if (!elem) return;
             elem.textContent = text;
-            const statusClass = passing ? 'status-pass' : 'status-fail';
+            // No-data cards pass 'N/A' (Issue #154): map to the gray
+            // status-unknown state so a fresh project does not surface
+            // alarming red "no data" badges.
+            let statusClass;
+            if (text === 'N/A') {{
+                statusClass = 'status-unknown';
+            }} else {{
+                statusClass = passing ? 'status-pass' : 'status-fail';
+            }}
             elem.className = 'metric-status ' + statusClass;
         }}
 

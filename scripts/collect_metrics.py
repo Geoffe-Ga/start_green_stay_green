@@ -25,6 +25,9 @@ import sys
 from typing import Any
 from typing import TYPE_CHECKING
 
+from start_green_stay_green.generators.metrics import count_precommit_hooks
+from start_green_stay_green.generators.metrics import precommit_status
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -175,6 +178,22 @@ class MetricsCollector:
         self.metrics["security_status"] = (
             "pass" if issues == self.thresholds["security_issues"] else "fail"
         )
+
+    def collect_precommit_status(self, config_path: Path) -> None:
+        """Collect pre-commit hooks status from the config file (Issue #154).
+
+        Counts the total hooks configured in ``.pre-commit-config.yaml`` and
+        records a ``precommit_status`` entry with ``total_hooks``,
+        ``passing_hooks``, ``percentage`` and ``status``. Because running
+        ``pre-commit run --all-files`` is expensive and CI already gates on
+        it, this treats configured hooks as passing; a missing or empty
+        config degrades gracefully to zero hooks with ``unknown`` status.
+
+        Args:
+            config_path: Path to the ``.pre-commit-config.yaml`` file.
+        """
+        total = count_precommit_hooks(config_path)
+        self.metrics["precommit_status"] = precommit_status(total)
 
     def add_mutation_score(self, score: float) -> None:
         """Add mutation testing score.
@@ -482,6 +501,9 @@ def _collect_script_mode(
     collector.collect_typecheck_metrics(scripts_dir)
     collector.collect_test_metrics(scripts_dir)
 
+    # Pre-Commit Status (Issue #154): derived from .pre-commit-config.yaml
+    collector.collect_precommit_status(Path(".pre-commit-config.yaml"))
+
 
 def _collect_file_mode(
     collector: MetricsCollector,
@@ -518,6 +540,9 @@ def _collect_file_mode(
         print(f"Warning: Could not parse security ({type(e).__name__}): {e}")
         collector.metrics["security_issues"] = None
         collector.metrics["security_status"] = "unknown"
+
+    # Pre-Commit Status (Issue #154): derived from .pre-commit-config.yaml
+    collector.collect_precommit_status(Path(".pre-commit-config.yaml"))
 
     _collect_mutation(collector, args)
 

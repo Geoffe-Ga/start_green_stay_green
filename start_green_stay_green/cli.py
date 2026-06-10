@@ -62,6 +62,7 @@ from start_green_stay_green.generators.github_actions import (
 )
 from start_green_stay_green.generators.metrics import MetricsGenerationConfig
 from start_green_stay_green.generators.metrics import MetricsGenerator
+from start_green_stay_green.generators.metrics import precommit_status
 from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import PreCommitGenerator
 from start_green_stay_green.generators.readme import ReadmeConfig
@@ -1282,6 +1283,9 @@ def _generate_metrics_dashboard_step(
 ) -> None:
     """Generate live metrics dashboard and workflow."""
     with step_timer("metrics"), console.status("Generating metrics dashboard..."):
+        precommit_hooks_total = MetricsGenerator.count_precommit_hooks(
+            project_path / ".pre-commit-config.yaml"
+        )
         config = MetricsGenerationConfig(
             language=language,
             project_name=project_name,
@@ -1290,6 +1294,7 @@ def _generate_metrics_dashboard_step(
             mutation_threshold=80,
             complexity_threshold=10,
             doc_coverage_threshold=95,
+            precommit_hooks_total=precommit_hooks_total,
             enable_dashboard=True,
             enable_badges=True,
         )
@@ -1313,6 +1318,7 @@ def _generate_metrics_dashboard_step(
                 "security_issues": 0,
             },
             "metrics": {
+                "precommit_status": precommit_status(precommit_hooks_total),
                 "coverage": 0.0,
                 "coverage_status": "fail",
                 "branch_coverage": 0.0,
