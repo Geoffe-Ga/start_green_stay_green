@@ -71,6 +71,20 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         "supported_versions": ["1.70", "1.75"],
         "package_manager": "cargo",
     },
+    "swift": {
+        # XCTest via `swift test`; Swift 6 toolchains also run any
+        # swift-testing suites through the same command.
+        "test_framework": "xctest",
+        "linters": ["swiftlint"],
+        "formatters": ["swift-format"],
+        # SwiftLint has no dedicated security ruleset; the generated
+        # .swiftlint.yml opts into its crash-safety/randomness rules.
+        # gitleaks covers secret scanning (shared with pre-commit) and
+        # Periphery covers dead-code analysis (scripts/security.sh).
+        "security_tools": ["swiftlint", "gitleaks", "periphery"],
+        "supported_versions": ["5.9", "5.10", "6.0"],
+        "package_manager": "spm",
+    },
     "java": {
         "test_framework": "junit",
         "linters": ["checkstyle"],
@@ -148,8 +162,8 @@ class CIGenerator(BaseGenerator):
                 Claude-generated path. Default :data:`None` selects the
                 deterministic template-based path
                 (``generate_workflow_from_template``).
-            language: Target language (python, typescript, go, rust, java,
-                csharp, ruby).
+            language: Target language (python, typescript, go, rust, swift,
+                java, csharp, ruby).
             framework: Optional framework (e.g., FastAPI, Express, Gin).
             reference_dir: Directory containing ``<language>.yml``
                 reference templates. Defaults to ``reference/ci/`` shipped

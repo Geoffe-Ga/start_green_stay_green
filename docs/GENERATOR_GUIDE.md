@@ -178,7 +178,7 @@ workflows_dir.mkdir(parents=True, exist_ok=True)
 - Documentation validation
 
 **Configuration Options**:
-- `language`: python, typescript, go, rust
+- `language`: python, typescript, go, rust, swift
 
 ### SkillsGenerator
 

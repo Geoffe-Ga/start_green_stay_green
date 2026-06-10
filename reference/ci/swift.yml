@@ -10,58 +10,138 @@ permissions:
   contents: read
   pull-requests: write
 
+# Runner reality for the generated watchOS scaffold:
+# - The scaffold is a SwiftUI + WatchKit watchOS app package. SwiftUI only
+#   ships in Apple SDKs, so every job runs on macOS — the Linux Swift
+#   toolchain cannot compile the scaffold at all.
+# - `quality` and `watchos` use the Xcode toolchain preinstalled on the
+#   runner image, so the compiler and platform SDKs always match.
+# - `test` exercises the Swift 5.9/5.10/6.0 version matrix using swift.org
+#   toolchains installed by swift-actions/setup-swift.
 jobs:
   quality:
     name: Code Quality Checks
     runs-on: macos-latest
-    strategy:
-      matrix:
-        xcode-version: ["15.1", "15.2"]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Select Xcode ${{ matrix.xcode-version }}
-        run: sudo xcode-select -s /Applications/Xcode_${{ matrix.xcode-version }}.app
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved', 'Package.swift') }}
 
-      - name: Install SwiftLint
-        run: brew install swiftlint
+      - name: Install SwiftLint, swift-format, and gitleaks
+        run: brew install swiftlint swift-format gitleaks
 
+      # Check-mode counterpart of the `swift-format format --in-place`
+      # pre-commit hook — identical to `scripts/format.sh --check`, so a
+      # tree that passed pre-commit locally passes here.
+      - name: Run swift-format check
+        run: swift-format lint --strict --recursive Sources Tests
+
+      # Same invocation as the SwiftLint pre-commit hook. The generated
+      # .swiftlint.yml enforces cyclomatic_complexity <= 10 and opts into
+      # SwiftLint's crash-safety/insecure-randomness rules (SwiftLint has
+      # no dedicated security ruleset — see the config's header comment).
       - name: Run SwiftLint
         run: swiftlint lint --strict
 
-      - name: Run SwiftFormat check
-        run: |
-          brew install swiftformat
-          swiftformat --lint .
+      # Secret-scanning parity with the gitleaks pre-commit hook.
+      - name: Run gitleaks secret scan
+        run: gitleaks detect --source . --no-banner --redact
 
-      - name: Build and test with coverage
-        run: |
-          xcodebuild test -scheme YourScheme -destination 'platform=iOS Simulator,name=iPhone 15' -enableCodeCoverage YES
+      # Periphery dead-code analysis (scripts/security.sh) is intentionally
+      # not run here: a fresh SwiftUI scaffold's view types are reached only
+      # through the runtime, so a strict scan fails on day one. Once the
+      # project grows real call graphs, tighten by adding:
+      #   brew install periphery && periphery scan --strict
+      - name: Run tests with coverage
+        run: swift test --enable-code-coverage
 
-      - name: Generate coverage report
+      # Same data source and parsing as `scripts/test.sh --coverage`:
+      # `swift test` writes an llvm-cov export JSON and --show-codecov-path
+      # locates it without re-running the suite. Threshold: >=90% lines —
+      # tests must keep pace with code for this gate to stay green.
+      - name: Check coverage threshold (>=90%)
         run: |
-          xcrun llvm-cov export -format="lcov" \
-            -instr-profile=$(find ~/Library/Developer/Xcode/DerivedData -name "*.profdata") \
-            $(find ~/Library/Developer/Xcode/DerivedData -name "*.xctest") > coverage.lcov
+          CODECOV_JSON="$(swift test --show-codecov-path)"
+          python3 - "$CODECOV_JSON" 90 << 'PYEOF'
+          import json
+          import sys
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+          path, threshold = sys.argv[1], float(sys.argv[2])
+          with open(path, encoding="utf-8") as handle:
+              percent = json.load(handle)["data"][0]["totals"]["lines"]["percent"]
+          print(f"Line coverage: {percent:.2f}% (threshold: {threshold:.0f}%)")
+          sys.exit(0 if percent >= threshold else 1)
+          PYEOF
+
+  test:
+    name: Swift ${{ matrix.swift-version }} Tests
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        swift-version: ["5.9", "5.10", "6.0"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # swift.org toolchain pinned per matrix leg. The default Xcode
+      # toolchain path is already covered by the quality/watchos jobs, so
+      # a toolchain-specific failure here points at a real version issue.
+      - name: Set up Swift ${{ matrix.swift-version }}
+        uses: swift-actions/setup-swift@v2
         with:
-          file: ./coverage.lcov
-          fail_ci_if_error: true
+          swift-version: ${{ matrix.swift-version }}
 
-  build:
-    name: Build and Archive
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Build package
+        run: swift build
+
+      - name: Run tests
+        run: swift test
+
+  watchos:
+    name: watchOS Simulator Build and Test
     runs-on: macos-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build for release
-        run: swift build -c release
+      # SwiftPM has no watchOS app product type, so the simulator build
+      # goes through xcodebuild, which opens the package directly. The
+      # auto-generated scheme is "<PackageName>-Package" — discovered
+      # dynamically because the name derives from the generated project.
+      # The simulator is matched by UDID: name/OS destination specifiers
+      # break when the image's simulator runtimes drift from the Xcode SDK.
+      - name: Discover scheme and simulator
+        run: |
+          SCHEME="$(xcodebuild -list -json | jq -r '.workspace.schemes[0]')"
+          UDID="$(xcrun simctl list devices available --json \
+            | jq -r '[.devices[][] | select(.name | startswith("Apple Watch"))][0].udid')"
+          echo "Scheme: $SCHEME / Simulator UDID: $UDID"
+          echo "SCHEME=$SCHEME" >> "$GITHUB_ENV"
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
 
-      - name: Run tests
-        run: swift test
+      - name: Build for the watchOS simulator
+        run: |
+          xcodebuild build \
+            -scheme "$SCHEME" \
+            -destination 'generic/platform=watchOS Simulator'
+
+      # xcodebuild packages the XCTest suite as a .xctest bundle, so this
+      # also exercises the code on the actual deployment platform (the
+      # `swift test` jobs above cover the macOS host).
+      - name: Run tests on a watchOS simulator
+        run: |
+          xcodebuild test \
+            -scheme "$SCHEME" \
+            -destination "id=$UDID" \
+            -enableCodeCoverage YES

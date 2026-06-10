@@ -770,12 +770,24 @@ gem "rubocop", "~> 1.0"
             type_name: PascalCase prefix used for the App struct name.
 
         Returns:
-            Content for the ``@main`` SwiftUI App source file.
+            Content for the ``@main`` SwiftUI App source file. The
+            ``@main`` attribute is gated behind ``#if os(watchOS)``:
+            ``swift test`` links the package's test runner *executable*
+            on the host platform, and a second entry point in the app
+            target collides with the runner's ``main`` symbol (duplicate
+            ``_main`` link error). On watchOS the entry point is intact;
+            on the macOS test host the type compiles as plain,
+            testable code.
         """
         return f"""import SwiftUI
 
 // watchOS entry point: shows "Hello from {self.config.project_name}!"
+// @main only applies on watchOS: the macOS host build that `swift test`
+// performs links SwiftPM's test runner executable, and a second entry
+// point would collide with the runner's own `main` symbol.
+#if os(watchOS)
 @main
+#endif
 struct {type_name}App: App {{
     @SceneBuilder var body: some Scene {{
         WindowGroup {{
