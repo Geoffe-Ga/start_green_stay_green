@@ -11,8 +11,20 @@ first tagged release.
 
 ## [Unreleased]
 
-Phase 6 follow-ups in progress (issues #316–#319). No user-facing
-changes shipped to this version yet.
+Phase 6 follow-ups in progress (issues #316–#319).
+
+### Added
+
+- **Swift (watchOS) language support** — `green init --language swift`
+  generates an SPM package (watchOS app scaffold, Swift 5.9/5.10/6.0)
+  with the full quality stack: swift-format + SwiftLint pre-commit hooks
+  and scripts (complexity ≤10), XCTest with a ≥90% llvm-cov coverage
+  gate, gitleaks/detect-secrets secret scanning, Periphery dead-code
+  analysis, SwiftLint custom-rule architecture enforcement, and a
+  macOS-runner CI pipeline with a Swift version matrix plus a
+  watchOS-simulator build-and-test job. Foundation (#351), quality
+  tooling (#352), CI pipeline (#353), tests (#354), documentation
+  (#355). A real generated example lives in `examples/swift/`.
 
 ## [1.0.0] — 2026-05-10
 

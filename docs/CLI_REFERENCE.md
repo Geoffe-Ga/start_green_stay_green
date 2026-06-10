@@ -129,6 +129,7 @@ Primary programming language for the project.
 - `typescript` - TypeScript with Node.js
 - `go` - Go 1.21+
 - `rust` - Rust 1.70+
+- `swift` - Swift 5.9/5.10/6.0 with Swift Package Manager (SPM), watchOS-ready
 
 **Examples**:
 ```bash
@@ -136,13 +137,35 @@ Primary programming language for the project.
 --language typescript
 --language go
 --language rust
+--language swift
 ```
 
 **Interactive Fallback**:
 If not provided, will prompt with options:
 ```
-Primary language: [python/typescript/go/rust]
+Primary language: [python/typescript/go/rust/swift]
 ```
+
+**Swift Toolchain**:
+
+A `--language swift` project is an SPM package (watchOS app scaffold)
+wired with this quality toolchain:
+
+| Concern | Tool | Where it runs |
+|---------|------|---------------|
+| Formatting | swift-format | `scripts/format.sh`, pre-commit, CI |
+| Linting + complexity (≤10) | SwiftLint (`.swiftlint.yml`) | `scripts/lint.sh`, pre-commit, CI |
+| Tests | XCTest via `swift test` | `scripts/test.sh`, CI |
+| Coverage (≥90%) | llvm-cov export from `swift test --enable-code-coverage` | `scripts/test.sh --coverage`, CI |
+| Secret scanning | gitleaks + detect-secrets | pre-commit, CI |
+| Dead-code analysis | Periphery | `scripts/security.sh` |
+| Mutation testing | muter | periodic quality gate (tracked by the opt-in metrics dashboard) |
+
+CI runs on macOS runners with a Swift 5.9/5.10/6.0 version matrix plus a
+watchOS-simulator build-and-test job. Local prerequisites: a Swift
+5.9/5.10/6.0 toolchain with SPM, and
+`brew install swiftlint swift-format gitleaks` for the generated
+pre-commit hooks (`brew install periphery` for dead-code scans).
 
 ##### `--output-dir` / `-o PATH` (Optional)
 
@@ -365,7 +388,7 @@ The `init` command validates:
 - Not a Windows reserved name
 
 **Language**:
-- Must be one of: python, typescript, go, rust
+- Must be one of: python, typescript, go, rust, swift
 - Case-insensitive
 
 **Output Directory**:
@@ -558,6 +581,28 @@ start-green-stay-green init \
   --project-name my-service \
   --language python
 ```
+
+### Creating a Swift (watchOS) Project
+
+```bash
+# Local prerequisites for the generated pre-commit hooks
+brew install swiftlint swift-format gitleaks
+
+start-green-stay-green init \
+  --project-name wrist-timer \
+  --language swift \
+  --no-interactive
+
+cd wrist-timer
+swift package resolve
+swift build
+pre-commit install
+./scripts/check-all.sh
+```
+
+See the [Swift Toolchain](#--language---l-text-optional) table above for
+the full tool list, and [examples/swift/](../examples/swift/) for real
+generated output.
 
 ### Batch Creating Projects
 
