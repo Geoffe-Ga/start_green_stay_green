@@ -30,7 +30,7 @@ class TestCIReferences:
         assert ci_dir.is_dir()
 
     def test_all_language_ci_workflows_exist(self, ci_dir: Path) -> None:
-        """Test that CI workflows exist for all 10 supported languages."""
+        """Test that CI workflows exist for all 11 supported languages."""
         required_workflows = [
             "python.yml",
             "typescript.yml",
@@ -42,6 +42,7 @@ class TestCIReferences:
             "ruby.yml",
             "php.yml",
             "kotlin.yml",
+            "cpp.yml",
         ]
 
         for workflow in required_workflows:

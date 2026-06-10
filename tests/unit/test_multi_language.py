@@ -400,12 +400,12 @@ class TestGeneratorOnlyLanguagePipelineGates:
 
 
 class TestCppPipelineGates:
-    """Pipeline steps run (or skip) correctly for cpp after #362.
+    """Pipeline steps all run for cpp after #362/#363.
 
     The #361 foundation shipped structure/dependencies/tests/readme only;
-    #362 wired the pre-commit/scripts/metrics/architecture tooling, so
-    those steps must now generate real artifacts. Only the CI step (#363)
-    still skips, with an informational message instead of a crash.
+    #362 wired the pre-commit/scripts/metrics/architecture tooling and
+    #363 completed the pipeline with the CI workflow, so every step must
+    now generate real artifacts.
     """
 
     def test_precommit_step_writes_for_cpp(self, tmp_path: Path) -> None:
@@ -437,11 +437,13 @@ class TestCppPipelineGates:
         assert (tmp_path / ".clang-format").exists()
         assert (tmp_path / ".clang-tidy").exists()
 
-    def test_ci_step_skips_cpp_without_workflow(self, tmp_path: Path) -> None:
-        """No ci.yml is written for cpp (CI generation is #363)."""
+    def test_ci_step_writes_cpp_workflow(self, tmp_path: Path) -> None:
+        """ci.yml is now generated for cpp (#363)."""
         cli_mod._generate_ci_step(tmp_path, "my-project", "cpp", None)
 
-        assert not (tmp_path / ".github" / "workflows" / "ci.yml").exists()
+        ci_file = tmp_path / ".github" / "workflows" / "ci.yml"
+        assert ci_file.exists()
+        assert "C/C++ Quality Checks" in ci_file.read_text()
 
     def test_metrics_step_writes_cpp_dashboard(self, tmp_path: Path) -> None:
         """The metrics dashboard is now generated for cpp (#362)."""

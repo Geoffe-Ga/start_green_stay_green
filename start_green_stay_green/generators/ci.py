@@ -110,6 +110,33 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         "supported_versions": ["17", "21"],
         "package_manager": "gradle",
     },
+    "cpp": {
+        # Catch2, not GoogleTest (the epic text named gtest): the #361
+        # foundation chose Catch2 — conanfile.txt pins catch2/3.x and
+        # the scaffolded tests use Catch2 macros — so CI stays
+        # consistent with what the generated project actually builds.
+        "test_framework": "catch2",
+        "linters": ["clang-tidy", "cppcheck"],
+        "formatters": ["clang-format"],
+        # cppcheck and clang-tidy's clang-analyzer-*/cert-* checks serve
+        # security duty too, but each is listed once (under linters) so
+        # tool-install consumers don't double-install them. gitleaks
+        # covers secret scanning (shared with pre-commit) and flawfinder
+        # the CWE-mapped dangerous-API scan (scripts/security.sh).
+        "security_tools": ["gitleaks", "flawfinder"],
+        # Compilers, not language standards: the generated CMakeLists.txt
+        # pins CMAKE_CXX_STANDARD to 17 (utils.cpp.CPP_STANDARD — a
+        # project decision, not a CI input; a -DCMAKE_CXX_STANDARD cache
+        # entry would be shadowed by the project's plain set()), so the
+        # honest matrix axis is the toolchain building that pinned
+        # standard: both major compilers on the ubuntu runner image.
+        "supported_versions": ["gcc", "clang"],
+        # CMake drives the build; Conan 2 provisions Catch2 and the
+        # CMake toolchain file. The Tizen native SDK comes from Tizen
+        # Studio, not from the package manager (see reference/ci/cpp.yml
+        # for the .tpk packaging stance).
+        "package_manager": "cmake-conan",
+    },
     "java": {
         "test_framework": "junit",
         "linters": ["checkstyle"],
