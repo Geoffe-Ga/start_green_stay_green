@@ -29,6 +29,7 @@ def test_something(mock_path: Mock) -> None:
 import asyncio
 import json
 from pathlib import Path
+from typing import cast
 from unittest import mock
 from unittest.mock import MagicMock
 from unittest.mock import Mock
@@ -1321,12 +1322,15 @@ class TestGenerateSteps:
 
     @patch("start_green_stay_green.cli.ClaudeMdGenerator")
     def test_generate_claude_md_step(self, mock_generator_class: Mock) -> None:
-        """Test _generate_claude_md_step creates generator."""
+        """Test _generate_claude_md_step renders the modular tree."""
         mock_orchestrator = MagicMock()
         mock_generator = MagicMock()
         mock_result = MagicMock()
         mock_result.content = "# CLAUDE.md content"
-        mock_generator.generate.return_value = mock_result
+        mock_generator.render_modular.return_value = (
+            mock_result,
+            {"principles": "# principles", "tools": "# tools"},
+        )
         mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
@@ -1339,7 +1343,56 @@ class TestGenerateSteps:
                 mock_orchestrator,
             )
 
-        mock_generator.generate.assert_called()
+        mock_generator.render_modular.assert_called_once()
+
+    def test_generate_claude_md_step_writes_modular_tree(self, tmp_path: Path) -> None:
+        """_generate_claude_md_step (no writer) emits index + split docs."""
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_claude_md_step(
+                tmp_path,
+                "real-modular-project",
+                "python",
+                None,  # No orchestrator -> deterministic baseline.
+            )
+
+        index = tmp_path / "CLAUDE.md"
+        assert index.exists()
+        assert "real-modular-project" in index.read_text()
+        docs_dir = tmp_path / ".claude" / "docs"
+        for name in ("principles", "quality-standards", "troubleshooting"):
+            assert (docs_dir / f"{name}.md").exists()
+
+    def test_enhance_claude_md_writes_modular_tree(self, tmp_path: Path) -> None:
+        """_enhance_claude_md (real generator, no writer) writes the tree."""
+        # ``None`` orchestrator drives the deterministic baseline index so
+        # the test needs no live API; the modular tree is still emitted.
+        with patch("start_green_stay_green.cli.console"):
+            cli._enhance_claude_md(
+                tmp_path,
+                "enhanced-project",
+                "python",
+                cast("AIOrchestrator", None),
+                dry_run=False,
+                file_writer=None,
+            )
+
+        assert (tmp_path / "CLAUDE.md").exists()
+        assert (tmp_path / ".claude" / "docs" / "workflow.md").exists()
+
+    def test_enhance_claude_md_dry_run_skips_writes(self, tmp_path: Path) -> None:
+        """_enhance_claude_md dry-run renders but writes nothing."""
+        with patch("start_green_stay_green.cli.console"):
+            cli._enhance_claude_md(
+                tmp_path,
+                "dryrun-project",
+                "python",
+                cast("AIOrchestrator", None),
+                dry_run=True,
+                file_writer=None,
+            )
+
+        assert not (tmp_path / "CLAUDE.md").exists()
+        assert not (tmp_path / ".claude" / "docs").exists()
 
     @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
     def test_generate_architecture_step(self, mock_generator_class: Mock) -> None:
