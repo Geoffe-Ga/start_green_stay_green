@@ -17,6 +17,8 @@ from start_green_stay_green.generators.metrics import MetricConfig
 from start_green_stay_green.generators.metrics import MetricsGenerationConfig
 from start_green_stay_green.generators.metrics import MetricsGenerator
 from start_green_stay_green.generators.metrics import STANDARD_METRICS
+from start_green_stay_green.generators.metrics import ci_status
+from start_green_stay_green.generators.metrics import count_ci_jobs
 from start_green_stay_green.generators.metrics import count_precommit_hooks
 from start_green_stay_green.generators.metrics import precommit_status
 
@@ -1246,6 +1248,250 @@ class TestPrecommitStatusHelper:
         assert result["status"] == "passing"
 
 
+class TestCountCIJobs:
+    """Tests for the canonical ``count_ci_jobs`` helper (Issue #159)."""
+
+    def test_counts_jobs_across_workflow_files(self) -> None:
+        """Job count is the sum of jobs across every workflow file."""
+        with TemporaryDirectory() as tmp:
+            workflows = Path(tmp)
+            (workflows / "ci.yml").write_text(
+                yaml.dump({"jobs": {"lint": {}, "test": {}, "build": {}}}),
+                encoding="utf-8",
+            )
+            (workflows / "deploy.yml").write_text(
+                yaml.dump({"jobs": {"deploy": {}}}),
+                encoding="utf-8",
+            )
+
+            assert count_ci_jobs(workflows) == 4
+
+    def test_counts_yaml_extension_workflows(self) -> None:
+        """Workflows using the ``.yaml`` extension are counted too."""
+        with TemporaryDirectory() as tmp:
+            workflows = Path(tmp)
+            (workflows / "ci.yaml").write_text(
+                yaml.dump({"jobs": {"test": {}}}),
+                encoding="utf-8",
+            )
+
+            assert count_ci_jobs(workflows) == 1
+
+    def test_missing_directory_returns_zero(self) -> None:
+        """A missing workflows directory yields zero jobs (graceful)."""
+        with TemporaryDirectory() as tmp:
+            missing = Path(tmp) / ".github" / "workflows"
+
+            assert count_ci_jobs(missing) == 0
+
+    def test_malformed_yaml_contributes_zero(self) -> None:
+        """Malformed workflow YAML degrades to zero rather than raising."""
+        with TemporaryDirectory() as tmp:
+            workflows = Path(tmp)
+            (workflows / "broken.yml").write_text(
+                "jobs: [unterminated", encoding="utf-8"
+            )
+            (workflows / "ok.yml").write_text(
+                yaml.dump({"jobs": {"test": {}}}),
+                encoding="utf-8",
+            )
+
+            assert count_ci_jobs(workflows) == 1
+
+    def test_non_mapping_jobs_contributes_zero(self) -> None:
+        """A workflow whose ``jobs`` is not a mapping contributes zero."""
+        with TemporaryDirectory() as tmp:
+            workflows = Path(tmp)
+            (workflows / "list-jobs.yml").write_text(
+                yaml.dump({"jobs": ["not", "a", "mapping"]}),
+                encoding="utf-8",
+            )
+            (workflows / "no-jobs.yml").write_text(
+                yaml.dump({"name": "no jobs key"}),
+                encoding="utf-8",
+            )
+            (workflows / "scalar.yml").write_text("just a string", encoding="utf-8")
+
+            assert count_ci_jobs(workflows) == 0
+
+    def test_empty_directory_returns_zero(self) -> None:
+        """An empty workflows directory yields zero jobs."""
+        with TemporaryDirectory() as tmp:
+            assert count_ci_jobs(Path(tmp)) == 0
+
+
+class TestCIStatusHelper:
+    """Tests for the canonical ``ci_status`` dict-builder (Issue #159)."""
+
+    def test_all_jobs_passing_yields_passing_status(self) -> None:
+        """All jobs succeeding yields a 100% passing status."""
+        assert ci_status(7, 7) == {
+            "total_jobs": 7,
+            "passing_jobs": 7,
+            "percentage": 100.0,
+            "status": "passing",
+        }
+
+    def test_partial_passing_yields_failing_status(self) -> None:
+        """Any failing job yields a failing status with a partial percentage."""
+        result = ci_status(8, 6)
+        assert result["total_jobs"] == 8
+        assert result["passing_jobs"] == 6
+        assert result["percentage"] == 75.0
+        assert result["status"] == "failing"
+
+    def test_unknown_status_when_passing_jobs_omitted(self) -> None:
+        """Static counting (no pass/fail data) yields the unknown status."""
+        assert ci_status(7) == {
+            "total_jobs": 7,
+            "passing_jobs": 0,
+            "percentage": 0.0,
+            "status": "unknown",
+        }
+
+    def test_unknown_status_for_zero_jobs(self) -> None:
+        """Zero jobs (no workflows) yields the unknown/no-data status."""
+        assert ci_status(0, 0) == {
+            "total_jobs": 0,
+            "passing_jobs": 0,
+            "percentage": 0.0,
+            "status": "unknown",
+        }
+
+    def test_run_url_included_when_provided(self) -> None:
+        """``run_url`` is included in the dict when the API supplies one."""
+        result = ci_status(7, 7, run_url="https://github.com/o/r/actions/runs/1")
+        assert result["run_url"] == "https://github.com/o/r/actions/runs/1"
+
+    def test_run_url_omitted_when_not_provided(self) -> None:
+        """``run_url`` is absent when no workflow run URL is available."""
+        assert "run_url" not in ci_status(7, 7)
+
+
+class TestCIStatusCard:
+    """Test the CI Status metric card (Issue #159)."""
+
+    def test_ci_card_renders_between_precommit_and_coverage(self) -> None:
+        """CI Status card renders at index 1: after Pre-Commit, before Coverage."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            ci_jobs_total=7,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "CI Status" in dashboard
+        assert dashboard.index("Pre-Commit Status") < dashboard.index("CI Status")
+        assert dashboard.index("CI Status") < dashboard.index("Code Coverage")
+
+    def test_ci_card_shows_total_jobs_threshold(self) -> None:
+        """Threshold shows ``X/Y Jobs`` using the configured total."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            ci_jobs_total=7,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "7/7 Jobs" in dashboard
+
+    def test_ci_card_has_value_and_status_ids(self) -> None:
+        """Card exposes the DOM ids the JS uses to populate it."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            ci_jobs_total=5,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert 'id="ci-value"' in dashboard
+        assert 'id="ci-threshold"' in dashboard
+        assert 'id="ci-status"' in dashboard
+        assert 'id="ci-status-badge"' in dashboard
+
+    def test_ci_js_color_codes_by_percentage(self) -> None:
+        """JS applies green/yellow/red classes per the issue thresholds."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            ci_jobs_total=7,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        # 100% -> pass (green); 85-99% -> warn (yellow); <85% -> fail (red)
+        assert "metrics.ci_status" in dashboard
+        assert ">= 100" in dashboard
+        assert ">= 85" in dashboard
+
+    def test_ci_card_renders_with_zero_total(self) -> None:
+        """A zero job total renders ``0/0 Jobs`` without crashing."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            ci_jobs_total=0,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "0/0 Jobs" in dashboard
+
+    def test_ci_js_grays_unknown_status_before_percentage(self) -> None:
+        """Unknown CI status maps to gray N/A, not red FAILING.
+
+        Mirrors the Issue #154 no-data guard: a ``status: 'unknown'``
+        ci_status entry (static fallback or no workflow data) has
+        ``percentage: 0.0`` which would fall through the percentage
+        thresholds and render red FAILING. ``updateCIStatus`` must branch on
+        the ``status`` field (and missing data) BEFORE the percentage
+        thresholds and apply the gray ``status-unknown`` treatment.
+        """
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            ci_jobs_total=7,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "ci.status === 'unknown'" in dashboard
+        guard = dashboard.index("ci.status === 'unknown'")
+        threshold = dashboard.index("if (percentage >= 85)")
+        assert guard < threshold
+
+    def test_negative_ci_jobs_total_rejected(self) -> None:
+        """A negative ``ci_jobs_total`` fails config validation."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            ci_jobs_total=-1,
+        )
+
+        with pytest.raises(ValueError, match="CI jobs total"):
+            MetricsGenerator(None, config)
+
+
 class TestCIIntegration:
     """Test CI integration configuration generation."""
 
@@ -1831,17 +2077,18 @@ class TestDashboardNewCards:
         assert "Test Count" in dashboard
         assert "tests-value" in dashboard
 
-    def test_dashboard_has_nine_metric_cards(self) -> None:
-        """Test dashboard has exactly 9 metric cards.
+    def test_dashboard_has_ten_metric_cards(self) -> None:
+        """Test dashboard has exactly 10 metric cards.
 
         Eight original quality cards plus the Pre-Commit Status card added
-        at index 0 (Issue #154).
+        at index 0 (Issue #154) and the CI Status card added at index 1
+        (Issue #159).
         """
         dashboard = self._get_dashboard()
 
         # Count metric-card div occurrences
         card_count = dashboard.count('class="metric-card"')
-        assert card_count == 9
+        assert card_count == 10
 
 
 class TestDashboardJavaScript:

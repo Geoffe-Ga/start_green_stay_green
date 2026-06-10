@@ -31,6 +31,10 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Generate metrics.json via script mode
+        env:
+          # Enables the CI Status card's GitHub API path (Issue #159);
+          # without it, collection degrades to a static job count.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           . .venv/bin/activate
           python scripts/collect_metrics.py \

@@ -9,6 +9,7 @@ import sqlite3
 # Import the module we're testing
 import sys
 from tempfile import TemporaryDirectory
+from unittest.mock import Mock
 from unittest.mock import patch
 
 import pytest
@@ -19,6 +20,8 @@ import collect_metrics
 from collect_metrics import MetricsCollector
 from collect_metrics import main as collect_main
 
+from start_green_stay_green.generators.metrics import ci_status
+from start_green_stay_green.generators.metrics import count_ci_jobs
 from start_green_stay_green.generators.metrics import count_precommit_hooks
 from start_green_stay_green.generators.metrics import precommit_status
 
@@ -891,6 +894,327 @@ class TestCollectPrecommitStatus:
 
             spy.assert_called_once_with(13)
             assert collector.metrics["precommit_status"] == precommit_status(13)
+
+
+class TestCollectCIStatus:
+    """Tests for ``collect_ci_status`` on MetricsCollector (Issue #159)."""
+
+    def _write_workflow(self, path: Path, name: str, job_ids: list[str]) -> Path:
+        """Write a workflow file declaring the given job ids.
+
+        Args:
+            path: Directory to write the workflow into.
+            name: Workflow filename (e.g., ``ci.yml``).
+            job_ids: Job identifiers for the ``jobs`` mapping.
+
+        Returns:
+            Path to the written workflow file.
+        """
+        workflow_path = path / name
+        workflow_path.write_text(
+            yaml.dump({"jobs": {job_id: {} for job_id in job_ids}}),
+            encoding="utf-8",
+        )
+        return workflow_path
+
+    def _clear_github_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Remove GitHub Actions env vars so the static fallback is used.
+
+        Args:
+            monkeypatch: Pytest monkeypatch fixture.
+        """
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+
+    def test_static_fallback_counts_jobs_with_unknown_status(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without API env vars, jobs are counted statically as unknown."""
+        self._clear_github_env(monkeypatch)
+        with TemporaryDirectory() as tmpdir:
+            workflows = Path(tmpdir)
+            self._write_workflow(workflows, "ci.yml", ["lint", "test"])
+            self._write_workflow(workflows, "release.yml", ["publish"])
+            collector = MetricsCollector("test", {})
+
+            collector.collect_ci_status(workflows)
+
+            status = collector.metrics["ci_status"]
+            assert status["total_jobs"] == 3
+            assert status["passing_jobs"] == 0
+            assert status["percentage"] == 0.0
+            assert status["status"] == "unknown"
+            assert "run_url" not in status
+
+    def test_missing_workflows_dir_degrades_to_unknown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A missing workflows directory yields total 0 and unknown status."""
+        self._clear_github_env(monkeypatch)
+        collector = MetricsCollector("test", {})
+
+        collector.collect_ci_status(Path("/nonexistent/.github/workflows"))
+
+        status = collector.metrics["ci_status"]
+        assert status["total_jobs"] == 0
+        assert status["status"] == "unknown"
+
+    def test_malformed_workflow_yaml_never_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Malformed workflow YAML degrades gracefully instead of raising."""
+        self._clear_github_env(monkeypatch)
+        with TemporaryDirectory() as tmpdir:
+            workflows = Path(tmpdir)
+            (workflows / "broken.yml").write_text(
+                "jobs: [unterminated", encoding="utf-8"
+            )
+            collector = MetricsCollector("test", {})
+
+            collector.collect_ci_status(workflows)
+
+            status = collector.metrics["ci_status"]
+            assert status["total_jobs"] == 0
+            assert status["status"] == "unknown"
+
+    def test_api_path_counts_job_conclusions(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With API env vars, job conclusions from the latest run are counted."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        payloads = {
+            "/repos/owner/repo/actions/runs"
+            "?branch=main&status=completed&per_page=1": {
+                "workflow_runs": [
+                    {
+                        "id": 42,
+                        "html_url": "https://github.com/owner/repo/actions/runs/42",
+                    }
+                ]
+            },
+            "/repos/owner/repo/actions/runs/42/jobs?per_page=100": {
+                "jobs": [
+                    {"conclusion": "success"},
+                    {"conclusion": "success"},
+                    {"conclusion": "failure"},
+                ]
+            },
+        }
+
+        with patch.object(
+            collect_metrics,
+            "_github_api_json",
+            side_effect=lambda path, _token: payloads[path],
+        ):
+            collector = MetricsCollector("test", {})
+            collector.collect_ci_status(Path("/nonexistent"))
+
+        status = collector.metrics["ci_status"]
+        assert status["total_jobs"] == 3
+        assert status["passing_jobs"] == 2
+        assert status["percentage"] == pytest.approx(66.67, abs=0.01)
+        assert status["status"] == "failing"
+        assert status["run_url"] == "https://github.com/owner/repo/actions/runs/42"
+
+    def test_api_all_passing_yields_passing_status(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """All-success job conclusions yield a 100% passing status."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        def fake_api(path: str, _token: str) -> dict[str, object]:
+            if "/jobs" in path:
+                return {"jobs": [{"conclusion": "success"}] * 7}
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 7,
+                        "html_url": "https://github.com/owner/repo/actions/runs/7",
+                    }
+                ]
+            }
+
+        with patch.object(collect_metrics, "_github_api_json", side_effect=fake_api):
+            collector = MetricsCollector("test", {})
+            collector.collect_ci_status(Path("/nonexistent"))
+
+        status = collector.metrics["ci_status"]
+        assert status["total_jobs"] == 7
+        assert status["passing_jobs"] == 7
+        assert status["percentage"] == 100.0
+        assert status["status"] == "passing"
+
+    def test_api_skipped_jobs_excluded_from_denominator(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Skipped jobs do not count against the passing percentage.
+
+        A conditionally-skipped job (e.g. a deploy gated on a branch
+        condition) must not drag an otherwise all-green run below 100%.
+        """
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        def fake_api(path: str, _token: str) -> dict[str, object]:
+            if "/jobs" in path:
+                return {
+                    "jobs": [
+                        {"conclusion": "success"},
+                        {"conclusion": "success"},
+                        {"conclusion": "skipped"},
+                    ]
+                }
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 9,
+                        "html_url": "https://github.com/owner/repo/actions/runs/9",
+                    }
+                ]
+            }
+
+        with patch.object(collect_metrics, "_github_api_json", side_effect=fake_api):
+            collector = MetricsCollector("test", {})
+            collector.collect_ci_status(Path("/nonexistent"))
+
+        status = collector.metrics["ci_status"]
+        assert status["total_jobs"] == 2
+        assert status["passing_jobs"] == 2
+        assert status["percentage"] == 100.0
+        assert status["status"] == "passing"
+
+    def test_api_all_jobs_skipped_degrades_to_unknown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A run where every job was skipped yields an unknown status."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        def fake_api(path: str, _token: str) -> dict[str, object]:
+            if "/jobs" in path:
+                return {"jobs": [{"conclusion": "skipped"}] * 2}
+            return {"workflow_runs": [{"id": 9}]}
+
+        with patch.object(collect_metrics, "_github_api_json", side_effect=fake_api):
+            collector = MetricsCollector("test", {})
+            collector.collect_ci_status(Path("/nonexistent"))
+
+        status = collector.metrics["ci_status"]
+        assert status["total_jobs"] == 0
+        assert status["status"] == "unknown"
+
+    def test_token_with_embedded_whitespace_is_rejected(self) -> None:
+        """A token containing whitespace never reaches the HTTP layer.
+
+        ``http.client`` does not sanitize header values; rejecting
+        whitespace-bearing tokens closes the header-injection path.
+        """
+        with patch("http.client.HTTPSConnection") as mock_connection:
+            result = collect_metrics._github_api_json(
+                "/repos/owner/repo/actions/runs", "bad\ntoken: injected"
+            )
+
+        assert result is None
+        mock_connection.assert_not_called()
+
+    def test_token_surrounding_whitespace_is_stripped(self) -> None:
+        """Leading/trailing whitespace on the token is stripped, not fatal."""
+        response = Mock()
+        response.status = 200
+        response.read.return_value = b'{"ok": true}'
+        connection = Mock()
+        connection.getresponse.return_value = response
+
+        with patch("http.client.HTTPSConnection", return_value=connection):
+            result = collect_metrics._github_api_json("/path", "  good-token\n")
+
+        assert result == {"ok": True}
+        headers = connection.request.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Bearer good-token"
+
+    def test_api_failure_falls_back_to_static_count(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An API error falls back to the static workflow count, never raising."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        with TemporaryDirectory() as tmpdir:
+            workflows = Path(tmpdir)
+            self._write_workflow(workflows, "ci.yml", ["lint", "test"])
+
+            with patch.object(collect_metrics, "_github_api_json", return_value=None):
+                collector = MetricsCollector("test", {})
+                collector.collect_ci_status(workflows)
+
+            status = collector.metrics["ci_status"]
+            assert status["total_jobs"] == 2
+            assert status["status"] == "unknown"
+
+    def test_api_empty_runs_falls_back_to_static_count(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No completed runs on main falls back to the static count."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        with TemporaryDirectory() as tmpdir:
+            workflows = Path(tmpdir)
+            self._write_workflow(workflows, "ci.yml", ["lint"])
+
+            with patch.object(
+                collect_metrics,
+                "_github_api_json",
+                return_value={"workflow_runs": []},
+            ):
+                collector = MetricsCollector("test", {})
+                collector.collect_ci_status(workflows)
+
+            status = collector.metrics["ci_status"]
+            assert status["total_jobs"] == 1
+            assert status["status"] == "unknown"
+
+    def test_invalid_repository_env_falls_back_to_static(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A malformed GITHUB_REPOSITORY skips the API path entirely."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "not a repo slug!")
+
+        with patch.object(collect_metrics, "_github_api_json") as mock_api:
+            collector = MetricsCollector("test", {})
+            collector.collect_ci_status(Path("/nonexistent"))
+
+        mock_api.assert_not_called()
+        assert collector.metrics["ci_status"]["status"] == "unknown"
+
+    def test_uses_canonical_package_job_counter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """collect_metrics imports the canonical CI helpers (no duplication).
+
+        Issue #159 DRY: the job-counting and status-building helpers live
+        only in ``start_green_stay_green.generators.metrics``;
+        ``collect_metrics`` reuses the same objects instead of redefining
+        them.
+        """
+        assert collect_metrics.__dict__["count_ci_jobs"] is count_ci_jobs
+        assert collect_metrics.__dict__["ci_status"] is ci_status
+
+        self._clear_github_env(monkeypatch)
+        with TemporaryDirectory() as tmpdir:
+            workflows = Path(tmpdir)
+            self._write_workflow(workflows, "ci.yml", ["a", "b", "c"])
+            collector = MetricsCollector("test", {})
+
+            collector.collect_ci_status(workflows)
+
+            assert collector.metrics["ci_status"]["total_jobs"] == (
+                count_ci_jobs(workflows)
+            )
 
 
 class TestMainScriptMode:
