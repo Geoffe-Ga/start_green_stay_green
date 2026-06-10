@@ -947,7 +947,7 @@ def _scripts_dir_has_other_language(scripts_dir: Path, language: str) -> bool:
 # would be wrong for e.g. a Java project, so the init pipeline skips
 # the step instead.
 _SCRIPTS_STEP_LANGUAGES: frozenset[str] = frozenset(
-    {"python", "typescript", "go", "rust", "swift", "kotlin"}
+    {"python", "typescript", "go", "rust", "swift", "kotlin", "cpp"}
 )
 
 
@@ -1256,18 +1256,20 @@ def _generate_architecture_step(
     Architecture configuration is fully deterministic (import-linter for
     Python, dependency-cruiser for TypeScript, go-arch-lint for Go,
     cargo-deny for Rust, SwiftLint custom rules for Swift, a Konsist test
-    for Kotlin). Runs regardless of API key availability; only Python,
-    TypeScript, Go, Rust, Swift, and Kotlin projects produce output. The
-    previous ``orchestrator`` argument was unused and has been removed
-    from this private helper.
+    for Kotlin, an include-boundary checker for C/C++). Runs regardless
+    of API key availability; only Python, TypeScript, Go, Rust, Swift,
+    Kotlin, and C/C++ projects produce output. The previous
+    ``orchestrator`` argument was unused and has been removed from this
+    private helper.
     """
-    if language not in {"python", "typescript", "go", "rust", "swift", "kotlin"}:
+    supported = {"python", "typescript", "go", "rust", "swift", "kotlin", "cpp"}
+    if language not in supported:
         # The generator only supports these languages; surface a dim info
         # line so users understand why no architecture rules were generated
         # for, e.g., a Java project rather than seeing silence.
         console.print(
             f"[dim]Architecture rules unavailable for {language} "
-            "(supported: python, typescript, go, rust, swift, kotlin)[/dim]"
+            f"(supported: {', '.join(sorted(supported))})[/dim]"
         )
         return
 

@@ -480,6 +480,21 @@ LANGUAGE_TOOLS: dict[str, dict[str, str]] = {
         "security": "detekt (potential-bugs) + gitleaks",
         "dependency_check": "OWASP dependency-check",
     },
+    # C/C++ (#362): coverage is the gcov/lcov pipeline wired through the
+    # generated CMakeLists.txt ENABLE_COVERAGE option and gated by
+    # scripts/test.sh --coverage. Mutation testing (mull, the maintained
+    # LLVM-based mutator) is a periodic gate like pitest/muter, not a
+    # per-commit hook. Each tool appears in exactly one category:
+    # complexity is lizard's (clang-tidy does not duplicate the gate) and
+    # security is cppcheck + flawfinder per the issue's tooling list.
+    "cpp": {
+        "coverage": "lcov (cmake -DENABLE_COVERAGE=ON + ctest)",
+        "mutation": "mull",
+        "complexity": "lizard (CCN)",
+        "documentation": "doxygen",
+        "security": "cppcheck + flawfinder",
+        "dependency_check": "conan audit",
+    },
 }
 
 

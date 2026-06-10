@@ -1,6 +1,8 @@
 """Unit tests for Scripts Generator."""
 
 from pathlib import Path
+import shutil
+import subprocess
 import tempfile
 
 import pytest
@@ -8,6 +10,7 @@ import yaml
 
 from start_green_stay_green.generators.scripts import ScriptConfig
 from start_green_stay_green.generators.scripts import ScriptsGenerator
+from start_green_stay_green.utils.cpp import CPP_STANDARD
 
 
 class TestScriptConfig:
@@ -185,6 +188,44 @@ class TestScriptsGeneratorPythonGeneration:
             assert "Running All Quality Checks" in content
             assert "lint.sh" in content
             assert "format.sh" in content
+
+    def test_python_check_all_uses_safe_array_expansion(self) -> None:
+        """check-all.sh run_check must use the exact safe-expansion form.
+
+        Regression guard: a stray trailing backslash-quote after the
+        safe expansion is a bash parse error under strict shells and a
+        silent literal argument under permissive ones. The expansion
+        must match the TypeScript generator's correct form exactly.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["check-all.sh"].read_text()
+            assert '"${args[@]+"${args[@]}"}" $VERBOSE_FLAG' in content
+            assert '}\\" $VERBOSE_FLAG' not in content
+
+    def test_python_fix_all_uses_safe_array_expansion(self) -> None:
+        """fix-all.sh must guard empty args with the safe expansion.
+
+        Under ``set -u`` some bash versions raise a bad-substitution
+        error when expanding an empty ``${args[@]}`` directly.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["fix-all.sh"].read_text()
+            assert '--fix "${args[@]+"${args[@]}"}" $VERBOSE_FLAG' in content
+            assert '--fix "${args[@]}" $VERBOSE_FLAG' not in content
 
     def test_python_format_script_contains_expected_content(self) -> None:
         """Test Python format.sh contains expected content."""
@@ -897,6 +938,283 @@ class TestScriptsGeneratorKotlinGeneration:
             assert "gitleaks" in content
 
 
+class TestScriptsGeneratorCppGeneration:
+    """Test C/C++ script generation (#362)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Generate cpp scripts into ``tmpdir`` and return the mapping."""
+        config = ScriptConfig(
+            language="cpp",
+            package_name="my_watch_app",
+        )
+        generator = ScriptsGenerator(Path(tmpdir), config)
+        return generator.generate()
+
+    def test_generate_cpp_scripts_creates_files(self) -> None:
+        """Test generate creates the full cpp script set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            assert "check-all.sh" in scripts
+            assert "format.sh" in scripts
+            assert "lint.sh" in scripts
+            assert "test.sh" in scripts
+            assert "security.sh" in scripts
+
+    def test_cpp_format_script_uses_clang_format(self) -> None:
+        """Test cpp format.sh uses clang-format against the shared config."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "clang-format -i" in content
+            assert "clang-format --dry-run --Werror" in content
+            assert ".clang-format" in content
+
+    def test_cpp_format_script_covers_all_cpp_extensions(self) -> None:
+        """format.sh finds every extension the pre-commit hook covers.
+
+        The clang-format hook uses types_or c/c++ (covering .c/.cc/.cxx/
+        .hh automatically); the standalone script's find must not
+        silently skip those files.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            for ext in ("*.c", "*.cc", "*.cpp", "*.cxx", "*.h", "*.hh", "*.hpp"):
+                assert f"-name '{ext}'" in content, ext
+
+    def test_cpp_shell_scripts_pass_bash_syntax_check(self) -> None:
+        """Every generated cpp shell script parses under bash -n.
+
+        Completes the parse-validation pattern: the templates embed
+        run_check() with array expansions, so a literal syntax check
+        guards against template-escaping regressions.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            for name, path in scripts.items():
+                if not name.endswith(".sh"):
+                    continue
+                bash = shutil.which("bash")
+                assert bash is not None, "bash not found on PATH"
+                result = subprocess.run(  # noqa: S603  # Issue #362: bash -n on generated content, no untrusted input
+                    [bash, "-n", str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, f"{name}: {result.stderr}"
+
+    def test_cpp_lint_script_runs_full_static_analysis(self) -> None:
+        """lint.sh runs clang-tidy, cppcheck, and the lizard CCN gate."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "clang-tidy" in content
+            assert "cppcheck --enable=warning,performance,portability" in content
+            assert "lizard --CCN" in content
+
+    def test_cpp_lint_script_gates_complexity_at_10_in_one_place(self) -> None:
+        """The CCN ceiling lives once, as MAX_CCN=10 in lint.sh.
+
+        The companion .clang-tidy deliberately does not duplicate the
+        bound via readability-function-cognitive-complexity; lizard owns
+        the complexity gate (single source of truth).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "MAX_CCN=10" in content
+            assert 'lizard --CCN "$MAX_CCN"' in content
+
+    def test_cpp_lint_script_requires_compile_commands(self) -> None:
+        """lint.sh fails with instructions when the build is unconfigured.
+
+        clang-tidy needs build/compile_commands.json; the script must say
+        how to produce it (the cmake configure step) instead of emitting
+        a bare clang-tidy error.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "build/compile_commands.json" in content
+            assert "conan install . --output-folder=build --build=missing" in content
+
+    def test_cpp_test_script_runs_ctest(self) -> None:
+        """Test cpp test.sh runs the Catch2 suite via CTest."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "ctest --test-dir build" in content
+
+    def test_cpp_test_script_enforces_90_percent_coverage(self) -> None:
+        """Coverage mode rebuilds instrumented and gates at 90% via lcov.
+
+        THRESHOLD=90 in test.sh is the single place the bound lives; the
+        ENABLE_COVERAGE instrumentation option it toggles is defined in
+        the generated CMakeLists.txt.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "THRESHOLD=90" in content
+            assert "-DENABLE_COVERAGE=ON" in content
+            assert "lcov --capture" in content
+
+    def test_cpp_test_script_excludes_third_party_from_coverage(self) -> None:
+        """The lcov data is narrowed to first-party src/ and inc/ sources."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert 'lcov --extract build/coverage.info "*/src/*" "*/inc/*"' in content
+
+    def test_cpp_test_script_documents_main_cpp_coverage_limit(self) -> None:
+        """test.sh discloses that the Tizen entry point is not measured.
+
+        src/main.cpp needs the Tizen SDK and is outside the host build,
+        so the coverage gate honestly excludes it rather than implying
+        whole-project coverage.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "src/main.cpp" in content
+            assert "coverage denominator" in content
+
+    def test_cpp_security_script_uses_flawfinder(self) -> None:
+        """Test cpp security.sh runs flawfinder's dangerous-API scan."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "flawfinder --error-level=4" in content
+
+    def test_cpp_security_script_warns_and_skips_when_tool_missing(self) -> None:
+        """security.sh degrades to a warning when flawfinder is absent.
+
+        Mirrors the Swift Periphery / Kotlin dependency-check precedent:
+        a fresh clone must pass check-all.sh out of the box, with a
+        documented tighten-me path.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "command -v flawfinder" in content
+            assert "pip install flawfinder" in content
+            assert "Tighten" in content
+
+    def test_cpp_security_script_documents_division_of_labor(self) -> None:
+        """security.sh discloses where the other security passes live.
+
+        cppcheck and the clang-analyzer checks run in lint.sh; secret
+        scanning runs in pre-commit; scan-build is the documented
+        tighten-me. The script must say so instead of overclaiming.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "gitleaks" in content
+            assert "clang-analyzer" in content
+            assert "scan-build" in content
+
+    def test_cpp_check_all_runs_full_toolchain(self) -> None:
+        """check-all.sh runs format, lint, tests (with coverage), security."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["check-all.sh"].read_text()
+            assert 'run_check "Format" "format.sh"' in content
+            assert 'run_check "Linting" "lint.sh"' in content
+            assert 'run_check "Tests" "test.sh" --coverage' in content
+            assert 'run_check "Security" "security.sh"' in content
+
+    def test_cpp_writes_clang_config_companions(self) -> None:
+        """.clang-format and .clang-tidy companions land at the project root."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            assert (Path(tmpdir) / ".clang-format").exists()
+            assert (Path(tmpdir) / ".clang-tidy").exists()
+
+    def test_clang_format_config_is_parseable_yaml(self) -> None:
+        """.clang-format must be syntactically valid YAML."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".clang-format").read_text()
+            parsed = yaml.safe_load(content)
+            assert isinstance(parsed, dict)
+            assert parsed["BasedOnStyle"] == "Google"
+
+    def test_clang_format_config_pins_the_cpp_standard(self) -> None:
+        """.clang-format's Standard matches the CMakeLists C++ standard.
+
+        Both interpolate utils.cpp.CPP_STANDARD, so the formatter and the
+        compiler can never disagree about the language version.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".clang-format").read_text()
+            parsed = yaml.safe_load(content)
+            assert parsed["Standard"] == f"c++{CPP_STANDARD}"
+
+    def test_clang_tidy_config_is_parseable_yaml(self) -> None:
+        """.clang-tidy must be syntactically valid YAML."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".clang-tidy").read_text()
+            parsed = yaml.safe_load(content)
+            assert isinstance(parsed, dict)
+
+    def test_clang_tidy_config_promotes_warnings_to_errors(self) -> None:
+        """.clang-tidy enables the analyzer checks and fails on findings."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".clang-tidy").read_text()
+            parsed = yaml.safe_load(content)
+            assert parsed["WarningsAsErrors"] == "*"
+            assert "clang-analyzer-*" in parsed["Checks"]
+            assert "bugprone-*" in parsed["Checks"]
+
+    def test_clang_tidy_config_documents_tighten_me_checks(self) -> None:
+        """.clang-tidy discloses the deliberately deferred check groups."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".clang-tidy").read_text()
+            assert "Tighten-me" in content
+            assert "cppcoreguidelines" in content
+
+    def test_clang_config_companions_preserve_existing_files(self) -> None:
+        """Existing user .clang-format/.clang-tidy are never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing_format = Path(tmpdir) / ".clang-format"
+            existing_format.write_text("BasedOnStyle: LLVM\n")
+            existing_tidy = Path(tmpdir) / ".clang-tidy"
+            existing_tidy.write_text("Checks: bugprone-*\n")
+
+            self._generate(tmpdir)
+
+            assert existing_format.read_text() == "BasedOnStyle: LLVM\n"
+            assert existing_tidy.read_text() == "Checks: bugprone-*\n"
+
+
 class TestScriptsGeneratorLanguageFallback:
     """Test language fallback behavior."""
 
@@ -1174,6 +1492,20 @@ class TestMutationKillers:
             content = scripts["lint.sh"].read_text()
             assert "detekt" in content
 
+    def test_cpp_language_dispatches_to_cpp_generator(self) -> None:
+        """Test 'cpp' language dispatches to the C/C++ generator."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="cpp",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            # Should generate cpp scripts with clang-tidy
+            content = scripts["lint.sh"].read_text()
+            assert "clang-tidy" in content
+
     def test_generated_scripts_exact_count_python(self) -> None:
         """Test Python generator creates EXACTLY 12 scripts.
 
@@ -1192,6 +1524,32 @@ class TestMutationKillers:
             assert len(scripts) == 12
             assert len(scripts) > 11
             assert len(scripts) < 13
+
+    def test_generated_scripts_exact_count_cpp(self) -> None:
+        """Test C/C++ generator creates EXACTLY 6 scripts.
+
+        Kills mutations in script count logic and catches silent script
+        additions/removals. Scripts: check-all, format, lint, test,
+        security, pr-status (companion configs .clang-format/.clang-tidy
+        are written separately and not counted here).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="cpp",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            assert len(scripts) == 6
+            assert sorted(scripts) == [
+                "check-all.sh",
+                "format.sh",
+                "lint.sh",
+                "pr-status.sh",
+                "security.sh",
+                "test.sh",
+            ]
 
     def test_generated_scripts_exact_count_typescript(self) -> None:
         """Test TypeScript generator creates EXACTLY 6 scripts."""

@@ -75,8 +75,9 @@ class DependenciesGenerator(BaseGenerator):
     All 10 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin, cpp) are available at the generator level. Note that
     the full CLI pipeline (``sgsg init``) skips its quality-tooling steps
-    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
-    and cpp; C/C++ tooling arrives with #362/#363.
+    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, and
+    ruby; C/C++ quality tooling landed with #362 and only its CI step
+    (#363) still skips.
 
     Attributes:
         output_dir: Directory where dependency files will be written
@@ -973,9 +974,28 @@ set(CMAKE_CXX_STANDARD {CPP_STANDARD})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Export build/compile_commands.json for clang-tidy: scripts/lint.sh and
+# the pre-commit clang-tidy hook both read it (-p build).
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Coverage instrumentation for scripts/test.sh --coverage (the >=90%
+# line-coverage gate lives in that script). OFF by default so plain
+# builds stay uninstrumented.
+option(ENABLE_COVERAGE "Instrument the build for gcov/lcov coverage" OFF)
+
 # Pure greeting logic: no Tizen dependencies (src/greeting.cpp + inc/).
+# Renaming the source file requires updating both 'greeting' references
+# below (and the target_link_libraries in the test target).
 add_library(greeting src/greeting.cpp)
 target_include_directories(greeting PUBLIC inc)
+
+if(ENABLE_COVERAGE)
+    # --coverage = -fprofile-arcs -ftest-coverage on both gcc and clang.
+    # PUBLIC so consumers (greeting_tests) also compile and link with the
+    # gcov runtime; .gcda data then lands under build/ for lcov.
+    target_compile_options(greeting PUBLIC --coverage -O0 -g)
+    target_link_options(greeting PUBLIC --coverage)
+endif()
 
 # Catch2 unit tests (dependency managed by Conan, see conanfile.txt).
 include(CTest)

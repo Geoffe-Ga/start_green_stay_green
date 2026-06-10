@@ -553,7 +553,7 @@ class TestKotlinReadme:
 
 
 class TestCppReadme:
-    """Test C/C++ Tizen-specific README content (#361)."""
+    """Test C/C++ Tizen-specific README content (#361/#362)."""
 
     @staticmethod
     def _readme_content(tmpdir: str) -> str:
@@ -583,22 +583,74 @@ class TestCppReadme:
             assert "org.example.testproject" in content
 
     def test_cpp_readme_discloses_planned_tooling(self) -> None:
-        """README lists #362/#363 tooling as planned, not generated."""
+        """README lists the deferred CI pipeline (#363) as planned."""
         with tempfile.TemporaryDirectory() as tmpdir:
             content = self._readme_content(tmpdir)
             assert "Planned / coming soon" in content
             assert "not yet generated" in content
+            assert "CI/CD pipeline" in content
 
-    def test_cpp_readme_never_checkmarks_planned_tooling(self) -> None:
-        """No planned feature (lint, pre-commit, CI) carries a checkmark."""
+    def test_cpp_readme_only_checkmarks_generated_features(self) -> None:
+        """cpp README must not ✅ features the scaffold does not generate.
+
+        After #362 the quality toolchain (clang-format/clang-tidy/cppcheck,
+        pre-commit hooks, quality scripts, architecture rules) IS generated
+        and may carry a checkmark; the CI/CD pipeline (#363) remains
+        deferred and must not.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             content = self._readme_content(tmpdir)
 
-            planned = ("clang-format", "clang-tidy", "Pre-commit", "CI/CD")
-            for feature in planned:
+            wired = ("clang-format", "clang-tidy", "Pre-commit hooks", "lizard")
+            for feature in wired:
+                assert any(
+                    "✅" in line and feature in line for line in content.splitlines()
+                ), f"README must advertise wired feature: {feature}"
+
+            unwired = ("CI/CD pipeline",)
+            for feature in unwired:
                 assert not any(
                     "✅" in line and feature in line for line in content.splitlines()
                 ), f"README must not checkmark planned feature: {feature}"
+
+    def test_cpp_readme_instructs_pre_commit_install(self) -> None:
+        """README tells users to install the now-generated pre-commit hooks.
+
+        Inverted from the #361 foundation scaffold: #362 wires a cpp
+        .pre-commit-config.yaml, so the README must document installing it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "pre-commit install" in content
+
+    def test_cpp_readme_documents_quality_tool_installs(self) -> None:
+        """README documents installing the quality toolchain.
+
+        clang-format/llvm/cppcheck/lcov come from brew or apt; lizard and
+        flawfinder are pip-installable — both install paths must appear.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "brew install clang-format llvm cppcheck lcov" in content
+            assert "apt-get install clang-format clang-tidy cppcheck lcov" in content
+            assert "pip install lizard flawfinder" in content
+
+    def test_cpp_readme_documents_check_all_gate(self) -> None:
+        """README points at the generated quality-gate entry point."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "./scripts/check-all.sh" in content
+
+    def test_cpp_readme_documents_coverage_denominator_limit(self) -> None:
+        """README discloses that main.cpp is outside the coverage gate.
+
+        src/main.cpp needs the Tizen SDK and is not part of the host
+        build, so the >=90% lcov gate cannot see it; the README must say
+        so instead of implying whole-project coverage.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "coverage denominator" in content
 
     def test_cpp_readme_documents_tizen_studio_split(self) -> None:
         """README explains the plain-CMake vs Tizen Studio build split."""

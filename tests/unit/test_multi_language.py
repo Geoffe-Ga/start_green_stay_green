@@ -161,7 +161,7 @@ class TestMultiLanguageGeneration:
 
 
 class TestMultiLanguageArchitectureParity:
-    """Go (#341), Rust (#342), Swift (#352), and Kotlin (#357) parity."""
+    """Go (#341), Rust (#342), Swift (#352), Kotlin (#357), cpp (#362)."""
 
     def test_go_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
         """Go must emit an architecture-enforcement config like py/ts."""
@@ -191,8 +191,15 @@ class TestMultiLanguageArchitectureParity:
         config = tmp_path / "plans" / "architecture" / "ArchitectureTest.kt"
         assert config.exists(), "Kotlin init must emit a Konsist test template"
 
+    def test_cpp_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
+        """cpp must emit an architecture-enforcement config like py/ts/go."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "cpp")
+
+        config = tmp_path / "plans" / "architecture" / "check_architecture.py"
+        assert config.exists(), "cpp init must emit the include-boundary checker"
+
     @pytest.mark.parametrize(
-        "language", ["python", "typescript", "go", "rust", "swift", "kotlin"]
+        "language", ["python", "typescript", "go", "rust", "swift", "kotlin", "cpp"]
     )
     def test_supported_languages_emit_architecture_config(
         self, tmp_path: Path, language: str
@@ -393,28 +400,42 @@ class TestGeneratorOnlyLanguagePipelineGates:
 
 
 class TestCppPipelineGates:
-    """Pipeline steps skip gracefully for the cpp foundation (#361).
+    """Pipeline steps run (or skip) correctly for cpp after #362.
 
-    C/C++ has structure/dependencies/tests/readme generators but no
-    quality-tooling support yet — that lands with #362 (pre-commit,
-    scripts, metrics, architecture) and #363 (CI). Instead of crashing
-    init, those steps must no-op with an informational message, exactly
-    as they did for the Kotlin foundation (#356) before #357/#358.
+    The #361 foundation shipped structure/dependencies/tests/readme only;
+    #362 wired the pre-commit/scripts/metrics/architecture tooling, so
+    those steps must now generate real artifacts. Only the CI step (#363)
+    still skips, with an informational message instead of a crash.
     """
 
-    def test_precommit_step_skips_cpp_without_writing(self, tmp_path: Path) -> None:
-        """No .pre-commit-config.yaml is written and no error is raised."""
+    def test_precommit_step_writes_for_cpp(self, tmp_path: Path) -> None:
+        """cpp now generates a pre-commit config (#362)."""
         cli_mod._generate_precommit_step(tmp_path, "my-project", "cpp")
 
-        assert not (tmp_path / ".pre-commit-config.yaml").exists()
+        config = tmp_path / ".pre-commit-config.yaml"
+        assert config.exists()
+        assert "clang-tidy" in config.read_text()
 
-    def test_scripts_step_skips_cpp_without_python_fallback(
-        self, tmp_path: Path
-    ) -> None:
-        """cpp must not receive the Python-fallback quality scripts."""
+    def test_scripts_step_writes_cpp_scripts(self, tmp_path: Path) -> None:
+        """cpp now receives its own quality scripts (#362)."""
         cli_mod._generate_scripts_step(tmp_path, "my-project", "cpp")
 
-        assert not (tmp_path / "scripts").exists()
+        test_script = tmp_path / "scripts" / "test.sh"
+        assert test_script.exists()
+        assert "ctest" in test_script.read_text()
+
+    def test_scripts_step_writes_clang_companions_at_project_root(
+        self, tmp_path: Path
+    ) -> None:
+        """The .clang-format/.clang-tidy companions land at the root.
+
+        The pre-commit hooks and the format/lint scripts resolve these
+        files relative to the project root, not the scripts directory.
+        """
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "cpp")
+
+        assert (tmp_path / ".clang-format").exists()
+        assert (tmp_path / ".clang-tidy").exists()
 
     def test_ci_step_skips_cpp_without_workflow(self, tmp_path: Path) -> None:
         """No ci.yml is written for cpp (CI generation is #363)."""
@@ -422,14 +443,15 @@ class TestCppPipelineGates:
 
         assert not (tmp_path / ".github" / "workflows" / "ci.yml").exists()
 
-    def test_metrics_step_skips_cpp_without_dashboard(self, tmp_path: Path) -> None:
-        """No metrics dashboard is written for cpp (metrics is #362)."""
+    def test_metrics_step_writes_cpp_dashboard(self, tmp_path: Path) -> None:
+        """The metrics dashboard is now generated for cpp (#362)."""
         cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "cpp")
 
-        assert not (tmp_path / "docs" / "metrics.json").exists()
+        assert (tmp_path / "docs" / "metrics.json").exists()
 
-    def test_architecture_step_skips_cpp(self, tmp_path: Path) -> None:
-        """No architecture rules are generated for cpp yet (#362)."""
+    def test_architecture_step_writes_cpp_rules(self, tmp_path: Path) -> None:
+        """Architecture rules are now generated for cpp (#362)."""
         cli_mod._generate_architecture_step(tmp_path, "my-project", "cpp")
 
-        assert not (tmp_path / "plans" / "architecture").exists()
+        checker = tmp_path / "plans" / "architecture" / "check_architecture.py"
+        assert checker.exists()

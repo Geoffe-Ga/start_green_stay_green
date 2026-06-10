@@ -1489,6 +1489,21 @@ class TestGenerateSteps:
         assert mock_generator.generate.call_args.kwargs["language"] == "kotlin"
 
     @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
+    def test_generate_architecture_step_cpp(self, mock_generator_class: Mock) -> None:
+        """Test _generate_architecture_step generates rules for C/C++."""
+        mock_generator = MagicMock()
+        mock_generator_class.return_value = mock_generator
+        mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_architecture_step(mock_path, "my-project", "cpp")
+
+        # cpp now has architecture parity (#362): the generator runs.
+        mock_generator.generate.assert_called_once()
+        assert mock_generator.generate.call_args.kwargs["language"] == "cpp"
+
+    @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
     def test_generate_architecture_step_skips_unsupported(
         self, mock_generator_class: Mock
     ) -> None:

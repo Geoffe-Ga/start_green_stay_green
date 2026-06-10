@@ -17,8 +17,8 @@ Start Green Stay Green is a meta-tool that scaffolds new software projects with 
 
 - **Enterprise-Grade Quality**: 90%+ code coverage, mutation testing, comprehensive linting
 - **AI Integration**: Pre-configured AI subagent profiles and code review workflows
-- **Multi-Language Support**: Python, TypeScript, Go, Rust, Swift (watchOS), and Kotlin (Wear OS)
-- **Architecture Enforcement**: import-linter (Python), dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust), SwiftLint custom rules (Swift), and Konsist (Kotlin)
+- **Multi-Language Support**: Python, TypeScript, Go, Rust, Swift (watchOS), Kotlin (Wear OS), and C/C++ (Tizen)
+- **Architecture Enforcement**: import-linter (Python), dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust), SwiftLint custom rules (Swift), Konsist (Kotlin), and an include-boundary checker (C/C++)
 - **Complete CI/CD**: GitHub Actions workflows with quality gates
 - **Additive Init**: Safe to re-run in existing directories — preserves your files
 - **Developer Experience**: Rich console output, interactive prompts, dry-run mode
@@ -431,6 +431,7 @@ Project names must follow these rules:
 - **Rust**: cargo test, clippy, rustfmt
 - **Swift**: swift test (≥90% coverage via llvm-cov), SwiftLint, swift-format, Periphery
 - **Kotlin**: ./gradlew test (≥90% coverage via Kover), detekt, ktlint, OWASP dependency-check
+- **C/C++**: ctest (≥90% coverage via gcov/lcov), clang-format, clang-tidy + cppcheck, lizard, flawfinder
 
 See the [CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for the
 full per-language toolchain table and prerequisites.
