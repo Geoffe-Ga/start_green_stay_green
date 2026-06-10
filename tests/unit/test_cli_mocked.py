@@ -1983,6 +1983,34 @@ class TestEnhanceDetectionHelpers:
         (tmp_path / "build.gradle").write_text("apply plugin: 'java'\n")
         assert cli._detect_project_language(tmp_path) == "java"
 
+    def test_detect_project_language_cpp_tizen_manifest(self, tmp_path: Path) -> None:
+        """``tizen-manifest.xml`` → cpp (#361)."""
+        (tmp_path / "tizen-manifest.xml").write_text("<manifest/>\n")
+        assert cli._detect_project_language(tmp_path) == "cpp"
+
+    def test_detect_project_language_cpp_conanfile(self, tmp_path: Path) -> None:
+        """``conanfile.txt`` → cpp (#361)."""
+        (tmp_path / "conanfile.txt").write_text("[requires]\n")
+        assert cli._detect_project_language(tmp_path) == "cpp"
+
+    def test_detect_project_language_cpp_cmakelists(self, tmp_path: Path) -> None:
+        """``CMakeLists.txt`` alone → cpp (#361)."""
+        (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+        assert cli._detect_project_language(tmp_path) == "cpp"
+
+    def test_detect_project_language_cmakelists_never_shadows_others(
+        self, tmp_path: Path
+    ) -> None:
+        """A Rust project vendoring CMake still detects as rust.
+
+        CMakeLists.txt shows up inside other ecosystems' projects (native
+        build scripts, vendored deps), so every more specific probe must
+        win over the cpp fallback.
+        """
+        (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+        (tmp_path / "Cargo.toml").write_text("[package]\n")
+        assert cli._detect_project_language(tmp_path) == "rust"
+
     def test_detect_project_language_returns_none_for_empty(
         self, tmp_path: Path
     ) -> None:

@@ -21,6 +21,7 @@ EXPECTED_TEST_FILES: dict[str, list[str]] = {
     "ruby": ["spec/test_project_spec.rb", "spec/spec_helper.rb"],
     "swift": ["Tests/test_projectTests/test_projectTests.swift"],
     "kotlin": ["app/src/test/kotlin/com/example/test_project/GreetingTest.kt"],
+    "cpp": ["tests/test_greeting.cpp"],
 }
 
 
@@ -485,3 +486,56 @@ class TestMultiLanguageTests:
             # A second case proves greeting() reflects its argument.
             assert 'greeting("wear")' in content
             assert 'assertEquals("Hello from wear!", ' in content
+
+
+class TestCppTestGeneration:
+    """Test C/C++ Catch2 scaffold generation (#361)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Run the tests generator for a cpp test project.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            Mapping of generated relative keys to file paths.
+        """
+        config = Config(
+            project_name="test-project",
+            language="cpp",
+            package_name="test_project",
+        )
+        return Generator(Path(tmpdir), config).generate()
+
+    def test_cpp_test_uses_catch2(self) -> None:
+        """The scaffold test includes Catch2 v3 and uses TEST_CASE."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["tests/test_greeting.cpp"].read_text()
+            assert "#include <catch2/catch_test_macros.hpp>" in content
+            assert "TEST_CASE(" in content
+
+    def test_cpp_test_exercises_format_greeting_logic(self) -> None:
+        """The test calls format_greeting with project and arbitrary names.
+
+        Exercising the assembly logic with two inputs (rather than
+        comparing identical literals) is the PR #392 review lesson.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["tests/test_greeting.cpp"].read_text()
+            assert 'test_project::format_greeting("test-project")' in content
+            assert '"Hello from test-project!"' in content
+            assert 'test_project::format_greeting("tizen")' in content
+
+    def test_cpp_test_has_no_tizen_dependencies(self) -> None:
+        """The Catch2 scaffold must build without the Tizen SDK."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["tests/test_greeting.cpp"].read_text()
+            assert "watch_app" not in content
+            assert "Elementary.h" not in content

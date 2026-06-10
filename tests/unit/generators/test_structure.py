@@ -10,6 +10,7 @@ import pytest
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.structure import StructureConfig
 from start_green_stay_green.generators.structure import StructureGenerator
+from start_green_stay_green.utils.cpp import tizen_app_id
 from start_green_stay_green.utils.swift import package_swift
 
 # Expected source directories per language
@@ -23,6 +24,7 @@ EXPECTED_SOURCE_DIRS: dict[str, str] = {
     "ruby": "lib",
     "swift": "Sources",
     "kotlin": "app",
+    "cpp": "src",
 }
 
 # Expected entry point files per language
@@ -36,6 +38,7 @@ EXPECTED_ENTRY_POINTS: dict[str, str] = {
     "ruby": "lib/test_project.rb",
     "swift": "Sources/test_project/TestProjectApp.swift",
     "kotlin": "app/src/main/kotlin/com/example/test_project/MainActivity.kt",
+    "cpp": "src/main.cpp",
 }
 
 
@@ -57,6 +60,9 @@ EXPECTED_CONFIG_FILES: dict[str, list[str]] = {
     "swift": ["Package.swift"],
     # Gradle manifests are owned by DependenciesGenerator for kotlin.
     "kotlin": [],
+    # CMake/Conan manifests are owned by DependenciesGenerator for cpp;
+    # tizen-manifest.xml is part of the structure scaffold.
+    "cpp": ["tizen-manifest.xml"],
 }
 
 
@@ -673,6 +679,139 @@ class TestKotlinStructure:
             assert "settings.gradle.kts" not in files
             assert "build.gradle.kts" not in files
             assert "app/build.gradle.kts" not in files
+
+
+class TestCppStructure:
+    """Test C/C++ Tizen native watch-app structure generation (#361)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Run the structure generator for a cpp test project.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            Mapping of generated relative keys to file paths.
+        """
+        config = StructureConfig(
+            project_name="test-project",
+            language="cpp",
+            package_name="test_project",
+        )
+        return StructureGenerator(Path(tmpdir), config).generate()
+
+    def test_cpp_creates_tizen_manifest(self) -> None:
+        """cpp generates a tizen-manifest.xml at the project root."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            assert "tizen-manifest.xml" in files
+            content = files["tizen-manifest.xml"].read_text()
+            assert "<manifest" in content
+            assert "watch-application" in content
+
+    def test_cpp_manifest_is_well_formed_xml(self) -> None:
+        """The generated tizen-manifest.xml parses as XML."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["tizen-manifest.xml"].read_text()
+            root = DefusedElementTree.fromstring(content)
+            assert root.tag == "{http://tizen.org/ns/packages}manifest"
+
+    def test_cpp_manifest_declares_wearable_profile(self) -> None:
+        """The manifest targets the wearable profile (Galaxy Watch)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["tizen-manifest.xml"].read_text()
+            assert '<profile name="wearable" />' in content
+            assert (
+                '<feature name="http://tizen.org/feature/watch_app">true</feature>'
+                in content
+            )
+
+    def test_cpp_manifest_uses_shared_app_id_helper(self) -> None:
+        """The app ID comes from the shared tizen_app_id helper."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["tizen-manifest.xml"].read_text()
+            assert tizen_app_id("test_project") in content
+            assert 'package="org.example.testproject"' in content
+
+    def test_cpp_manifest_documents_missing_icon_binary(self) -> None:
+        """Icon binaries are never generated; the manifest discloses it."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["tizen-manifest.xml"].read_text()
+            assert "NOT generated" in content
+            assert "<icon>test_project.png</icon>" in content
+
+    def test_cpp_creates_watch_app_entry_point(self) -> None:
+        """src/main.cpp uses the Tizen watch_app lifecycle with EFL."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            assert "src/main.cpp" in files
+            content = files["src/main.cpp"].read_text()
+            assert "#include <watch_app.h>" in content
+            assert "#include <watch_app_efl.h>" in content
+            assert "#include <Elementary.h>" in content
+            assert "watch_app_main(argc, argv, &callbacks, &ad)" in content
+
+    def test_cpp_main_documents_tizen_studio_requirement(self) -> None:
+        """main.cpp discloses that it builds via Tizen Studio, not CMake."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["src/main.cpp"].read_text()
+            assert "Tizen Studio" in content
+            assert "NOT by the plain CMake build" in content
+
+    def test_cpp_creates_pure_logic_translation_unit(self) -> None:
+        """format_greeting lives in its own Tizen-free translation unit."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            assert "inc/greeting.h" in files
+            assert "src/greeting.cpp" in files
+            header = files["inc/greeting.h"].read_text()
+            impl = files["src/greeting.cpp"].read_text()
+            assert "namespace test_project {" in header
+            assert "std::string format_greeting(const std::string" in header
+            assert '"Hello from " + project_name + "!"' in impl
+            assert "watch_app" not in header
+            assert "watch_app" not in impl
+
+    def test_cpp_main_calls_format_greeting_with_project_name(self) -> None:
+        """The watch UI text is assembled by the testable pure function."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["src/main.cpp"].read_text()
+            assert 'test_project::format_greeting("test-project")' in content
+
+    def test_cpp_creates_resource_placeholder_notes(self) -> None:
+        """res/ and shared/res/ carry notes instead of binary assets."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            assert "res/README.md" in files
+            assert "shared/res/README.md" in files
+            icon_note = files["shared/res/README.md"].read_text()
+            assert "test_project.png" in icon_note
+            assert "NOT generated" in icon_note
+
+    def test_cpp_does_not_write_build_manifests(self) -> None:
+        """CMake/Conan manifests belong to DependenciesGenerator."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            assert "CMakeLists.txt" not in files
+            assert "conanfile.txt" not in files
 
 
 class TestTypeScriptConfigGeneration:

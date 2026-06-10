@@ -9,6 +9,9 @@ import pytest
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.dependencies import DependenciesGenerator
 from start_green_stay_green.generators.dependencies import DependencyConfig
+from start_green_stay_green.utils.cpp import CATCH2_VERSION
+from start_green_stay_green.utils.cpp import CMAKE_MINIMUM_VERSION
+from start_green_stay_green.utils.cpp import CPP_STANDARD
 from start_green_stay_green.utils.kotlin import AGP_VERSION
 from start_green_stay_green.utils.kotlin import JUNIT_VERSION
 from start_green_stay_green.utils.kotlin import KONSIST_VERSION
@@ -33,6 +36,7 @@ EXPECTED_DEP_FILES: dict[str, list[str]] = {
         "gradle.properties",
         "app/build.gradle.kts",
     ],
+    "cpp": ["CMakeLists.txt", "conanfile.txt"],
 }
 
 
@@ -573,3 +577,84 @@ class TestKotlinDependencies:
                 f'testImplementation("com.lemonappdev:konsist:{KONSIST_VERSION}")'
                 in content
             )
+
+
+class TestCppDependencies:
+    """Test C/C++ CMake + Conan manifest generation (#361)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Run the dependencies generator for a cpp test project.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            Mapping of generated relative keys to file paths.
+        """
+        config = DependencyConfig(
+            project_name="test-project",
+            language="cpp",
+            package_name="test_project",
+        )
+        return DependenciesGenerator(Path(tmpdir), config).generate()
+
+    def test_cmakelists_pins_minimum_version_and_standard(self) -> None:
+        """CMakeLists.txt pins the shared CMake minimum and C++ standard."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["CMakeLists.txt"].read_text()
+            assert f"cmake_minimum_required(VERSION {CMAKE_MINIMUM_VERSION})" in content
+            assert f"set(CMAKE_CXX_STANDARD {CPP_STANDARD})" in content
+            assert "set(CMAKE_CXX_STANDARD_REQUIRED ON)" in content
+
+    def test_cmakelists_builds_library_and_catch2_test_target(self) -> None:
+        """The build covers the pure-logic library plus the Catch2 tests."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["CMakeLists.txt"].read_text()
+            assert "add_library(greeting src/greeting.cpp)" in content
+            assert "find_package(Catch2 3 REQUIRED)" in content
+            assert "Catch2::Catch2WithMain" in content
+            assert "catch_discover_tests(greeting_tests)" in content
+
+    def test_cmakelists_uses_sanitized_project_identifier(self) -> None:
+        """The CMake project name comes from the shared cpp helper."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["CMakeLists.txt"].read_text()
+            assert "project(test_project VERSION 0.1.0 LANGUAGES CXX)" in content
+
+    def test_cmakelists_excludes_tizen_entry_point(self) -> None:
+        """src/main.cpp (Tizen Studio's job) is not in the CMake build."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["CMakeLists.txt"].read_text()
+            assert "src/main.cpp" not in [
+                line.strip()
+                for line in content.splitlines()
+                if not line.lstrip().startswith("#")
+            ]
+            assert "Tizen Studio" in content
+
+    def test_conanfile_pins_catch2(self) -> None:
+        """conanfile.txt requires the pinned Catch2 version."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["conanfile.txt"].read_text()
+            assert f"catch2/{CATCH2_VERSION}" in content
+            assert "[requires]" in content
+
+    def test_conanfile_declares_cmake_generators(self) -> None:
+        """conanfile.txt emits the toolchain the documented build consumes."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["conanfile.txt"].read_text()
+            assert "CMakeDeps" in content
+            assert "CMakeToolchain" in content

@@ -179,6 +179,28 @@ class TestGetSetupInstructions:
         build_idx = instructions.index("./gradlew build")
         assert wrapper_idx < build_idx
 
+    def test_cpp_installs_conan_then_builds_and_tests(self) -> None:
+        """cpp setup runs Conan, configures CMake, builds, then tests (#361).
+
+        The .tpk packaging path needs Tizen Studio (not installable by
+        init), so the steps cover only the plain CMake + Conan build of
+        the pure-logic library and its Catch2 tests.
+        """
+        instructions = _get_setup_instructions(("cpp",), Path("/home/user/watch-proj"))
+
+        conan_idx = instructions.index(
+            "conan install . --output-folder=build --build=missing"
+        )
+        configure_cmds = [
+            c for c in instructions if c.startswith("cmake -B build -S .")
+        ]
+        assert len(configure_cmds) == 1
+        assert "conan_toolchain.cmake" in configure_cmds[0]
+        build_idx = instructions.index("cmake --build build")
+        test_idx = instructions.index("ctest --test-dir build")
+        assert conan_idx < instructions.index(configure_cmds[0]) < build_idx < test_idx
+        assert not any("tizen" in c for c in instructions)
+
     def test_unknown_language_has_sensible_default(self) -> None:
         """Unknown languages should still get pre-commit + check-all."""
         instructions = _get_setup_instructions(("ruby",), Path("/home/user/ruby-proj"))

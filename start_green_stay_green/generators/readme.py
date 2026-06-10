@@ -14,6 +14,11 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.cpp import CATCH2_VERSION
+from start_green_stay_green.utils.cpp import CMAKE_MINIMUM_VERSION
+from start_green_stay_green.utils.cpp import CPP_STANDARD
+from start_green_stay_green.utils.cpp import cpp_identifier
+from start_green_stay_green.utils.cpp import tizen_app_id
 from start_green_stay_green.utils.kotlin import android_package
 from start_green_stay_green.utils.kotlin import android_package_path
 from start_green_stay_green.utils.naming import pascal_case
@@ -60,11 +65,12 @@ class ReadmeGenerator(BaseGenerator):
     description, installation instructions, usage guide, and documentation
     for the quality tools included in the project.
 
-    All 9 supported languages (python, typescript, go, rust, java, csharp,
-    ruby, swift, kotlin) are available at the generator level. Note that the
-    full CLI pipeline (``sgsg init``) skips its quality-tooling steps
-    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, and
-    ruby; Kotlin runs the full pipeline (quality tooling #357, CI #358).
+    All 10 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift, kotlin, cpp) are available at the generator level. Note that
+    the full CLI pipeline (``sgsg init``) skips its quality-tooling steps
+    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
+    and cpp; C/C++ tooling arrives with #362/#363. Kotlin runs the full
+    pipeline (quality tooling #357, CI #358).
 
     Attributes:
         output_dir: Directory where README.md will be created
@@ -165,6 +171,7 @@ class ReadmeGenerator(BaseGenerator):
             "ruby": self._generate_ruby_readme,
             "swift": self._generate_swift_readme,
             "kotlin": self._generate_kotlin_readme,
+            "cpp": self._generate_cpp_readme,
         }
         return {"README.md": generators[self.config.language]()}
 
@@ -1558,4 +1565,182 @@ MIT License
 
 Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green_stay_green)
 - Maximum quality Kotlin Wear OS projects from day one.
+"""
+
+    def _generate_cpp_readme(self) -> Path:
+        """Generate the C/C++ Tizen watch-app README.md (#361).
+
+        Returns:
+            Path to generated README.md
+        """
+        readme_path = self.output_dir / "README.md"
+        return self._write_readme(readme_path, self._cpp_readme_content())
+
+    def _cpp_readme_content(self) -> str:
+        """Generate C/C++ README.md content.
+
+        Only artifacts the scaffold actually generates carry a checkmark.
+        Quality tooling (#362) and CI (#363) are listed under "Planned /
+        coming soon" — the truthful present/planned split established by
+        the Swift (#351) and Kotlin (#356) foundations. The Tizen Studio
+        split is documented explicitly: unit tests build with plain
+        CMake + Conan, while ``.tpk`` packaging needs the Tizen Studio
+        CLI, which cannot be generated or installed by the scaffold.
+
+        Returns:
+            Content for README.md
+        """
+        display_name = self.config.project_name.replace("-", " ").title()
+        app_id = tizen_app_id(self.config.package_name)
+        namespace = cpp_identifier(self.config.package_name)
+
+        return f"""# {self.config.project_name}
+
+{display_name} - A quality-controlled C/C++ Tizen watch-app project generated
+with Start Green Stay Green.
+
+## Description
+
+This C/C++ scaffold is the foundation of a quality-controlled Tizen native
+(Samsung Galaxy Watch) project. The following are generated today:
+
+- ✅ Tizen native watch-app target (appcore `watch_app` lifecycle + EFL UI,
+  `src/main.cpp`)
+- ✅ Pure-logic library (`src/greeting.cpp` + `inc/greeting.h`) testable
+  without Tizen Studio
+- ✅ `tizen-manifest.xml` watch-application manifest (wearable profile,
+  app ID `{app_id}`)
+- ✅ CMake build (`CMakeLists.txt`, CMake ≥{CMAKE_MINIMUM_VERSION},
+  C++{CPP_STANDARD}) and Conan manifest (`conanfile.txt`)
+- ✅ Catch2 {CATCH2_VERSION} unit-test scaffold (`tests/test_greeting.cpp`)
+- ✅ This README
+
+### Planned / coming soon
+
+These quality features are part of the Start Green Stay Green roadmap for
+C/C++ but are **not yet generated** by this scaffold — do not assume they
+are configured:
+
+- Code quality tools (clang-format, clang-tidy)
+- Security scanning
+- Pre-commit hooks (quality checks)
+- CI/CD pipeline (GitHub Actions)
+- Enforced 90%+ test coverage gate
+
+## The two builds (read this first)
+
+This project deliberately splits into two builds:
+
+1. **Pure logic + unit tests — plain CMake + Conan, no Tizen Studio.**
+   `CMakeLists.txt` builds only the `greeting` library and its Catch2
+   tests, so the tests run on any host (and any future CI runner).
+2. **The watch app itself — Tizen Studio.** `src/main.cpp` needs the
+   Tizen native SDK headers (`watch_app.h`, EFL), and the installable
+   `.tpk` package is produced by the Tizen Studio CLI
+   (`tizen build-native` / `tizen package`). Tizen Studio is **not**
+   generated or installed by this scaffold — install it from
+   https://developer.tizen.org/development/tizen-studio and import this
+   project.
+
+## Installation
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd {self.config.project_name}
+
+# Install the Conan-managed test dependency (Catch2)
+conan install . --output-folder=build --build=missing
+```
+
+## Usage
+
+Build the pure-logic library and unit tests (no Tizen Studio needed):
+
+```bash
+cmake -B build -S . \\
+    -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake \\
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+To run the watch app on a Galaxy Watch or the Tizen emulator, import the
+project into Tizen Studio and package it there (see *The two builds*).
+
+Expected output (on the watch face):
+```
+Hello from {self.config.project_name}!
+```
+
+## Development
+
+### Building and Testing
+
+```bash
+# Configure and build (after `conan install`, see Installation)
+cmake --build build
+
+# Run the Catch2 unit tests
+ctest --test-dir build
+```
+
+> **Note:** Linting (clang-format, clang-tidy), security scanning,
+> pre-commit hooks, and CI are on the roadmap but not yet configured by
+> this scaffold. See *Planned / coming soon* above.
+
+### Quality Tools
+
+This scaffold currently includes:
+
+- **Catch2**: Unit-test framework (managed by Conan, runs via CTest)
+- **CMake + Conan**: Build system and dependency management
+
+### Project Structure
+
+```
+{self.config.project_name}/
+├── CMakeLists.txt           # Pure-logic library + Catch2 tests
+├── conanfile.txt            # Conan 2 manifest (Catch2)
+├── tizen-manifest.xml       # Watch application manifest ({app_id})
+├── inc/
+│   └── greeting.h           # Pure-logic header (namespace {namespace})
+├── src/
+│   ├── greeting.cpp         # Pure logic: format_greeting()
+│   └── main.cpp             # Tizen watch_app + EFL entry (Tizen Studio)
+├── res/                     # Private resources (see res/README.md)
+├── shared/res/              # Launcher icon goes here (see README note)
+└── tests/
+    └── test_greeting.cpp    # Catch2 scaffold
+```
+
+### Testing
+
+```bash
+# Run all unit tests
+ctest --test-dir build
+
+# Run the test binary directly with Catch2's CLI
+./build/greeting_tests "[greeting]"
+```
+
+### Code Quality
+
+This scaffold is the foundation for a MAXIMUM QUALITY C/C++ project. Today
+it provides:
+
+- **C++{CPP_STANDARD} with strict standard conformance**: \
+`CMAKE_CXX_STANDARD_REQUIRED ON`, extensions off
+- **Catch2 test scaffold**: ready for you to add tests
+
+Enforced coverage gates, linting, and formatting are planned (see *Planned /
+coming soon* above) and are not yet wired into this scaffold.
+
+## License
+
+MIT License
+
+## Attribution
+
+Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green_stay_green)
+- Maximum quality C/C++ Tizen watch projects from day one.
 """

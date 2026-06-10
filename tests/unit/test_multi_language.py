@@ -390,3 +390,46 @@ class TestGeneratorOnlyLanguagePipelineGates:
         cli_mod._generate_architecture_step(tmp_path, "my-project", "ruby")
 
         assert not (tmp_path / "plans" / "architecture").exists()
+
+
+class TestCppPipelineGates:
+    """Pipeline steps skip gracefully for the cpp foundation (#361).
+
+    C/C++ has structure/dependencies/tests/readme generators but no
+    quality-tooling support yet — that lands with #362 (pre-commit,
+    scripts, metrics, architecture) and #363 (CI). Instead of crashing
+    init, those steps must no-op with an informational message, exactly
+    as they did for the Kotlin foundation (#356) before #357/#358.
+    """
+
+    def test_precommit_step_skips_cpp_without_writing(self, tmp_path: Path) -> None:
+        """No .pre-commit-config.yaml is written and no error is raised."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "cpp")
+
+        assert not (tmp_path / ".pre-commit-config.yaml").exists()
+
+    def test_scripts_step_skips_cpp_without_python_fallback(
+        self, tmp_path: Path
+    ) -> None:
+        """cpp must not receive the Python-fallback quality scripts."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "cpp")
+
+        assert not (tmp_path / "scripts").exists()
+
+    def test_ci_step_skips_cpp_without_workflow(self, tmp_path: Path) -> None:
+        """No ci.yml is written for cpp (CI generation is #363)."""
+        cli_mod._generate_ci_step(tmp_path, "my-project", "cpp", None)
+
+        assert not (tmp_path / ".github" / "workflows" / "ci.yml").exists()
+
+    def test_metrics_step_skips_cpp_without_dashboard(self, tmp_path: Path) -> None:
+        """No metrics dashboard is written for cpp (metrics is #362)."""
+        cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "cpp")
+
+        assert not (tmp_path / "docs" / "metrics.json").exists()
+
+    def test_architecture_step_skips_cpp(self, tmp_path: Path) -> None:
+        """No architecture rules are generated for cpp yet (#362)."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "cpp")
+
+        assert not (tmp_path / "plans" / "architecture").exists()
