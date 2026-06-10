@@ -5,10 +5,62 @@ from pathlib import Path
 import pytest
 
 from start_green_stay_green.cli import _get_setup_instructions
+from start_green_stay_green.cli import _venv_activation_command
 
 # Languages exercised by the per-language common-tail tests; "java" covers
 # the unknown-language default path.
 ALL_LANGUAGES = ("python", "typescript", "go", "rust", "java")
+
+
+class TestVenvActivationCommand:
+    """Tests for _venv_activation_command shell detection."""
+
+    @pytest.mark.parametrize(
+        ("shell", "expected"),
+        [
+            ("/usr/bin/fish", "source .venv/bin/activate.fish"),
+            ("/opt/homebrew/bin/fish", "source .venv/bin/activate.fish"),
+            ("/bin/csh", "source .venv/bin/activate.csh"),
+            ("/bin/tcsh", "source .venv/bin/activate.csh"),
+            ("/bin/bash", "source .venv/bin/activate"),
+            ("/bin/zsh", "source .venv/bin/activate"),
+            ("/bin/sh", "source .venv/bin/activate"),
+        ],
+    )
+    def test_posix_shell_detection(self, shell: str, expected: str) -> None:
+        """POSIX shells should map to their matching activation script."""
+        assert _venv_activation_command("posix", {"SHELL": shell}) == expected
+
+    def test_posix_missing_shell_defaults_to_bash_form(self) -> None:
+        """Missing SHELL env var should fall back to the bash/zsh form."""
+        command = _venv_activation_command("posix", {})
+        assert command == "source .venv/bin/activate"
+
+    def test_posix_unknown_shell_defaults_to_bash_form(self) -> None:
+        """Unrecognized shells should fall back to the bash/zsh form."""
+        command = _venv_activation_command("posix", {"SHELL": "/usr/bin/nushell"})
+        assert command == "source .venv/bin/activate"
+
+    def test_posix_empty_shell_defaults_to_bash_form(self) -> None:
+        """An empty SHELL value should fall back to the bash/zsh form."""
+        command = _venv_activation_command("posix", {"SHELL": ""})
+        assert command == "source .venv/bin/activate"
+
+    def test_windows_cmd_uses_scripts_activate(self) -> None:
+        """Windows without PSModulePath should emit the cmd activate script."""
+        command = _venv_activation_command("nt", {})
+        assert command == ".venv\\Scripts\\activate"
+
+    def test_windows_powershell_uses_activate_ps1(self) -> None:
+        """Windows with PSModulePath set should emit the PowerShell script."""
+        env = {"PSModulePath": "C:\\Users\\dev\\Documents\\PowerShell\\Modules"}
+        command = _venv_activation_command("nt", env)
+        assert command == ".venv\\Scripts\\Activate.ps1"
+
+    def test_windows_ignores_posix_shell_var(self) -> None:
+        """On Windows, a stray SHELL env var should not trigger POSIX forms."""
+        command = _venv_activation_command("nt", {"SHELL": "/usr/bin/fish"})
+        assert command == ".venv\\Scripts\\activate"
 
 
 class TestGetSetupInstructions:
@@ -23,6 +75,27 @@ class TestGetSetupInstructions:
 
     def test_python_includes_venv_activation(self) -> None:
         """Python setup should activate the virtualenv."""
+        instructions = _get_setup_instructions(
+            ("python",), Path("/home/user/my-project")
+        )
+        assert "source .venv/bin/activate" in instructions
+
+    def test_python_activation_respects_fish_shell(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Python setup should emit the fish activation script under fish."""
+        monkeypatch.setenv("SHELL", "/usr/bin/fish")
+        instructions = _get_setup_instructions(
+            ("python",), Path("/home/user/my-project")
+        )
+        assert "source .venv/bin/activate.fish" in instructions
+        assert "source .venv/bin/activate" not in instructions
+
+    def test_python_activation_defaults_without_shell_var(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Python setup should keep the bash/zsh form when SHELL is unset."""
+        monkeypatch.delenv("SHELL", raising=False)
         instructions = _get_setup_instructions(
             ("python",), Path("/home/user/my-project")
         )

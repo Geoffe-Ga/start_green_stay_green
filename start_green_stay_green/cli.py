@@ -12,6 +12,7 @@ from datetime import datetime
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
 import shlex
 import shutil
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from collections.abc import Coroutine
     from collections.abc import Generator
+    from collections.abc import Mapping
     from collections.abc import Sequence
 
     from start_green_stay_green.utils.enhance_state import EnhanceState
@@ -1501,11 +1503,6 @@ def _generate_project_files(
 
 
 _LANG_SETUP_STEPS: dict[str, list[str]] = {
-    "python": [
-        "python -m venv .venv",
-        "source .venv/bin/activate",
-        "pip install -r requirements.txt -r requirements-dev.txt",
-    ],
     "typescript": ["npm install"],
     "go": ["go mod download"],
     "rust": ["cargo build"],
@@ -1513,12 +1510,52 @@ _LANG_SETUP_STEPS: dict[str, list[str]] = {
 }
 
 
+def _venv_activation_command(os_name: str, env: Mapping[str, str]) -> str:
+    r"""Return the venv activation command for the user's shell.
+
+    The default ``source .venv/bin/activate`` is bash/zsh syntax and
+    silently fails in fish, csh/tcsh, cmd.exe, and PowerShell, so a
+    best-effort heuristic detection is applied:
+
+    - Windows (``os_name == "nt"``): a ``PSModulePath`` environment
+      variable is treated as a PowerShell indicator (``Activate.ps1``);
+      otherwise the cmd.exe form (``.venv\Scripts\activate``) is used.
+    - POSIX: the basename of the ``SHELL`` environment variable selects
+      ``activate.fish`` for fish and ``activate.csh`` for csh/tcsh.
+    - Unknown or missing shells fall back to the bash/zsh form, matching
+      the historical default.
+
+    Args:
+        os_name: Platform identifier, typically ``os.name`` ("nt" on
+            Windows, "posix" elsewhere).
+        env: Environment mapping to inspect, typically ``os.environ``.
+
+    Returns:
+        Shell command string that activates ``.venv`` in the detected
+        shell.
+    """
+    if os_name == "nt":
+        if "PSModulePath" in env:
+            return ".venv\\Scripts\\Activate.ps1"
+        return ".venv\\Scripts\\activate"
+    shell = PurePosixPath(env.get("SHELL", "")).name
+    if shell == "fish":
+        return "source .venv/bin/activate.fish"
+    if shell in {"csh", "tcsh"}:
+        return "source .venv/bin/activate.csh"
+    return "source .venv/bin/activate"
+
+
 def _get_setup_instructions(languages: Sequence[str], project_path: Path) -> list[str]:
     """Return language-specific setup commands for a generated project.
 
     For multi-language projects, language-specific steps are concatenated
     in the order the languages appear. Shared steps (cd, pre-commit
-    install, check-all) are not duplicated.
+    install, check-all) are not duplicated. The Python venv activation
+    line is shell-aware (see :func:`_venv_activation_command`); the
+    detection is a heuristic based on ``os.name`` and the ``SHELL`` /
+    ``PSModulePath`` environment variables, and defaults to the bash/zsh
+    form when the shell cannot be identified.
 
     Args:
         languages: Ordered sequence of programming languages (python,
@@ -1534,7 +1571,16 @@ def _get_setup_instructions(languages: Sequence[str], project_path: Path) -> lis
 
     middle: list[str] = []
     for lang in dict.fromkeys(languages):
-        middle.extend(_LANG_SETUP_STEPS.get(lang, []))
+        if lang == "python":
+            middle.extend(
+                [
+                    "python -m venv .venv",
+                    _venv_activation_command(os.name, os.environ),
+                    "pip install -r requirements.txt -r requirements-dev.txt",
+                ]
+            )
+        else:
+            middle.extend(_LANG_SETUP_STEPS.get(lang, []))
 
     return [cd, *middle, *common_tail]
 
