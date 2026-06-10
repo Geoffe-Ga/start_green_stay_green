@@ -472,6 +472,14 @@ LANGUAGE_TOOLS: dict[str, dict[str, str]] = {
         "security": "swiftlint + periphery",
         "dependency_check": "swift package update --dry-run",
     },
+    "kotlin": {
+        "coverage": "kover (./gradlew koverVerifyDebug)",
+        "mutation": "pitest",
+        "complexity": "detekt (CyclomaticComplexMethod)",
+        "documentation": "dokka",
+        "security": "detekt (potential-bugs) + gitleaks",
+        "dependency_check": "OWASP dependency-check",
+    },
 }
 
 

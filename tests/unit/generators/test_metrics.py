@@ -183,8 +183,19 @@ class TestLanguageTools:
             "go",
             "rust",
             "swift",
+            "kotlin",
         }
         assert required_languages.issubset(set(LANGUAGE_TOOLS.keys()))
+
+    def test_kotlin_tools(self) -> None:
+        """Test Kotlin tool mappings (#357)."""
+        tools = LANGUAGE_TOOLS["kotlin"]
+        assert tools["coverage"] == "kover (./gradlew koverVerifyDebug)"
+        assert tools["mutation"] == "pitest"
+        assert tools["complexity"] == "detekt (CyclomaticComplexMethod)"
+        assert tools["documentation"] == "dokka"
+        assert tools["security"] == "detekt (potential-bugs) + gitleaks"
+        assert tools["dependency_check"] == "OWASP dependency-check"
 
     def test_swift_tools(self) -> None:
         """Test Swift tool mappings (#352)."""
@@ -741,6 +752,26 @@ class TestMetricsConfigGeneration:
         assert (
             metrics["cyclomatic_complexity"]["tool"]
             == "swiftlint (cyclomatic_complexity)"
+        )
+        assert metrics["code_coverage"]["threshold"] == 90
+        assert metrics["cyclomatic_complexity"]["threshold"] == 10
+
+    def test_generate_metrics_config_kotlin_tools(self) -> None:
+        """Kotlin metric config reports Kover coverage and detekt (#357)."""
+        config = MetricsGenerationConfig(
+            language="kotlin",
+            project_name="wear-app",
+        )
+        generator = MetricsGenerator(None, config)
+
+        metrics_config = generator._generate_metrics_config()
+        metrics = metrics_config["metrics"]
+
+        assert metrics_config["language"] == "kotlin"
+        assert metrics["code_coverage"]["tool"] == "kover (./gradlew koverVerifyDebug)"
+        assert (
+            metrics["cyclomatic_complexity"]["tool"]
+            == "detekt (CyclomaticComplexMethod)"
         )
         assert metrics["code_coverage"]["threshold"] == 90
         assert metrics["cyclomatic_complexity"]["threshold"] == 10

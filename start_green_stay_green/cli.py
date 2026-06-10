@@ -944,10 +944,10 @@ def _scripts_dir_has_other_language(scripts_dir: Path, language: str) -> bool:
 
 # Languages with native quality-script templates in ScriptsGenerator.
 # The generator falls back to *Python* scripts for anything else, which
-# would be wrong for e.g. a Kotlin project, so the init pipeline skips
-# the step instead (Kotlin tooling lands with #357).
+# would be wrong for e.g. a Java project, so the init pipeline skips
+# the step instead.
 _SCRIPTS_STEP_LANGUAGES: frozenset[str] = frozenset(
-    {"python", "typescript", "go", "rust", "swift"}
+    {"python", "typescript", "go", "rust", "swift", "kotlin"}
 )
 
 
@@ -962,7 +962,7 @@ def _generate_scripts_step(
 
     If scripts/ already contains scripts from a different language,
     automatically uses scripts/{language}/ subdirectory to avoid conflicts.
-    Languages without native script templates (java, csharp, ruby, kotlin)
+    Languages without native script templates (java, csharp, ruby)
     are skipped with an informational message instead of receiving the
     generator's Python fallback.
 
@@ -1010,9 +1010,9 @@ def _generate_precommit_step(
 ) -> None:
     """Generate pre-commit configuration, merging with existing if present.
 
-    Languages PreCommitGenerator does not support yet (java, csharp, ruby,
-    kotlin — Kotlin hooks land with #357) are skipped with an informational
-    message instead of aborting the whole init run.
+    Languages PreCommitGenerator does not support yet (java, csharp, ruby)
+    are skipped with an informational message instead of aborting the
+    whole init run.
     """
     if language not in PRECOMMIT_LANGUAGE_CONFIGS:
         console.print(
@@ -1254,18 +1254,19 @@ def _generate_architecture_step(
 
     Architecture configuration is fully deterministic (import-linter for
     Python, dependency-cruiser for TypeScript, go-arch-lint for Go,
-    cargo-deny for Rust, SwiftLint custom rules for Swift). Runs regardless
-    of API key availability; only Python, TypeScript, Go, Rust, and Swift
-    projects produce output. The previous ``orchestrator`` argument was
-    unused and has been removed from this private helper.
+    cargo-deny for Rust, SwiftLint custom rules for Swift, a Konsist test
+    for Kotlin). Runs regardless of API key availability; only Python,
+    TypeScript, Go, Rust, Swift, and Kotlin projects produce output. The
+    previous ``orchestrator`` argument was unused and has been removed
+    from this private helper.
     """
-    if language not in {"python", "typescript", "go", "rust", "swift"}:
+    if language not in {"python", "typescript", "go", "rust", "swift", "kotlin"}:
         # The generator only supports these languages; surface a dim info
         # line so users understand why no architecture rules were generated
         # for, e.g., a Java project rather than seeing silence.
         console.print(
             f"[dim]Architecture rules unavailable for {language} "
-            "(supported: python, typescript, go, rust, swift)[/dim]"
+            "(supported: python, typescript, go, rust, swift, kotlin)[/dim]"
         )
         return
 
@@ -1421,9 +1422,9 @@ def _generate_metrics_dashboard_step(
 ) -> None:
     """Generate live metrics dashboard and workflow.
 
-    Languages MetricsGenerator does not support yet (kotlin metrics land
-    with #357) are skipped with an informational message instead of
-    aborting init when ``--enable-live-dashboard`` is passed.
+    Languages MetricsGenerator does not support yet (java, csharp, ruby)
+    are skipped with an informational message instead of aborting init
+    when ``--enable-live-dashboard`` is passed.
     """
     if language not in METRICS_LANGUAGE_TOOLS:
         console.print(

@@ -11,7 +11,9 @@ from start_green_stay_green.generators.dependencies import DependenciesGenerator
 from start_green_stay_green.generators.dependencies import DependencyConfig
 from start_green_stay_green.utils.kotlin import AGP_VERSION
 from start_green_stay_green.utils.kotlin import JUNIT_VERSION
+from start_green_stay_green.utils.kotlin import KONSIST_VERSION
 from start_green_stay_green.utils.kotlin import KOTLIN_VERSION
+from start_green_stay_green.utils.kotlin import KOVER_VERSION
 from start_green_stay_green.utils.kotlin import android_package
 from start_green_stay_green.utils.swift import package_swift
 
@@ -522,3 +524,52 @@ class TestKotlinDependencies:
             assert "gradlew.bat" not in files
             assert not (Path(tmpdir) / "gradlew").exists()
             assert not (Path(tmpdir) / "gradle" / "wrapper").exists()
+
+    def test_root_build_pins_kover_plugin(self) -> None:
+        """The root build pins the Kover coverage plugin version (#357)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["build.gradle.kts"].read_text()
+            assert (
+                f'id("org.jetbrains.kotlinx.kover") version "{KOVER_VERSION}" '
+                "apply false" in content
+            )
+
+    def test_app_module_applies_kover_plugin(self) -> None:
+        """The app module applies Kover so coverage tasks exist (#357)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["app/build.gradle.kts"].read_text()
+            assert 'id("org.jetbrains.kotlinx.kover")' in content
+
+    def test_app_module_gates_debug_coverage_at_90_percent(self) -> None:
+        """Kover verifies >=90% coverage on the debug variant (#357).
+
+        scripts/test.sh --coverage runs ./gradlew koverVerifyDebug, so
+        the bound must live here in the manifest as the single source
+        of truth.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["app/build.gradle.kts"].read_text()
+            assert 'variant("debug")' in content
+            assert "minBound(90)" in content
+
+    def test_app_module_includes_konsist_test_dependency(self) -> None:
+        """Konsist is wired so the architecture test compiles (#357).
+
+        plans/architecture/ArchitectureTest.kt is a Konsist JUnit test;
+        once copied into app/src/test/kotlin it must build without any
+        further dependency edits.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["app/build.gradle.kts"].read_text()
+            assert (
+                f'testImplementation("com.lemonappdev:konsist:{KONSIST_VERSION}")'
+                in content
+            )

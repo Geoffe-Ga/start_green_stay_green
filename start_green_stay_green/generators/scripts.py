@@ -1,8 +1,8 @@
 """Scripts directory generator.
 
 Generates quality control scripts adapted to target project languages and structure.
-Supports Python, TypeScript, Go, Rust, Swift, and other languages with
-appropriate tooling.
+Supports Python, TypeScript, Go, Rust, Swift, Kotlin, and other languages
+with appropriate tooling.
 """
 
 from __future__ import annotations
@@ -23,7 +23,8 @@ class ScriptConfig:
     """Configuration for script generation.
 
     Attributes:
-        language: Programming language (python, typescript, go, rust, swift, etc.)
+        language: Programming language (python, typescript, go, rust,
+            swift, kotlin, etc.)
         package_name: Name of the main package/module
         supports_pytest: Whether project uses pytest for testing
         supports_coverage: Whether project uses coverage reporting
@@ -129,6 +130,7 @@ class ScriptsGenerator:
             "go": self._generate_go_scripts,
             "rust": self._generate_rust_scripts,
             "swift": self._generate_swift_scripts,
+            "kotlin": self._generate_kotlin_scripts,
         }
         # Fallback to Python scripts for unknown languages.
         builder = builders.get(self.config.language, self._generate_python_scripts)
@@ -325,6 +327,45 @@ class ScriptsGenerator:
         # Companion SwiftLint config — written at the project root, not
         # added to the scripts dict (it isn't an executable).
         self._write_swiftlint_config_template()
+
+        return scripts
+
+    def _generate_kotlin_scripts(self) -> dict[str, Path]:
+        """Generate Kotlin-specific quality control scripts (#357).
+
+        Emits check/format/lint/test/security scripts plus a companion
+        ``detekt.yml`` at the project root (complexity gate and
+        potential-bugs rules) so the lint script and the pre-commit
+        detekt hook share one configuration.
+
+        Returns:
+            Dictionary mapping script names to file paths
+        """
+        scripts: dict[str, Path] = {}
+
+        scripts["check-all.sh"] = self._write_script(
+            "check-all.sh",
+            self._kotlin_check_all_script(),
+        )
+        scripts["format.sh"] = self._write_script(
+            "format.sh",
+            self._kotlin_format_script(),
+        )
+        scripts["lint.sh"] = self._write_script(
+            "lint.sh",
+            self._kotlin_lint_script(),
+        )
+        scripts["test.sh"] = self._write_script(
+            "test.sh",
+            self._kotlin_test_script(),
+        )
+        scripts["security.sh"] = self._write_script(
+            "security.sh",
+            self._kotlin_security_script(),
+        )
+        # Companion detekt config — written at the project root, not
+        # added to the scripts dict (it isn't an executable).
+        self._write_detekt_config_template()
 
         return scripts
 
@@ -3182,6 +3223,468 @@ cyclomatic_complexity:
             self._file_writer.write_file(config_path, self._SWIFTLINT_CONFIG_TEMPLATE)
         else:
             config_path.write_text(self._SWIFTLINT_CONFIG_TEMPLATE, encoding="utf-8")
+        return config_path
+
+    # Kotlin script generators
+
+    def _kotlin_check_all_script(self) -> str:
+        """Generate Kotlin check-all.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/check-all.sh - Run all quality checks
+# Usage: ./scripts/check-all.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run all quality checks in sequence.
+
+Runs:
+  1. Format check (ktlint)
+  2. Static analysis + complexity <=10 (detekt)
+  3. Tests + coverage >=90% (./gradlew test + Kover)
+  4. Security (OWASP dependency-check)
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All checks passed
+    1           One or more checks failed
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+VERBOSE_FLAG=""
+if $VERBOSE; then
+    VERBOSE_FLAG="--verbose"
+fi
+
+echo "=== Running All Quality Checks ==="
+echo ""
+
+FAILED_CHECKS=()
+PASSED_CHECKS=()
+
+run_check() {
+    local check_name=$1
+    local script=$2
+    shift 2
+
+    echo "Running: $check_name"
+    if "$SCRIPT_DIR/$script" "${@}" $VERBOSE_FLAG; then
+        PASSED_CHECKS+=("$check_name")
+        echo "✓ $check_name passed"
+    else
+        FAILED_CHECKS+=("$check_name")
+        echo "✗ $check_name failed" >&2
+    fi
+    echo ""
+}
+
+run_check "Format" "format.sh"
+run_check "Linting" "lint.sh"
+run_check "Tests" "test.sh" --coverage
+run_check "Security" "security.sh"
+
+echo "=== Quality Checks Summary ==="
+echo "Passed: ${#PASSED_CHECKS[@]}"
+echo "Failed: ${#FAILED_CHECKS[@]}"
+
+if [ ${#FAILED_CHECKS[@]} -gt 0 ]; then
+    exit 1
+else
+    echo "✓ All quality checks passed!"
+    exit 0
+fi
+"""
+
+    def _kotlin_format_script(self) -> str:
+        """Generate Kotlin format.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/format.sh - Format Kotlin code
+# Usage: ./scripts/format.sh [--fix] [--check] [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+FIX=false
+CHECK=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --fix)
+            FIX=true
+            shift
+            ;;
+        --check)
+            CHECK=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Format Kotlin code using ktlint (install: brew install ktlint).
+
+OPTIONS:
+    --fix       Apply formatting (default, writes in place)
+    --check     Check only, fail if formatting needed
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           Code is properly formatted
+    1           Formatting issues found
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+echo "=== Formatting (ktlint) ==="
+
+if $CHECK; then
+    ktlint || { echo "✗ Format check failed" >&2; exit 1; }
+    echo "✓ Code formatting check passed"
+else
+    # --format fixes what it can and still fails on the rest.
+    ktlint --format || { echo "✗ Formatting failed" >&2; exit 1; }
+    echo "✓ Code formatted successfully"
+fi
+exit 0
+"""
+
+    def _kotlin_lint_script(self) -> str:
+        """Generate Kotlin lint.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/lint.sh - Run static analysis with detekt
+# Usage: ./scripts/lint.sh [--fix] [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+FIX=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --fix)
+            FIX=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run static analysis using detekt (install: brew install detekt).
+
+Reads detekt.yml at the project root on top of detekt's default config.
+detekt.yml enforces CyclomaticComplexMethod <= 10 and keeps the
+potential-bugs ruleset active.
+
+OPTIONS:
+    --fix       Auto-correct formatting issues where possible
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All checks passed
+    1           Static-analysis issues found
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+echo "=== Static Analysis (detekt) ==="
+
+DETEKT_ARGS=(--config detekt.yml --build-upon-default-config)
+DETEKT_ARGS+=(--excludes '**/build/**')
+if $FIX; then
+    DETEKT_ARGS+=(--auto-correct)
+fi
+
+detekt "${DETEKT_ARGS[@]}" || { echo "✗ Linting failed" >&2; exit 1; }
+
+echo "✓ Linting checks passed"
+exit 0
+"""
+
+    def _kotlin_test_script(self) -> str:
+        """Generate Kotlin test.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/test.sh - Run Kotlin tests via Gradle
+# Usage: ./scripts/test.sh [--coverage] [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+COVERAGE=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --coverage)
+            COVERAGE=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run JVM unit tests (JUnit via ./gradlew test).
+
+OPTIONS:
+    --coverage  Enforce >=90% line coverage via Kover
+                (the bound lives in app/build.gradle.kts: kover block)
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All tests passed (and coverage met, with --coverage)
+    1           Test failures or coverage below threshold
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+# The Gradle wrapper jar is a binary artifact the generator never
+# writes; materialise it once from a local Gradle install (this is the
+# first step in the README's Installation section).
+if [ ! -x ./gradlew ]; then
+    echo "✗ ./gradlew not found - run 'gradle wrapper' once to create it" >&2
+    exit 1
+fi
+
+echo "=== Running Tests (./gradlew) ==="
+
+if $COVERAGE; then
+    # koverVerifyDebug runs the debug unit tests and fails when line
+    # coverage drops below the minBound(90) configured in
+    # app/build.gradle.kts; koverXmlReportDebug emits the report the
+    # metrics dashboard reads.
+    ./gradlew koverXmlReportDebug koverVerifyDebug || \\
+        { echo "✗ Tests or coverage gate failed" >&2; exit 1; }
+else
+    ./gradlew test || { echo "✗ Tests failed" >&2; exit 1; }
+fi
+
+echo "✓ Tests passed"
+exit 0
+"""
+
+    def _kotlin_security_script(self) -> str:
+        """Generate Kotlin security.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/security.sh - Security checks for Kotlin
+# Usage: ./scripts/security.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run security checks.
+
+Division of labor:
+  - Secret scanning (gitleaks + detect-secrets) runs in pre-commit.
+  - detekt's potential-bugs rules run in lint.sh.
+  - This script adds OWASP dependency-check CVE scanning of the
+    dependency tree (install: brew install dependency-check).
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           No issues found (or dependency-check not installed)
+    1           Vulnerable dependencies detected (CVSS >= 7)
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+echo "=== Security (OWASP dependency-check) ==="
+
+# Pragmatic default: a missing dependency-check binary warns instead of
+# failing so a fresh clone passes check-all.sh out of the box. Tighten by
+# replacing the warning block with `exit 1` once dependency-check is
+# installed everywhere (including CI).
+if ! command -v dependency-check &> /dev/null; then
+    echo "⚠ dependency-check not found - skipping dependency CVE scan" >&2
+    echo "⚠ Install with: brew install dependency-check" >&2
+    exit 0
+fi
+
+dependency-check \\
+    --project "$(basename "$PROJECT_ROOT")" \\
+    --scan . \\
+    --out build/reports/dependency-check \\
+    --failOnCVSS 7 || \\
+    { echo "✗ dependency-check found vulnerable dependencies" >&2; exit 1; }
+
+echo "✓ Security checks passed"
+exit 0
+"""
+
+    # detekt companion configuration template. Shared by lint.sh and the
+    # pre-commit detekt hook, applied on top of detekt's default config
+    # via --build-upon-default-config. CyclomaticComplexMethod mirrors the
+    # <=10 gate used by radon (Python), eslint (TypeScript), gocyclo (Go),
+    # clippy (Rust), and SwiftLint (Swift). detekt has no dedicated
+    # security ruleset, so the security posture is documented explicitly:
+    # potential-bugs rules here, secret scanning in pre-commit (gitleaks +
+    # detect-secrets), dependency CVE scanning in security.sh (OWASP
+    # dependency-check).
+    _DETEKT_CONFIG_TEMPLATE = """\
+# detekt configuration generated by Start Green Stay Green.
+#
+# Applied on top of detekt's default config (the lint script and the
+# pre-commit hook both pass --build-upon-default-config), so only the
+# overrides below differ from the defaults.
+#
+# Complexity gate: detekt 1.23.x reports methods whose McCabe complexity
+# is >= the configured threshold, so threshold: 11 reports 11+ and
+# enforces the <=10 ceiling that radon/eslint/gocyclo/clippy/SwiftLint
+# apply for the other supported languages.
+#
+# Security posture (documented, not implied): detekt has no dedicated
+# security ruleset. The potential-bugs rules below catch crash-prone and
+# incorrect constructs; secret scanning is handled by the gitleaks and
+# detect-secrets pre-commit hooks, and dependency CVE scanning by OWASP
+# dependency-check (scripts/security.sh).
+
+build:
+  # Fail on any reported issue (detekt's default); kept explicit so the
+  # gate is visible at a glance.
+  maxIssues: 0
+
+complexity:
+  CyclomaticComplexMethod:
+    active: true
+    # Reports at complexity >= 11, i.e. every function must stay <= 10.
+    threshold: 11
+
+potential-bugs:
+  active: true
+"""
+
+    def _write_detekt_config_template(self) -> Path | None:
+        """Write the companion ``detekt.yml`` at the project root.
+
+        The config lives at ``$PROJECT_ROOT`` so both ``lint.sh`` and the
+        pre-commit detekt hook reference it with the same relative path.
+        An existing file is preserved (user customisations win).
+
+        Returns:
+            Path to the written config, or ``None`` if a file already
+            exists at the destination.
+        """
+        config_path = self.project_root / "detekt.yml"
+        if config_path.exists():
+            return None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._file_writer is not None:
+            self._file_writer.write_file(config_path, self._DETEKT_CONFIG_TEMPLATE)
+        else:
+            config_path.write_text(self._DETEKT_CONFIG_TEMPLATE, encoding="utf-8")
         return config_path
 
     # Language-agnostic script generators

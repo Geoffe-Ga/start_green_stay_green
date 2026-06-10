@@ -1,8 +1,8 @@
 """Architecture enforcement generator.
 
 Generates architecture validation configuration for import-linter (Python),
-dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust), and
-SwiftLint custom rules (Swift).
+dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust),
+SwiftLint custom rules (Swift), and Konsist (Kotlin).
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 import warnings
+
+from start_green_stay_green.utils.kotlin import android_package
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -26,7 +28,8 @@ class ArchitectureResult:
     Attributes:
         output_dir: Directory containing generated files.
         files_created: List of files created.
-        language: Target language (python, typescript, go, rust, swift).
+        language: Target language (python, typescript, go, rust, swift,
+            kotlin).
     """
 
     output_dir: Path
@@ -109,6 +112,25 @@ _LANGUAGE_TOOLING: dict[str, _LanguageTooling] = {
         docs_url="https://realm.github.io/SwiftLint/custom_rules.html",
         display_name="Swift",
     ),
+    "kotlin": _LanguageTooling(
+        # No standalone Kotlin layer linter exists either; layer rules are
+        # expressed as a Konsist JUnit test over Kotlin sources. Konsist's
+        # 'config' is therefore a test file compiled into the project: the
+        # Gradle run command takes no config-file flag (run_cmd carries no
+        # {config_file} placeholder), and the one-time wiring step — copy
+        # the template into the test source set — lives in install_cmd.
+        # The konsist dependency is already declared in the generated
+        # app/build.gradle.kts.
+        tool="Konsist",
+        config_file="ArchitectureTest.kt",
+        install_cmd=(
+            "gradle wrapper && "
+            "cp plans/architecture/ArchitectureTest.kt app/src/test/kotlin/"
+        ),
+        run_cmd='./gradlew testDebugUnitTest --tests "*ArchitectureTest"',
+        docs_url="https://docs.konsist.lemonappdev.com/",
+        display_name="Kotlin",
+    ),
 }
 
 
@@ -117,8 +139,9 @@ class ArchitectureEnforcementGenerator:
 
     Generates import-linter config for Python, dependency-cruiser
     config for TypeScript, go-arch-lint config for Go, cargo-deny
-    config for Rust, and SwiftLint custom rules for Swift to enforce
-    layer separation and prevent circular dependencies.
+    config for Rust, SwiftLint custom rules for Swift, and a Konsist
+    test for Kotlin to enforce layer separation and prevent circular
+    dependencies.
 
     Attributes:
         orchestrator: AI orchestrator for content generation.
@@ -165,7 +188,8 @@ class ArchitectureEnforcementGenerator:
         """Generate architecture enforcement configuration.
 
         Args:
-            language: Target language (python, typescript, go, rust, swift).
+            language: Target language (python, typescript, go, rust,
+                swift, kotlin).
             project_name: Name of the project.
 
         Returns:
@@ -190,6 +214,7 @@ class ArchitectureEnforcementGenerator:
             "go": partial(self._generate_go_config, project_name),
             "rust": self._generate_rust_config,
             "swift": self._generate_swift_config,
+            "kotlin": partial(self._generate_kotlin_config, project_name),
         }
         files_created = config_builders[language]()
 
@@ -577,6 +602,97 @@ custom_rules:
         config_path.write_text(config_content)
         return [config_path]
 
+    def _generate_kotlin_config(self, project_name: str) -> list[Path]:
+        """Generate the Konsist architecture test for Kotlin.
+
+        No standalone Kotlin layer linter exists (unlike import-linter,
+        dependency-cruiser, go-arch-lint, or cargo-deny), so layer rules
+        are expressed as a Konsist (architecture-testing library) JUnit
+        test over Kotlin sources. The emitted file is a template parked in
+        ``plans/architecture``: it only enforces once copied into the
+        ``app/src/test/kotlin`` source set (the konsist dependency is
+        already declared in the generated ``app/build.gradle.kts``). The
+        test documents that wiring step and Konsist's enforcement limits
+        explicitly, mirroring how the Rust ``deny.toml`` and Swift custom
+        rules document their gaps. The dependency matrix mirrors the Go
+        config: presentation -> application -> domain, with infrastructure
+        allowed to depend on domain only.
+
+        Args:
+            project_name: Name of the project; layer packages derive from
+                its sanitized Android namespace so the test stays in sync
+                with the scaffolded sources.
+
+        Returns:
+            List of files created.
+        """
+        config_path = self.output_dir / "ArchitectureTest.kt"
+
+        namespace = android_package(project_name)
+        config_content = f"""\
+// Konsist architecture test enforcing layered architecture.
+//
+// No standalone Kotlin layer linter exists (unlike import-linter for
+// Python, dependency-cruiser for TypeScript, go-arch-lint for Go, or
+// cargo-deny for Rust), so layer rules are expressed as a Konsist
+// (https://docs.konsist.lemonappdev.com/) JUnit test over Kotlin sources.
+//
+// Wiring (one-time): this file is a template parked in plans/architecture;
+// it only enforces once it lives in a test source set. Copy it in and run:
+//   cp plans/architecture/ArchitectureTest.kt app/src/test/kotlin/
+//   ./gradlew testDebugUnitTest --tests "*ArchitectureTest"
+// The konsist dependency is already declared in app/build.gradle.kts.
+//
+// Enforcement limits (documented, not hidden):
+//   - Konsist analyzes Kotlin source declarations statically,
+//     not a resolved dependency graph: dependencies created via
+//     reflection, dependency-injection wiring, or generated/Java sources
+//     are invisible to it.
+//   - Layers are defined by the package convention below
+//     ({namespace}.<layer>..); code outside those packages is unchecked.
+//   - dependsOn checks are non-strict by default (pragmatic warn-first
+//     default): a layer whose package does not exist yet passes. Tighten
+//     by passing strict = true once every layer package exists.
+//   - No cycle rule is needed here: Gradle itself rejects circular
+//     project dependencies at build time.
+//
+// Dependency matrix (mirrors the Go go-arch-lint config):
+//   presentation -> application, domain
+//   application  -> domain
+//   infrastructure -> domain
+//   domain       -> (nothing)
+package {namespace}.architecture
+
+import com.lemonappdev.konsist.api.Konsist
+import com.lemonappdev.konsist.api.architecture.KoArchitectureCreator.assertArchitecture
+import com.lemonappdev.konsist.api.architecture.Layer
+import org.junit.Test
+
+class ArchitectureTest {{
+    @Test
+    fun `layers depend only inward`() {{
+        Konsist
+            .scopeFromProject()
+            .assertArchitecture {{
+                val domain = Layer("Domain", "{namespace}.domain..")
+                val application = Layer("Application", "{namespace}.application..")
+                val presentation = Layer("Presentation", "{namespace}.presentation..")
+                val infrastructure =
+                    Layer("Infrastructure", "{namespace}.infrastructure..")
+
+                domain.dependsOnNothing()
+                application.dependsOn(domain)
+                presentation.dependsOn(application)
+                presentation.dependsOn(domain)
+                infrastructure.dependsOn(domain)
+            }}
+    }}
+}}
+"""
+
+        config_path.write_text(config_content)
+        return [config_path]
+
     def _generate_readme(self, language: str, project_name: str) -> Path:
         """Generate README with usage instructions.
 
@@ -662,6 +778,7 @@ Edit the configuration file:
 - Go: `.go-arch-lint.yml`
 - Rust: `deny.toml`
 - Swift: `.swiftlint-architecture.yml`
+- Kotlin: `ArchitectureTest.kt`
 
 See documentation:
 - Python: https://import-linter.readthedocs.io/
@@ -669,6 +786,7 @@ See documentation:
 - Go: https://github.com/fe3dback/go-arch-lint
 - Rust: https://embarkstudios.github.io/cargo-deny/
 - Swift: https://realm.github.io/SwiftLint/custom_rules.html
+- Kotlin: https://docs.konsist.lemonappdev.com/
 
 ## Integration
 

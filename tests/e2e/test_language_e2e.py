@@ -3,12 +3,13 @@
 Tests the complete sgsg init flow for supported languages, verifying
 that the CLI produces valid project structures end-to-end.
 
-Note: java, csharp, ruby, and kotlin are supported at the generator level
-but the quality-tooling pipeline steps (PreCommitGenerator, scripts, CI)
-only support python, typescript, go, rust, and swift currently; init skips
-those steps for the generator-level languages (#356). They are tested at
-the unit/integration level via test_language_generators.py and
-test_kotlin_init_integration.py.
+Note: java, csharp, and ruby are supported at the generator level but the
+quality-tooling pipeline steps (PreCommitGenerator, scripts, CI) skip
+them (#356). Kotlin gained its quality tooling with #357 but still lacks
+a CI workflow (#358), so it stays out of CLI_SUPPORTED_LANGUAGES below;
+its full init flow is covered at the integration level by
+test_kotlin_init_integration.py (and test_language_generators.py covers
+the generator-only languages).
 
 All tests use an environment with API keys stripped and a null keyring
 backend to prevent real Anthropic API calls. See Issue #196.

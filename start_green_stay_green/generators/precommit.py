@@ -25,7 +25,8 @@ class GenerationConfig:
 
     Attributes:
         project_name: Name of the project.
-        language: Programming language (python, typescript, go, rust, swift).
+        language: Programming language (python, typescript, go, rust,
+            swift, kotlin).
         language_config: Additional language-specific configuration.
     """
 
@@ -426,6 +427,88 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         ],
         "default_language_version": {},
     },
+    "kotlin": {
+        "hooks": [
+            {
+                "repo": "https://github.com/pre-commit/pre-commit-hooks",
+                "rev": "v4.5.0",
+                "hooks": [
+                    {"id": "trailing-whitespace"},
+                    {"id": "end-of-file-fixer"},
+                    {"id": "check-yaml"},
+                    {"id": "check-json"},
+                    {"id": "check-added-large-files", "args": ["--maxkb=500"]},
+                    {"id": "check-case-conflict"},
+                    {"id": "check-merge-conflict"},
+                    {"id": "check-symlinks"},
+                    {"id": "detect-private-key"},
+                    {"id": "fix-byte-order-marker"},
+                    {"id": "mixed-line-ending", "args": ["--fix=lf"]},
+                    {"id": "no-commit-to-branch", "args": ["--branch", "main"]},
+                ],
+            },
+            # ktlint and detekt run as `repo: local` system hooks
+            # (mirroring the Swift swift-format/SwiftLint hooks): neither
+            # pinterest/ktlint nor detekt/detekt ships an official
+            # .pre-commit-hooks.yaml manifest, so a remote hook repo would
+            # have to point at an unofficial mirror. Install both with:
+            # `brew install ktlint detekt`.
+            {
+                "repo": "local",
+                "hooks": [
+                    {
+                        "id": "ktlint",
+                        "name": "ktlint",
+                        # --format fixes what it can and still fails on
+                        # the violations it cannot fix.
+                        "entry": "ktlint --format",
+                        "language": "system",
+                        "types": ["kotlin"],
+                    },
+                    {
+                        "id": "detekt",
+                        "name": "detekt",
+                        # Reads the generated detekt.yml (complexity <=10
+                        # gate + potential-bugs rules) on top of detekt's
+                        # default config, the same file lint.sh uses.
+                        "entry": (
+                            "detekt --config detekt.yml "
+                            "--build-upon-default-config "
+                            "--excludes **/build/**"
+                        ),
+                        "language": "system",
+                        "types": ["kotlin"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                ],
+            },
+            {
+                "repo": "https://github.com/gitleaks/gitleaks",
+                "rev": "v8.18.4",
+                "hooks": [
+                    {"id": "gitleaks"},
+                ],
+            },
+            {
+                "repo": "https://github.com/shellcheck-py/shellcheck-py",
+                "rev": "v0.9.0.6",
+                "hooks": [
+                    {"id": "shellcheck"},
+                ],
+            },
+            {
+                "repo": "https://github.com/Yelp/detect-secrets",
+                "rev": "v1.4.0",
+                "hooks": [
+                    {
+                        "id": "detect-secrets",
+                        "args": ["--baseline", ".secrets.baseline"],
+                    },
+                ],
+            },
+        ],
+        "default_language_version": {},
+    },
 }
 
 
@@ -435,7 +518,8 @@ class PreCommitGenerator(BaseGenerator):
     Customizes pre-commit hooks based on project language and requirements.
     Includes formatting, linting, security, and general file quality checks.
 
-    Supports: Python, TypeScript, Go, Rust, Swift, and other languages.
+    Supports: Python, TypeScript, Go, Rust, Swift, Kotlin, and other
+    languages.
 
     Attributes:
         orchestrator: Optional AI orchestrator for enhanced generation.
