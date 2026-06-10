@@ -1276,22 +1276,6 @@ def _generate_subagents_step(
     console.print("[green]✓[/green] Generated subagents")
 
 
-def _initial_precommit_status(total_hooks: int) -> dict[str, object]:
-    """Build the baseline Pre-Commit Status entry for a fresh metrics.json.
-
-    Configured hooks are treated as passing for the initial snapshot;
-    a zero count (no config found) yields an ``unknown`` status so the
-    dashboard can show a meaningful placeholder.
-
-    Args:
-        total_hooks: Number of hooks counted from ``.pre-commit-config.yaml``.
-
-    Returns:
-        A ``precommit_status`` mapping with total/passing/percentage/status.
-    """
-    return precommit_status(total_hooks)
-
-
 def _generate_metrics_dashboard_step(
     project_path: Path,
     project_name: str,
@@ -1334,7 +1318,7 @@ def _generate_metrics_dashboard_step(
                 "security_issues": 0,
             },
             "metrics": {
-                "precommit_status": _initial_precommit_status(precommit_hooks_total),
+                "precommit_status": precommit_status(precommit_hooks_total),
                 "coverage": 0.0,
                 "coverage_status": "fail",
                 "branch_coverage": 0.0,

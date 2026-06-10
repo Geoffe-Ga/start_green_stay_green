@@ -45,7 +45,6 @@ from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
 from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
-from start_green_stay_green.generators.metrics import precommit_status
 from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
 from start_green_stay_green.utils.enhance_state import BatchProgress
 from start_green_stay_green.utils.enhance_state import EnhanceState
@@ -976,33 +975,6 @@ class TestMetricsDashboardGeneration:
             content = workflow_file.read_text()
             assert "my-new-project" in content
             assert "start-green-stay-green" not in content
-
-
-class TestInitialPrecommitStatus:
-    """Tests for cli._initial_precommit_status (Issue #154 DRY)."""
-
-    def test_passing_status_for_configured_hooks(self) -> None:
-        """A positive hook count yields the 100% passing status dict."""
-        assert cli._initial_precommit_status(31) == precommit_status(31)
-        assert cli._initial_precommit_status(31)["status"] == "passing"
-
-    def test_unknown_status_for_zero_hooks(self) -> None:
-        """Zero hooks yields the unknown/no-data status dict."""
-        assert cli._initial_precommit_status(0) == precommit_status(0)
-        assert cli._initial_precommit_status(0)["status"] == "unknown"
-
-    def test_delegates_to_shared_builder(self) -> None:
-        """The dict is built by the canonical ``precommit_status`` helper.
-
-        Issue #154 DRY consolidation: ``_initial_precommit_status`` must not
-        re-derive the status fields; it must delegate to the shared
-        ``precommit_status`` builder.
-        """
-        with patch.object(cli, "precommit_status", wraps=precommit_status) as spy:
-            result = cli._initial_precommit_status(7)
-
-        spy.assert_called_once_with(7)
-        assert result == precommit_status(7)
 
 
 class TestShowDryRunPreview:
