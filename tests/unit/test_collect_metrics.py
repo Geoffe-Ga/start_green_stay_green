@@ -750,6 +750,103 @@ class TestNewMetricMethods:
         assert collector.metrics["maintainability_status"] == "unknown"
 
 
+class TestCollectDocsMetrics:
+    """Issue #217: docs coverage in script mode via metrics-docs.sh."""
+
+    def test_collect_docs_metrics_success(self) -> None:
+        """Docs coverage from the script payload computes a pass status."""
+        collector = MetricsCollector("test", {"docs_coverage": 95})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"docs_coverage_pct": 96.5},
+        ) as mock_script:
+            collector.collect_docs_metrics(Path("/scripts"), Path("/missing.txt"))
+
+        mock_script.assert_called_once_with("metrics-docs.sh", Path("/scripts"))
+        assert collector.metrics["docs_coverage"] == 96.5
+        assert collector.metrics["docs_status"] == "pass"
+
+    def test_collect_docs_metrics_below_threshold(self) -> None:
+        """Docs coverage below the threshold computes a fail status."""
+        collector = MetricsCollector("test", {"docs_coverage": 95})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"docs_coverage_pct": 92.0},
+        ):
+            collector.collect_docs_metrics(Path("/scripts"), Path("/missing.txt"))
+
+        assert collector.metrics["docs_coverage"] == 92.0
+        assert collector.metrics["docs_status"] == "fail"
+
+    def test_collect_docs_metrics_script_failure_no_file(self) -> None:
+        """Script failure with no report file degrades to unknown."""
+        collector = MetricsCollector("test", {"docs_coverage": 95})
+
+        with patch.object(collector, "collect_from_script", return_value=None):
+            collector.collect_docs_metrics(Path("/scripts"), Path("/missing.txt"))
+
+        assert collector.metrics["docs_coverage"] is None
+        assert collector.metrics["docs_status"] == "unknown"
+
+    def test_collect_docs_metrics_missing_pct_key_is_unknown(self) -> None:
+        """A payload without docs_coverage_pct yields unknown, not pass."""
+        collector = MetricsCollector("test", {"docs_coverage": 95})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"status": "pass"},
+        ):
+            collector.collect_docs_metrics(Path("/scripts"), Path("/missing.txt"))
+
+        assert collector.metrics["docs_coverage"] is None
+        assert collector.metrics["docs_status"] == "unknown"
+
+    def test_collect_docs_metrics_falls_back_to_report_file(self) -> None:
+        """Script failure falls back to a pre-generated docs report file."""
+        with TemporaryDirectory() as tmpdir:
+            docs_file = Path(tmpdir) / "docs-report.txt"
+            docs_file.write_text("RESULT: 97.5%")
+            collector = MetricsCollector("test", {"docs_coverage": 95})
+
+            with patch.object(collector, "collect_from_script", return_value=None):
+                collector.collect_docs_metrics(Path("/scripts"), docs_file)
+
+            assert collector.metrics["docs_coverage"] == 97.5
+            assert collector.metrics["docs_status"] == "pass"
+
+    def test_collect_docs_metrics_fallback_unparseable_file_is_unknown(self) -> None:
+        """Script failure plus an unparseable report file yields unknown."""
+        with TemporaryDirectory() as tmpdir:
+            docs_file = Path(tmpdir) / "docs-report.txt"
+            docs_file.write_text("no coverage data here")
+            collector = MetricsCollector("test", {"docs_coverage": 95})
+
+            with patch.object(collector, "collect_from_script", return_value=None):
+                collector.collect_docs_metrics(Path("/scripts"), docs_file)
+
+            assert collector.metrics["docs_coverage"] is None
+            assert collector.metrics["docs_status"] == "unknown"
+
+    def test_collect_docs_metrics_threshold_boundary(self) -> None:
+        """Coverage exactly at the threshold passes (>= comparison)."""
+        collector = MetricsCollector("test", {"docs_coverage": 95})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"docs_coverage_pct": 95.0},
+        ):
+            collector.collect_docs_metrics(Path("/scripts"), Path("/missing.txt"))
+
+        assert collector.metrics["docs_coverage"] == 95.0
+        assert collector.metrics["docs_status"] == "pass"
+
+
 class TestUnifiedThresholdConvention:
     """Issue #206: Python owns status computation via the thresholds dict.
 
@@ -1523,6 +1620,10 @@ class TestMainScriptMode:
             # Security failure should report "unknown", not "pass"
             assert data["metrics"]["security_status"] == "unknown"
             assert data["metrics"]["security_issues"] is None
+            # Docs coverage falls back to the report file when the
+            # metrics-docs.sh script yields no data (Issue #217)
+            assert data["metrics"]["docs_coverage"] == 96.5
+            assert data["metrics"]["docs_status"] == "pass"
 
     def test_main_file_mode_backward_compat(self) -> None:
         """Test that file mode remains backward compatible."""

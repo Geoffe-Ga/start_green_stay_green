@@ -942,6 +942,7 @@ class TestDashboardGeneration:
         assert dashboard is not None
         assert "≥85%" in dashboard  # coverage
         assert "≥80%" in dashboard  # branch coverage
+        assert "≥75%" in dashboard  # mutation (re-added in #217)
 
     def test_dashboard_has_metric_cards(self) -> None:
         """Test that dashboard has metric card structure."""
@@ -2008,14 +2009,16 @@ class TestDashboardNewCards:
         assert dashboard is not None
         return dashboard
 
-    def test_all_eight_card_ids_exist(self) -> None:
-        """Test that all 8 metric card IDs exist in generated HTML."""
+    def test_all_ten_card_ids_exist(self) -> None:
+        """Test that all 10 metric card IDs exist in generated HTML."""
         dashboard = self._get_dashboard()
 
         expected_ids = [
             "coverage-value",
             "branch-value",
+            "mutation-value",
             "complexity-value",
+            "docs-value",
             "security-value",
             "maintainability-value",
             "lint-value",
@@ -2025,14 +2028,16 @@ class TestDashboardNewCards:
         for card_id in expected_ids:
             assert card_id in dashboard, f"Missing card ID: {card_id}"
 
-    def test_all_eight_status_ids_exist(self) -> None:
-        """Test that all 8 status element IDs exist in generated HTML."""
+    def test_all_ten_status_ids_exist(self) -> None:
+        """Test that all 10 status element IDs exist in generated HTML."""
         dashboard = self._get_dashboard()
 
         expected_ids = [
             "coverage-status",
             "branch-status",
+            "mutation-status",
             "complexity-status",
+            "docs-status",
             "security-status",
             "maintainability-status",
             "lint-status",
@@ -2077,18 +2082,33 @@ class TestDashboardNewCards:
         assert "Test Count" in dashboard
         assert "tests-value" in dashboard
 
-    def test_dashboard_has_ten_metric_cards(self) -> None:
-        """Test dashboard has exactly 10 metric cards.
+    def test_mutation_card_exists(self) -> None:
+        """Test mutation score card exists in dashboard (Issue #217)."""
+        dashboard = self._get_dashboard()
+
+        assert "Mutation Score" in dashboard
+        assert "mutation-value" in dashboard
+
+    def test_docs_card_exists(self) -> None:
+        """Test documentation coverage card exists in dashboard (Issue #217)."""
+        dashboard = self._get_dashboard()
+
+        assert "Documentation Coverage" in dashboard
+        assert "docs-value" in dashboard
+
+    def test_dashboard_has_twelve_metric_cards(self) -> None:
+        """Test dashboard has exactly 12 metric cards.
 
         Eight original quality cards plus the Pre-Commit Status card added
-        at index 0 (Issue #154) and the CI Status card added at index 1
-        (Issue #159).
+        at index 0 (Issue #154), the CI Status card added at index 1
+        (Issue #159), and the re-added Mutation Score and Documentation
+        Coverage cards (Issue #217).
         """
         dashboard = self._get_dashboard()
 
         # Count metric-card div occurrences
         card_count = dashboard.count('class="metric-card"')
-        assert card_count == 10
+        assert card_count == 12
 
 
 class TestDashboardJavaScript:
@@ -2144,6 +2164,26 @@ class TestDashboardJavaScript:
         """Test JavaScript has null check for branch coverage (#212)."""
         dashboard = self._get_dashboard()
         assert "metrics.branch_coverage === null" in dashboard
+
+    def test_js_handles_null_mutation_score(self) -> None:
+        """Test JavaScript has null check for mutation score (#217).
+
+        The null branch must pass 'N/A' (not 'NO DATA') so updateStatus
+        maps it to the gray status-unknown state instead of red.
+        """
+        dashboard = self._get_dashboard()
+        assert "metrics.mutation_score === null" in dashboard
+        assert "updateStatus('mutation', 'N/A', false)" in dashboard
+
+    def test_js_handles_null_docs_coverage(self) -> None:
+        """Test JavaScript has null check for docs coverage (#217).
+
+        The null branch must pass 'N/A' (not 'NO DATA') so updateStatus
+        maps it to the gray status-unknown state instead of red.
+        """
+        dashboard = self._get_dashboard()
+        assert "metrics.docs_coverage === null" in dashboard
+        assert "updateStatus('docs', 'N/A', false)" in dashboard
 
     def test_js_handles_null_security_issues(self) -> None:
         """Test JavaScript has null check for security issues (#212)."""
