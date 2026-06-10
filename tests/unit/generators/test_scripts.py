@@ -1486,6 +1486,32 @@ class TestMutationKillers:
             assert len(scripts) > 11
             assert len(scripts) < 13
 
+    def test_generated_scripts_exact_count_cpp(self) -> None:
+        """Test C/C++ generator creates EXACTLY 6 scripts.
+
+        Kills mutations in script count logic and catches silent script
+        additions/removals. Scripts: check-all, format, lint, test,
+        security, pr-status (companion configs .clang-format/.clang-tidy
+        are written separately and not counted here).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="cpp",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            assert len(scripts) == 6
+            assert sorted(scripts) == [
+                "check-all.sh",
+                "format.sh",
+                "lint.sh",
+                "pr-status.sh",
+                "security.sh",
+                "test.sh",
+            ]
+
     def test_generated_scripts_exact_count_typescript(self) -> None:
         """Test TypeScript generator creates EXACTLY 6 scripts."""
         with tempfile.TemporaryDirectory() as tmpdir:

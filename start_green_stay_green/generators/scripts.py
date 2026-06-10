@@ -2353,6 +2353,9 @@ run_check() {
     shift 2
 
     echo "Running: $check_name"
+    # "${@}" is safe under set -u even when no extra args remain
+    # (unlike a named local array, which needs the
+    # ${args[@]+"${args[@]}"} guard the python template uses).
     if "$SCRIPT_DIR/$script" "${@}" $VERBOSE_FLAG; then
         PASSED_CHECKS+=("$check_name")
         echo "✓ $check_name passed"
@@ -2655,6 +2658,9 @@ run_check() {
     shift 2
 
     echo "Running: $check_name"
+    # "${@}" is safe under set -u even when no extra args remain
+    # (unlike a named local array, which needs the
+    # ${args[@]+"${args[@]}"} guard the python template uses).
     if "$SCRIPT_DIR/$script" "${@}" $VERBOSE_FLAG; then
         PASSED_CHECKS+=("$check_name")
         echo "✓ $check_name passed"
@@ -2958,6 +2964,9 @@ run_check() {
     shift 2
 
     echo "Running: $check_name"
+    # "${@}" is safe under set -u even when no extra args remain
+    # (unlike a named local array, which needs the
+    # ${args[@]+"${args[@]}"} guard the python template uses).
     if "$SCRIPT_DIR/$script" "${@}" $VERBOSE_FLAG; then
         PASSED_CHECKS+=("$check_name")
         echo "✓ $check_name passed"
@@ -3414,6 +3423,9 @@ run_check() {
     shift 2
 
     echo "Running: $check_name"
+    # "${@}" is safe under set -u even when no extra args remain
+    # (unlike a named local array, which needs the
+    # ${args[@]+"${args[@]}"} guard the python template uses).
     if "$SCRIPT_DIR/$script" "${@}" $VERBOSE_FLAG; then
         PASSED_CHECKS+=("$check_name")
         echo "✓ $check_name passed"
@@ -3854,6 +3866,9 @@ run_check() {
     shift 2
 
     echo "Running: $check_name"
+    # "${@}" is safe under set -u even when no extra args remain
+    # (unlike a named local array, which needs the
+    # ${args[@]+"${args[@]}"} guard the python template uses).
     if "$SCRIPT_DIR/$script" "${@}" $VERBOSE_FLAG; then
         PASSED_CHECKS+=("$check_name")
         echo "✓ $check_name passed"
@@ -3886,6 +3901,8 @@ fi
         return """#!/usr/bin/env bash
 # scripts/format.sh - Format C/C++ code
 # Usage: ./scripts/format.sh [--fix] [--check] [--verbose] [--help]
+# Default (no flags) writes formatting in place, same as --fix; use
+# --check for a non-mutating verification pass.
 
 set -euo pipefail
 
