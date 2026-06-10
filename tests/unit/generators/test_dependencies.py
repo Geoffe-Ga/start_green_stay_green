@@ -701,19 +701,17 @@ class TestJavaDependencies:
             assert f"<version>{ARCHUNIT_VERSION}</version>" in content
 
     def test_pom_pmd_plugin_layers_the_ccn_companion_ruleset(self) -> None:
-        """The PMD plugin keeps its default rules and adds pmd-ruleset.xml.
+        """The PMD plugin layers quickstart baseline + pmd-ruleset.xml.
 
         The companion ruleset (written by the scripts generator) is the
-        single home of the <=10 cyclomatic-complexity bound; the default
-        maven-pmd-plugin ruleset is kept explicitly so adding the
-        companion does not silently drop the stock analysis.
+        single home of the <=10 cyclomatic-complexity bound; the PMD 7
+        ``category/java/quickstart.xml`` baseline is referenced
+        explicitly (pre-7 ``rulesets/java/*`` paths no longer resolve)
+        so adding the companion does not silently drop stock analysis.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             content = self._pom(tmpdir)
-            assert (
-                "<ruleset>rulesets/java/maven-pmd-plugin-default.xml</ruleset>"
-                in content
-            )
+            assert "<ruleset>category/java/quickstart.xml</ruleset>" in content
             assert "<ruleset>pmd-ruleset.xml</ruleset>" in content
 
     def test_pom_declares_owasp_dependency_check_plugin(self) -> None:

@@ -554,9 +554,14 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
                     {
                         "id": "google-java-format",
                         "name": "google-java-format",
-                        # --replace rewrites files in place; unformatted
-                        # files still fail the hook via the diff.
-                        "entry": "google-java-format --replace",
+                        # Check-mode: --replace exits 0 whether or not it
+                        # changed files, so it can never fail a commit.
+                        # --dry-run --set-exit-if-changed fails the hook
+                        # on unformatted files; scripts/format.sh keeps
+                        # --replace for the fixing path.
+                        "entry": (
+                            "google-java-format --dry-run" " --set-exit-if-changed"
+                        ),
                         "language": "system",
                         "types": ["java"],
                     },
@@ -968,12 +973,7 @@ class PreCommitGenerator(BaseGenerator):
             >>> len(hooks) > 0
             True
         """
-        if language not in LANGUAGE_CONFIGS:
-            msg = (
-                f"Unsupported language: {language}. "
-                f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
-            )
-            raise ValueError(msg)
+        self._validate_language_supported(language)
         # Cast to satisfy mypy strict mode - dict access returns Any
         return cast("list[dict[str, Any]]", LANGUAGE_CONFIGS[language]["hooks"])
 
@@ -1006,12 +1006,7 @@ class PreCommitGenerator(BaseGenerator):
             >>> count > 20
             True
         """
-        if language not in LANGUAGE_CONFIGS:
-            msg = (
-                f"Unsupported language: {language}. "
-                f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
-            )
-            raise ValueError(msg)
+        self._validate_language_supported(language)
 
         hooks_config = LANGUAGE_CONFIGS[language]["hooks"]
         return self._sum_hooks_in_repos(hooks_config)

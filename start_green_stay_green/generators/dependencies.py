@@ -639,7 +639,10 @@ Wear OS app</description>
         <!-- ArchUnit backs the architecture test template parked in
              plans/architecture/ArchitectureTest.java; declared here so
              the template compiles the moment it is copied into
-             src/test/java (see plans/architecture/README.md). -->
+             src/test/java (see plans/architecture/README.md). The base
+             artifact (not archunit-junit4) is deliberate: the template
+             uses plain @Test methods with explicit ClassFileImporter
+             calls, so the JUnit-runner integration adds nothing. -->
         <dependency>
             <groupId>com.tngtech.archunit</groupId>
             <artifactId>archunit</artifactId>
@@ -717,11 +720,10 @@ Wear OS app</description>
                 <version>{PMD_PLUGIN_VERSION}</version>
                 <configuration>
                     <rulesets>
-                        <!-- The plugin's stock rules, kept explicitly so
-                             adding the companion below does not silently
-                             drop them. -->
-                        <ruleset>rulesets/java/maven-pmd-plugin-default.xml\
-</ruleset>
+                        <!-- PMD 7's category path for the curated
+                             baseline rules (the pre-7 rulesets/java/*
+                             paths no longer resolve). -->
+                        <ruleset>category/java/quickstart.xml</ruleset>
                         <!-- Companion at the project root (written by the
                              scripts generator): the SINGLE home of the
                              cyclomatic-complexity <= 10 gate, shared by

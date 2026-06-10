@@ -1275,7 +1275,7 @@ def _generate_architecture_step(
     if language not in supported:
         # The generator only supports these languages; surface a dim info
         # line so users understand why no architecture rules were generated
-        # for, e.g., a Java project rather than seeing silence.
+        # for, e.g., a C# project rather than seeing silence.
         console.print(
             f"[dim]Architecture rules unavailable for {language} "
             f"(supported: {', '.join(sorted(supported))})[/dim]"

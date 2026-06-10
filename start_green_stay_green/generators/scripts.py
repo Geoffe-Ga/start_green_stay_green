@@ -4701,10 +4701,13 @@ fi
 echo "=== Running Tests (mvn) ==="
 
 if $COVERAGE; then
-    # jacoco:check applies the plugin-level rules from pom.xml (the
-    # single home of the >=90% line bound); jacoco:report emits
-    # target/site/jacoco/ for the metrics dashboard and CI upload.
-    mvn clean test jacoco:report jacoco:check || \\
+    # `mvn clean verify` runs the full lifecycle, so the pom's bound
+    # jacoco executions (prepare-agent -> report -> check) fire in
+    # order. Invoking jacoco:check as a standalone goal can silently
+    # pass against an empty report when the agent binding is missing —
+    # the same silent no-op class as the SpotBugs compile guard. The
+    # >=90% line bound lives only in pom.xml.
+    mvn clean verify || \\
         { echo "✗ Tests or coverage gate failed" >&2; exit 1; }
 else
     mvn test || { echo "✗ Tests failed" >&2; exit 1; }
@@ -4843,9 +4846,12 @@ exit 0
     <rule ref="category/java/design.xml/CyclomaticComplexity">
         <properties>
             <!-- Reports at complexity >= 11, i.e. every method must
-                 stay <= 10. The class-level report stays at PMD's
-                 default. -->
+                 stay <= 10. classReportLevel is pinned explicitly:
+                 PMD 7's CyclomaticComplexity has two independent
+                 thresholds, and leaving the class level implicit
+                 invites surprise class-level violations. -->
             <property name="methodReportLevel" value="11" />
+            <property name="classReportLevel" value="80" />
         </properties>
     </rule>
 </ruleset>
@@ -4956,15 +4962,16 @@ cmd_list() {{
         echo "Running: gh ${{args[*]}}"
     fi
 
-    local fmt="%-12s %-30s %-20s %-12s %-18s %s\\n"
-    printf "$fmt" "ID" "BRANCH" "WORKFLOW" \\
+    # Literal format string at each call site: a variable format
+    # trips shellcheck SC2059 in generated projects' own hooks.
+    printf '%-12s %-30s %-20s %-12s %-18s %s\\n' "ID" "BRANCH" "WORKFLOW" \\
         "STATUS" "CONCLUSION" "CREATED"
-    printf "$fmt" "----" "------" "--------" \\
+    printf '%-12s %-30s %-20s %-12s %-18s %s\\n' "----" "------" "--------" \\
         "------" "----------" "-------"
 
     gh "${{args[@]}}" | while IFS=$'\\t' \\
         read -r id branch_name workflow status conclusion created; do
-        printf "$fmt" "$id" "$branch_name" \\
+        printf '%-12s %-30s %-20s %-12s %-18s %s\\n' "$id" "$branch_name" \\
             "$workflow" "$status" "$conclusion" "$created"
     done
 }}

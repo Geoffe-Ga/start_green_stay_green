@@ -892,10 +892,16 @@ class TestGenerateWithJava:
         hook_ids = [hook.get("id", "") for hook in local_repo.get("hooks", [])]
         assert "google-java-format" in hook_ids
 
-    def test_java_google_java_format_hook_formats_in_place(
+    def test_java_google_java_format_hook_fails_on_unformatted(
         self, mock_orchestrator: Mock
     ) -> None:
-        """The formatter hook rewrites files (--replace) like ktlint --format."""
+        """The formatter hook is check-mode and fails on unformatted files.
+
+        ``--replace`` exits 0 whether or not it changed anything, so it
+        can never fail a commit; the hook must use
+        ``--dry-run --set-exit-if-changed`` (scripts/format.sh keeps the
+        fixing path).
+        """
         generator = PreCommitGenerator(mock_orchestrator)
         repos = self._parsed_repos(generator)
         local_repo = next(repo for repo in repos if repo.get("repo") == "local")
@@ -904,7 +910,8 @@ class TestGenerateWithJava:
             for hook in local_repo["hooks"]
             if hook.get("id") == "google-java-format"
         )
-        assert "--replace" in formatter["entry"]
+        assert "--dry-run --set-exit-if-changed" in formatter["entry"]
+        assert "--replace" not in formatter["entry"]
         assert formatter["types"] == ["java"]
 
     @pytest.mark.parametrize("hook_id", ["checkstyle", "pmd", "spotbugs"])

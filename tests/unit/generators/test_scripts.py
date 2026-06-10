@@ -1330,19 +1330,24 @@ class TestScriptsGeneratorJavaGeneration:
             assert "command -v mvn" in content
 
     def test_java_test_script_enforces_coverage_via_pom_jacoco_gate(self) -> None:
-        """Coverage mode runs jacoco:check; the >=90% bound stays in the pom.
+        """Coverage mode runs the full lifecycle; the bound stays in the pom.
 
-        Unlike the cpp THRESHOLD=90 (CMake has no manifest home for the
-        bound), Maven does: the JaCoCo plugin rules in pom.xml are the
-        single source of the coverage bound, so the script must invoke
-        the gate without restating the number.
+        ``mvn clean verify`` fires the pom's bound jacoco executions
+        (prepare-agent -> report -> check) in order; invoking
+        ``jacoco:check`` as a standalone goal can silently pass against
+        an empty report. Unlike the cpp THRESHOLD=90 (CMake has no
+        manifest home for the bound), the JaCoCo plugin rules in pom.xml
+        are the single source of the coverage bound, so the script must
+        not restate the number.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             scripts = self._generate(tmpdir)
 
             content = scripts["test.sh"].read_text()
-            assert "jacoco:report" in content
-            assert "jacoco:check" in content
+            assert "mvn clean verify" in content
+            # No standalone goal invocation remains in the command line
+            # (the string may still appear in explanatory comments).
+            assert "mvn clean test jacoco:report jacoco:check" not in content
             assert "pom.xml" in content
             assert "THRESHOLD=" not in content
 
