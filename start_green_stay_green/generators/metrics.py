@@ -110,6 +110,44 @@ def count_precommit_hooks(config_path: Path) -> int:
     return sum(_repo_hook_count(repo) for repo in repos)
 
 
+def precommit_status(
+    total_hooks: int, passing_hooks: int | None = None
+) -> dict[str, object]:
+    """Build the canonical Pre-Commit Status dict for the metrics dashboard.
+
+    Single source of truth (Issue #154 DRY consolidation) for the
+    ``precommit_status`` mapping consumed by the dashboard's Pre-Commit
+    Status card. Both ``start_green_stay_green.cli._initial_precommit_status``
+    and ``scripts/collect_metrics.py`` delegate here instead of rebuilding the
+    ``total_hooks``/``passing_hooks``/``percentage``/``status`` fields
+    themselves.
+
+    When ``total_hooks`` is ``0`` (no ``.pre-commit-config.yaml`` found) the
+    status is ``"unknown"`` so the dashboard renders the gray "N/A" no-data
+    treatment instead of a red FAILING card. Otherwise the status is
+    ``"passing"`` and the percentage reflects ``passing_hooks / total_hooks``.
+
+    Args:
+        total_hooks: Total hooks counted from ``.pre-commit-config.yaml``.
+        passing_hooks: Hooks treated as passing. Defaults to ``total_hooks``
+            (configured hooks are assumed passing for the snapshot).
+
+    Returns:
+        A ``precommit_status`` mapping with ``total_hooks``,
+        ``passing_hooks``, ``percentage`` and ``status`` keys.
+    """
+    if passing_hooks is None:
+        passing_hooks = total_hooks
+    has_hooks = total_hooks > 0
+    percentage = (passing_hooks / total_hooks * 100) if has_hooks else 0.0
+    return {
+        "total_hooks": total_hooks,
+        "passing_hooks": passing_hooks,
+        "percentage": percentage,
+        "status": "passing" if has_hooks else "unknown",
+    }
+
+
 @dataclass(frozen=True)
 class MetricConfig:
     """Configuration for a single quality metric.
@@ -785,6 +823,10 @@ class MetricsGenerator(BaseGenerator):
             background: #da3633;
             color: #fff;
         }}
+        .status-unknown {{
+            background: #30363d;
+            color: #8b949e;
+        }}
         .footer {{
             text-align: center;
             margin-top: 3rem;
@@ -933,7 +975,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.coverage !== undefined) {{
                 if (metrics.coverage === null) {{
                     document.getElementById('coverage-value').textContent = 'N/A';
-                    updateStatus('coverage', 'NO DATA', false);
+                    updateStatus('coverage', 'N/A', false);
                 }} else {{
                     updateMetric('coverage', metrics.coverage, '%',
                         metrics.coverage >= thresholds.coverage);
@@ -944,7 +986,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.branch_coverage !== undefined) {{
                 if (metrics.branch_coverage === null) {{
                     document.getElementById('branch-value').textContent = 'N/A';
-                    updateStatus('branch', 'NO DATA', false);
+                    updateStatus('branch', 'N/A', false);
                 }} else {{
                     updateMetric('branch', metrics.branch_coverage, '%',
                         metrics.branch_coverage >= thresholds.branch_coverage);
@@ -955,7 +997,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.complexity_avg !== undefined) {{
                 if (metrics.complexity_avg === null) {{
                     document.getElementById('complexity-value').textContent = 'N/A';
-                    updateStatus('complexity', 'NO DATA', false);
+                    updateStatus('complexity', 'N/A', false);
                 }} else {{
                     updateMetric('complexity', metrics.complexity_avg, '',
                         metrics.complexity_avg <= thresholds.complexity);
@@ -966,7 +1008,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.security_issues !== undefined) {{
                 if (metrics.security_issues === null) {{
                     document.getElementById('security-value').textContent = 'N/A';
-                    updateStatus('security', 'NO DATA', false);
+                    updateStatus('security', 'N/A', false);
                 }} else {{
                     const elem = document.getElementById('security-value');
                     elem.textContent = metrics.security_issues;
@@ -981,7 +1023,7 @@ class MetricsGenerator(BaseGenerator):
                 if (metrics.maintainability_avg === null) {{
                     const mv = document.getElementById('maintainability-value');
                     mv.textContent = 'N/A';
-                    updateStatus('maintainability', 'NO DATA', false);
+                    updateStatus('maintainability', 'N/A', false);
                 }} else {{
                     const t = thresholds.maintainability || 20;
                     updateMetric('maintainability',
@@ -994,7 +1036,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.lint_violations !== undefined) {{
                 if (metrics.lint_violations === null) {{
                     document.getElementById('lint-value').textContent = 'N/A';
-                    updateStatus('lint', 'NO DATA', false);
+                    updateStatus('lint', 'N/A', false);
                 }} else {{
                     const elem = document.getElementById('lint-value');
                     elem.textContent = metrics.lint_violations;
@@ -1008,7 +1050,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.type_errors !== undefined) {{
                 if (metrics.type_errors === null) {{
                     document.getElementById('typecheck-value').textContent = 'N/A';
-                    updateStatus('typecheck', 'NO DATA', false);
+                    updateStatus('typecheck', 'N/A', false);
                 }} else {{
                     const elem = document.getElementById('typecheck-value');
                     elem.textContent = metrics.type_errors;
@@ -1022,7 +1064,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.tests_total !== undefined) {{
                 if (metrics.tests_total === null) {{
                     document.getElementById('tests-value').textContent = 'N/A';
-                    updateStatus('tests', 'NO DATA', false);
+                    updateStatus('tests', 'N/A', false);
                 }} else {{
                     const elem = document.getElementById('tests-value');
                     const failed = metrics.tests_failed || 0;
@@ -1041,10 +1083,15 @@ class MetricsGenerator(BaseGenerator):
             const badgeElem =
                 document.getElementById('precommit-status-badge');
 
-            if (!precommit) {{
+            // No-data guard (Issue #154): when there is no precommit data, or
+            // the status is 'unknown' (no .pre-commit-config.yaml), render the
+            // gray N/A treatment BEFORE the percentage thresholds so a 0%
+            // unknown card does not fall through to red FAILING.
+            if (!precommit || precommit.status === 'unknown') {{
                 valueElem.textContent = 'N/A';
-                badgeElem.textContent = 'NO DATA';
-                badgeElem.className = 'metric-status status-warn';
+                thresholdElem.textContent = 'No data';
+                badgeElem.textContent = 'N/A';
+                badgeElem.className = 'metric-status status-unknown';
                 return;
             }}
 
@@ -1084,8 +1131,17 @@ class MetricsGenerator(BaseGenerator):
 
         function updateStatus(name, text, passing) {{
             const elem = document.getElementById(`${{name}}-status`);
+            if (!elem) return;
             elem.textContent = text;
-            const statusClass = passing ? 'status-pass' : 'status-fail';
+            // No-data cards pass 'N/A' (Issue #154): map to the gray
+            // status-unknown state so a fresh project does not surface
+            // alarming red "no data" badges.
+            let statusClass;
+            if (text === 'N/A') {{
+                statusClass = 'status-unknown';
+            }} else {{
+                statusClass = passing ? 'status-pass' : 'status-fail';
+            }}
             elem.className = 'metric-status ' + statusClass;
         }}
 

@@ -62,6 +62,7 @@ from start_green_stay_green.generators.github_actions import (
 )
 from start_green_stay_green.generators.metrics import MetricsGenerationConfig
 from start_green_stay_green.generators.metrics import MetricsGenerator
+from start_green_stay_green.generators.metrics import precommit_status
 from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import PreCommitGenerator
 from start_green_stay_green.generators.readme import ReadmeConfig
@@ -1288,13 +1289,7 @@ def _initial_precommit_status(total_hooks: int) -> dict[str, object]:
     Returns:
         A ``precommit_status`` mapping with total/passing/percentage/status.
     """
-    has_hooks = total_hooks > 0
-    return {
-        "total_hooks": total_hooks,
-        "passing_hooks": total_hooks,
-        "percentage": 100.0 if has_hooks else 0.0,
-        "status": "passing" if has_hooks else "unknown",
-    }
+    return precommit_status(total_hooks)
 
 
 def _generate_metrics_dashboard_step(

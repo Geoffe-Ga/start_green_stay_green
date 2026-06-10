@@ -20,6 +20,7 @@ from collect_metrics import MetricsCollector
 from collect_metrics import main as collect_main
 
 from start_green_stay_green.generators.metrics import count_precommit_hooks
+from start_green_stay_green.generators.metrics import precommit_status
 
 
 class TestMetricsCollector:
@@ -868,6 +869,28 @@ class TestCollectPrecommitStatus:
             assert collector.metrics["precommit_status"]["total_hooks"] == (
                 count_precommit_hooks(config_path)
             )
+
+    def test_collect_precommit_status_delegates_to_shared_builder(self) -> None:
+        """The status dict is built by the canonical ``precommit_status`` helper.
+
+        Issue #154 DRY consolidation: ``collect_precommit_status`` must not
+        re-derive ``has_hooks``/``passing_hooks``/``percentage``/``status``;
+        it must delegate dict construction to the shared
+        ``precommit_status`` builder in the metrics generator module.
+        """
+        with TemporaryDirectory() as tmpdir:
+            config_path = self._write_config(Path(tmpdir), 13)
+            collector = MetricsCollector("test", {})
+
+            with patch.object(
+                collect_metrics,
+                "precommit_status",
+                wraps=precommit_status,
+            ) as spy:
+                collector.collect_precommit_status(config_path)
+
+            spy.assert_called_once_with(13)
+            assert collector.metrics["precommit_status"] == precommit_status(13)
 
 
 class TestMainScriptMode:

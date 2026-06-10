@@ -85,8 +85,8 @@
             color: #fff;
         }
         .status-unknown {
-            background: #484f58;
-            color: #c9d1d9;
+            background: #30363d;
+            color: #8b949e;
         }
         .footer {
             text-align: center;
@@ -344,10 +344,15 @@
             const badgeElem =
                 document.getElementById('precommit-status-badge');
 
-            if (!precommit) {
+            // No-data guard (Issue #154): when there is no precommit data, or
+            // the status is 'unknown' (no .pre-commit-config.yaml), render the
+            // gray N/A treatment BEFORE the percentage thresholds so a 0%
+            // unknown card does not fall through to red FAILING.
+            if (!precommit || precommit.status === 'unknown') {
                 valueElem.textContent = 'N/A';
-                badgeElem.textContent = 'NO DATA';
-                badgeElem.className = 'metric-status status-warn';
+                thresholdElem.textContent = 'No data';
+                badgeElem.textContent = 'N/A';
+                badgeElem.className = 'metric-status status-unknown';
                 return;
             }
 
@@ -389,6 +394,9 @@
             const elem = document.getElementById(`${name}-status`);
             if (!elem) return;
             elem.textContent = text;
+            // No-data cards pass 'N/A' (Issue #154): map to the gray
+            // status-unknown state so a fresh project does not surface
+            // alarming red "no data" badges.
             let statusClass;
             if (text === 'N/A') {
                 statusClass = 'status-unknown';

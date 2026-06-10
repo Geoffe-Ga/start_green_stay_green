@@ -18,6 +18,7 @@ from start_green_stay_green.generators.metrics import MetricsGenerationConfig
 from start_green_stay_green.generators.metrics import MetricsGenerator
 from start_green_stay_green.generators.metrics import STANDARD_METRICS
 from start_green_stay_green.generators.metrics import count_precommit_hooks
+from start_green_stay_green.generators.metrics import precommit_status
 
 
 class TestMetricConfig:
@@ -1166,6 +1167,83 @@ class TestPrecommitStatusCard:
 
         assert dashboard is not None
         assert "0/0 Hooks" in dashboard
+
+    def test_precommit_js_grays_unknown_status_before_percentage(self) -> None:
+        """Zero-hooks/``unknown`` status maps to gray, not red FAILING.
+
+        Regression for the no-data UX bug (Issue #154): a
+        ``status: 'unknown'`` precommit card has ``percentage: 0.0`` which
+        would fall through the ``>= 100``/``>= 90`` guards and render red
+        FAILING. ``updatePrecommitStatus`` must branch on the ``status``
+        field (and missing data) BEFORE the percentage thresholds and apply
+        the gray ``status-unknown`` treatment, mirroring the other cards.
+        """
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            precommit_hooks_total=32,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        # The unknown/no-data guard must short-circuit before the percentage
+        # colour thresholds and use the gray status-unknown class.
+        assert "precommit.status === 'unknown'" in dashboard
+        assert "status-unknown" in dashboard
+        guard = dashboard.index("precommit.status === 'unknown'")
+        threshold = dashboard.index("if (percentage >= 100)")
+        assert guard < threshold
+
+    def test_dashboard_defines_status_unknown_css(self) -> None:
+        """The gray ``status-unknown`` badge class is defined in the CSS."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert ".status-unknown {" in dashboard
+
+
+class TestPrecommitStatusHelper:
+    """Tests for the canonical ``precommit_status`` dict-builder (Issue #154)."""
+
+    def test_passing_status_for_configured_hooks(self) -> None:
+        """A positive hook count yields a 100% passing status."""
+        assert precommit_status(32) == {
+            "total_hooks": 32,
+            "passing_hooks": 32,
+            "percentage": 100.0,
+            "status": "passing",
+        }
+
+    def test_unknown_status_for_zero_hooks(self) -> None:
+        """Zero hooks (no config) yields the unknown/no-data status."""
+        assert precommit_status(0) == {
+            "total_hooks": 0,
+            "passing_hooks": 0,
+            "percentage": 0.0,
+            "status": "unknown",
+        }
+
+    def test_passing_hooks_defaults_to_total(self) -> None:
+        """``passing_hooks`` defaults to ``total_hooks`` when omitted."""
+        result = precommit_status(10)
+        assert result["passing_hooks"] == 10
+
+    def test_partial_passing_yields_proportional_percentage(self) -> None:
+        """An explicit passing count below total yields a partial percentage."""
+        result = precommit_status(10, passing_hooks=9)
+        assert result["passing_hooks"] == 9
+        assert result["percentage"] == 90.0
+        assert result["status"] == "passing"
 
 
 class TestCIIntegration:

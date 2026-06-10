@@ -26,6 +26,7 @@ from typing import Any
 from typing import TYPE_CHECKING
 
 from start_green_stay_green.generators.metrics import count_precommit_hooks
+from start_green_stay_green.generators.metrics import precommit_status
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -192,13 +193,7 @@ class MetricsCollector:
             config_path: Path to the ``.pre-commit-config.yaml`` file.
         """
         total = count_precommit_hooks(config_path)
-        has_hooks = total > 0
-        self.metrics["precommit_status"] = {
-            "total_hooks": total,
-            "passing_hooks": total,
-            "percentage": 100.0 if has_hooks else 0.0,
-            "status": "passing" if has_hooks else "unknown",
-        }
+        self.metrics["precommit_status"] = precommit_status(total)
 
     def add_mutation_score(self, score: float) -> None:
         """Add mutation testing score.
