@@ -83,7 +83,7 @@ output_path.write_text(yaml_content)
 
 **Configuration Options**:
 - `project_name`: Name of the project
-- `language`: python, typescript, go, or rust
+- `language`: python, typescript, go, rust, or swift
 - `language_config`: Language-specific settings (dict)
 
 **Output**: `.pre-commit-config.yaml` with hooks for:
@@ -138,7 +138,7 @@ scripts = generator.generate()
 - `complexity.sh` - Code complexity analysis
 
 **Configuration Options**:
-- `language`: python, typescript, go, rust
+- `language`: python, typescript, go, rust, swift
 - `package_name`: Python package name (snake_case)
 
 ### CIGenerator (AI-powered)
@@ -372,6 +372,7 @@ generator.generate(language="python", project_name="my-app")
 - TypeScript: dependency-cruiser
 - Go: go-arch-lint
 - Rust: cargo-deny
+- Swift: SwiftLint custom rules
 
 ### GitHubActionsReviewGenerator (AI-powered)
 
