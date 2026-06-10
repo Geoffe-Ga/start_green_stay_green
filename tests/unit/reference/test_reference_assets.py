@@ -96,6 +96,27 @@ class TestScriptsReferences:
             assert script_path.is_file()
             assert script_path.stat().st_size > 0, f"Empty Python script: {script}"
 
+    def test_java_lint_script_compiles_before_spotbugs(
+        self, scripts_dir: Path
+    ) -> None:
+        """The java reference lint script's SpotBugs run is no no-op (#368).
+
+        SpotBugs reads bytecode: a bare ``mvn spotbugs:check`` silently
+        passes when target/classes is empty, so the reference script must
+        compile within the same invocation — parity with the generated
+        scripts/security.sh and reference/ci/java.yml.
+        """
+        content = (scripts_dir / "java" / "lint.sh").read_text()
+        commands = [
+            line
+            for line in content.splitlines()
+            if "spotbugs:check" in line and not line.lstrip().startswith("#")
+        ]
+        assert commands, "lint.sh must run the SpotBugs gate"
+        for command in commands:
+            assert "compile" in command
+            assert command.index("compile") < command.index("spotbugs:check")
+
 
 class TestSkillsReferences:
     """Test skills references exist and have proper structure."""

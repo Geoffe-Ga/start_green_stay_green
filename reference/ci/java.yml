@@ -35,17 +35,28 @@ jobs:
       - name: Run PMD
         run: mvn pmd:check
 
+      # SpotBugs reads bytecode, and `mvn spotbugs:check` silently
+      # passes when target/classes is empty — compile first so the scan
+      # actually analyzes the project (parity with the generated
+      # pre-commit hook and scripts/security.sh).
       - name: Run SpotBugs
-        run: mvn spotbugs:check
+        run: mvn compile spotbugs:check
 
       - name: Run tests with JaCoCo coverage
         run: mvn clean test jacoco:report
 
+      # The upload is best-effort: no CODECOV_TOKEN is provisioned in a
+      # fresh project, and tokenless uploads are rate-limited, so a
+      # failed upload must not fail CI. Java can afford this leniency
+      # because — unlike the other reference workflows, where the
+      # Codecov upload is the only coverage surface — the enforced
+      # >=90% gate is the local `mvn jacoco:check` step below, backed
+      # by the pom: Codecov here is informational, not load-bearing.
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
           file: ./target/site/jacoco/jacoco.xml
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
       - name: Check coverage threshold
         run: mvn jacoco:check

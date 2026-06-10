@@ -1373,7 +1373,7 @@ class TestCIGeneratorTemplatePath:
 
     @pytest.mark.parametrize(
         "language",
-        ["python", "typescript", "go", "rust", "swift", "kotlin", "cpp"],
+        ["python", "typescript", "go", "rust", "swift", "kotlin", "cpp", "java"],
     )
     def test_generate_from_template_for_supported_language(self, language: str) -> None:
         """Each canonical language renders without an orchestrator."""
@@ -2116,6 +2116,161 @@ class TestCppReferenceTemplate:
         GITHUB_ENV/GITHUB_PATH write to guard.
         """
         parsed = yaml.safe_load(cpp_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert not any("GITHUB_ENV" in cmd for cmd in run_commands)
+        assert not any("GITHUB_PATH" in cmd for cmd in run_commands)
+
+
+class TestJavaReferenceTemplate:
+    """Tests for the Java reference CI workflow (#366/#368).
+
+    The java scaffold is a legacy Android Wear app whose Maven build
+    deliberately covers ONLY the pure-logic library and its JUnit 4
+    tests (the #366 two-builds split): the APK is Android tooling's job,
+    so every assertion reflects what `mvn` can actually run on a plain
+    ubuntu runner. The quality gates are the pom-backed Maven goals the
+    integration suite cross-checks against the generated pom.
+    """
+
+    @pytest.fixture
+    def java_workflow(self) -> CIWorkflow:
+        """Render the deterministic Java reference workflow."""
+        return CIGenerator(language="java").generate_workflow_from_template()
+
+    def test_workflow_is_valid_yaml(self, java_workflow: CIWorkflow) -> None:
+        """Rendered workflow parses with yaml.safe_load and validates."""
+        parsed = yaml.safe_load(java_workflow.content)
+        assert java_workflow.is_valid
+        assert isinstance(parsed, dict)
+        assert parsed["name"] == "Java Quality Checks"
+
+    def test_workflow_has_quality_and_build_jobs(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """Workflow declares exactly the quality and build jobs."""
+        parsed = yaml.safe_load(java_workflow.content)
+        assert set(parsed["jobs"]) == {"quality", "build"}
+
+    def test_all_jobs_run_on_ubuntu(self, java_workflow: CIWorkflow) -> None:
+        """Every job runs on ubuntu: Maven/JVM builds need no macOS."""
+        parsed = yaml.safe_load(java_workflow.content)
+        for name, job in parsed["jobs"].items():
+            assert job["runs-on"] == "ubuntu-latest", f"{name} must run on ubuntu"
+
+    def test_jdk_matrix_covers_the_lts_releases_above_the_pom_target(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """The quality job matrixes over JDK 17 and 21.
+
+        utils/java.JAVA_RELEASE pins the pom's --release to 17, so the
+        matrix runs the LTS JDKs that can build it (11 from
+        LANGUAGE_CONFIGS predates the target and is deliberately
+        absent).
+        """
+        parsed = yaml.safe_load(java_workflow.content)
+        matrix = parsed["jobs"]["quality"]["strategy"]["matrix"]
+        assert matrix["java-version"] == ["17", "21"]
+
+    def test_setup_actions_are_pinned_to_majors(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """checkout and setup-java are pinned majors with Maven caching."""
+        content = java_workflow.content
+        assert "actions/checkout@v4" in content
+        assert "actions/setup-java@v4" in content
+        assert "cache: 'maven'" in content
+
+    def test_quality_job_runs_every_pom_backed_gate(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """CI runs the checkstyle/pmd/spotbugs/jacoco goals the pom backs.
+
+        The generated pom declares each plugin precisely so these goals
+        resolve (test_java_init_integration cross-checks the pom side).
+        """
+        parsed = yaml.safe_load(java_workflow.content)
+        quality_commands = [
+            cmd.strip()
+            for step in parsed["jobs"]["quality"]["steps"]
+            if (cmd := step.get("run"))
+        ]
+        assert "mvn checkstyle:check" in quality_commands
+        assert "mvn pmd:check" in quality_commands
+        assert "mvn clean test jacoco:report" in quality_commands
+        assert "mvn jacoco:check" in quality_commands
+
+    def test_spotbugs_compiles_before_checking(self, java_workflow: CIWorkflow) -> None:
+        """The SpotBugs step compiles first so the scan is not a no-op.
+
+        SpotBugs reads bytecode: a bare `mvn spotbugs:check` silently
+        passes when target/classes is empty (the #367 report's gap, the
+        PR #430 review's carry-over). The compile must precede the check
+        within one invocation, matching the generated pre-commit hook
+        and scripts/security.sh.
+        """
+        parsed = yaml.safe_load(java_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        spotbugs_runs = [cmd for cmd in run_commands if "spotbugs:check" in cmd]
+        assert len(spotbugs_runs) == 1
+        command = spotbugs_runs[0]
+        assert "compile" in command
+        assert command.index("compile") < command.index("spotbugs:check")
+
+    def test_codecov_upload_cannot_fail_ci(self, java_workflow: CIWorkflow) -> None:
+        """The tokenless Codecov upload is best-effort, never a gate.
+
+        A fresh project has no CODECOV_TOKEN secret and tokenless
+        uploads are rate-limited, so `fail_ci_if_error: true` would make
+        generated projects start red (the #366 report's gap). The
+        enforced coverage gate is the pom-backed `mvn jacoco:check`
+        step instead.
+        """
+        parsed = yaml.safe_load(java_workflow.content)
+        codecov_steps = [
+            step
+            for job in parsed["jobs"].values()
+            for step in job["steps"]
+            if "codecov" in step.get("uses", "")
+        ]
+        assert len(codecov_steps) == 1
+        assert codecov_steps[0]["with"]["fail_ci_if_error"] is False
+
+    def test_build_job_packages_without_rerunning_tests(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """The build job packages the JAR; the suite ran once in quality.
+
+        -DskipTests keeps the single coverage-gated test execution in
+        the quality job (the Swift PR #414 no-double-test-run lesson).
+        """
+        parsed = yaml.safe_load(java_workflow.content)
+        build_commands = [
+            step.get("run", "") for step in parsed["jobs"]["build"]["steps"]
+        ]
+        assert any("mvn clean package -DskipTests" in cmd for cmd in build_commands)
+        assert any("mvn verify -DskipTests" in cmd for cmd in build_commands)
+
+    def test_android_packaging_documented_not_stubbed(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """No step pretends to build the APK Maven cannot produce."""
+        parsed = yaml.safe_load(java_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert not any("gradle" in cmd for cmd in run_commands)
+        assert not any("apk" in cmd.lower() for cmd in run_commands)
+
+    def test_workflow_writes_nothing_to_github_env(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """Nothing discovered at runtime is exported to GITHUB_ENV.
+
+        The Swift PR #414 review flagged unvalidated GITHUB_ENV writes
+        as the documented Actions env-injection vector; like the Kotlin
+        and cpp workflows, every value here is a static literal, so
+        there is no dynamic discovery and no GITHUB_ENV/GITHUB_PATH
+        write to guard.
+        """
+        parsed = yaml.safe_load(java_workflow.content)
         run_commands = _all_run_commands(parsed)
         assert not any("GITHUB_ENV" in cmd for cmd in run_commands)
         assert not any("GITHUB_PATH" in cmd for cmd in run_commands)
