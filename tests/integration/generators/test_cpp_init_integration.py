@@ -1,4 +1,4 @@
-"""Integration tests for ``sgsg init --language cpp`` (#361/#362).
+"""Integration tests for ``sgsg init --language cpp`` (#361/#362/#363).
 
 Runs the full init flow once via the Typer CliRunner and asserts the
 generated C/C++ (Tizen native watch-app) project tree and the CMake/Conan
@@ -11,9 +11,9 @@ CMake, Conan, or Tizen Studio — so they pass on CI runners where none of
 those are installed, mirroring ``test_kotlin_init_integration.py`` (#356).
 
 With #362 the quality toolchain (pre-commit config, quality scripts,
-clang companion configs, architecture rules) is generated for C/C++;
-only the CI workflow remains deferred (#363), so this suite locks in
-the presence of the tooling artifacts and the *absence* of ci.yml.
+clang companion configs, architecture rules) is generated for C/C++,
+and #363 completed the pipeline with the CI workflow, so this suite
+locks in the presence of every pipeline artifact including ci.yml.
 """
 
 from pathlib import Path
@@ -110,6 +110,8 @@ class TestCppInitTree:
             "scripts/security.sh",
             "plans/architecture/check_architecture.py",
             "plans/architecture/run-check.sh",
+            # The CI workflow (#363) completed the cpp pipeline.
+            ".github/workflows/ci.yml",
         ],
     )
     def test_quality_tooling_artifact_generated(
@@ -123,8 +125,6 @@ class TestCppInitTree:
     @pytest.mark.parametrize(
         "relative_path",
         [
-            # CI is #363 — it must not be generated yet.
-            ".github/workflows/ci.yml",
             # The metrics dashboard is opt-in (--enable-live-dashboard).
             "docs/metrics.json",
             # Tizen Studio project/packaging artifacts and icon binaries
@@ -136,7 +136,7 @@ class TestCppInitTree:
     def test_out_of_scope_artifact_not_generated(
         self, cpp_project: Path, relative_path: str
     ) -> None:
-        """The scaffold must not emit #363 artifacts or Tizen binaries."""
+        """The scaffold must not emit opt-in artifacts or Tizen binaries."""
         assert not (cpp_project / relative_path).exists()
 
 
@@ -186,6 +186,22 @@ class TestCppInitQualityTooling:
         cmake = (cpp_project / "CMakeLists.txt").read_text()
         assert "option(ENABLE_COVERAGE" in cmake
         assert "set(CMAKE_EXPORT_COMPILE_COMMANDS ON)" in cmake
+
+    def test_ci_workflow_parses_and_delegates_to_scripts(
+        self, cpp_project: Path
+    ) -> None:
+        """ci.yml (#363) parses and gates via the generated scripts.
+
+        CI ⇄ local parity: the workflow runs scripts/test.sh --coverage
+        (the single home of the >=90% bound) instead of reimplementing
+        the gate in YAML. Workflow internals are covered in depth by
+        TestCppReferenceTemplate in tests/unit/generators/test_ci.py.
+        """
+        content = (cpp_project / ".github" / "workflows" / "ci.yml").read_text()
+        parsed = yaml.safe_load(content)
+        assert parsed["name"] == "C/C++ Quality Checks"
+        assert set(parsed["jobs"]) == {"quality", "test"}
+        assert "./scripts/test.sh --coverage" in content
 
 
 class TestCppInitManifests:
@@ -282,13 +298,14 @@ class TestCppInitReadme:
 
 
 class TestCppInitConsoleOutput:
-    """Assert init's console output reflects the #362 wiring."""
+    """Assert init's console output reflects the #362/#363 wiring."""
 
-    def test_init_skips_only_the_ci_step(self, tmp_path: Path) -> None:
-        """Init prints the dim skip line for CI (#363) and nothing else.
+    def test_init_skips_no_pipeline_steps(self, tmp_path: Path) -> None:
+        """Init prints no skip notice for any cpp pipeline step.
 
         The pre-commit, scripts, and architecture steps gained cpp
-        support with #362, so their skip notices must be gone.
+        support with #362 and the CI step with #363, so every
+        "unavailable" notice must be gone.
         """
         runner = CliRunner()
         with patch(
@@ -309,7 +326,8 @@ class TestCppInitConsoleOutput:
                 ],
             )
         assert result.exit_code == 0
-        assert "CI pipeline unavailable for cpp" in result.output
+        assert "CI pipeline unavailable for cpp" not in result.output
+        assert "Generated CI pipeline" in result.output
         assert "Pre-commit config unavailable for cpp" not in result.output
         assert "Quality scripts unavailable for cpp" not in result.output
         assert "Architecture rules unavailable for cpp" not in result.output
