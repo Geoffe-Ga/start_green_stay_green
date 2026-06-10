@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-10T08:19:42.757119+00:00",
+  "timestamp": "2026-06-10T08:43:09.662659+00:00",
   "project": "start-green-stay-green",
   "thresholds": {
     "coverage": 90,
@@ -13,13 +13,13 @@
     "type_errors": 0
   },
   "metrics": {
-    "coverage": 94.77,
+    "coverage": 94.8,
     "coverage_status": "pass",
-    "branch_coverage": 88.86,
+    "branch_coverage": 89.0,
     "branch_coverage_status": "pass",
-    "complexity_avg": 2.106451612903226,
+    "complexity_avg": 2.112721417069243,
     "complexity_status": "pass",
-    "maintainability_avg": 74.24,
+    "maintainability_avg": 74.22,
     "maintainability_status": "pass",
     "docs_coverage": 100.0,
     "docs_status": "pass",
@@ -31,8 +31,8 @@
     "lint_status": "pass",
     "type_errors": 0,
     "typecheck_status": "pass",
-    "tests_total": 1931,
-    "tests_passed": 1931,
+    "tests_total": 1946,
+    "tests_passed": 1946,
     "tests_failed": 0,
     "tests_skipped": 0,
     "tests_status": "pass",
@@ -47,7 +47,7 @@
       "passing_jobs": 0,
       "percentage": 0.0,
       "status": "unknown",
-      "run_url": "https://github.com/Geoffe-Ga/start_green_stay_green/actions/runs/27262972545"
+      "run_url": "https://github.com/Geoffe-Ga/start_green_stay_green/actions/runs/27264203490"
     }
   }
 }
