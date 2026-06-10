@@ -815,7 +815,23 @@ STRICT = False
 # -------------------------------------------------------------------------
 
 # Matches #include "<layer>/..." and #include <<layer>/...>.
+# Path-traversal includes (#include "../../other.h") are ignored by
+# design: they do not name a layer, and banning them outright is a
+# style decision left to clang-tidy.
 _INCLUDE_RE = re.compile(r'^\\s*#\\s*include\\s+["<]([A-Za-z0-9_]+)/')
+
+
+def _validate_matrix() -> list[str]:
+    """Reject allowed-set entries that name no known layer (typo guard)."""
+    errors: list[str] = []
+    for layer, allowed in ALLOWED_DEPENDENCIES.items():
+        for target in sorted(allowed):
+            if target not in ALLOWED_DEPENDENCIES:
+                errors.append(
+                    f"ALLOWED_DEPENDENCIES['{layer}'] allows unknown "
+                    f"layer '{target}' — typo?"
+                )
+    return errors
 
 
 def _project_root() -> Path:
@@ -856,6 +872,13 @@ def _layer_violations(layer_dir: Path, layer: str) -> list[str]:
 
 def main() -> int:
     """Scan every layer directory and report boundary violations."""
+    matrix_errors = _validate_matrix()
+    if matrix_errors:
+        print("Invalid ALLOWED_DEPENDENCIES matrix:")
+        for error in matrix_errors:
+            print(f"  {error}")
+        return 2
+
     root = _project_root()
     violations: list[str] = []
     layers_found = 0

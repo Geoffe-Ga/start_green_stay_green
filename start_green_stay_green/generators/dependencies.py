@@ -984,6 +984,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(ENABLE_COVERAGE "Instrument the build for gcov/lcov coverage" OFF)
 
 # Pure greeting logic: no Tizen dependencies (src/greeting.cpp + inc/).
+# Renaming the source file requires updating both 'greeting' references
+# below (and the target_link_libraries in the test target).
 add_library(greeting src/greeting.cpp)
 target_include_directories(greeting PUBLIC inc)
 

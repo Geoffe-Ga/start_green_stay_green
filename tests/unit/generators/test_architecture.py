@@ -1034,6 +1034,32 @@ class TestArchitectureEnforcementGeneratorCpp:
             captured.out
         )
 
+    def test_cpp_checker_rejects_unknown_layer_in_matrix(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A typo'd layer name in the editable matrix fails loudly.
+
+        The whole enforcement rests on ALLOWED_DEPENDENCIES, so an
+        allowed-set entry naming no known layer (e.g. "domian") must
+        abort with exit 2 instead of silently never matching.
+        """
+        output_dir = self._generate(tmp_path)
+        script = output_dir / "check_architecture.py"
+        source = script.read_text()
+        source = source.replace(
+            '"application": frozenset({"domain"}),',
+            '"application": frozenset({"domian"}),',
+        )
+        script.write_text(source)
+
+        exit_code = self._run_checker(script)
+
+        captured = capsys.readouterr()
+        assert exit_code == 2
+        assert "unknown layer 'domian'" in captured.out
+
     def test_cpp_checker_warns_and_passes_without_layer_dirs(
         self,
         tmp_path: Path,

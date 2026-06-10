@@ -4065,6 +4065,10 @@ fi
 echo "=== Static Analysis (clang-tidy + cppcheck + lizard) ==="
 
 echo "--- clang-tidy (.clang-tidy; includes clang-analyzer-* checks) ---"
+# -p expects compile_commands.json at build/compile_commands.json (the
+# documented `cmake -B build` configure step). If your build directory
+# differs, adjust here AND in the clang-tidy pre-commit hook — without
+# it clang-tidy silently runs with no compile commands.
 TIDY_ARGS=(-p build)
 if $FIX; then
     TIDY_ARGS+=(-fix)
@@ -4103,7 +4107,9 @@ COVERAGE=false
 VERBOSE=false
 # Line-coverage gate. This is the single place the C/C++ coverage bound
 # lives; the ENABLE_COVERAGE instrumentation option it relies on is
-# defined in CMakeLists.txt.
+# defined in CMakeLists.txt. Note: unlike languages whose build manifest
+# owns the bound (e.g. Kover's minBound in Gradle), CMake has no
+# canonical coverage-threshold home, so the gate lives here by design.
 THRESHOLD=90
 
 while [[ $# -gt 0 ]]; do

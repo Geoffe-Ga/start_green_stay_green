@@ -572,7 +572,11 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
                         # cppcheck below (types_or covers c and c++) —
                         # clang-tidy's check set here is C++-oriented and
                         # would need a separate -std=cNN profile to add
-                        # value for C.
+                        # value for C. The -p path assumes the documented
+                        # `cmake -B build` configure step; a different
+                        # build dir must be mirrored here and in lint.sh
+                        # or clang-tidy silently runs without compile
+                        # commands.
                         "entry": "clang-tidy -p build",
                         "language": "system",
                         "types": ["c++"],
