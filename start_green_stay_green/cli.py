@@ -53,6 +53,7 @@ from start_green_stay_green.generators.architecture import (
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.base import validate_language
 from start_green_stay_green.generators.ci import CIGenerator
+from start_green_stay_green.generators.claude_md import ClaudeMdGenerationResult
 from start_green_stay_green.generators.claude_md import ClaudeMdGenerator
 from start_green_stay_green.generators.dependencies import DependenciesGenerator
 from start_green_stay_green.generators.dependencies import DependencyConfig
@@ -487,7 +488,7 @@ def _show_dry_run_preview(
     console.print("  - Quality scripts")
     console.print("  - Skills")
     console.print("  - Subagent profiles")
-    console.print("  - CLAUDE.md")
+    console.print("  - CLAUDE.md (modular: index + .claude/docs/)")
     console.print("  - GitHub Actions (AI review)")
     console.print("  - Architecture enforcement")
 
@@ -1118,6 +1119,42 @@ def _generate_review_step(
     console.print("[green]✓[/green] Generated GitHub Actions review")
 
 
+def _write_modular_claude_md(
+    generator: ClaudeMdGenerator,
+    project_path: Path,
+    project_config: dict[str, Any],
+    file_writer: FileWriter | None,
+) -> ClaudeMdGenerationResult:
+    """Render and write the modular ``.claude/`` CLAUDE.md tree (#397).
+
+    Writes the index ``CLAUDE.md`` plus the six ``.claude/docs/*.md`` split
+    files. When a ``file_writer`` is supplied, each file goes through its
+    conflict-aware path so ``green init`` re-runs preserve user edits.
+
+    Args:
+        generator: Configured CLAUDE.md generator.
+        project_path: Target project root directory.
+        project_config: Project configuration passed to the generator.
+        file_writer: Optional conflict-aware writer; direct writes when None.
+
+    Returns:
+        The index generation result (carries token usage telemetry).
+    """
+    index_result, docs = generator.render_modular(project_config)
+    index_file = project_path / "CLAUDE.md"
+    docs_dir = project_path / ".claude" / "docs"
+    if file_writer is not None:
+        file_writer.write_file(index_file, index_result.content)
+        for name, content in docs.items():
+            file_writer.write_file(docs_dir / f"{name}.md", content)
+    else:
+        index_file.write_text(index_result.content, encoding="utf-8")
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        for name, content in docs.items():
+            (docs_dir / f"{name}.md").write_text(content, encoding="utf-8")
+    return index_result
+
+
 def _generate_claude_md_step(
     project_path: Path,
     project_name: str,
@@ -1146,13 +1183,13 @@ def _generate_claude_md_step(
             ],
             "skills": REQUIRED_SKILLS.copy(),
         }
-        claude_md_result = claude_md_generator.generate(project_config)
-        claude_md_file = project_path / "CLAUDE.md"
-        if file_writer is not None:
-            file_writer.write_file(claude_md_file, claude_md_result.content)
-        else:
-            claude_md_file.write_text(claude_md_result.content, encoding="utf-8")
-    console.print("[green]✓[/green] Generated CLAUDE.md")
+        _write_modular_claude_md(
+            claude_md_generator,
+            project_path,
+            project_config,
+            file_writer,
+        )
+    console.print("[green]✓[/green] Generated CLAUDE.md (modular .claude/docs)")
 
 
 def _generate_architecture_step(
@@ -2226,35 +2263,37 @@ def _enhance_claude_md(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
     dry_run: bool,
     file_writer: FileWriter | None,
 ) -> None:
-    """Re-tune ``CLAUDE.md`` against the existing project.
+    """Re-tune the modular ``CLAUDE.md`` tree against the existing project.
 
     Mirrors :func:`_generate_claude_md_step`'s tuning path but writes
-    to the existing project rather than a fresh scaffold. ``dry_run``
-    skips the write but still runs the API call so the user sees the
+    to the existing project rather than a fresh scaffold. Emits the index
+    ``CLAUDE.md`` plus the six ``.claude/docs/*.md`` split files. ``dry_run``
+    skips the writes but still runs the API call so the user sees the
     full token-usage telemetry (and any errors) they'd see for real.
     """
     with step_timer("enhance_claude_md"), console.status("Re-tuning CLAUDE.md..."):
         claude_md_generator = ClaudeMdGenerator(orchestrator)
-        result = claude_md_generator.generate(
-            {
-                "project_name": project_name,
-                "language": language,
-                "scripts": list(_CLAUDE_MD_SCRIPTS),
-                "skills": REQUIRED_SKILLS.copy(),
-            }
-        )
-        target = project_path / "CLAUDE.md"
+        project_config: dict[str, Any] = {
+            "project_name": project_name,
+            "language": language,
+            "scripts": list(_CLAUDE_MD_SCRIPTS),
+            "skills": REQUIRED_SKILLS.copy(),
+        }
         if dry_run:
+            index_result, _docs = claude_md_generator.render_modular(project_config)
+            target = project_path / "CLAUDE.md"
             console.print(
-                f"[dim]--dry-run: would rewrite {target} "
-                f"({len(result.content):,} chars).[/dim]"
+                f"[dim]--dry-run: would rewrite {target} and "
+                f".claude/docs/ ({len(index_result.content):,} index chars).[/dim]"
             )
             return
-        if file_writer is not None:
-            file_writer.write_file(target, result.content)
-        else:
-            target.write_text(result.content, encoding="utf-8")
-    console.print("[green]✓[/green] Re-tuned CLAUDE.md")
+        _write_modular_claude_md(
+            claude_md_generator,
+            project_path,
+            project_config,
+            file_writer,
+        )
+    console.print("[green]✓[/green] Re-tuned CLAUDE.md (modular .claude/docs)")
 
 
 def _enhance_subagents(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
