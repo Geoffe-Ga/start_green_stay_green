@@ -567,7 +567,12 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
                         # (CMAKE_EXPORT_COMPILE_COMMANDS is ON in the
                         # generated CMakeLists.txt). Runs on .cpp files
                         # only: headers have no compile command of their
-                        # own and are covered via HeaderFilterRegex.
+                        # own and are covered via HeaderFilterRegex, and
+                        # pure-C sources are deliberately left to
+                        # cppcheck below (types_or covers c and c++) —
+                        # clang-tidy's check set here is C++-oriented and
+                        # would need a separate -std=cNN profile to add
+                        # value for C.
                         "entry": "clang-tidy -p build",
                         "language": "system",
                         "types": ["c++"],

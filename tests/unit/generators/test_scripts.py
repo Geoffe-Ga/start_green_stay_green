@@ -187,6 +187,44 @@ class TestScriptsGeneratorPythonGeneration:
             assert "lint.sh" in content
             assert "format.sh" in content
 
+    def test_python_check_all_uses_safe_array_expansion(self) -> None:
+        """check-all.sh run_check must use the exact safe-expansion form.
+
+        Regression guard: a stray trailing backslash-quote after the
+        safe expansion is a bash parse error under strict shells and a
+        silent literal argument under permissive ones. The expansion
+        must match the TypeScript generator's correct form exactly.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["check-all.sh"].read_text()
+            assert '"${args[@]+"${args[@]}"}" $VERBOSE_FLAG' in content
+            assert '}\\" $VERBOSE_FLAG' not in content
+
+    def test_python_fix_all_uses_safe_array_expansion(self) -> None:
+        """fix-all.sh must guard empty args with the safe expansion.
+
+        Under ``set -u`` some bash versions raise a bad-substitution
+        error when expanding an empty ``${args[@]}`` directly.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["fix-all.sh"].read_text()
+            assert '--fix "${args[@]+"${args[@]}"}" $VERBOSE_FLAG' in content
+            assert '--fix "${args[@]}" $VERBOSE_FLAG' not in content
+
     def test_python_format_script_contains_expected_content(self) -> None:
         """Test Python format.sh contains expected content."""
         with tempfile.TemporaryDirectory() as tmpdir:
