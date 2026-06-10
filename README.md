@@ -17,7 +17,7 @@ Start Green Stay Green is a meta-tool that scaffolds new software projects with 
 
 - **Enterprise-Grade Quality**: 90%+ code coverage, mutation testing, comprehensive linting
 - **AI Integration**: Pre-configured AI subagent profiles and code review workflows
-- **Multi-Language Support**: Python, TypeScript, Go, Rust, and more
+- **Multi-Language Support**: Python, TypeScript, Go, Rust, and Swift (watchOS)
 - **Architecture Enforcement**: import-linter (Python), dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust), and SwiftLint custom rules (Swift)
 - **Complete CI/CD**: GitHub Actions workflows with quality gates
 - **Additive Init**: Safe to re-run in existing directories — preserves your files
@@ -431,6 +431,9 @@ Project names must follow these rules:
 - **Rust**: cargo test, clippy, rustfmt
 - **Swift**: swift test (≥90% coverage via llvm-cov), SwiftLint, swift-format, Periphery
 
+See the [CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for the
+full per-language toolchain table and prerequisites.
+
 (More languages coming soon)
 
 ## Examples
@@ -494,6 +497,31 @@ for name in service-a service-b service-c; do
     --no-interactive
 done
 ```
+
+### Example 5: Swift (watchOS) Project
+
+```bash
+# Prerequisites: Swift 5.9, 5.10, or 6.0 with Swift Package Manager (SPM),
+# plus the local quality toolchain for the generated pre-commit hooks:
+brew install swiftlint swift-format gitleaks
+
+start-green-stay-green init \
+  --project-name wrist-timer \
+  --language swift \
+  --no-interactive
+
+cd wrist-timer
+swift package resolve
+swift build
+pre-commit install
+./scripts/check-all.sh  # swift-format, SwiftLint, swift test + ≥90% llvm-cov coverage
+```
+
+The generated CI pipeline runs on macOS runners with a Swift
+5.9/5.10/6.0 version matrix and a watchOS-simulator build-and-test job.
+See [examples/swift/](examples/swift/) for real generated output and the
+[CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
+the full Swift toolchain table.
 
 ## Project Structure
 
@@ -664,6 +692,7 @@ All contributions must:
 - ✅ `--force` and `--interactive` conflict resolution (#252)
 - ✅ YAML-aware pre-commit config merging (#253)
 - ✅ Multi-language `--language` support (#254)
+- ✅ Swift (watchOS) language support — scaffold, quality tooling, CI, tests (#351, #352, #353, #354)
 
 ### Planned
 
