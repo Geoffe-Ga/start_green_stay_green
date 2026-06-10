@@ -161,6 +161,24 @@ class TestGetSetupInstructions:
         assert "swift package resolve" in instructions
         assert "swift build" in instructions
 
+    def test_kotlin_creates_wrapper_then_builds(self) -> None:
+        """Kotlin setup should create the Gradle wrapper, then build (#356).
+
+        The wrapper jar is a binary artifact the generator never writes, so
+        the first step materialises it from a local Gradle install.
+        """
+        instructions = _get_setup_instructions(
+            ("kotlin",), Path("/home/user/wear-proj")
+        )
+        gradle_wrapper_cmds = [
+            c for c in instructions if c.startswith("gradle wrapper")
+        ]
+        assert len(gradle_wrapper_cmds) == 1
+        assert "./gradlew build" in instructions
+        wrapper_idx = instructions.index(gradle_wrapper_cmds[0])
+        build_idx = instructions.index("./gradlew build")
+        assert wrapper_idx < build_idx
+
     def test_unknown_language_has_sensible_default(self) -> None:
         """Unknown languages should still get pre-commit + check-all."""
         instructions = _get_setup_instructions(("ruby",), Path("/home/user/ruby-proj"))

@@ -20,6 +20,7 @@ EXPECTED_TEST_FILES: dict[str, list[str]] = {
     "csharp": ["tests/MainTests.cs"],
     "ruby": ["spec/test_project_spec.rb", "spec/spec_helper.rb"],
     "swift": ["Tests/test_projectTests/test_projectTests.swift"],
+    "kotlin": ["app/src/test/kotlin/com/example/test_project/GreetingTest.kt"],
 }
 
 
@@ -440,3 +441,47 @@ class TestMultiLanguageTests:
             assert 'let projectName = "test-project"' in content
             assert 'let greeting = "Hello from \\(projectName)!"' in content
             assert 'XCTAssertEqual(greeting, "Hello from test-project!")' in content
+
+    def test_kotlin_test_is_a_junit_class(self) -> None:
+        """Kotlin test file uses JUnit 4 with @Test methods (#356)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="kotlin",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            test_key = "app/src/test/kotlin/com/example/test_project/GreetingTest.kt"
+            content = files[test_key].read_text()
+            assert "package com.example.test_project" in content
+            assert "import org.junit.Test" in content
+            assert "@Test" in content
+            assert "class GreetingTest" in content
+
+    def test_kotlin_test_has_meaningful_assertions(self) -> None:
+        """Kotlin test exercises greeting(), not identical string literals.
+
+        The generated JUnit test must call the scaffold's ``greeting``
+        function so the assertion verifies the interpolation logic rather
+        than comparing two identical literals (which would detect no
+        defects) — the same review lesson the Swift scaffold learned in
+        PR #392.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="kotlin",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            test_key = "app/src/test/kotlin/com/example/test_project/GreetingTest.kt"
+            content = files[test_key].read_text()
+            assert 'greeting("test-project")' in content
+            assert 'assertEquals("Hello from test-project!", ' in content
+            # A second case proves greeting() reflects its argument.
+            assert 'greeting("wear")' in content
+            assert 'assertEquals("Hello from wear!", ' in content

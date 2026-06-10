@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.kotlin import android_package
+from start_green_stay_green.utils.kotlin import android_package_path
 from start_green_stay_green.utils.naming import pascal_case
 
 if TYPE_CHECKING:
@@ -57,11 +59,11 @@ class TestsGenerator(BaseGenerator):
     This generator creates the tests directory structure (tests/, tests/__init__.py,
     tests/test_main.py) with a passing test for the Hello World code.
 
-    All 8 supported languages (python, typescript, go, rust, java, csharp,
-    ruby, swift) are available at the generator level. Note that java, csharp,
-    ruby, and swift are not yet supported by the full CLI pipeline
-    (``sgsg init``) because PreCommitGenerator does not yet handle those
-    languages.
+    All 9 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift, kotlin) are available at the generator level. Note that the
+    full CLI pipeline (``sgsg init``) skips its quality-tooling steps
+    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
+    and kotlin; Kotlin's tooling arrives with #357/#358.
 
     Attributes:
         output_dir: Directory where tests structure will be created
@@ -135,6 +137,7 @@ class TestsGenerator(BaseGenerator):
             "csharp": self._generate_csharp_tests,
             "ruby": self._generate_ruby_tests,
             "swift": self._generate_swift_tests,
+            "kotlin": self._generate_kotlin_tests,
         }
         return generators[self.config.language]()
 
@@ -628,6 +631,66 @@ final class {type_name}Tests: XCTestCase {{
         let projectName = "{self.config.project_name}"
         let greeting = "Hello from \\(projectName)!"
         XCTAssertEqual(greeting, "Hello from {self.config.project_name}!")
+    }}
+}}
+"""
+
+    def _generate_kotlin_tests(self) -> dict[str, Path]:
+        """Generate the Kotlin JUnit unit-test scaffold (#356).
+
+        Creates ``app/src/test/kotlin/<package>/GreetingTest.kt``, a plain
+        JVM JUnit 4 test (no Robolectric/emulator needed) so
+        ``./gradlew test`` has something real to run when later coverage
+        gates (#357) arrive.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        package_path = android_package_path(self.config.package_name)
+        test_dir = self.output_dir / "app" / "src" / "test" / "kotlin" / package_path
+        test_dir.mkdir(parents=True, exist_ok=True)
+
+        test_key = f"app/src/test/kotlin/{package_path}/GreetingTest.kt"
+        files[test_key] = self._write_file(
+            test_dir / "GreetingTest.kt",
+            self._kotlin_greeting_test(),
+        )
+
+        return files
+
+    def _kotlin_greeting_test(self) -> str:
+        """Generate the Kotlin JUnit test content.
+
+        The generated test exercises real behavior rather than comparing
+        two identical string literals: it calls the scaffold's top-level
+        ``greeting`` function (string interpolation in ``MainActivity.kt``)
+        with both the project name and an arbitrary name, so the equality
+        assertions verify the interpolation logic.
+
+        Returns:
+            Content for the JUnit 4 test class file.
+        """
+        package = android_package(self.config.package_name)
+        return f"""package {package}
+
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+/** Verifies the greeting interpolation logic in MainActivity.kt. */
+class GreetingTest {{
+    @Test
+    fun greetingIsAssembledFromProjectName() {{
+        // greeting() interpolates its argument, so this verifies real
+        // logic rather than comparing two identical literals.
+        assertEquals("Hello from {self.config.project_name}!", \
+greeting("{self.config.project_name}"))
+    }}
+
+    @Test
+    fun greetingReflectsAnArbitraryName() {{
+        assertEquals("Hello from wear!", greeting("wear"))
     }}
 }}
 """

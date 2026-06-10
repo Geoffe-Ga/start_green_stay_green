@@ -14,6 +14,14 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.kotlin import ACTIVITY_COMPOSE_VERSION
+from start_green_stay_green.utils.kotlin import AGP_VERSION
+from start_green_stay_green.utils.kotlin import COMPOSE_BOM_VERSION
+from start_green_stay_green.utils.kotlin import GRADLE_WRAPPER_VERSION
+from start_green_stay_green.utils.kotlin import JUNIT_VERSION
+from start_green_stay_green.utils.kotlin import KOTLIN_VERSION
+from start_green_stay_green.utils.kotlin import WEAR_COMPOSE_VERSION
+from start_green_stay_green.utils.kotlin import android_package
 from start_green_stay_green.utils.swift import package_swift
 
 if TYPE_CHECKING:
@@ -58,11 +66,11 @@ class DependenciesGenerator(BaseGenerator):
     pyproject.toml) with appropriate dependencies and tool configurations for the
     target project's language and tooling.
 
-    All 8 supported languages (python, typescript, go, rust, java, csharp,
-    ruby, swift) are available at the generator level. Note that java, csharp,
-    ruby, and swift are not yet supported by the full CLI pipeline
-    (``sgsg init``) because PreCommitGenerator does not yet handle those
-    languages.
+    All 9 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift, kotlin) are available at the generator level. Note that the
+    full CLI pipeline (``sgsg init``) skips its quality-tooling steps
+    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
+    and kotlin; Kotlin's tooling arrives with #357/#358.
 
     Attributes:
         output_dir: Directory where dependency files will be written
@@ -136,6 +144,7 @@ class DependenciesGenerator(BaseGenerator):
             "csharp": self._generate_csharp_dependencies,
             "ruby": self._generate_ruby_dependencies,
             "swift": self._generate_swift_dependencies,
+            "kotlin": self._generate_kotlin_dependencies,
         }
         return generators[self.config.language]()
 
@@ -704,3 +713,165 @@ package_swift` helper so the structure and dependency generators emit an
             Content for ``Package.swift`` declaring a watchOS app target
         """
         return package_swift(self.config.package_name)
+
+    def _generate_kotlin_dependencies(self) -> dict[str, Path]:
+        """Generate the Gradle (Kotlin DSL) manifests for Wear OS (#356).
+
+        Emits ``settings.gradle.kts``, the root ``build.gradle.kts``,
+        ``gradle.properties``, and the ``app`` module's
+        ``build.gradle.kts`` with Jetpack Compose for Wear OS
+        dependencies. The Gradle wrapper (``gradlew`` and its jar) is
+        deliberately NOT generated — it is a binary artifact; the
+        settings file and README direct users to run ``gradle wrapper``
+        once instead.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        files["settings.gradle.kts"] = self._write_file(
+            "settings.gradle.kts",
+            self._kotlin_settings_gradle_kts(),
+        )
+        files["build.gradle.kts"] = self._write_file(
+            "build.gradle.kts",
+            self._kotlin_root_build_gradle_kts(),
+        )
+        files["gradle.properties"] = self._write_file(
+            "gradle.properties",
+            self._kotlin_gradle_properties(),
+        )
+
+        # The app module's manifest lives under app/.
+        (self.output_dir / "app").mkdir(parents=True, exist_ok=True)
+        files["app/build.gradle.kts"] = self._write_file(
+            "app/build.gradle.kts",
+            self._kotlin_app_build_gradle_kts(),
+        )
+
+        return files
+
+    def _kotlin_settings_gradle_kts(self) -> str:
+        """Generate ``settings.gradle.kts`` for the Wear OS project.
+
+        Returns:
+            Settings script declaring plugin/dependency repositories, the
+            root project name, and the ``:app`` module. Includes an honest
+            note that the Gradle wrapper binary is not generated.
+        """
+        project = self.config.project_name
+        return f"""// Gradle (Kotlin DSL) settings for the {project} Wear OS project.
+//
+// NOTE: the Gradle wrapper (gradlew, gradle/wrapper/gradle-wrapper.jar)
+// is NOT generated — binary artifacts do not belong in a generator.
+// With a local Gradle install, create it once via:
+//   gradle wrapper --gradle-version {GRADLE_WRAPPER_VERSION}
+pluginManagement {{
+    repositories {{
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }}
+}}
+
+dependencyResolutionManagement {{
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {{
+        google()
+        mavenCentral()
+    }}
+}}
+
+rootProject.name = "{self.config.project_name}"
+include(":app")
+"""
+
+    def _kotlin_root_build_gradle_kts(self) -> str:
+        """Generate the root ``build.gradle.kts``.
+
+        Returns:
+            Root build script pinning the Android Gradle Plugin, the
+            Kotlin Android plugin, and the Compose compiler plugin (which
+            must match the Kotlin version) for all modules.
+        """
+        return f"""// Root Gradle build: pins plugin versions for all modules.
+// The Compose compiler plugin version must match the Kotlin version.
+plugins {{
+    id("com.android.application") version "{AGP_VERSION}" apply false
+    id("org.jetbrains.kotlin.android") version "{KOTLIN_VERSION}" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "{KOTLIN_VERSION}" apply false
+}}
+"""
+
+    def _kotlin_gradle_properties(self) -> str:
+        """Generate ``gradle.properties``.
+
+        Returns:
+            Project-wide Gradle settings: AndroidX opt-in (required by
+            Compose), JVM memory, and the official Kotlin code style.
+        """
+        return """# Project-wide Gradle settings for the Wear OS app.
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+# AndroidX is required by Jetpack Compose.
+android.useAndroidX=true
+kotlin.code.style=official
+"""
+
+    def _kotlin_app_build_gradle_kts(self) -> str:
+        """Generate the ``app`` module's ``build.gradle.kts``.
+
+        Returns:
+            Android application module configured for Wear OS: minSdk 30
+            (Wear OS 3, the Galaxy Watch 4+ baseline), Compose enabled,
+            Jetpack Compose for Wear OS dependencies, and a JUnit
+            ``testImplementation`` so ``./gradlew test`` runs the
+            generated unit-test scaffold.
+        """
+        namespace = android_package(self.config.package_name)
+        return f"""// Android application module for the Wear OS app.
+plugins {{
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+}}
+
+android {{
+    namespace = "{namespace}"
+    compileSdk = 35
+
+    defaultConfig {{
+        applicationId = "{namespace}"
+        // Wear OS 3 (Galaxy Watch 4+) baseline.
+        minSdk = 30
+        targetSdk = 35
+        versionCode = 1
+        versionName = "0.1.0"
+    }}
+
+    buildFeatures {{
+        compose = true
+    }}
+
+    compileOptions {{
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }}
+}}
+
+kotlin {{
+    jvmToolchain(17)
+}}
+
+dependencies {{
+    implementation(platform("androidx.compose:compose-bom:{COMPOSE_BOM_VERSION}"))
+    implementation("androidx.activity:activity-compose:{ACTIVITY_COMPOSE_VERSION}")
+
+    // Jetpack Compose for Wear OS (androidx.wear.compose).
+    implementation("androidx.wear.compose:compose-material:{WEAR_COMPOSE_VERSION}")
+    implementation("androidx.wear.compose:compose-foundation:{WEAR_COMPOSE_VERSION}")
+
+    // JUnit scaffold for the unit tests (run: ./gradlew test).
+    testImplementation("junit:junit:{JUNIT_VERSION}")
+}}
+"""

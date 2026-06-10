@@ -304,3 +304,52 @@ class TestSequentialLanguageDetection:
         _generate_scripts_step(project, "myproject", "python", writer)
         assert (project / "scripts" / "python" / "test.sh").exists()
         assert "pytest" in (project / "scripts" / "python" / "test.sh").read_text()
+
+
+class TestGeneratorOnlyLanguagePipelineGates:
+    """Pipeline steps skip gracefully for generator-only languages (#356).
+
+    Kotlin (like java/csharp/ruby today) has structure/dependencies/tests/
+    readme generators but no quality-tooling support yet — that lands with
+    #357 (pre-commit, scripts, metrics) and #358 (CI). Instead of crashing
+    init, those steps must no-op with an informational message, exactly as
+    the architecture step already did for unsupported languages.
+    """
+
+    def test_precommit_step_skips_kotlin_without_writing(self, tmp_path: Path) -> None:
+        """No .pre-commit-config.yaml is written and no error is raised."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "kotlin")
+
+        assert not (tmp_path / ".pre-commit-config.yaml").exists()
+
+    def test_precommit_step_still_writes_for_python(self, tmp_path: Path) -> None:
+        """Supported languages keep generating the pre-commit config."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "python")
+
+        assert (tmp_path / ".pre-commit-config.yaml").exists()
+
+    def test_scripts_step_skips_kotlin_without_python_fallback(
+        self, tmp_path: Path
+    ) -> None:
+        """Kotlin must not receive the Python-fallback quality scripts."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "kotlin")
+
+        assert not (tmp_path / "scripts").exists()
+
+    def test_ci_step_skips_kotlin_without_workflow(self, tmp_path: Path) -> None:
+        """No ci.yml is written for kotlin (CI generation is #358)."""
+        cli_mod._generate_ci_step(tmp_path, "my-project", "kotlin", None)
+
+        assert not (tmp_path / ".github" / "workflows" / "ci.yml").exists()
+
+    def test_metrics_step_skips_kotlin_without_dashboard(self, tmp_path: Path) -> None:
+        """No metrics dashboard is written for kotlin (metrics is #357)."""
+        cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "kotlin")
+
+        assert not (tmp_path / "docs" / "metrics.json").exists()
+
+    def test_architecture_step_skips_kotlin(self, tmp_path: Path) -> None:
+        """No architecture rules are generated for kotlin yet."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "kotlin")
+
+        assert not (tmp_path / "plans" / "architecture").exists()
