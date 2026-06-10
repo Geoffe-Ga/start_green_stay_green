@@ -146,6 +146,10 @@ class BatchPersistenceContext:
     below the ``PLR0913`` threshold without splitting concerns. See
     issue #316.
 
+    Note: ``state`` is mutated (via ``clear_batch()``) on successful
+    reconciliation; ``frozen=True`` prevents reassignment of the field,
+    not mutation of the object it holds.
+
     Attributes:
         state: The :class:`EnhanceState` record. Cleared on
             successful reconciliation; left intact on

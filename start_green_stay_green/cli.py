@@ -2838,12 +2838,9 @@ def _resume_subagent_batch_cli(
     _render_batch_resume_outcome(outcome)
 
 
-# Static-message statuses for :func:`_render_batch_resume_outcome`.
-# IN_PROGRESS and ENDED are deliberately absent — they need
-# ``outcome.poll`` / ``outcome.bundle`` data woven into the rendered
-# message, so they branch into ``_render_batch_in_progress`` /
-# ``_render_batch_ended`` instead. Adding them to this dict would
-# silently drop their dynamic data.
+# Message contents for the static-message branches of
+# :func:`_render_batch_resume_outcome`; IN_PROGRESS and ENDED have their
+# own ``case`` branches because their messages weave in dynamic data.
 _BATCH_OUTCOME_STATIC: dict[ResumeStatus, str] = {
     ResumeStatus.NO_BATCH: (
         "[yellow]No batch is in flight; nothing to resume.[/yellow]"
