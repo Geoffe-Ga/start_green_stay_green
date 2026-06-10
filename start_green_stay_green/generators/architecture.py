@@ -445,14 +445,23 @@ allow = [
 
 [bans]
 # Duplicate crate versions create the same hidden coupling and bloat
-# that tangled imports do in other ecosystems.
-multiple-versions = "deny"
+# that tangled imports do in other ecosystems. "warn" rather than
+# "deny": transitive Rust dependency trees routinely contain duplicate
+# semver-incompatible versions (windows-*, syn, regex families), and a
+# hard deny fails on the first cargo add. Tighten to "deny" if your
+# crate deliberately pins its dependency tree.
+multiple-versions = "warn"
 wildcards = "deny"
 # Enforce layered architecture:
 #   presentation -> application -> domain
 # A layer crate may only be consumed by the layers listed as wrappers,
 # and the domain crate (unrestricted below) must itself stay pure: it
 # may not depend on application, presentation, or infrastructure.
+#
+# Note: cargo-deny cannot restrict what depends on the presentation
+# crate without knowing the top-level binary name, so the
+# domain -> presentation and application -> presentation directions
+# are enforced by convention / code review rather than by this config.
 deny = [
     # Only the presentation layer may drive the application layer.
     { crate = "application", wrappers = ["presentation"] },

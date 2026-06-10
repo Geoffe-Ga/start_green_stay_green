@@ -1,6 +1,7 @@
 """Unit tests for Architecture Enforcement Generator."""
 
 from pathlib import Path
+import tomllib
 from unittest.mock import create_autospec
 
 import pytest
@@ -389,6 +390,59 @@ class TestArchitectureEnforcementGeneratorRust:
         # An accurate statement about Cargo's built-in cycle rejection
         # must be present.
         assert "# Cargo itself rejects circular crate dependencies" in config
+
+    def test_rust_config_is_parseable_toml(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """deny.toml must be syntactically valid TOML."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="rust", project_name="myapp")
+
+        config = (output_dir / "deny.toml").read_text()
+        tomllib.loads(config)  # raises on parse error
+
+    def test_rust_config_documents_presentation_gap(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The config documents what cargo-deny cannot enforce.
+
+        cargo-deny cannot restrict what depends on the presentation
+        crate without knowing the top-level binary name, so
+        ``domain -> presentation`` and ``application -> presentation``
+        rely on convention. The generated config must say so rather
+        than imply complete enforcement.
+        """
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="rust", project_name="myapp")
+
+        config = (output_dir / "deny.toml").read_text()
+        assert "cargo-deny cannot restrict what depends on" in config
+        assert "convention" in config
+
+    def test_rust_config_warns_on_duplicate_versions(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Duplicate-version policy defaults to warn, not deny.
+
+        Transitive Rust dependency trees routinely contain duplicate
+        semver-incompatible versions (windows-*, syn, regex families);
+        a hard deny would fail users on their first ``cargo add``.
+        """
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="rust", project_name="myapp")
+
+        config = (output_dir / "deny.toml").read_text()
+        assert 'multiple-versions = "warn"' in config
+        assert 'multiple-versions = "deny"' not in config
 
     def test_rust_readme_mentions_cargo_deny(
         self,
