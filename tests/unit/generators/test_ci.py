@@ -10,6 +10,7 @@ Comprehensive tests for CI pipeline generation covering:
 """
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 from jinja2 import UndefinedError
@@ -24,6 +25,7 @@ from start_green_stay_green.ai.orchestrator import TokenUsage
 from start_green_stay_green.generators.ci import CIGenerator
 from start_green_stay_green.generators.ci import CIWorkflow
 from start_green_stay_green.generators.ci import LANGUAGE_CONFIGS
+from start_green_stay_green.utils.kotlin import GRADLE_WRAPPER_VERSION
 
 
 class TestCIWorkflowDataClass:
@@ -1174,10 +1176,52 @@ jobs:
         """Test Swift package_manager is exactly spm."""
         assert LANGUAGE_CONFIGS["swift"]["package_manager"] == "spm"
 
+    # LANGUAGE_CONFIGS Exact Value Tests - Kotlin
+    def test_kotlin_test_framework_exact(self) -> None:
+        """Test Kotlin test_framework is exactly junit."""
+        assert LANGUAGE_CONFIGS["kotlin"]["test_framework"] == "junit"
+
+    def test_kotlin_linters_exact(self) -> None:
+        """Test Kotlin linters list is exact."""
+        assert LANGUAGE_CONFIGS["kotlin"]["linters"] == ["ktlint", "detekt"]
+
+    def test_kotlin_formatters_exact(self) -> None:
+        """Test Kotlin formatters list is exact.
+
+        ktlint genuinely is both a linter and a formatter (like ruff,
+        eslint, and rubocop in the other configs), so it appears in both
+        lists; that is established precedent, unlike double-listing a
+        tool under security_tools (the Swift PR #414 lesson).
+        """
+        assert LANGUAGE_CONFIGS["kotlin"]["formatters"] == ["ktlint"]
+
+    def test_kotlin_security_tools_exact(self) -> None:
+        """Test Kotlin security_tools list is exact.
+
+        detekt's potential-bugs rules serve security duty too but it is
+        listed only under linters so tool-install consumers don't
+        double-install it (the Swift PR #414 review lesson).
+        """
+        expected = ["gitleaks", "dependency-check"]
+        assert LANGUAGE_CONFIGS["kotlin"]["security_tools"] == expected
+
+    def test_kotlin_supported_versions_exact(self) -> None:
+        """Test Kotlin supported_versions are the JDK LTS releases.
+
+        The Kotlin version (2.0.21) is pinned by the generated root
+        build.gradle.kts — a project decision, not a CI input — so the
+        meaningful matrix axis is the JVM running Gradle/AGP.
+        """
+        assert LANGUAGE_CONFIGS["kotlin"]["supported_versions"] == ["17", "21"]
+
+    def test_kotlin_package_manager_exact(self) -> None:
+        """Test Kotlin package_manager is exactly gradle."""
+        assert LANGUAGE_CONFIGS["kotlin"]["package_manager"] == "gradle"
+
     # Config Keys Exact Tests
-    def test_language_configs_has_exactly_8_languages(self) -> None:
-        """Test LANGUAGE_CONFIGS has exactly 8 supported languages."""
-        assert len(LANGUAGE_CONFIGS) == 8
+    def test_language_configs_has_exactly_9_languages(self) -> None:
+        """Test LANGUAGE_CONFIGS has exactly 9 supported languages."""
+        assert len(LANGUAGE_CONFIGS) == 9
 
     def test_language_configs_contains_python(self) -> None:
         """Test LANGUAGE_CONFIGS contains python key."""
@@ -1210,6 +1254,10 @@ jobs:
     def test_language_configs_contains_swift(self) -> None:
         """Test LANGUAGE_CONFIGS contains swift key."""
         assert "swift" in LANGUAGE_CONFIGS
+
+    def test_language_configs_contains_kotlin(self) -> None:
+        """Test LANGUAGE_CONFIGS contains kotlin key."""
+        assert "kotlin" in LANGUAGE_CONFIGS
 
     def test_all_configs_have_test_framework_key(self) -> None:
         """Test all language configs have test_framework key."""
@@ -1275,7 +1323,7 @@ class TestCIGeneratorTemplatePath:
 
     @pytest.mark.parametrize(
         "language",
-        ["python", "typescript", "go", "rust", "swift"],
+        ["python", "typescript", "go", "rust", "swift", "kotlin"],
     )
     def test_generate_from_template_for_supported_language(self, language: str) -> None:
         """Each canonical language renders without an orchestrator."""
@@ -1564,3 +1612,235 @@ class TestSwiftReferenceTemplate:
         assert "xcodebuild -list -json" in swift_workflow.content
         # The old stub hardcoded a placeholder scheme that could never exist.
         assert "YourScheme" not in swift_workflow.content
+
+
+def _all_run_commands(parsed_workflow: dict[str, Any]) -> list[str]:
+    """Collect every step ``run`` command across all workflow jobs.
+
+    Parsing (instead of scanning raw content) lets assertions target the
+    commands that actually execute while YAML comments stay free to
+    document decisions honestly — the PR #414 review noted raw string
+    assertions are brittle exactly because they cannot tell the two
+    apart.
+
+    Args:
+        parsed_workflow: ``yaml.safe_load`` result for a workflow.
+
+    Returns:
+        Every non-empty ``run`` value, in job/step order.
+    """
+    return [
+        step["run"]
+        for job in parsed_workflow["jobs"].values()
+        for step in job["steps"]
+        if step.get("run")
+    ]
+
+
+class TestKotlinReferenceTemplate:
+    """Tests for the Kotlin reference CI workflow (Issue #358).
+
+    The Kotlin scaffold is a Jetpack Compose for Wear OS Android app
+    built with Gradle (Kotlin DSL), so every assertion reflects what can
+    actually run: Android/JVM builds work on GitHub's ubuntu runners
+    (Android SDK and Temurin JDKs preinstalled, no macOS needed unlike
+    Swift), the scaffold deliberately ships no Gradle wrapper binary,
+    and the >=90% coverage bound lives in the generated
+    app/build.gradle.kts Kover block — not in the workflow.
+    """
+
+    @pytest.fixture
+    def kotlin_workflow(self) -> CIWorkflow:
+        """Render the deterministic Kotlin reference workflow."""
+        return CIGenerator(language="kotlin").generate_workflow_from_template()
+
+    def test_workflow_is_valid_yaml(self, kotlin_workflow: CIWorkflow) -> None:
+        """Rendered workflow parses with yaml.safe_load and validates."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        assert kotlin_workflow.is_valid
+        assert isinstance(parsed, dict)
+        assert parsed["name"] == "Kotlin Quality Checks"
+
+    def test_workflow_has_quality_test_and_wear_jobs(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """Workflow declares the quality, test, and wear jobs."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        assert set(parsed["jobs"]) == {"quality", "test", "wear"}
+
+    def test_all_jobs_run_on_ubuntu(self, kotlin_workflow: CIWorkflow) -> None:
+        """Every job runs on ubuntu: Android/JVM builds need no macOS."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        for name, job in parsed["jobs"].items():
+            assert job["runs-on"] == "ubuntu-latest", f"{name} must run on ubuntu"
+
+    def test_jdk_matrix_does_not_fail_fast(self, kotlin_workflow: CIWorkflow) -> None:
+        """Matrix legs run to completion so every failing JDK is seen."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        assert parsed["jobs"]["test"]["strategy"]["fail-fast"] is False
+
+    def test_jdk_matrix_matches_language_config_versions(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """The test job matrixes over the LANGUAGE_CONFIGS JDK versions."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        matrix = parsed["jobs"]["test"]["strategy"]["matrix"]
+        assert matrix["java-version"] == (
+            LANGUAGE_CONFIGS["kotlin"]["supported_versions"]
+        )
+
+    def test_setup_actions_are_pinned_to_majors(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """checkout, setup-java, and setup-gradle are pinned majors."""
+        content = kotlin_workflow.content
+        assert "actions/checkout@v4" in content
+        assert "actions/setup-java@v4" in content
+        assert "gradle/actions/setup-gradle@v4" in content
+
+    def test_workflow_provisions_gradle_instead_of_missing_wrapper(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """CI never invokes the wrapper the scaffold deliberately omits.
+
+        The generator never writes binary artifacts, so gradlew and
+        gradle-wrapper.jar do not exist in a fresh project; any
+        ``./gradlew`` (or ``chmod +x gradlew``) step would fail on the
+        first run. setup-gradle provisions a pinned Gradle matching
+        utils/kotlin.GRADLE_WRAPPER_VERSION (the version the scaffold
+        README tells users to materialise) and steps call ``gradle``.
+        Assertions parse the workflow so YAML comments may still
+        document the wrapper situation honestly.
+        """
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        # Covers both `./gradlew ...` invocations and the old stub's
+        # `chmod +x gradlew` step.
+        assert not any("gradlew" in cmd for cmd in run_commands)
+        assert parsed["env"]["GRADLE_VERSION"] == GRADLE_WRAPPER_VERSION
+        gradle_setups = [
+            step
+            for job in parsed["jobs"].values()
+            for step in job["steps"]
+            if "setup-gradle" in step.get("uses", "")
+        ]
+        assert gradle_setups
+        for step in gradle_setups:
+            assert step["with"]["gradle-version"] == "${{ env.GRADLE_VERSION }}"
+
+    def test_coverage_gate_runs_kover_once_without_duplicating_bound(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """One Gradle invocation gates coverage; the bound stays in Gradle.
+
+        koverXmlReportDebug and koverVerifyDebug share a single
+        testDebugUnitTest execution inside one task graph (the Swift
+        PR #414 no-double-test-run lesson), and the >=90% bound lives
+        only in app/build.gradle.kts (kover { ... minBound(90) }) so the
+        threshold can never drift between the manifest and the workflow.
+        Run commands are parsed so comments may reference the bound.
+        """
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert any(
+            cmd.strip() == "gradle koverXmlReportDebug koverVerifyDebug"
+            for cmd in run_commands
+        )
+        assert not any("minBound" in cmd for cmd in run_commands)
+        assert not any("90" in cmd for cmd in run_commands)
+
+    def test_quality_job_does_not_rerun_the_test_suite(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """No standalone test step duplicates the Kover coverage run."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        run_commands = [
+            step.get("run", "") for step in parsed["jobs"]["quality"]["steps"]
+        ]
+        kover_runs = [cmd for cmd in run_commands if "koverVerifyDebug" in cmd]
+        assert len(kover_runs) == 1
+        assert not any(cmd.strip() == "gradle test" for cmd in run_commands)
+
+    def test_quality_job_mirrors_precommit_lint_and_format_hooks(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """CI runs the same ktlint/detekt checks as pre-commit."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        run_commands = [
+            step.get("run", "") for step in parsed["jobs"]["quality"]["steps"]
+        ]
+        # Check-mode counterpart of the `ktlint --format` pre-commit hook
+        # (identical to scripts/format.sh without --fix).
+        assert any(cmd.strip() == "ktlint" for cmd in run_commands)
+        # Same invocation as the detekt pre-commit hook and scripts/lint.sh:
+        # the shared detekt.yml on top of detekt's default config.
+        assert (
+            "detekt --config detekt.yml --build-upon-default-config"
+            in kotlin_workflow.content
+        )
+        assert "--excludes '**/build/**'" in kotlin_workflow.content
+
+    def test_quality_job_runs_gitleaks_secret_scan(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """CI runs gitleaks at the same version pre-commit pins."""
+        content = kotlin_workflow.content
+        assert "gitleaks detect" in content
+        # Parity with the rev pinned in the generated .pre-commit-config
+        # (https://github.com/gitleaks/gitleaks rev v8.18.4).
+        assert 'GITLEAKS_VERSION: "8.18.4"' in content
+
+    def test_quality_tools_are_version_pinned_downloads(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """ktlint/detekt come from pinned GitHub release downloads.
+
+        Homebrew (the documented local install path) was removed from
+        GitHub's Ubuntu runner images, so the workflow fetches pinned
+        release binaries instead — deterministically, never "latest".
+        """
+        content = kotlin_workflow.content
+        assert "KTLINT_VERSION" in content
+        assert "DETEKT_VERSION" in content
+        assert "releases/download" in content
+        assert "releases/latest" not in content
+        assert "brew install" not in content
+
+    def test_wear_job_assembles_debug_apk_without_emulator(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """The wear job builds the Wear OS APK; no emulator steps exist.
+
+        The scaffold generates no androidTest source set, so an emulator
+        job would have nothing to execute; assembleDebug is the honest
+        deterministic proof the Wear OS target builds. The emulator
+        stance is documented in YAML comments, not dead steps.
+        """
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        wear_commands = [
+            step.get("run", "") for step in parsed["jobs"]["wear"]["steps"]
+        ]
+        assert any("gradle assembleDebug" in cmd for cmd in wear_commands)
+        uses = [
+            step.get("uses", "")
+            for job in parsed["jobs"].values()
+            for step in job["steps"]
+        ]
+        assert not any("emulator" in action for action in uses)
+
+    def test_workflow_writes_nothing_to_github_env(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """Nothing discovered at runtime is exported to GITHUB_ENV.
+
+        The Swift PR #414 review flagged unvalidated GITHUB_ENV writes
+        as the documented Actions env-injection vector. The Kotlin
+        workflow sidesteps the vector entirely: every value (versions,
+        tasks, paths) is a static literal, so there is no dynamic
+        discovery and no GITHUB_ENV/GITHUB_PATH write to guard. Run
+        commands are parsed so comments may explain that decision.
+        """
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert not any("GITHUB_ENV" in cmd for cmd in run_commands)
+        assert not any("GITHUB_PATH" in cmd for cmd in run_commands)

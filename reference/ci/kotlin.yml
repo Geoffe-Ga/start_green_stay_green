@@ -10,69 +10,178 @@ permissions:
   contents: read
   pull-requests: write
 
+# Runner reality for the generated Wear OS scaffold:
+# - The scaffold is an Android/JVM Gradle project (Jetpack Compose for
+#   Wear OS). Android builds need only a JDK and the Android SDK, both of
+#   which ship on GitHub's ubuntu images (ANDROID_HOME preconfigured,
+#   licenses accepted), so every job runs on ubuntu — no macOS required,
+#   unlike the Swift/watchOS pipeline.
+# - The scaffold deliberately ships WITHOUT the Gradle wrapper: gradlew
+#   and gradle-wrapper.jar are binary artifacts the generator never
+#   writes (see the note in settings.gradle.kts). setup-gradle therefore
+#   provisions a pinned Gradle and every step invokes `gradle` directly.
+#   Once you commit a wrapper (run `gradle wrapper` locally), you may
+#   switch these invocations to ./gradlew and drop the gradle-version
+#   inputs below.
+env:
+  # One Gradle for all jobs — the same version the scaffold README tells
+  # users to materialise locally (AGP 8.7 requires Gradle >= 8.9).
+  GRADLE_VERSION: "8.9"
+
 jobs:
   quality:
     name: Code Quality Checks
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        jdk-version: ["17", "21"]
+    env:
+      # Pinned quality-tool versions. Homebrew — the install path the
+      # generated pre-commit hooks document for local development — was
+      # removed from GitHub's Ubuntu runner images, so CI fetches the
+      # same tools as pinned GitHub release artifacts instead.
+      # GITLEAKS_VERSION matches the rev pinned in .pre-commit-config.yaml.
+      KTLINT_VERSION: "1.5.0"
+      DETEKT_VERSION: "1.23.8"
+      GITLEAKS_VERSION: "8.18.4"
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK ${{ matrix.jdk-version }}
+      # JDK 17 matches the jvmToolchain(17) pin in app/build.gradle.kts.
+      # Gradle/dependency caching is handled by setup-gradle below, so
+      # setup-java's own `cache: gradle` input stays off (no double cache).
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: ${{ matrix.jdk-version }}
-          distribution: 'temurin'
-          cache: 'gradle'
+          distribution: temurin
+          java-version: "17"
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Run ktlint
-        run: ./gradlew ktlintCheck
-
-      - name: Run detekt
-        run: ./gradlew detekt
-
-      - name: Build with Gradle
-        run: ./gradlew build
-
-      - name: Run tests with JaCoCo coverage
-        run: ./gradlew test jacocoTestReport
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
-          file: ./build/reports/jacoco/test/jacocoTestReport.xml
-          fail_ci_if_error: true
+          gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: Check coverage threshold
-        run: ./gradlew jacocoTestCoverageVerification
+      # Every URL below is a static, version-pinned literal — nothing is
+      # discovered at runtime, so no value ever needs to be validated and
+      # exported through GITHUB_ENV/GITHUB_PATH (the documented Actions
+      # env-injection vector that dynamic discovery has to guard against).
+      - name: Install ktlint, detekt, and gitleaks
+        run: |
+          curl -fsSL -o /tmp/ktlint \
+            "https://github.com/pinterest/ktlint/releases/download/${KTLINT_VERSION}/ktlint"
+          chmod +x /tmp/ktlint
+          sudo mv /tmp/ktlint /usr/local/bin/ktlint
+          curl -fsSL -o /tmp/detekt-cli.zip \
+            "https://github.com/detekt/detekt/releases/download/v${DETEKT_VERSION}/detekt-cli-${DETEKT_VERSION}.zip"
+          unzip -q /tmp/detekt-cli.zip -d "$HOME/.detekt"
+          sudo ln -s "$HOME/.detekt/detekt-cli-${DETEKT_VERSION}/bin/detekt" \
+            /usr/local/bin/detekt
+          curl -fsSL -o /tmp/gitleaks.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
 
-  build:
-    name: Build and Verify
+      # Check-mode counterpart of the `ktlint --format` pre-commit hook —
+      # identical to scripts/format.sh without --fix, so a tree that
+      # passed pre-commit locally passes here.
+      - name: Run ktlint format check
+        run: ktlint
+
+      # Same invocation as the detekt pre-commit hook and scripts/lint.sh:
+      # the shared detekt.yml (cyclomatic complexity <= 10 gate +
+      # potential-bugs rules) applied on top of detekt's default config,
+      # with Gradle build output excluded.
+      - name: Run detekt static analysis
+        run: detekt --config detekt.yml --build-upon-default-config --excludes '**/build/**'
+
+      # Secret-scanning parity with the gitleaks pre-commit hook.
+      - name: Run gitleaks secret scan
+        run: gitleaks detect --source . --no-banner --redact
+
+      # Coverage gate — the same Gradle invocation as scripts/test.sh
+      # --coverage. One invocation, one task graph: koverXmlReportDebug
+      # (the report the metrics dashboard reads) and koverVerifyDebug
+      # (the gate) share a single testDebugUnitTest execution, so the
+      # suite never runs twice for one coverage measurement. The >=90%
+      # line bound lives in app/build.gradle.kts
+      # (kover { ... minBound(90) }) as the single source of truth and is
+      # deliberately NOT repeated here — raise it there, not in CI.
+      - name: Run tests with Kover coverage gate
+        run: gradle koverXmlReportDebug koverVerifyDebug
+
+  test:
+    name: JDK ${{ matrix.java-version }} Tests
+    runs-on: ubuntu-latest
+    strategy:
+      # Run every leg to completion: the point of a version matrix is to
+      # see exactly which JDKs fail, not just the first one.
+      fail-fast: false
+      matrix:
+        # The Kotlin version (2.0.21) and the bytecode target
+        # (jvmToolchain(17)) are pinned by the generated Gradle manifests
+        # — project decisions, not CI inputs — so the meaningful matrix
+        # axis is the JVM that runs Gradle/AGP itself: both current JDK
+        # LTS releases. On the 21 leg, Gradle resolves the
+        # jvmToolchain(17) compile JDK from the Temurin 17 preinstalled
+        # under /usr/lib/jvm on the runner image (a location on Gradle's
+        # toolchain auto-detection path).
+        java-version: ["17", "21"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java-version }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Show toolchain versions
+        run: |
+          java -version
+          gradle --version
+
+      # Runs every unit-test variant on the matrix JVM (the quality job
+      # already gates debug-variant coverage; this job's axis is JDK
+      # compatibility, not coverage, so no Kover tasks here).
+      - name: Run unit tests
+        run: gradle test
+
+  wear:
+    name: Wear OS APK Build
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: "21"
-          distribution: 'temurin'
-          cache: 'gradle'
+          distribution: temurin
+          java-version: "17"
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
 
-      - name: Build with Gradle
-        run: ./gradlew assemble
-
-      - name: Verify artifacts
-        run: ./gradlew check
+      # assembleDebug compiles the Compose-for-Wear-OS sources against
+      # the Android SDK and packages the wear APK — the AndroidManifest's
+      # watch uses-feature and standalone metadata make this the actual
+      # Wear OS artifact — proving the scaffold builds for its target.
+      #
+      # No emulator (instrumentation) tests run here, honestly: the
+      # scaffold generates no androidTest source set, so an emulator job
+      # would have nothing to execute, and Wear OS AVD boots on shared
+      # runners are slow and nondeterministic. When you add androidTest
+      # sources, wire an emulator job (e.g. reactivecircus/
+      # android-emulator-runner with a wear-os system image) and make it
+      # required only once it runs deterministically.
+      - name: Assemble the Wear OS debug APK
+        run: gradle assembleDebug

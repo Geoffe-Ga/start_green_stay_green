@@ -5,11 +5,11 @@ that the CLI produces valid project structures end-to-end.
 
 Note: java, csharp, and ruby are supported at the generator level but the
 quality-tooling pipeline steps (PreCommitGenerator, scripts, CI) skip
-them (#356). Kotlin gained its quality tooling with #357 but still lacks
-a CI workflow (#358), so it stays out of CLI_SUPPORTED_LANGUAGES below;
-its full init flow is covered at the integration level by
-test_kotlin_init_integration.py (and test_language_generators.py covers
-the generator-only languages).
+them (#356). Kotlin gained its quality tooling with #357 and its CI
+workflow with #358, completing the pipeline, so it joins
+CLI_SUPPORTED_LANGUAGES below (test_kotlin_init_integration.py covers
+its full init flow in depth and test_language_generators.py covers the
+generator-only languages).
 
 All tests use an environment with API keys stripped and a null keyring
 backend to prevent real Anthropic API calls. See Issue #196.
@@ -26,7 +26,7 @@ import pytest
 from tests.conftest import get_env_without_api_keys
 
 # Languages fully supported in the CLI pipeline (all generators)
-CLI_SUPPORTED_LANGUAGES = ("python", "typescript", "go", "rust", "swift")
+CLI_SUPPORTED_LANGUAGES = ("python", "typescript", "go", "rust", "swift", "kotlin")
 
 # Expected key files per language that sgsg init should create
 EXPECTED_KEY_FILES: dict[str, list[str]] = {
@@ -65,6 +65,18 @@ EXPECTED_KEY_FILES: dict[str, list[str]] = {
         "Package.swift",
         "Tests/test_projectTests/test_projectTests.swift",
         ".swiftlint.yml",
+        "README.md",
+    ],
+    "kotlin": [
+        "settings.gradle.kts",
+        "build.gradle.kts",
+        "gradle.properties",
+        "app/build.gradle.kts",
+        "app/src/main/AndroidManifest.xml",
+        "app/src/main/kotlin/com/example/test_project/MainActivity.kt",
+        "app/src/test/kotlin/com/example/test_project/GreetingTest.kt",
+        "detekt.yml",
+        ".github/workflows/ci.yml",
         "README.md",
     ],
 }
