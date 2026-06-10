@@ -1,7 +1,8 @@
 """Architecture enforcement generator.
 
 Generates architecture validation configuration for import-linter (Python),
-dependency-cruiser (TypeScript), go-arch-lint (Go), and cargo-deny (Rust).
+dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust), and
+SwiftLint custom rules (Swift).
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ class ArchitectureResult:
     Attributes:
         output_dir: Directory containing generated files.
         files_created: List of files created.
-        language: Target language (python, typescript, go, rust).
+        language: Target language (python, typescript, go, rust, swift).
     """
 
     output_dir: Path
@@ -97,6 +98,17 @@ _LANGUAGE_TOOLING: dict[str, _LanguageTooling] = {
         docs_url="https://embarkstudios.github.io/cargo-deny/",
         display_name="Rust",
     ),
+    "swift": _LanguageTooling(
+        # No native Swift layer linter exists (unlike import-linter or
+        # go-arch-lint), so layer rules are expressed as SwiftLint custom
+        # regex rules; the generated config documents that gap.
+        tool="SwiftLint custom rules",
+        config_file=".swiftlint-architecture.yml",
+        install_cmd="brew install swiftlint",
+        run_cmd="swiftlint lint --config {config_file}",
+        docs_url="https://realm.github.io/SwiftLint/custom_rules.html",
+        display_name="Swift",
+    ),
 }
 
 
@@ -104,9 +116,9 @@ class ArchitectureEnforcementGenerator:
     """Generates architecture enforcement configuration.
 
     Generates import-linter config for Python, dependency-cruiser
-    config for TypeScript, go-arch-lint config for Go, and cargo-deny
-    config for Rust to enforce layer separation and prevent circular
-    dependencies.
+    config for TypeScript, go-arch-lint config for Go, cargo-deny
+    config for Rust, and SwiftLint custom rules for Swift to enforce
+    layer separation and prevent circular dependencies.
 
     Attributes:
         orchestrator: AI orchestrator for content generation.
@@ -153,7 +165,7 @@ class ArchitectureEnforcementGenerator:
         """Generate architecture enforcement configuration.
 
         Args:
-            language: Target language (python, typescript, go, rust).
+            language: Target language (python, typescript, go, rust, swift).
             project_name: Name of the project.
 
         Returns:
@@ -177,6 +189,7 @@ class ArchitectureEnforcementGenerator:
             "typescript": partial(self._generate_typescript_config, project_name),
             "go": partial(self._generate_go_config, project_name),
             "rust": self._generate_rust_config,
+            "swift": self._generate_swift_config,
         }
         files_created = config_builders[language]()
 
@@ -477,6 +490,93 @@ unknown-git = "deny"
         config_path.write_text(config_content)
         return [config_path]
 
+    # Like the Rust config, the Swift config is project-name agnostic: the
+    # custom rules reference the per-layer SPM module names, which are fixed
+    # by convention, so no project_name parameter is needed here.
+    def _generate_swift_config(self) -> list[Path]:
+        """Generate SwiftLint custom-rules configuration for Swift.
+
+        No native Swift architecture linter exists (unlike import-linter,
+        dependency-cruiser, go-arch-lint, or cargo-deny), so layer rules
+        are expressed as SwiftLint custom regex rules over ``import``
+        statements. The generated config documents that enforcement gap
+        explicitly, mirroring how the Rust ``deny.toml`` documents what
+        cargo-deny cannot restrict. The dependency matrix mirrors the Go
+        config: presentation -> application -> domain, with infrastructure
+        allowed to depend on domain only.
+
+        Returns:
+            List of files created.
+        """
+        config_path = self.output_dir / ".swiftlint-architecture.yml"
+
+        # Raw string: the regexes below must reach the YAML file with their
+        # backslashes intact (single-quoted YAML scalars keep them literal).
+        config_content = r"""# SwiftLint custom rules enforcing layered architecture.
+#
+# No native Swift layer linter exists (unlike import-linter for Python,
+# dependency-cruiser for TypeScript, go-arch-lint for Go, or cargo-deny
+# for Rust), so layer rules are expressed as SwiftLint custom regex rules
+# over `import` statements.
+#
+# Enforcement limits (documented, not hidden):
+#   - Custom rules are regex matches over source text,
+#     not a resolved dependency graph. They only catch explicit `import`
+#     statements of layer modules; they cannot see transitive dependencies.
+#   - Layers must be modeled as separate SPM targets/modules named
+#     Presentation, Application, Domain, and Infrastructure. References
+#     within a single module never need an `import` and are NOT caught.
+#   - No cycle rule is needed here:
+#     Swift Package Manager itself rejects circular target dependencies
+#     at build time.
+#
+# Dependency matrix (mirrors the Go go-arch-lint config):
+#   presentation -> application, domain
+#   application  -> domain
+#   infrastructure -> domain
+#   domain       -> (nothing)
+#
+# Run with:
+#   swiftlint lint --config .swiftlint-architecture.yml
+
+# Run only the custom architecture rules from this config so this check
+# stays orthogonal to the general lint pass (.swiftlint.yml).
+only_rules:
+  - custom_rules
+
+included:
+  - Sources
+
+custom_rules:
+  domain_layer_purity:
+    name: 'Domain layer purity'
+    included: 'Sources/Domain/.*\.swift'
+    regex: '^\s*(@testable\s+)?import\s+(Presentation|Application|Infrastructure)\b'
+    message: 'Domain must not import Presentation, Application, or Infrastructure.'
+    severity: error
+  application_layer_boundary:
+    name: 'Application layer boundary'
+    included: 'Sources/Application/.*\.swift'
+    regex: '^\s*(@testable\s+)?import\s+(Presentation|Infrastructure)\b'
+    message: 'Application may only depend on Domain, never on outer layers.'
+    severity: error
+  infrastructure_layer_boundary:
+    name: 'Infrastructure layer boundary'
+    included: 'Sources/Infrastructure/.*\.swift'
+    regex: '^\s*(@testable\s+)?import\s+(Presentation|Application)\b'
+    message: 'Infrastructure may only depend on Domain.'
+    severity: error
+  presentation_layer_boundary:
+    name: 'Presentation layer boundary'
+    included: 'Sources/Presentation/.*\.swift'
+    regex: '^\s*(@testable\s+)?import\s+Infrastructure\b'
+    message: 'Presentation may depend on Application and Domain only.'
+    severity: error
+"""
+
+        config_path.write_text(config_content)
+        return [config_path]
+
     def _generate_readme(self, language: str, project_name: str) -> Path:
         """Generate README with usage instructions.
 
@@ -561,12 +661,14 @@ Edit the configuration file:
 - TypeScript: `.dependency-cruiser.js`
 - Go: `.go-arch-lint.yml`
 - Rust: `deny.toml`
+- Swift: `.swiftlint-architecture.yml`
 
 See documentation:
 - Python: https://import-linter.readthedocs.io/
 - TypeScript: https://github.com/sverweij/dependency-cruiser
 - Go: https://github.com/fe3dback/go-arch-lint
 - Rust: https://embarkstudios.github.io/cargo-deny/
+- Swift: https://realm.github.io/SwiftLint/custom_rules.html
 
 ## Integration
 

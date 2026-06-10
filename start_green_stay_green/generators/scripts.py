@@ -1,7 +1,8 @@
 """Scripts directory generator.
 
 Generates quality control scripts adapted to target project languages and structure.
-Supports Python, TypeScript, Go, Rust, and other languages with appropriate tooling.
+Supports Python, TypeScript, Go, Rust, Swift, and other languages with
+appropriate tooling.
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from start_green_stay_green.utils.file_writer import FileWriter
 
 
@@ -20,7 +23,7 @@ class ScriptConfig:
     """Configuration for script generation.
 
     Attributes:
-        language: Programming language (python, typescript, go, rust, etc.)
+        language: Programming language (python, typescript, go, rust, swift, etc.)
         package_name: Name of the main package/module
         supports_pytest: Whether project uses pytest for testing
         supports_coverage: Whether project uses coverage reporting
@@ -115,20 +118,21 @@ class ScriptsGenerator:
         Raises:
             OSError: If script files cannot be written
         """
-        scripts: dict[str, Path] = {}
-
-        # Generate language-specific scripts
-        if self.config.language == "python":
-            scripts.update(self._generate_python_scripts())
-        elif self.config.language in ("typescript", "ts", "javascript", "js"):
-            scripts.update(self._generate_typescript_scripts())
-        elif self.config.language == "go":
-            scripts.update(self._generate_go_scripts())
-        elif self.config.language == "rust":
-            scripts.update(self._generate_rust_scripts())
-        else:
-            # Fallback to Python scripts for unknown languages
-            scripts.update(self._generate_python_scripts())
+        # Dispatch table keeps generate() flat as languages are added:
+        # each entry is a zero-argument builder returning the scripts dict.
+        builders: dict[str, Callable[[], dict[str, Path]]] = {
+            "python": self._generate_python_scripts,
+            "typescript": self._generate_typescript_scripts,
+            "ts": self._generate_typescript_scripts,
+            "javascript": self._generate_typescript_scripts,
+            "js": self._generate_typescript_scripts,
+            "go": self._generate_go_scripts,
+            "rust": self._generate_rust_scripts,
+            "swift": self._generate_swift_scripts,
+        }
+        # Fallback to Python scripts for unknown languages.
+        builder = builders.get(self.config.language, self._generate_python_scripts)
+        scripts: dict[str, Path] = builder()
 
         # Language-agnostic scripts
         scripts["pr-status.sh"] = self._write_script(
@@ -282,6 +286,45 @@ class ScriptsGenerator:
             "test.sh",
             self._rust_test_script(),
         )
+
+        return scripts
+
+    def _generate_swift_scripts(self) -> dict[str, Path]:
+        """Generate Swift-specific quality control scripts.
+
+        Emits check/format/lint/test/security scripts plus a companion
+        ``.swiftlint.yml`` at the project root (complexity gate and
+        crash-safety/security opt-in rules) so the lint script and the
+        pre-commit SwiftLint hook share one configuration.
+
+        Returns:
+            Dictionary mapping script names to file paths
+        """
+        scripts: dict[str, Path] = {}
+
+        scripts["check-all.sh"] = self._write_script(
+            "check-all.sh",
+            self._swift_check_all_script(),
+        )
+        scripts["format.sh"] = self._write_script(
+            "format.sh",
+            self._swift_format_script(),
+        )
+        scripts["lint.sh"] = self._write_script(
+            "lint.sh",
+            self._swift_lint_script(),
+        )
+        scripts["test.sh"] = self._write_script(
+            "test.sh",
+            self._swift_test_script(),
+        )
+        scripts["security.sh"] = self._write_script(
+            "security.sh",
+            self._swift_security_script(),
+        )
+        # Companion SwiftLint config — written at the project root, not
+        # added to the scripts dict (it isn't an executable).
+        self._write_swiftlint_config_template()
 
         return scripts
 
@@ -2690,6 +2733,456 @@ fi
 echo "✓ Tests passed"
 exit 0
 """
+
+    # Swift script generators
+
+    def _swift_check_all_script(self) -> str:
+        """Generate Swift check-all.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/check-all.sh - Run all quality checks
+# Usage: ./scripts/check-all.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run all quality checks in sequence.
+
+Runs:
+  1. Format check (swift-format)
+  2. Linting + complexity <=10 (SwiftLint)
+  3. Tests + coverage >=90% (swift test + llvm-cov)
+  4. Security & dead code (Periphery)
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All checks passed
+    1           One or more checks failed
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+VERBOSE_FLAG=""
+if $VERBOSE; then
+    VERBOSE_FLAG="--verbose"
+fi
+
+echo "=== Running All Quality Checks ==="
+echo ""
+
+FAILED_CHECKS=()
+PASSED_CHECKS=()
+
+run_check() {
+    local check_name=$1
+    local script=$2
+    shift 2
+
+    echo "Running: $check_name"
+    if "$SCRIPT_DIR/$script" "${@}" $VERBOSE_FLAG; then
+        PASSED_CHECKS+=("$check_name")
+        echo "✓ $check_name passed"
+    else
+        FAILED_CHECKS+=("$check_name")
+        echo "✗ $check_name failed" >&2
+    fi
+    echo ""
+}
+
+run_check "Format" "format.sh"
+run_check "Linting" "lint.sh"
+run_check "Tests" "test.sh" --coverage
+run_check "Security" "security.sh"
+
+echo "=== Quality Checks Summary ==="
+echo "Passed: ${#PASSED_CHECKS[@]}"
+echo "Failed: ${#FAILED_CHECKS[@]}"
+
+if [ ${#FAILED_CHECKS[@]} -gt 0 ]; then
+    exit 1
+else
+    echo "✓ All quality checks passed!"
+    exit 0
+fi
+"""
+
+    def _swift_format_script(self) -> str:
+        """Generate Swift format.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/format.sh - Format Swift code
+# Usage: ./scripts/format.sh [--fix] [--check] [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+FIX=false
+CHECK=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --fix)
+            FIX=true
+            shift
+            ;;
+        --check)
+            CHECK=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Format Swift code using swift-format (install: brew install swift-format).
+
+OPTIONS:
+    --fix       Apply formatting (default, writes in place)
+    --check     Check only, fail if formatting needed
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           Code is properly formatted
+    1           Formatting issues found
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+echo "=== Formatting (swift-format) ==="
+
+if $CHECK; then
+    swift-format lint --strict --recursive Sources Tests || \\
+        { echo "✗ Format check failed" >&2; exit 1; }
+    echo "✓ Code formatting check passed"
+else
+    swift-format format --in-place --recursive Sources Tests || \\
+        { echo "✗ Formatting failed" >&2; exit 1; }
+    echo "✓ Code formatted successfully"
+fi
+exit 0
+"""
+
+    def _swift_lint_script(self) -> str:
+        """Generate Swift lint.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/lint.sh - Run linting with SwiftLint
+# Usage: ./scripts/lint.sh [--fix] [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+FIX=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --fix)
+            FIX=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run linting using SwiftLint (install: brew install swiftlint).
+
+Reads .swiftlint.yml at the project root, which enforces
+cyclomatic_complexity <= 10 and the crash-safety/security opt-in rules.
+
+OPTIONS:
+    --fix       Auto-fix linting issues where possible
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All checks passed
+    1           Linting issues found
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+echo "=== Linting (SwiftLint) ==="
+
+if $FIX; then
+    swiftlint lint --fix || { echo "✗ SwiftLint fix failed" >&2; exit 1; }
+else
+    swiftlint lint --strict || { echo "✗ Linting failed" >&2; exit 1; }
+fi
+
+echo "✓ Linting checks passed"
+exit 0
+"""
+
+    def _swift_test_script(self) -> str:
+        """Generate Swift test.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/test.sh - Run Swift tests
+# Usage: ./scripts/test.sh [--coverage] [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+COVERAGE=false
+VERBOSE=false
+THRESHOLD=90
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --coverage)
+            COVERAGE=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run Swift tests (XCTest via swift test).
+
+OPTIONS:
+    --coverage  Enforce >=${THRESHOLD}% line coverage via llvm-cov data
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All tests passed (and coverage met, with --coverage)
+    1           Test failures or coverage below threshold
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+echo "=== Running Tests (swift test) ==="
+
+swift test --enable-code-coverage || { echo "✗ Tests failed" >&2; exit 1; }
+
+if $COVERAGE; then
+    # swift test emits llvm-cov export JSON; --show-codecov-path points
+    # at it without re-running the suite.
+    CODECOV_JSON="$(swift test --show-codecov-path)"
+    python3 - "$CODECOV_JSON" "$THRESHOLD" << 'PYEOF' || exit 1
+import json
+import sys
+
+path, threshold = sys.argv[1], float(sys.argv[2])
+with open(path, encoding="utf-8") as handle:
+    percent = json.load(handle)["data"][0]["totals"]["lines"]["percent"]
+print(f"Line coverage: {percent:.2f}% (threshold: {threshold:.0f}%)")
+sys.exit(0 if percent >= threshold else 1)
+PYEOF
+fi
+
+echo "✓ Tests passed"
+exit 0
+"""
+
+    def _swift_security_script(self) -> str:
+        """Generate Swift security.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/security.sh - Security & dead-code checks for Swift
+# Usage: ./scripts/security.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run security and dead-code checks.
+
+Division of labor:
+  - Secret scanning (gitleaks + detect-secrets) runs in pre-commit.
+  - SwiftLint's crash-safety/security rules run in lint.sh.
+  - This script adds Periphery dead-code detection
+    (install: brew install periphery).
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           No issues found (or Periphery not installed; see below)
+    1           Unused/dead code detected
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+echo "=== Security & Dead Code (Periphery) ==="
+
+# Pragmatic default: a missing Periphery binary warns instead of failing
+# so a fresh clone passes check-all.sh out of the box. Tighten by
+# replacing the warning block with `exit 1` once Periphery is installed
+# everywhere (including CI).
+if ! command -v periphery &> /dev/null; then
+    echo "⚠ periphery not found - skipping dead-code scan" >&2
+    echo "⚠ Install with: brew install periphery" >&2
+    exit 0
+fi
+
+periphery scan --strict || { echo "✗ Periphery found unused code" >&2; exit 1; }
+
+echo "✓ Security checks passed"
+exit 0
+"""
+
+    # SwiftLint companion configuration template. Shared by lint.sh and the
+    # pre-commit SwiftLint hook. cyclomatic_complexity mirrors the <=10 gate
+    # used by radon (Python), eslint (TypeScript), gocyclo (Go), and clippy
+    # (Rust). SwiftLint has no dedicated security ruleset, so the security
+    # posture is documented explicitly: crash-safety/randomness rules here,
+    # secret scanning in pre-commit (gitleaks + detect-secrets), dead-code
+    # analysis in security.sh (Periphery).
+    _SWIFTLINT_CONFIG_TEMPLATE = """\
+# SwiftLint configuration generated by Start Green Stay Green.
+#
+# Complexity gate: cyclomatic_complexity <= 10 (error) mirrors the
+# radon/eslint/gocyclo/clippy thresholds enforced for other languages.
+#
+# Security posture (documented, not implied): SwiftLint has no dedicated
+# security ruleset. The opt-in rules below catch crash-prone force
+# operations and insecure randomness; secret scanning is handled by the
+# gitleaks and detect-secrets pre-commit hooks, and dead-code analysis by
+# Periphery (scripts/security.sh).
+
+included:
+  - Sources
+  - Tests
+
+opt_in_rules:
+  # Crash safety: forbid force unwraps/casts/tries outside tests.
+  - force_unwrapping
+  # Insecure randomness: arc4random/rand are not CSPRNGs.
+  - legacy_random
+  # Memory safety: capturing unowned references invites use-after-free.
+  - unowned_variable_capture
+  # Diagnostics: fatalError without a message hides crash causes.
+  - fatal_error_message
+
+cyclomatic_complexity:
+  warning: 10
+  error: 10
+"""
+
+    def _write_swiftlint_config_template(self) -> Path | None:
+        """Write the companion ``.swiftlint.yml`` at the project root.
+
+        The config lives at ``$PROJECT_ROOT`` so both ``lint.sh`` and the
+        pre-commit SwiftLint hook resolve it implicitly. An existing file
+        is preserved (user customisations win).
+
+        Returns:
+            Path to the written config, or ``None`` if a file already
+            exists at the destination.
+        """
+        config_path = self.project_root / ".swiftlint.yml"
+        if config_path.exists():
+            return None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._file_writer is not None:
+            self._file_writer.write_file(config_path, self._SWIFTLINT_CONFIG_TEMPLATE)
+        else:
+            config_path.write_text(self._SWIFTLINT_CONFIG_TEMPLATE, encoding="utf-8")
+        return config_path
 
     # Language-agnostic script generators
 

@@ -1238,12 +1238,17 @@ Start Green Stay Green.
 
 ## Description
 
-This Swift scaffold is the foundation of a quality-controlled watchOS
-project. The following are generated today:
+This Swift scaffold is a quality-controlled watchOS project. The following
+are generated today:
 
 - ✅ Apple Watch (watchOS) app target built with SwiftUI
 - ✅ Swift Package Manager manifest (Package.swift)
 - ✅ XCTest test target
+- ✅ Code quality tools (SwiftLint + swift-format, configured in .swiftlint.yml)
+- ✅ Pre-commit hooks (format, lint, secret scanning via gitleaks)
+- ✅ Quality scripts (./scripts/check-all.sh with a 90%+ coverage gate)
+- ✅ Security & dead-code scanning (Periphery via ./scripts/security.sh)
+- ✅ Architecture enforcement (SwiftLint custom rules)
 - ✅ This README
 
 ### Planned / coming soon
@@ -1252,11 +1257,7 @@ These quality features are part of the Start Green Stay Green roadmap for
 Swift but are **not yet generated** by this scaffold — do not assume they
 are configured:
 
-- Code quality tools (SwiftLint, swift-format)
-- Security scanning (Swift Package audit)
-- Pre-commit hooks (quality checks)
 - CI/CD pipeline (GitHub Actions)
-- Enforced 90%+ test coverage gate
 
 ## Installation
 
@@ -1267,6 +1268,12 @@ cd {self.config.project_name}
 
 # Resolve package dependencies
 swift package resolve
+
+# Install the quality toolchain (Homebrew)
+brew install swiftlint swift-format periphery
+
+# Install the pre-commit hooks
+pre-commit install
 ```
 
 ## Usage
@@ -1302,10 +1309,12 @@ swift test
 
 # Run tests with code coverage
 swift test --enable-code-coverage
+
+# Run every quality gate (format, lint, tests + coverage, security)
+./scripts/check-all.sh
 ```
 
-> **Note:** Linting (SwiftLint), formatting (swift-format), security
-> scanning, pre-commit hooks, and CI are on the roadmap but not yet
+> **Note:** A CI pipeline (GitHub Actions) is on the roadmap but not yet
 > configured by this scaffold. See *Planned / coming soon* above.
 
 ### Quality Tools
@@ -1314,6 +1323,11 @@ This scaffold currently includes:
 
 - **XCTest**: Built-in testing framework
 - **Swift Package Manager**: Dependency management and build tooling
+- **SwiftLint**: Linting with cyclomatic complexity ≤10 (.swiftlint.yml)
+- **swift-format**: Code formatting (./scripts/format.sh)
+- **Periphery**: Dead-code detection (./scripts/security.sh)
+- **Pre-commit hooks**: swift-format, SwiftLint, gitleaks, detect-secrets
+- **Architecture rules**: SwiftLint custom rules (plans/architecture/)
 
 ### Project Structure
 
@@ -1342,14 +1356,17 @@ swift test --filter TestName
 
 ### Code Quality
 
-This scaffold is the foundation for a MAXIMUM QUALITY Swift project. Today it
-provides:
+This scaffold is a MAXIMUM QUALITY Swift project. Today it provides:
 
 - **Type Safety**: 100% compile-time type checking (inherent to Swift)
 - **XCTest test target**: ready for you to add tests
+- **Coverage gate**: ./scripts/test.sh --coverage enforces ≥90% line coverage
+- **Complexity gate**: SwiftLint errors on cyclomatic complexity >10
+- **Formatting & linting**: swift-format and SwiftLint, locally and in
+  pre-commit
 
-Enforced coverage gates, linting, and formatting are planned (see *Planned /
-coming soon* above) and are not yet wired into this scaffold.
+A CI pipeline is planned (see *Planned / coming soon* above) and is not yet
+wired into this scaffold.
 
 ## License
 
