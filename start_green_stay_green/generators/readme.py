@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.naming import pascal_case
 
 if TYPE_CHECKING:
     from start_green_stay_green.utils.file_writer import FileWriter
@@ -57,10 +58,11 @@ class ReadmeGenerator(BaseGenerator):
     description, installation instructions, usage guide, and documentation
     for the quality tools included in the project.
 
-    All 7 supported languages (python, typescript, go, rust, java, csharp, ruby)
-    are available at the generator level. Note that java, csharp, and ruby are
-    not yet supported by the full CLI pipeline (``sgsg init``) because
-    PreCommitGenerator does not yet handle those languages.
+    All 8 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift) are available at the generator level. Note that java, csharp,
+    ruby, and swift are not yet supported by the full CLI pipeline
+    (``sgsg init``) because PreCommitGenerator does not yet handle those
+    languages.
 
     Attributes:
         output_dir: Directory where README.md will be created
@@ -159,6 +161,7 @@ class ReadmeGenerator(BaseGenerator):
             "java": self._generate_java_readme,
             "csharp": self._generate_csharp_readme,
             "ruby": self._generate_ruby_readme,
+            "swift": self._generate_swift_readme,
         }
         return {"README.md": generators[self.config.language]()}
 
@@ -1207,4 +1210,153 @@ MIT License
 
 Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green_stay_green)
 - Maximum quality Ruby projects from day one.
+"""
+
+    def _generate_swift_readme(self) -> Path:
+        """Generate Swift README.md.
+
+        Returns:
+            Path to generated README.md
+        """
+        readme_path = self.output_dir / "README.md"
+        return self._write_readme(readme_path, self._swift_readme_content())
+
+    def _swift_readme_content(self) -> str:
+        """Generate Swift README.md content.
+
+        Returns:
+            Content for README.md
+        """
+        # Convert project name to title case for display
+        display_name = self.config.project_name.replace("-", " ").title()
+        type_name = pascal_case(self.config.package_name)
+
+        return f"""# {self.config.project_name}
+
+{display_name} - A quality-controlled Swift watchOS project generated with
+Start Green Stay Green.
+
+## Description
+
+This Swift scaffold is the foundation of a quality-controlled watchOS
+project. The following are generated today:
+
+- ✅ Apple Watch (watchOS) app target built with SwiftUI
+- ✅ Swift Package Manager manifest (Package.swift)
+- ✅ XCTest test target
+- ✅ This README
+
+### Planned / coming soon
+
+These quality features are part of the Start Green Stay Green roadmap for
+Swift but are **not yet generated** by this scaffold — do not assume they
+are configured:
+
+- Code quality tools (SwiftLint, swift-format)
+- Security scanning (Swift Package audit)
+- Pre-commit hooks (quality checks)
+- CI/CD pipeline (GitHub Actions)
+- Enforced 90%+ test coverage gate
+
+## Installation
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd {self.config.project_name}
+
+# Resolve package dependencies
+swift package resolve
+```
+
+## Usage
+
+Build and run the watchOS Hello World app:
+
+```bash
+swift build
+```
+
+Open the package in Xcode to run the SwiftUI app on the Apple Watch
+simulator:
+
+```bash
+open Package.swift
+```
+
+Expected output (in the watchOS app UI):
+```
+Hello from {self.config.project_name}!
+```
+
+## Development
+
+### Building and Testing
+
+```bash
+# Build the package
+swift build
+
+# Run all tests
+swift test
+
+# Run tests with code coverage
+swift test --enable-code-coverage
+```
+
+> **Note:** Linting (SwiftLint), formatting (swift-format), security
+> scanning, pre-commit hooks, and CI are on the roadmap but not yet
+> configured by this scaffold. See *Planned / coming soon* above.
+
+### Quality Tools
+
+This scaffold currently includes:
+
+- **XCTest**: Built-in testing framework
+- **Swift Package Manager**: Dependency management and build tooling
+
+### Project Structure
+
+```
+{self.config.project_name}/
+├── Sources/             # Swift source code (watchOS app target)
+│   └── {self.config.package_name}/
+│       ├── {type_name}App.swift  # SwiftUI @main App entry
+│       └── ContentView.swift     # SwiftUI watchOS view
+├── Tests/               # XCTest test target
+└── Package.swift        # Swift Package Manager manifest
+```
+
+### Testing
+
+```bash
+# Run all tests
+swift test
+
+# Run tests with code coverage
+swift test --enable-code-coverage
+
+# Run a specific test
+swift test --filter TestName
+```
+
+### Code Quality
+
+This scaffold is the foundation for a MAXIMUM QUALITY Swift project. Today it
+provides:
+
+- **Type Safety**: 100% compile-time type checking (inherent to Swift)
+- **XCTest test target**: ready for you to add tests
+
+Enforced coverage gates, linting, and formatting are planned (see *Planned /
+coming soon* above) and are not yet wired into this scaffold.
+
+## License
+
+MIT License
+
+## Attribution
+
+Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green_stay_green)
+- Maximum quality Swift watchOS projects from day one.
 """

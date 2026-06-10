@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.naming import pascal_case
+from start_green_stay_green.utils.swift import package_swift
 
 if TYPE_CHECKING:
     from start_green_stay_green.utils.file_writer import FileWriter
@@ -56,10 +58,11 @@ class StructureGenerator(BaseGenerator):
     This generator creates the source code directory structure (package directory,
     __init__.py, Hello World starter code) for the target project's language.
 
-    All 7 supported languages (python, typescript, go, rust, java, csharp, ruby)
-    are available at the generator level. Note that java, csharp, and ruby are
-    not yet supported by the full CLI pipeline (``sgsg init``) because
-    PreCommitGenerator does not yet handle those languages.
+    All 8 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift) are available at the generator level. Note that java, csharp,
+    ruby, and swift are not yet supported by the full CLI pipeline
+    (``sgsg init``) because PreCommitGenerator does not yet handle those
+    languages.
 
     Attributes:
         output_dir: Directory where structure will be created
@@ -132,6 +135,7 @@ class StructureGenerator(BaseGenerator):
             "java": self._generate_java_structure,
             "csharp": self._generate_csharp_structure,
             "ruby": self._generate_ruby_structure,
+            "swift": self._generate_swift_structure,
         }
         return generators[self.config.language]()
 
@@ -717,3 +721,98 @@ gem "rake", "~> 13.0"
 gem "rspec", "~> 3.0"
 gem "rubocop", "~> 1.0"
 """
+
+    def _generate_swift_structure(self) -> dict[str, Path]:
+        """Generate Swift watchOS project structure.
+
+        Creates a Swift Package Manager layout with a SwiftUI + WatchKit
+        watchOS app target: an ``@main`` App entry point and a ``ContentView``
+        under ``Sources/{package_name}/``, plus the ``Package.swift`` manifest.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        # Create Sources/{package_name} directory for the watchOS app target
+        source_dir = self.output_dir / "Sources" / self.config.package_name
+        source_dir.mkdir(parents=True, exist_ok=True)
+
+        type_name = pascal_case(self.config.package_name)
+
+        # Generate the SwiftUI @main App entry point
+        app_key = f"Sources/{self.config.package_name}/{type_name}App.swift"
+        files[app_key] = self._write_file(
+            source_dir / f"{type_name}App.swift",
+            self._swift_app_swift(type_name),
+        )
+
+        # Generate the SwiftUI ContentView
+        view_key = f"Sources/{self.config.package_name}/ContentView.swift"
+        files[view_key] = self._write_file(
+            source_dir / "ContentView.swift",
+            self._swift_content_view_swift(),
+        )
+
+        # Generate the SPM manifest
+        package_key = "Package.swift"
+        files[package_key] = self._write_file(
+            self.output_dir / "Package.swift",
+            self._swift_package_swift(),
+        )
+
+        return files
+
+    def _swift_app_swift(self, type_name: str) -> str:
+        """Generate the SwiftUI watchOS App entry point.
+
+        Args:
+            type_name: PascalCase prefix used for the App struct name.
+
+        Returns:
+            Content for the ``@main`` SwiftUI App source file.
+        """
+        return f"""import SwiftUI
+
+// watchOS entry point: shows "Hello from {self.config.project_name}!"
+@main
+struct {type_name}App: App {{
+    @SceneBuilder var body: some Scene {{
+        WindowGroup {{
+            ContentView()
+        }}
+    }}
+}}
+"""
+
+    def _swift_content_view_swift(self) -> str:
+        """Generate the SwiftUI ContentView for the watchOS app.
+
+        Returns:
+            Content for the ``ContentView`` SwiftUI source file.
+        """
+        return f"""import SwiftUI
+
+struct ContentView: View {{
+    var body: some View {{
+        Text("Hello from {self.config.project_name}!")
+            .padding()
+    }}
+}}
+
+#Preview {{
+    ContentView()
+}}
+"""
+
+    def _swift_package_swift(self) -> str:
+        """Generate the Swift Package Manager manifest for watchOS.
+
+        Delegates to the shared :func:`~start_green_stay_green.utils.swift.\
+package_swift` helper so the structure and dependency generators emit an
+        identical manifest from one source of truth.
+
+        Returns:
+            Content for ``Package.swift`` declaring a watchOS app target.
+        """
+        return package_swift(self.config.package_name)
