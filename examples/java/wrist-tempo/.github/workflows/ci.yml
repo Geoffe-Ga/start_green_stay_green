@@ -1,0 +1,83 @@
+name: Java Quality Checks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  quality:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java-version: ["17", "21"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ matrix.java-version }}
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Run Checkstyle
+        run: mvn checkstyle:check
+
+      - name: Run PMD
+        run: mvn pmd:check
+
+      # SpotBugs reads bytecode, and `mvn spotbugs:check` silently
+      # passes when target/classes is empty — compile first so the scan
+      # actually analyzes the project (parity with the generated
+      # pre-commit hook and scripts/security.sh).
+      - name: Run SpotBugs
+        run: mvn compile spotbugs:check
+
+      - name: Run tests with JaCoCo coverage
+        run: mvn clean test jacoco:report
+
+      # The upload is best-effort: no CODECOV_TOKEN is provisioned in a
+      # fresh project, and tokenless uploads are rate-limited, so a
+      # failed upload must not fail CI. Java can afford this leniency
+      # because — unlike the other reference workflows, where the
+      # Codecov upload is the only coverage surface — the enforced
+      # >=90% gate is the local `mvn jacoco:check` step below, backed
+      # by the pom: Codecov here is informational, not load-bearing.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./target/site/jacoco/jacoco.xml
+          fail_ci_if_error: false
+
+      - name: Check coverage threshold
+        run: mvn jacoco:check
+
+  build:
+    name: Build and Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build with Maven
+        run: mvn clean package -DskipTests
+
+      - name: Verify package
+        run: mvn verify -DskipTests

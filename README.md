@@ -591,6 +591,36 @@ Studio CLI (a manual install — see the generated README). See
 [CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
 the full C/C++ toolchain table.
 
+### Example 8: Java (Wear OS legacy) Project
+
+```bash
+# Prerequisites: JDK 17+ and Maven, plus google-java-format for the
+# generated pre-commit format hook (the linters are Maven plugins
+# pinned in the generated pom.xml - no extra installs):
+brew install google-java-format
+
+start-green-stay-green init \
+  --project-name wrist-tempo \
+  --language java \
+  --no-interactive
+
+cd wrist-tempo
+mvn test
+pre-commit install
+./scripts/check-all.sh  # google-java-format, Checkstyle + PMD (CCN ≤10), mvn test + ≥90% JaCoCo coverage, SpotBugs + OWASP dependency-check
+```
+
+The generated CI pipeline runs on ubuntu runners with a JDK 17/21
+(Temurin) quality matrix running the same Maven goals as the local
+build, including the pom-backed `mvn jacoco:check` ≥90% coverage gate.
+The scaffold deliberately splits into two builds: the pure logic and
+its JUnit 4 tests build with plain Maven on any host, while the watch
+APK requires Android tooling (Android Studio / Gradle — see the
+generated README). See [examples/java/](examples/java/) for real
+generated output and the
+[CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
+the full Java toolchain table.
+
 ## Project Structure
 
 After running `start-green-stay-green init`, your project will have:
@@ -763,7 +793,7 @@ All contributions must:
 - ✅ Swift (watchOS) language support — scaffold, quality tooling, CI, tests (#351, #352, #353, #354)
 - ✅ Kotlin (Wear OS) language support — scaffold, quality tooling, CI, tests (#356, #357, #358, #359)
 - ✅ C/C++ (Tizen native) language support — scaffold, quality tooling, CI, tests (#361, #362, #363, #364)
-- ✅ Java (Wear OS legacy) scaffold + CI and quality tooling (#366, #367)
+- ✅ Java (Wear OS legacy) language support — scaffold, quality tooling, CI, tests (#366, #367, #368)
 
 ### Planned
 

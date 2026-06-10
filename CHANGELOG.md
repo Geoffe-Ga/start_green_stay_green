@@ -56,6 +56,24 @@ Phase 6 follow-ups in progress (issues #316–#319).
   advertises its real CI pipeline (generated since #353) instead of
   listing CI/CD as planned.
 
+- **Java (Wear OS legacy Android Wear) language support** —
+  `green init --language java` generates a legacy Android Wear
+  watch-app scaffold — the maintenance path for existing Java watch
+  apps — with a deliberate two-build split: the pure-logic sources and
+  their JUnit 4 tests build with plain Maven (Java 17) on any host,
+  while the watch APK stays an Android-tooling (Android Studio /
+  Gradle) build the generator does not scaffold. Full quality stack:
+  google-java-format plus Checkstyle/PMD/SpotBugs pre-commit hooks as
+  Maven goals, a PMD cyclomatic-complexity gate (≤10,
+  `pmd-ruleset.xml`), a ≥90% JaCoCo line-coverage gate bound in
+  `pom.xml`, gitleaks/detect-secrets secret scanning, OWASP
+  dependency-check CVE scanning (NVD_API_KEY-gated), an ArchUnit
+  architecture test, and an ubuntu CI pipeline with a JDK 17/21
+  (Temurin) matrix running the same Maven goals as the local build.
+  Foundation (#366), quality tooling (#367), tests (#368),
+  documentation (#369). A real generated example lives in
+  `examples/java/`.
+
 ## [1.0.0] — 2026-05-10
 
 First tagged release. Bundles the entire claude-init optimization
