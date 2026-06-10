@@ -151,6 +151,7 @@ artifacts = generator.write_all(Path("output"))
 - **JavaScript**: jest, stryker, eslint, jsdoc, npm audit
 - **Go**: go test -cover, go-mutesting, gocyclo, godoc, gosec
 - **Rust**: cargo-tarpaulin, cargo-mutants, clippy, rustdoc, cargo-audit
+- **Swift**: swift test + llvm-cov, muter, swiftlint, swift-docc, periphery
 
 ## Configuration Options
 
@@ -363,7 +364,7 @@ config = MetricsGenerationConfig(
 )
 ```
 
-**Solution**: Use a supported language (python, typescript, javascript, go, rust)
+**Solution**: Use a supported language (python, typescript, javascript, go, rust, swift)
 
 ### Invalid Threshold
 
