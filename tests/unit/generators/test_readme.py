@@ -497,27 +497,25 @@ class TestKotlinReadme:
             assert "not generated" in content.lower()
 
     def test_kotlin_readme_only_checkmarks_generated_features(self) -> None:
-        """Kotlin README must not checkmark features it does not generate.
+        """Kotlin README must not ✅ features the scaffold does not generate.
 
-        Kotlin is a foundation-only scaffold (#356): quality tooling is
-        #357 and CI is #358, so the README must not advertise them with a
-        checkmark — the same truthfulness rule the Swift README followed
-        in PR #392 before #352/#353 landed.
+        After #357 the quality toolchain (ktlint, detekt, pre-commit
+        hooks, quality scripts) IS generated and may carry a checkmark;
+        the CI/CD pipeline (#358) remains deferred and must not.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             content = self._readme_content(tmpdir)
 
             # Features that ARE generated may carry a checkmark.
             assert "- ✅" in content
+            wired = ("ktlint", "detekt", "Pre-commit hooks")
+            for feature in wired:
+                assert any(
+                    "✅" in line and feature in line for line in content.splitlines()
+                ), f"README must advertise wired feature: {feature}"
 
             # Unwired features must never be claimed with a ✅ checkmark.
-            unwired = (
-                "ktlint",
-                "detekt",
-                "Pre-commit hooks",
-                "CI/CD pipeline",
-                "Security scanning",
-            )
+            unwired = ("CI/CD pipeline",)
             for feature in unwired:
                 for line in content.splitlines():
                     if feature in line:
@@ -530,11 +528,26 @@ class TestKotlinReadme:
         with tempfile.TemporaryDirectory() as tmpdir:
             content = self._readme_content(tmpdir)
             assert "Planned / coming soon" in content
-            assert "ktlint" in content
             assert "CI/CD pipeline" in content
 
-    def test_kotlin_readme_does_not_instruct_pre_commit_install(self) -> None:
-        """README must not tell users to install non-existent hooks."""
+    def test_kotlin_readme_instructs_pre_commit_install(self) -> None:
+        """README tells users to install the now-generated pre-commit hooks.
+
+        Inverted from the #356 foundation scaffold: #357 wires a Kotlin
+        .pre-commit-config.yaml, so the README must document installing it.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             content = self._readme_content(tmpdir)
-            assert "pre-commit install" not in content
+            assert "pre-commit install" in content
+
+    def test_kotlin_readme_documents_quality_tool_installs(self) -> None:
+        """README documents installing the brew-distributed quality tools."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "brew install ktlint detekt" in content
+
+    def test_kotlin_readme_documents_check_all_gate(self) -> None:
+        """README points at the generated quality-gate entry point."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "./scripts/check-all.sh" in content

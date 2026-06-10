@@ -19,7 +19,9 @@ from start_green_stay_green.utils.kotlin import AGP_VERSION
 from start_green_stay_green.utils.kotlin import COMPOSE_BOM_VERSION
 from start_green_stay_green.utils.kotlin import GRADLE_WRAPPER_VERSION
 from start_green_stay_green.utils.kotlin import JUNIT_VERSION
+from start_green_stay_green.utils.kotlin import KONSIST_VERSION
 from start_green_stay_green.utils.kotlin import KOTLIN_VERSION
+from start_green_stay_green.utils.kotlin import KOVER_VERSION
 from start_green_stay_green.utils.kotlin import WEAR_COMPOSE_VERSION
 from start_green_stay_green.utils.kotlin import android_package
 from start_green_stay_green.utils.swift import package_swift
@@ -69,8 +71,9 @@ class DependenciesGenerator(BaseGenerator):
     All 9 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin) are available at the generator level. Note that the
     full CLI pipeline (``sgsg init``) skips its quality-tooling steps
-    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
-    and kotlin; Kotlin's tooling arrives with #357/#358.
+    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, and
+    ruby; Kotlin's quality tooling landed with #357 and only its CI step
+    (#358) still skips.
 
     Attributes:
         output_dir: Directory where dependency files will be written
@@ -792,8 +795,9 @@ include(":app")
 
         Returns:
             Root build script pinning the Android Gradle Plugin, the
-            Kotlin Android plugin, and the Compose compiler plugin (which
-            must match the Kotlin version) for all modules.
+            Kotlin Android plugin, the Compose compiler plugin (which
+            must match the Kotlin version), and the Kover coverage
+            plugin for all modules.
         """
         return f"""// Root Gradle build: pins plugin versions for all modules.
 // The Compose compiler plugin version must match the Kotlin version.
@@ -801,6 +805,8 @@ plugins {{
     id("com.android.application") version "{AGP_VERSION}" apply false
     id("org.jetbrains.kotlin.android") version "{KOTLIN_VERSION}" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "{KOTLIN_VERSION}" apply false
+    // Kover: Kotlin-native code coverage (run: scripts/test.sh --coverage).
+    id("org.jetbrains.kotlinx.kover") version "{KOVER_VERSION}" apply false
 }}
 """
 
@@ -824,9 +830,12 @@ kotlin.code.style=official
         Returns:
             Android application module configured for Wear OS: minSdk 30
             (Wear OS 3, the Galaxy Watch 4+ baseline), Compose enabled,
-            Jetpack Compose for Wear OS dependencies, and a JUnit
+            Jetpack Compose for Wear OS dependencies, a JUnit
             ``testImplementation`` so ``./gradlew test`` runs the
-            generated unit-test scaffold.
+            generated unit-test scaffold, the Kover coverage gate
+            (>=90% on the debug variant, run by ``scripts/test.sh
+            --coverage``), and the Konsist dependency backing the
+            generated architecture test (#357).
         """
         namespace = android_package(self.config.package_name)
         return f"""// Android application module for the Wear OS app.
@@ -834,6 +843,7 @@ plugins {{
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlinx.kover")
 }}
 
 android {{
@@ -863,6 +873,21 @@ kotlin {{
     jvmToolchain(17)
 }}
 
+// Coverage gate: scripts/test.sh --coverage runs koverVerifyDebug, which
+// fails the build when debug-variant line coverage drops below 90%. This
+// block is the single source of truth for the bound.
+kover {{
+    reports {{
+        variant("debug") {{
+            verify {{
+                rule {{
+                    minBound(90)
+                }}
+            }}
+        }}
+    }}
+}}
+
 dependencies {{
     implementation(platform("androidx.compose:compose-bom:{COMPOSE_BOM_VERSION}"))
     implementation("androidx.activity:activity-compose:{ACTIVITY_COMPOSE_VERSION}")
@@ -873,5 +898,10 @@ dependencies {{
 
     // JUnit scaffold for the unit tests (run: ./gradlew test).
     testImplementation("junit:junit:{JUNIT_VERSION}")
+
+    // Konsist backs the generated architecture test: copy
+    // plans/architecture/ArchitectureTest.kt into app/src/test/kotlin/
+    // and it compiles with no further dependency edits.
+    testImplementation("com.lemonappdev:konsist:{KONSIST_VERSION}")
 }}
 """

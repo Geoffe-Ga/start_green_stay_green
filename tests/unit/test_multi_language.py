@@ -161,7 +161,7 @@ class TestMultiLanguageGeneration:
 
 
 class TestMultiLanguageArchitectureParity:
-    """Test that Go (#341), Rust (#342) and Swift (#352) have parity."""
+    """Go (#341), Rust (#342), Swift (#352), and Kotlin (#357) parity."""
 
     def test_go_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
         """Go must emit an architecture-enforcement config like py/ts."""
@@ -184,8 +184,15 @@ class TestMultiLanguageArchitectureParity:
         config = tmp_path / "plans" / "architecture" / ".swiftlint-architecture.yml"
         assert config.exists(), "Swift init must emit a SwiftLint rules config"
 
+    def test_kotlin_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
+        """Kotlin must emit an architecture-enforcement config like py/ts/go."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "kotlin")
+
+        config = tmp_path / "plans" / "architecture" / "ArchitectureTest.kt"
+        assert config.exists(), "Kotlin init must emit a Konsist test template"
+
     @pytest.mark.parametrize(
-        "language", ["python", "typescript", "go", "rust", "swift"]
+        "language", ["python", "typescript", "go", "rust", "swift", "kotlin"]
     )
     def test_supported_languages_emit_architecture_config(
         self, tmp_path: Path, language: str
@@ -309,16 +316,24 @@ class TestSequentialLanguageDetection:
 class TestGeneratorOnlyLanguagePipelineGates:
     """Pipeline steps skip gracefully for generator-only languages (#356).
 
-    Kotlin (like java/csharp/ruby today) has structure/dependencies/tests/
-    readme generators but no quality-tooling support yet — that lands with
-    #357 (pre-commit, scripts, metrics) and #358 (CI). Instead of crashing
-    init, those steps must no-op with an informational message, exactly as
-    the architecture step already did for unsupported languages.
+    java/csharp/ruby have structure/dependencies/tests/readme generators
+    but no quality-tooling support — instead of crashing init, the tooling
+    steps must no-op with an informational message. Kotlin graduated from
+    this set when #357 wired its pre-commit/scripts/metrics/architecture
+    tooling; only its CI step (#358) still skips.
     """
 
-    def test_precommit_step_skips_kotlin_without_writing(self, tmp_path: Path) -> None:
-        """No .pre-commit-config.yaml is written and no error is raised."""
+    def test_precommit_step_writes_for_kotlin(self, tmp_path: Path) -> None:
+        """Kotlin now generates a pre-commit config (#357)."""
         cli_mod._generate_precommit_step(tmp_path, "my-project", "kotlin")
+
+        config = tmp_path / ".pre-commit-config.yaml"
+        assert config.exists()
+        assert "ktlint" in config.read_text()
+
+    def test_precommit_step_skips_ruby_without_writing(self, tmp_path: Path) -> None:
+        """No .pre-commit-config.yaml is written and no error is raised."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "ruby")
 
         assert not (tmp_path / ".pre-commit-config.yaml").exists()
 
@@ -328,11 +343,19 @@ class TestGeneratorOnlyLanguagePipelineGates:
 
         assert (tmp_path / ".pre-commit-config.yaml").exists()
 
-    def test_scripts_step_skips_kotlin_without_python_fallback(
+    def test_scripts_step_writes_kotlin_scripts(self, tmp_path: Path) -> None:
+        """Kotlin now receives its own quality scripts (#357)."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "kotlin")
+
+        test_script = tmp_path / "scripts" / "test.sh"
+        assert test_script.exists()
+        assert "gradlew" in test_script.read_text()
+
+    def test_scripts_step_skips_ruby_without_python_fallback(
         self, tmp_path: Path
     ) -> None:
-        """Kotlin must not receive the Python-fallback quality scripts."""
-        cli_mod._generate_scripts_step(tmp_path, "my-project", "kotlin")
+        """Ruby must not receive the Python-fallback quality scripts."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "ruby")
 
         assert not (tmp_path / "scripts").exists()
 
@@ -342,14 +365,26 @@ class TestGeneratorOnlyLanguagePipelineGates:
 
         assert not (tmp_path / ".github" / "workflows" / "ci.yml").exists()
 
-    def test_metrics_step_skips_kotlin_without_dashboard(self, tmp_path: Path) -> None:
-        """No metrics dashboard is written for kotlin (metrics is #357)."""
+    def test_metrics_step_writes_kotlin_dashboard(self, tmp_path: Path) -> None:
+        """The metrics dashboard is now generated for kotlin (#357)."""
         cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "kotlin")
+
+        assert (tmp_path / "docs" / "metrics.json").exists()
+
+    def test_metrics_step_skips_ruby_without_dashboard(self, tmp_path: Path) -> None:
+        """No metrics dashboard is written for unsupported languages."""
+        cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "ruby")
 
         assert not (tmp_path / "docs" / "metrics.json").exists()
 
-    def test_architecture_step_skips_kotlin(self, tmp_path: Path) -> None:
-        """No architecture rules are generated for kotlin yet."""
+    def test_architecture_step_writes_kotlin_rules(self, tmp_path: Path) -> None:
+        """Architecture rules are now generated for kotlin (#357)."""
         cli_mod._generate_architecture_step(tmp_path, "my-project", "kotlin")
+
+        assert (tmp_path / "plans" / "architecture" / "ArchitectureTest.kt").exists()
+
+    def test_architecture_step_skips_ruby(self, tmp_path: Path) -> None:
+        """No architecture rules are generated for unsupported languages."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "ruby")
 
         assert not (tmp_path / "plans" / "architecture").exists()

@@ -726,6 +726,177 @@ class TestScriptsGeneratorSwiftGeneration:
             assert "gitleaks" in content
 
 
+class TestScriptsGeneratorKotlinGeneration:
+    """Test Kotlin script generation (#357)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Generate Kotlin scripts into ``tmpdir`` and return the mapping."""
+        config = ScriptConfig(
+            language="kotlin",
+            package_name="my_wear_app",
+        )
+        generator = ScriptsGenerator(Path(tmpdir), config)
+        return generator.generate()
+
+    def test_generate_kotlin_scripts_creates_files(self) -> None:
+        """Test generate creates the full Kotlin script set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            assert "check-all.sh" in scripts
+            assert "format.sh" in scripts
+            assert "lint.sh" in scripts
+            assert "test.sh" in scripts
+            assert "security.sh" in scripts
+
+    def test_kotlin_format_script_uses_ktlint(self) -> None:
+        """Test Kotlin format.sh uses ktlint."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "ktlint" in content
+            assert "ktlint --format" in content
+
+    def test_kotlin_lint_script_uses_detekt_with_companion_config(self) -> None:
+        """Test Kotlin lint.sh runs detekt against the shared detekt.yml."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "detekt" in content
+            assert "--config detekt.yml" in content
+            assert "--build-upon-default-config" in content
+
+    def test_kotlin_test_script_requires_gradle_wrapper(self) -> None:
+        """test.sh fails with instructions when ./gradlew is missing.
+
+        The #356 scaffold deliberately never writes the wrapper jar
+        (binary artifact); the script must say how to create it instead
+        of emitting a bare command-not-found.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "./gradlew" in content
+            assert "gradle wrapper" in content
+
+    def test_kotlin_test_script_enforces_coverage_via_kover(self) -> None:
+        """Coverage mode runs the Kover verify task gating at 90%.
+
+        The 90% bound itself lives in app/build.gradle.kts (kover block);
+        the script must invoke the verify task and document where the
+        bound is configured rather than duplicating the number in shell.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "koverVerifyDebug" in content
+            assert "koverXmlReportDebug" in content
+            assert "app/build.gradle.kts" in content
+
+    def test_kotlin_security_script_uses_dependency_check(self) -> None:
+        """Test Kotlin security.sh runs OWASP dependency-check."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "dependency-check" in content
+
+    def test_kotlin_security_script_warns_and_skips_when_tool_missing(self) -> None:
+        """security.sh degrades to a warning when dependency-check is absent.
+
+        Mirrors the Swift Periphery precedent: a fresh clone must pass
+        check-all.sh out of the box, with a documented tighten-me path.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "command -v dependency-check" in content
+            assert "brew install dependency-check" in content
+            assert "Tighten" in content
+
+    def test_kotlin_check_all_runs_full_toolchain(self) -> None:
+        """check-all.sh runs format, lint, tests (with coverage), security."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["check-all.sh"].read_text()
+            assert 'run_check "Format" "format.sh"' in content
+            assert 'run_check "Linting" "lint.sh"' in content
+            assert 'run_check "Tests" "test.sh" --coverage' in content
+            assert 'run_check "Security" "security.sh"' in content
+
+    def test_kotlin_writes_detekt_config_companion(self) -> None:
+        """A detekt.yml companion lands at the project root."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            config_path = Path(tmpdir) / "detekt.yml"
+            assert config_path.exists()
+
+    def test_detekt_config_is_parseable_yaml(self) -> None:
+        """detekt.yml must be syntactically valid YAML."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / "detekt.yml").read_text()
+            parsed = yaml.safe_load(content)
+            assert isinstance(parsed, dict)
+
+    def test_detekt_config_caps_cyclomatic_complexity_at_10(self) -> None:
+        """detekt.yml enforces the project-wide <=10 complexity ceiling.
+
+        detekt 1.23.x reports methods whose McCabe complexity is >= the
+        configured threshold, so a threshold of 11 reports 11+ and
+        enforces <=10 — the same gate radon/eslint/gocyclo/clippy/
+        SwiftLint apply for the other languages.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / "detekt.yml").read_text()
+            parsed = yaml.safe_load(content)
+            rule = parsed["complexity"]["CyclomaticComplexMethod"]
+            assert rule["active"] is True
+            assert rule["threshold"] == 11
+
+    def test_detekt_config_activates_potential_bugs(self) -> None:
+        """detekt.yml keeps the potential-bugs ruleset active."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / "detekt.yml").read_text()
+            parsed = yaml.safe_load(content)
+            assert parsed["potential-bugs"]["active"] is True
+
+    def test_detekt_config_preserves_existing_file(self) -> None:
+        """An existing user detekt.yml is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / "detekt.yml"
+            existing.write_text("complexity:\n  active: false\n")
+
+            self._generate(tmpdir)
+
+            assert existing.read_text() == "complexity:\n  active: false\n"
+
+    def test_detekt_config_documents_security_gap(self) -> None:
+        """detekt.yml discloses that secret scanning lives in pre-commit.
+
+        detekt has no dedicated security ruleset; the config must say
+        where secret scanning actually happens instead of overclaiming.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / "detekt.yml").read_text()
+            assert "gitleaks" in content
+
+
 class TestScriptsGeneratorLanguageFallback:
     """Test language fallback behavior."""
 
@@ -988,6 +1159,20 @@ class TestMutationKillers:
             # Should generate Swift scripts with SwiftLint
             content = scripts["lint.sh"].read_text()
             assert "swiftlint" in content
+
+    def test_kotlin_language_dispatches_to_kotlin_generator(self) -> None:
+        """Test 'kotlin' language dispatches to Kotlin generator."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="kotlin",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            # Should generate Kotlin scripts with detekt
+            content = scripts["lint.sh"].read_text()
+            assert "detekt" in content
 
     def test_generated_scripts_exact_count_python(self) -> None:
         """Test Python generator creates EXACTLY 12 scripts.

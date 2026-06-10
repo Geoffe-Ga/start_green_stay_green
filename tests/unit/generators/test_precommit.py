@@ -525,6 +525,142 @@ class TestGenerateWithSwift:
         assert any("shellcheck-py" in url for url in repo_urls)
 
 
+class TestGenerateWithKotlin:
+    """Test content generation for Kotlin projects (#357)."""
+
+    @staticmethod
+    def _parsed_repos(generator: PreCommitGenerator) -> list[dict[str, Any]]:
+        """Generate the Kotlin config and return its parsed repos list."""
+        config = GenerationConfig(
+            project_name="kotlin-project",
+            language="kotlin",
+            language_config={},
+        )
+        result = generator.generate(config)
+        yaml_content = "\n".join(
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        )
+        parsed = yaml.safe_load(yaml_content)
+        return list(parsed["repos"])
+
+    def test_generate_kotlin_returns_dict(self, mock_orchestrator: Mock) -> None:
+        """Test generate returns dict for Kotlin."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        config = GenerationConfig(
+            project_name="kotlin-project",
+            language="kotlin",
+            language_config={},
+        )
+        result = generator.generate(config)
+        assert isinstance(result, dict)
+        assert result["content"]
+
+    def test_generate_kotlin_content_is_valid_yaml(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Generated Kotlin pre-commit config must be parseable YAML."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        assert isinstance(repos, list)
+        assert repos
+
+    def test_generate_kotlin_includes_ktlint(self, mock_orchestrator: Mock) -> None:
+        """Test generated Kotlin config includes a ktlint hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(
+            (repo for repo in repos if repo.get("repo") == "local"),
+            None,
+        )
+        assert local_repo is not None
+        hook_ids = [hook.get("id", "") for hook in local_repo.get("hooks", [])]
+        assert "ktlint" in hook_ids
+
+    def test_generate_kotlin_includes_detekt(self, mock_orchestrator: Mock) -> None:
+        """Test generated Kotlin config includes a detekt hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(
+            (repo for repo in repos if repo.get("repo") == "local"),
+            None,
+        )
+        assert local_repo is not None
+        hook_ids = [hook.get("id", "") for hook in local_repo.get("hooks", [])]
+        assert "detekt" in hook_ids
+
+    def test_kotlin_ktlint_hook_formats_in_place(self, mock_orchestrator: Mock) -> None:
+        """The ktlint hook runs --format so fixable violations are fixed."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        ktlint = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "ktlint"
+        )
+        assert "--format" in ktlint["entry"]
+
+    def test_kotlin_detekt_hook_shares_companion_config(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """The detekt hook reads the same detekt.yml that lint.sh uses.
+
+        The companion config (complexity <=10 gate, potential-bugs rules)
+        is written by the scripts generator; the hook must build upon the
+        default config so only the overrides live in detekt.yml.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        detekt = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "detekt"
+        )
+        assert "--config detekt.yml" in detekt["entry"]
+        assert "--build-upon-default-config" in detekt["entry"]
+
+    def test_kotlin_local_hooks_use_system_language(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Local Kotlin hooks invoke system binaries (brew-installed CLIs).
+
+        Neither pinterest/ktlint nor detekt/detekt ships an official
+        .pre-commit-hooks.yaml manifest, so the hooks must probe the
+        brew-installed binaries instead of a remote hook repo.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        for hook in local_repo["hooks"]:
+            assert hook["language"] == "system", f"{hook['id']} not language: system"
+            assert hook["types"] == ["kotlin"], f"{hook['id']} missing kotlin types"
+
+    def test_generate_kotlin_includes_gitleaks(self, mock_orchestrator: Mock) -> None:
+        """Test generated Kotlin config includes the gitleaks secrets hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        gitleaks_repo = next(
+            (repo for repo in repos if "gitleaks/gitleaks" in repo.get("repo", "")),
+            None,
+        )
+        assert gitleaks_repo is not None
+        hook_ids = [hook.get("id", "") for hook in gitleaks_repo.get("hooks", [])]
+        assert "gitleaks" in hook_ids
+
+    def test_generate_kotlin_includes_detect_secrets(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Kotlin keeps the detect-secrets hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("Yelp/detect-secrets" in url for url in repo_urls)
+
+    def test_generate_kotlin_includes_shellcheck(self, mock_orchestrator: Mock) -> None:
+        """Kotlin keeps the shellcheck hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("shellcheck-py" in url for url in repo_urls)
+
+
 class TestValidateLanguage:
     """Test language validation functionality."""
 
@@ -553,6 +689,13 @@ class TestValidateLanguage:
         """Test validate_language returns True for Swift."""
         generator = PreCommitGenerator(mock_orchestrator)
         assert generator.validate_language("swift")
+
+    def test_validate_language_kotlin_returns_true(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test validate_language returns True for Kotlin."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        assert generator.validate_language("kotlin")
 
     def test_validate_language_rust_returns_true(self, mock_orchestrator: Mock) -> None:
         """Test validate_language returns True for Rust."""
@@ -629,11 +772,19 @@ class TestGetSupportedLanguages:
         result = generator.get_supported_languages()
         assert "swift" in result
 
+    def test_get_supported_languages_includes_kotlin(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_supported_languages includes kotlin."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_supported_languages()
+        assert "kotlin" in result
+
     def test_get_supported_languages_exact_count(self, mock_orchestrator: Mock) -> None:
         """Test get_supported_languages returns expected count."""
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_supported_languages()
-        assert len(result) == 5
+        assert len(result) == 6
 
     def test_get_supported_languages_no_duplicates(
         self, mock_orchestrator: Mock
@@ -689,6 +840,14 @@ class TestGetLanguageHooks:
         """Test get_language_hooks returns list for swift."""
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_language_hooks("swift")
+        assert isinstance(result, list)
+
+    def test_get_language_hooks_kotlin_returns_list(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_language_hooks returns list for kotlin."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_language_hooks("kotlin")
         assert isinstance(result, list)
 
     def test_get_language_hooks_unsupported_raises_error(
@@ -761,6 +920,18 @@ class TestCountHooksForLanguage:
         """
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.count_hooks_for_language("swift")
+        assert result == 17
+
+    def test_count_hooks_kotlin_counts_every_hook(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test count_hooks_for_language sums all Kotlin hooks exactly.
+
+        12 shared pre-commit-hooks + ktlint + detekt + gitleaks
+        + shellcheck + detect-secrets = 17.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.count_hooks_for_language("kotlin")
         assert result == 17
 
     def test_count_hooks_unsupported_raises_error(
@@ -854,6 +1025,10 @@ class TestLanguageConfigsStructure:
     def test_language_configs_has_swift(self) -> None:
         """Test LANGUAGE_CONFIGS has swift entry."""
         assert "swift" in LANGUAGE_CONFIGS
+
+    def test_language_configs_has_kotlin(self) -> None:
+        """Test LANGUAGE_CONFIGS has kotlin entry."""
+        assert "kotlin" in LANGUAGE_CONFIGS
 
     def test_each_language_has_hooks_key(self) -> None:
         """Test each language config has hooks key."""
@@ -1876,6 +2051,10 @@ class TestLanguageConfigsStructureValidation:
     def test_swift_repos_exact_count(self) -> None:
         """Test Swift has exactly 5 repository configurations."""
         assert len(LANGUAGE_CONFIGS["swift"]["hooks"]) == 5
+
+    def test_kotlin_repos_exact_count(self) -> None:
+        """Test Kotlin has exactly 5 repository configurations."""
+        assert len(LANGUAGE_CONFIGS["kotlin"]["hooks"]) == 5
 
     def test_every_hook_has_id_key(self) -> None:
         """Test every individual hook has an 'id' key."""

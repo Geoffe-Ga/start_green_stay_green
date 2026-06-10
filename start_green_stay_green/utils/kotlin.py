@@ -27,6 +27,11 @@ WEAR_COMPOSE_VERSION = "1.4.0"
 ACTIVITY_COMPOSE_VERSION = "1.9.3"
 JUNIT_VERSION = "4.13.2"
 GRADLE_WRAPPER_VERSION = "8.9"
+# Quality-tooling versions (#357). Kover is the Kotlin-native coverage
+# plugin (JetBrains); Konsist powers the generated architecture test
+# (plans/architecture/ArchitectureTest.kt).
+KOVER_VERSION = "0.9.8"
+KONSIST_VERSION = "0.17.3"
 
 # Characters invalid in a lowercase Java/Kotlin package segment.
 _INVALID_SEGMENT_CHARS = re.compile(r"[^a-z0-9_]")

@@ -710,6 +710,222 @@ class TestArchitectureEnforcementGeneratorSwift:
         assert result.language == "swift"
 
 
+class TestArchitectureEnforcementGeneratorKotlin:
+    """Test Kotlin-specific architecture rules (#357)."""
+
+    @staticmethod
+    def _generate(tmp_path: Path, project_name: str = "my-app") -> Path:
+        """Generate the Kotlin architecture config and return its directory."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+        generator.generate(language="kotlin", project_name=project_name)
+        return output_dir
+
+    def test_generate_kotlin_creates_konsist_test(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test generating the Konsist architecture test for Kotlin."""
+        output_dir = self._generate(tmp_path)
+
+        # Should create the Konsist test template
+        config_file = output_dir / "ArchitectureTest.kt"
+        assert config_file.exists()
+
+        # Should create README and run script
+        assert (output_dir / "README.md").exists()
+        assert (output_dir / "run-check.sh").exists()
+
+    def test_kotlin_config_is_structurally_valid_kotlin(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """ArchitectureTest.kt must be structurally valid Kotlin source.
+
+        There is no Kotlin parser in the test environment, so validity is
+        checked structurally: balanced braces/parentheses, a package
+        declaration first, imports before the class, and no unrendered
+        template placeholders.
+        """
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.kt").read_text()
+        code_lines = [
+            line
+            for line in source.splitlines()
+            if line.strip() and not line.lstrip().startswith("//")
+        ]
+        code = "\n".join(code_lines)
+
+        assert code.count("{") == code.count("}")
+        assert code.count("(") == code.count(")")
+        # The first statement must be the package declaration, followed by
+        # the imports, then the class.
+        assert code_lines[0].startswith("package ")
+        import_lines = [line for line in code_lines if line.startswith("import ")]
+        assert import_lines
+        assert code.index("package ") < code.index("import ")
+        assert code.index("import ") < code.index("class ArchitectureTest")
+        assert "class ArchitectureTest" in code
+        assert "@Test" in code
+        # No unrendered Python format placeholders may survive.
+        assert "{namespace}" not in source
+
+    def test_kotlin_config_uses_konsist_api(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The test drives Konsist's architecture-assertion API."""
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.kt").read_text()
+        assert "import com.lemonappdev.konsist.api.Konsist" in source
+        assert (
+            "import com.lemonappdev.konsist.api.architecture."
+            "KoArchitectureCreator.assertArchitecture" in source
+        )
+        assert "import com.lemonappdev.konsist.api.architecture.Layer" in source
+        assert "Konsist" in source
+        assert ".scopeFromProject()" in source
+        assert ".assertArchitecture" in source
+
+    def test_kotlin_config_enforces_layer_separation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test Kotlin config defines all four layers with inward deps."""
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.kt").read_text()
+        for layer in ("Domain", "Application", "Presentation", "Infrastructure"):
+            assert f'Layer("{layer}"' in source
+        assert "domain.dependsOnNothing()" in source
+        assert "application.dependsOn(domain)" in source
+        assert "presentation.dependsOn(application)" in source
+        assert "presentation.dependsOn(domain)" in source
+        assert "infrastructure.dependsOn(domain)" in source
+
+    def test_kotlin_config_derives_layer_packages_from_project_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Layer packages come from the shared Android namespace helper.
+
+        A hyphenated project name must produce the sanitized namespace
+        (my-app -> com.example.my_app), keeping the architecture test in
+        sync with the scaffolded sources.
+        """
+        output_dir = self._generate(tmp_path, project_name="my-app")
+
+        source = (output_dir / "ArchitectureTest.kt").read_text()
+        assert '"com.example.my_app.domain.."' in source
+        assert '"com.example.my_app.presentation.."' in source
+
+    def test_kotlin_config_documents_static_analysis_limits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The test documents what Konsist cannot enforce.
+
+        Konsist analyzes Kotlin source declarations statically; the
+        generated test must disclose that limit (mirroring the Rust
+        deny.toml and Swift regex-rule gap notes) rather than imply
+        complete enforcement.
+        """
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.kt").read_text()
+        assert "not a resolved dependency graph" in source
+        assert "reflection" in source
+
+    def test_kotlin_config_documents_wiring_requirement(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The test discloses it only enforces once wired into a source set."""
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.kt").read_text()
+        assert "app/src/test/kotlin" in source
+
+    def test_kotlin_config_documents_non_strict_default(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The warn-first non-strict default carries a tighten-me note."""
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.kt").read_text()
+        assert "strict = true" in source
+
+    def test_kotlin_config_cycle_comment_is_accurate(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Cycle prevention is attributed to Gradle, not to Konsist.
+
+        Gradle itself rejects circular project dependencies at build
+        time; the generated test must say so rather than overclaiming
+        what Konsist does.
+        """
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.kt").read_text()
+        assert "Gradle itself rejects circular" in source
+
+    def test_kotlin_readme_mentions_konsist(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Kotlin README references the Konsist tooling."""
+        output_dir = self._generate(tmp_path)
+
+        readme = (output_dir / "README.md").read_text()
+        assert "Konsist" in readme
+
+    def test_kotlin_run_script_probes_gradle_wrapper(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Kotlin run-check.sh probes the Gradle wrapper."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "command -v ./gradlew" in script
+
+    def test_kotlin_run_script_runs_architecture_test(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Kotlin run-check.sh runs the Konsist test via Gradle."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert '--tests "*ArchitectureTest"' in script
+
+    def test_kotlin_run_script_uses_display_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Kotlin run-check.sh announces the 'Kotlin' display name."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "Checking Kotlin architecture" in script
+
+    def test_kotlin_result_reports_kotlin_language(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the result object records the Kotlin language."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        result = generator.generate(language="kotlin", project_name="my-app")
+
+        assert result.language == "kotlin"
+
+
 class TestArchitectureEnforcementGeneratorTypeScript:
     """Test TypeScript-specific architecture rules."""
 
@@ -757,6 +973,7 @@ class TestLanguageTooling:
             ("go", "Go"),
             ("rust", "Rust"),
             ("swift", "Swift"),
+            ("kotlin", "Kotlin"),
         ],
     )
     def test_each_tooling_carries_a_display_name(
@@ -776,6 +993,19 @@ class TestLanguageTooling:
         filled = tooling.run_cmd.format(config_file=tooling.config_file)
         assert tooling.config_file in filled
         assert "{config_file}" not in filled
+
+    def test_kotlin_install_cmd_carries_the_config_path(self) -> None:
+        """Kotlin references its config via install_cmd, not run_cmd.
+
+        Konsist's 'config' is a JUnit test compiled into the project, so
+        the Gradle run command takes no config-file flag. The wiring step
+        (copying the template into the test source set) lives in
+        install_cmd instead, which is what run-check.sh and the README
+        surface to users.
+        """
+        tooling = _LANGUAGE_TOOLING["kotlin"]
+        assert "{config_file}" not in tooling.run_cmd
+        assert f"plans/architecture/{tooling.config_file}" in tooling.install_cmd
 
     def test_build_run_script_uses_display_name_not_a_dict(self) -> None:
         """_build_run_script reads display_name from the dataclass."""

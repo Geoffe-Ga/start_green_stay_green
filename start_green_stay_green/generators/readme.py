@@ -63,8 +63,9 @@ class ReadmeGenerator(BaseGenerator):
     All 9 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin) are available at the generator level. Note that the
     full CLI pipeline (``sgsg init``) skips its quality-tooling steps
-    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
-    and kotlin; Kotlin's tooling arrives with #357/#358.
+    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, and
+    ruby; Kotlin's quality tooling landed with #357 and only its CI step
+    (#358) still skips.
 
     Attributes:
         output_dir: Directory where README.md will be created
@@ -1393,10 +1394,12 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
     def _kotlin_readme_content(self) -> str:
         """Generate Kotlin README.md content.
 
-        Mirrors the truthful present/planned split the Swift foundation
-        README used in PR #392: only the artifacts the #356 scaffold
-        actually generates carry a checkmark; quality tooling (#357) and
-        CI (#358) are disclosed as planned.
+        Mirrors the truthful present/planned split the Swift README uses:
+        only artifacts the scaffold actually generates carry a checkmark.
+        The #357 quality toolchain (ktlint/detekt, pre-commit hooks,
+        quality scripts, Kover coverage gate, Konsist architecture test)
+        is generated and advertised; the CI pipeline (#358) remains
+        disclosed as planned.
 
         Returns:
             Content for README.md
@@ -1413,8 +1416,8 @@ Start Green Stay Green.
 
 ## Description
 
-This Kotlin scaffold is the foundation of a quality-controlled Wear OS
-(Galaxy Watch 4+ / Wear OS 3) project. The following are generated today:
+This Kotlin scaffold is a quality-controlled Wear OS (Galaxy Watch 4+ /
+Wear OS 3) project. The following are generated today:
 
 - ✅ Wear OS app target built with Jetpack Compose for Wear OS
   (androidx.wear.compose)
@@ -1423,6 +1426,11 @@ This Kotlin scaffold is the foundation of a quality-controlled Wear OS
 - ✅ AndroidManifest.xml with the `wear` device profile (watch hardware
   feature + standalone app metadata)
 - ✅ JUnit unit-test scaffold (app/src/test)
+- ✅ Code quality tools (ktlint + detekt, configured in detekt.yml)
+- ✅ Pre-commit hooks (format, static analysis, secret scanning via gitleaks)
+- ✅ Quality scripts (./scripts/check-all.sh with a 90%+ Kover coverage gate)
+- ✅ Security scanning (OWASP dependency-check via ./scripts/security.sh)
+- ✅ Architecture enforcement (Konsist test, plans/architecture/)
 - ✅ This README
 
 ### Planned / coming soon
@@ -1431,11 +1439,7 @@ These quality features are part of the Start Green Stay Green roadmap for
 Kotlin but are **not yet generated** by this scaffold — do not assume they
 are configured:
 
-- Code quality tools (ktlint, detekt)
-- Security scanning
-- Pre-commit hooks (quality checks)
 - CI/CD pipeline (GitHub Actions)
-- Enforced 90%+ test coverage gate
 
 ## Installation
 
@@ -1448,6 +1452,12 @@ cd {self.config.project_name}
 # artifacts are never scaffolded. Create it once with a local Gradle
 # install:
 gradle wrapper
+
+# Install the quality toolchain (Homebrew)
+brew install ktlint detekt
+
+# Install the pre-commit hooks
+pre-commit install
 ```
 
 ## Usage
@@ -1476,11 +1486,13 @@ Hello from {self.config.project_name}!
 
 # Run the JVM unit tests
 ./gradlew test
+
+# Run every quality gate (format, lint, tests + coverage, security)
+./scripts/check-all.sh
 ```
 
-> **Note:** Linting (ktlint/detekt), security scanning, pre-commit hooks,
-> and CI are on the roadmap but not yet configured by this scaffold. See
-> *Planned / coming soon* above.
+> **Note:** A CI pipeline (GitHub Actions) is on the roadmap but not yet
+> configured by this scaffold. See *Planned / coming soon* above.
 
 ### Quality Tools
 
@@ -1488,6 +1500,12 @@ This scaffold currently includes:
 
 - **JUnit**: JVM unit-test scaffold (no emulator required)
 - **Gradle (Kotlin DSL)**: Dependency management and build tooling
+- **ktlint**: Formatting and code-style linting (./scripts/format.sh)
+- **detekt**: Static analysis with cyclomatic complexity ≤10 (detekt.yml)
+- **Kover**: Coverage gate ≥90% on the debug variant (app/build.gradle.kts)
+- **OWASP dependency-check**: Dependency CVE scan (./scripts/security.sh)
+- **Pre-commit hooks**: ktlint, detekt, gitleaks, detect-secrets
+- **Architecture rules**: Konsist test (plans/architecture/)
 
 ### Project Structure
 
@@ -1520,14 +1538,18 @@ This scaffold currently includes:
 
 ### Code Quality
 
-This scaffold is the foundation for a MAXIMUM QUALITY Kotlin project.
-Today it provides:
+This scaffold is a MAXIMUM QUALITY Kotlin project. Today it provides:
 
 - **Type Safety**: 100% compile-time type checking (inherent to Kotlin)
 - **JUnit test scaffold**: ready for you to add tests
+- **Coverage gate**: ./scripts/test.sh --coverage enforces ≥90% line
+  coverage via Kover (koverVerifyDebug)
+- **Complexity gate**: detekt errors on cyclomatic complexity >10
+- **Formatting & static analysis**: ktlint and detekt, locally and in
+  pre-commit
 
-Enforced coverage gates, linting, formatting, and CI are planned (see
-*Planned / coming soon* above) and are not yet wired into this scaffold.
+A CI pipeline is planned (see *Planned / coming soon* above) and is not
+yet wired into this scaffold.
 
 ## License
 
