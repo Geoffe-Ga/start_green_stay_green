@@ -15,8 +15,11 @@ import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+import collect_metrics
 from collect_metrics import MetricsCollector
 from collect_metrics import main as collect_main
+
+from start_green_stay_green.generators.metrics import count_precommit_hooks
 
 
 class TestMetricsCollector:
@@ -837,6 +840,34 @@ class TestCollectPrecommitStatus:
             collector.collect_precommit_status(config_path)
 
             assert collector.metrics["precommit_status"]["total_hooks"] == 0
+
+    def test_uses_canonical_package_hook_counter(self) -> None:
+        """collect_metrics imports the canonical hook counter (no duplication).
+
+        Issue #154 DRY consolidation: the hook-counting helpers must live only
+        in ``start_green_stay_green.generators.metrics``. ``collect_metrics``
+        must import and reuse that canonical ``count_precommit_hooks`` rather
+        than redefining its own ``_load_precommit_repos`` / ``_repo_hook_count``
+        / ``_count_precommit_hooks`` copies.
+        """
+        # The duplicated private helpers must be gone from the script module.
+        assert not hasattr(collect_metrics, "_load_precommit_repos")
+        assert not hasattr(collect_metrics, "_repo_hook_count")
+        assert not hasattr(collect_metrics, "_count_precommit_hooks")
+        # The script re-exports the canonical helper (same object), so
+        # collected status matches the canonical count for the same config.
+        assert collect_metrics.__dict__["count_precommit_hooks"] is (
+            count_precommit_hooks
+        )
+        with TemporaryDirectory() as tmpdir:
+            config_path = self._write_config(Path(tmpdir), 7)
+            collector = MetricsCollector("test", {})
+
+            collector.collect_precommit_status(config_path)
+
+            assert collector.metrics["precommit_status"]["total_hooks"] == (
+                count_precommit_hooks(config_path)
+            )
 
 
 class TestMainScriptMode:

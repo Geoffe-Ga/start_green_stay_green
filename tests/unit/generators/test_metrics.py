@@ -17,6 +17,7 @@ from start_green_stay_green.generators.metrics import MetricConfig
 from start_green_stay_green.generators.metrics import MetricsGenerationConfig
 from start_green_stay_green.generators.metrics import MetricsGenerator
 from start_green_stay_green.generators.metrics import STANDARD_METRICS
+from start_green_stay_green.generators.metrics import count_precommit_hooks
 
 
 class TestMetricConfig:
@@ -1057,6 +1058,33 @@ class TestPrecommitStatusCard:
             )
 
             assert MetricsGenerator.count_precommit_hooks(config_path) == 2
+
+    def test_module_level_count_precommit_hooks_is_canonical(self) -> None:
+        """The public module-level helper counts hooks and the staticmethod delegates.
+
+        ``count_precommit_hooks`` is the single canonical implementation
+        (Issue #154 DRY consolidation); ``scripts/collect_metrics.py`` imports
+        it instead of duplicating the logic. The generator staticmethod must
+        return the same result for the same config.
+        """
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / ".pre-commit-config.yaml"
+            config_path.write_text(
+                yaml.dump(
+                    {
+                        "repos": [
+                            {"repo": "a", "hooks": [{"id": "x"}, {"id": "y"}]},
+                            {"repo": "b", "hooks": [{"id": "z"}]},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            assert count_precommit_hooks(config_path) == 3
+            assert count_precommit_hooks(config_path) == (
+                MetricsGenerator.count_precommit_hooks(config_path)
+            )
 
     def test_precommit_card_is_first_card(self) -> None:
         """Pre-Commit Status card renders before the Code Coverage card."""

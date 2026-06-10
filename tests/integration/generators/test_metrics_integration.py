@@ -620,3 +620,29 @@ class TestDashboardSync:
                 f"docs/dashboard.html JS missing handler for {key}. "
                 "Run: python scripts/regenerate_dashboard.py"
             )
+
+    def test_deployed_no_data_cards_render_gray_not_red(self) -> None:
+        """Fresh dashboards must show the eight existing cards' no-data state gray.
+
+        Regression guard for Issue #154: a brand-new project has no
+        ``metrics.json`` values, so the eight pre-existing cards fall into
+        their ``null`` branch and call ``updateStatus(name, 'N/A', false)``.
+        ``updateStatus`` must map the ``'N/A'`` text to the gray
+        ``status-unknown`` state (not red ``status-fail``) so a fresh project
+        does not surface alarming red "no data" badges. This asserts the
+        deployed ``docs/dashboard.html`` keeps the gray no-data behavior.
+        """
+        deployed = self._get_deployed()
+
+        assert ".status-unknown {" in deployed, (
+            "docs/dashboard.html dropped the gray status-unknown CSS state. "
+            "Fresh no-data cards would render red instead of gray."
+        )
+        assert "if (text === 'N/A') {" in deployed, (
+            "docs/dashboard.html updateStatus no longer maps 'N/A' text to "
+            "the gray status-unknown state; fresh no-data cards render red."
+        )
+        assert "statusClass = 'status-unknown';" in deployed, (
+            "docs/dashboard.html updateStatus no longer assigns "
+            "status-unknown for the no-data ('N/A') case."
+        )

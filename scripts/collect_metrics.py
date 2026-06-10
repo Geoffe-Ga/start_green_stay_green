@@ -25,7 +25,7 @@ import sys
 from typing import Any
 from typing import TYPE_CHECKING
 
-import yaml
+from start_green_stay_green.generators.metrics import count_precommit_hooks
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -191,7 +191,7 @@ class MetricsCollector:
         Args:
             config_path: Path to the ``.pre-commit-config.yaml`` file.
         """
-        total = _count_precommit_hooks(config_path)
+        total = count_precommit_hooks(config_path)
         has_hooks = total > 0
         self.metrics["precommit_status"] = {
             "total_hooks": total,
@@ -418,56 +418,6 @@ class MetricsCollector:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.write_text(json.dumps(metrics_data, indent=2))
         print(f"✓ Generated {output_file}")
-
-
-def _load_precommit_repos(config_path: Path) -> list[object]:
-    """Load the ``repos`` list from a pre-commit config, degrading to ``[]``.
-
-    Args:
-        config_path: Path to a ``.pre-commit-config.yaml`` file.
-
-    Returns:
-        The ``repos`` list, or an empty list when the file is absent,
-        unreadable, or malformed.
-    """
-    if not config_path.is_file():
-        return []
-
-    try:
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
-        return []
-
-    repos = data.get("repos") if isinstance(data, dict) else None
-    return repos if isinstance(repos, list) else []
-
-
-def _repo_hook_count(repo: object) -> int:
-    """Return the number of hooks declared by a single pre-commit repo entry.
-
-    Args:
-        repo: A single entry from the pre-commit ``repos`` list.
-
-    Returns:
-        Hook count for the entry, or ``0`` when it is malformed.
-    """
-    if not isinstance(repo, dict):
-        return 0
-    hooks = repo.get("hooks")
-    return len(hooks) if isinstance(hooks, list) else 0
-
-
-def _count_precommit_hooks(config_path: Path) -> int:
-    """Count total hooks across all repos in a pre-commit config.
-
-    Args:
-        config_path: Path to a ``.pre-commit-config.yaml`` file.
-
-    Returns:
-        Total hook count, or ``0`` when absent, empty, or malformed.
-    """
-    repos = _load_precommit_repos(config_path)
-    return sum(_repo_hook_count(repo) for repo in repos)
 
 
 def _default_thresholds() -> dict[str, int | float]:

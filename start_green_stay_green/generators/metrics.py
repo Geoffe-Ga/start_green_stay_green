@@ -91,6 +91,25 @@ def _repo_hook_count(repo: object) -> int:
     return len(hooks) if isinstance(hooks, list) else 0
 
 
+def count_precommit_hooks(config_path: Path) -> int:
+    """Count the total number of hooks in a pre-commit config file.
+
+    Canonical, public hook-counting helper. Sums the ``hooks`` entries
+    across every ``repos`` entry in a ``.pre-commit-config.yaml``. Missing,
+    empty, or malformed configs degrade gracefully to ``0`` so callers (the
+    dashboard generator and ``scripts/collect_metrics.py``) can still render
+    a meaningful Pre-Commit Status card without duplicating this logic.
+
+    Args:
+        config_path: Path to a ``.pre-commit-config.yaml`` file.
+
+    Returns:
+        Total hook count, or ``0`` when the file is absent or has no hooks.
+    """
+    repos = _load_precommit_repos(config_path)
+    return sum(_repo_hook_count(repo) for repo in repos)
+
+
 @dataclass(frozen=True)
 class MetricConfig:
     """Configuration for a single quality metric.
@@ -471,10 +490,9 @@ class MetricsGenerator(BaseGenerator):
     def count_precommit_hooks(config_path: Path) -> int:
         """Count the total number of hooks in a pre-commit config file.
 
-        Sums the ``hooks`` entries across every ``repos`` entry in a
-        ``.pre-commit-config.yaml``. Missing, empty, or malformed configs
-        degrade gracefully to ``0`` so the dashboard can still render a
-        meaningful Pre-Commit Status card.
+        Thin wrapper around the canonical module-level
+        :func:`count_precommit_hooks`, retained for callers that reach the
+        helper through the generator class. See that function for behavior.
 
         Args:
             config_path: Path to a ``.pre-commit-config.yaml`` file.
@@ -483,8 +501,7 @@ class MetricsGenerator(BaseGenerator):
             Total hook count, or ``0`` when the file is absent or has no
             hooks.
         """
-        repos = _load_precommit_repos(config_path)
-        return sum(_repo_hook_count(repo) for repo in repos)
+        return count_precommit_hooks(config_path)
 
     def _get_tool_for_language(self, metric_type: str) -> str:
         """Get appropriate tool for language and metric type.
