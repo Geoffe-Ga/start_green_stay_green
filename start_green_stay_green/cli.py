@@ -1275,6 +1275,28 @@ def _generate_subagents_step(
     console.print("[green]✓[/green] Generated subagents")
 
 
+def _initial_precommit_status(total_hooks: int) -> dict[str, object]:
+    """Build the baseline Pre-Commit Status entry for a fresh metrics.json.
+
+    Configured hooks are treated as passing for the initial snapshot;
+    a zero count (no config found) yields an ``unknown`` status so the
+    dashboard can show a meaningful placeholder.
+
+    Args:
+        total_hooks: Number of hooks counted from ``.pre-commit-config.yaml``.
+
+    Returns:
+        A ``precommit_status`` mapping with total/passing/percentage/status.
+    """
+    has_hooks = total_hooks > 0
+    return {
+        "total_hooks": total_hooks,
+        "passing_hooks": total_hooks,
+        "percentage": 100.0 if has_hooks else 0.0,
+        "status": "passing" if has_hooks else "unknown",
+    }
+
+
 def _generate_metrics_dashboard_step(
     project_path: Path,
     project_name: str,
@@ -1282,6 +1304,9 @@ def _generate_metrics_dashboard_step(
 ) -> None:
     """Generate live metrics dashboard and workflow."""
     with step_timer("metrics"), console.status("Generating metrics dashboard..."):
+        precommit_hooks_total = MetricsGenerator.count_precommit_hooks(
+            project_path / ".pre-commit-config.yaml"
+        )
         config = MetricsGenerationConfig(
             language=language,
             project_name=project_name,
@@ -1290,6 +1315,7 @@ def _generate_metrics_dashboard_step(
             mutation_threshold=80,
             complexity_threshold=10,
             doc_coverage_threshold=95,
+            precommit_hooks_total=precommit_hooks_total,
             enable_dashboard=True,
             enable_badges=True,
         )
@@ -1313,6 +1339,7 @@ def _generate_metrics_dashboard_step(
                 "security_issues": 0,
             },
             "metrics": {
+                "precommit_status": _initial_precommit_status(precommit_hooks_total),
                 "coverage": 0.0,
                 "coverage_status": "fail",
                 "branch_coverage": 0.0,

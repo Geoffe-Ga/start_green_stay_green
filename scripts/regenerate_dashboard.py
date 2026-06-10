@@ -36,9 +36,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    precommit_hooks_total = MetricsGenerator.count_precommit_hooks(
+        Path(".pre-commit-config.yaml")
+    )
     config = MetricsGenerationConfig(
         language="python",
         project_name=args.project_name,
+        precommit_hooks_total=precommit_hooks_total,
     )
     generator = MetricsGenerator(None, config)
     result = generator.write_dashboard(args.output_dir)

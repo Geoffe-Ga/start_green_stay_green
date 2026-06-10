@@ -842,6 +842,7 @@ class TestMetricsDashboardGeneration:
         # Setup mock generator
         mock_generator = Mock()
         mock_generator_class.return_value = mock_generator
+        mock_generator_class.count_precommit_hooks.return_value = 31
 
         # Mock shutil.copy to create a dummy workflow file when called
         def copy_side_effect(_src: Path, dst: Path) -> None:
@@ -890,6 +891,7 @@ class TestMetricsDashboardGeneration:
         """Test _generate_metrics_dashboard_step creates .github/workflows."""
         # Setup mock generator to avoid instantiation errors
         mock_generator_class.return_value = Mock()
+        mock_generator_class.count_precommit_hooks.return_value = 31
 
         # Mock shutil.copy to create files
         def copy_side_effect(_src: Path, dst: Path) -> None:
@@ -922,6 +924,7 @@ class TestMetricsDashboardGeneration:
         """Test _generate_metrics_dashboard_step warns when workflow missing."""
         # Setup mock generator
         mock_generator_class.return_value = Mock()
+        mock_generator_class.count_precommit_hooks.return_value = 31
         # Setup mock copy (not used but required by patch decorator order)
         mock_shutil_copy.return_value = None
 
@@ -948,6 +951,7 @@ class TestMetricsDashboardGeneration:
         """Test _generate_metrics_dashboard_step replaces project name in workflow."""
         # Setup mock generator
         mock_generator_class.return_value = Mock()
+        mock_generator_class.count_precommit_hooks.return_value = 31
 
         # Create source workflow with SGSG project name
         workflow_content = "project: start-green-stay-green\nname: Metrics"

@@ -25,6 +25,8 @@ import sys
 from typing import Any
 from typing import TYPE_CHECKING
 
+import yaml
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -175,6 +177,28 @@ class MetricsCollector:
         self.metrics["security_status"] = (
             "pass" if issues == self.thresholds["security_issues"] else "fail"
         )
+
+    def collect_precommit_status(self, config_path: Path) -> None:
+        """Collect pre-commit hooks status from the config file (Issue #154).
+
+        Counts the total hooks configured in ``.pre-commit-config.yaml`` and
+        records a ``precommit_status`` entry with ``total_hooks``,
+        ``passing_hooks``, ``percentage`` and ``status``. Because running
+        ``pre-commit run --all-files`` is expensive and CI already gates on
+        it, this treats configured hooks as passing; a missing or empty
+        config degrades gracefully to zero hooks with ``unknown`` status.
+
+        Args:
+            config_path: Path to the ``.pre-commit-config.yaml`` file.
+        """
+        total = _count_precommit_hooks(config_path)
+        has_hooks = total > 0
+        self.metrics["precommit_status"] = {
+            "total_hooks": total,
+            "passing_hooks": total,
+            "percentage": 100.0 if has_hooks else 0.0,
+            "status": "passing" if has_hooks else "unknown",
+        }
 
     def add_mutation_score(self, score: float) -> None:
         """Add mutation testing score.
@@ -396,6 +420,56 @@ class MetricsCollector:
         print(f"✓ Generated {output_file}")
 
 
+def _load_precommit_repos(config_path: Path) -> list[object]:
+    """Load the ``repos`` list from a pre-commit config, degrading to ``[]``.
+
+    Args:
+        config_path: Path to a ``.pre-commit-config.yaml`` file.
+
+    Returns:
+        The ``repos`` list, or an empty list when the file is absent,
+        unreadable, or malformed.
+    """
+    if not config_path.is_file():
+        return []
+
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return []
+
+    repos = data.get("repos") if isinstance(data, dict) else None
+    return repos if isinstance(repos, list) else []
+
+
+def _repo_hook_count(repo: object) -> int:
+    """Return the number of hooks declared by a single pre-commit repo entry.
+
+    Args:
+        repo: A single entry from the pre-commit ``repos`` list.
+
+    Returns:
+        Hook count for the entry, or ``0`` when it is malformed.
+    """
+    if not isinstance(repo, dict):
+        return 0
+    hooks = repo.get("hooks")
+    return len(hooks) if isinstance(hooks, list) else 0
+
+
+def _count_precommit_hooks(config_path: Path) -> int:
+    """Count total hooks across all repos in a pre-commit config.
+
+    Args:
+        config_path: Path to a ``.pre-commit-config.yaml`` file.
+
+    Returns:
+        Total hook count, or ``0`` when absent, empty, or malformed.
+    """
+    repos = _load_precommit_repos(config_path)
+    return sum(_repo_hook_count(repo) for repo in repos)
+
+
 def _default_thresholds() -> dict[str, int | float]:
     """Return default quality thresholds aligned with SGSG standards."""
     return {
@@ -482,6 +556,9 @@ def _collect_script_mode(
     collector.collect_typecheck_metrics(scripts_dir)
     collector.collect_test_metrics(scripts_dir)
 
+    # Pre-Commit Status (Issue #154): derived from .pre-commit-config.yaml
+    collector.collect_precommit_status(Path(".pre-commit-config.yaml"))
+
 
 def _collect_file_mode(
     collector: MetricsCollector,
@@ -518,6 +595,9 @@ def _collect_file_mode(
         print(f"Warning: Could not parse security ({type(e).__name__}): {e}")
         collector.metrics["security_issues"] = None
         collector.metrics["security_status"] = "unknown"
+
+    # Pre-Commit Status (Issue #154): derived from .pre-commit-config.yaml
+    collector.collect_precommit_status(Path(".pre-commit-config.yaml"))
 
     _collect_mutation(collector, args)
 

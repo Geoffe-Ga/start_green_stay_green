@@ -54,6 +54,43 @@ DANGEROUS_PATHS = {
 }
 
 
+def _load_precommit_repos(config_path: Path) -> list[object]:
+    """Load the ``repos`` list from a pre-commit config, degrading to ``[]``.
+
+    Args:
+        config_path: Path to a ``.pre-commit-config.yaml`` file.
+
+    Returns:
+        The ``repos`` list, or an empty list when the file is absent,
+        unreadable, or malformed.
+    """
+    if not config_path.is_file():
+        return []
+
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return []
+
+    repos = data.get("repos") if isinstance(data, dict) else None
+    return repos if isinstance(repos, list) else []
+
+
+def _repo_hook_count(repo: object) -> int:
+    """Return the number of hooks declared by a single pre-commit repo entry.
+
+    Args:
+        repo: A single entry from the pre-commit ``repos`` list.
+
+    Returns:
+        Hook count for the entry, or ``0`` when it is malformed.
+    """
+    if not isinstance(repo, dict):
+        return 0
+    hooks = repo.get("hooks")
+    return len(hooks) if isinstance(hooks, list) else 0
+
+
 @dataclass(frozen=True)
 class MetricConfig:
     """Configuration for a single quality metric.
@@ -91,6 +128,10 @@ class MetricsGenerationConfig:
         debt_ratio_threshold: Max technical debt ratio (0-100).
         doc_coverage_threshold: Documentation coverage threshold (0-100).
         dependency_freshness_days: Max dependency age in days.
+        precommit_hooks_total: Total number of pre-commit hooks configured
+            (derived from ``.pre-commit-config.yaml``). Rendered as the
+            denominator of the Pre-Commit Status card's ``X/Y Hooks``
+            threshold. Defaults to 0 when no config is available.
         enable_sonarqube: Whether to generate SonarQube config.
         enable_badges: Whether to generate GitHub badges.
         enable_dashboard: Whether to generate dashboard template.
@@ -107,6 +148,7 @@ class MetricsGenerationConfig:
     debt_ratio_threshold: int = 5
     doc_coverage_threshold: int = 95
     dependency_freshness_days: int = 30
+    precommit_hooks_total: int = 0
     enable_sonarqube: bool = False
     enable_badges: bool = True
     enable_dashboard: bool = True
@@ -421,6 +463,28 @@ class MetricsGenerator(BaseGenerator):
         self._validate_non_negative(
             self.config.dependency_freshness_days, "Dependency freshness days"
         )
+        self._validate_non_negative(
+            self.config.precommit_hooks_total, "Pre-commit hooks total"
+        )
+
+    @staticmethod
+    def count_precommit_hooks(config_path: Path) -> int:
+        """Count the total number of hooks in a pre-commit config file.
+
+        Sums the ``hooks`` entries across every ``repos`` entry in a
+        ``.pre-commit-config.yaml``. Missing, empty, or malformed configs
+        degrade gracefully to ``0`` so the dashboard can still render a
+        meaningful Pre-Commit Status card.
+
+        Args:
+            config_path: Path to a ``.pre-commit-config.yaml`` file.
+
+        Returns:
+            Total hook count, or ``0`` when the file is absent or has no
+            hooks.
+        """
+        repos = _load_precommit_repos(config_path)
+        return sum(_repo_hook_count(repo) for repo in repos)
 
     def _get_tool_for_language(self, metric_type: str) -> str:
         """Get appropriate tool for language and metric type.
@@ -613,6 +677,11 @@ class MetricsGenerator(BaseGenerator):
         # Security: HTML-escape project name to prevent XSS
         safe_project_name = html.escape(self.config.project_name)
 
+        # Pre-Commit Status baseline: render all configured hooks as passing
+        # (``X/Y Hooks``). The JS later overrides this from metrics.json.
+        precommit_total = self.config.precommit_hooks_total
+        precommit_threshold = f"{precommit_total}/{precommit_total} Hooks"
+
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -714,6 +783,18 @@ class MetricsGenerator(BaseGenerator):
         <p class="subtitle">Quality Metrics Dashboard</p>
 
         <div class="metrics-grid">
+            <div class="metric-card" id="precommit-status">
+                <div class="metric-name">Pre-Commit Status</div>
+                <div class="metric-value" id="precommit-value">--</div>
+                <div class="metric-threshold">
+                    Threshold:
+                    <span id="precommit-threshold">{precommit_threshold}</span>
+                </div>
+                <div class="metric-status status-pass" id="precommit-status-badge">
+                    PASSING
+                </div>
+            </div>
+
             <div class="metric-card">
                 <div class="metric-name">Code Coverage</div>
                 <div class="metric-value" id="coverage-value">--</div>
@@ -828,6 +909,9 @@ class MetricsGenerator(BaseGenerator):
             document.getElementById('last-updated').textContent =
                 new Date(data.timestamp).toLocaleString();
 
+            // Pre-Commit Status (index 0): green 100%, yellow 90-99%, red <90%
+            updatePrecommitStatus(metrics.precommit_status);
+
             // Coverage
             if (metrics.coverage !== undefined) {{
                 if (metrics.coverage === null) {{
@@ -932,6 +1016,47 @@ class MetricsGenerator(BaseGenerator):
                         failed === 0);
                 }}
             }}
+        }}
+
+        function updatePrecommitStatus(precommit) {{
+            const valueElem = document.getElementById('precommit-value');
+            const thresholdElem = document.getElementById('precommit-threshold');
+            const badgeElem =
+                document.getElementById('precommit-status-badge');
+
+            if (!precommit) {{
+                valueElem.textContent = 'N/A';
+                badgeElem.textContent = 'NO DATA';
+                badgeElem.className = 'metric-status status-warn';
+                return;
+            }}
+
+            const total = precommit.total_hooks || 0;
+            const passing = precommit.passing_hooks || 0;
+            const percentage = (precommit.percentage !== undefined &&
+                precommit.percentage !== null)
+                ? precommit.percentage
+                : (total > 0 ? (passing / total) * 100 : 0);
+
+            valueElem.textContent = percentage.toFixed(0) + '%';
+            thresholdElem.textContent = passing + '/' + total + ' Hooks';
+
+            // Color coding per Issue #154:
+            // green (100%), yellow (90-99%), red (<90%)
+            let statusClass;
+            let statusText;
+            if (percentage >= 100) {{
+                statusClass = 'status-pass';
+                statusText = 'PASSING';
+            }} else if (percentage >= 90) {{
+                statusClass = 'status-warn';
+                statusText = 'WARNING';
+            }} else {{
+                statusClass = 'status-fail';
+                statusText = 'FAILING';
+            }}
+            badgeElem.textContent = statusText;
+            badgeElem.className = 'metric-status ' + statusClass;
         }}
 
         function updateMetric(name, value, suffix, passing) {{

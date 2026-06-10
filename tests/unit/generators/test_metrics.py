@@ -973,6 +973,173 @@ class TestDashboardGeneration:
         assert "grid" in dashboard  # CSS grid layout
 
 
+class TestPrecommitStatusCard:
+    """Test the Pre-Commit Status metric card (Issue #154)."""
+
+    def _write_config(self, path: Path, *, hook_count: int) -> Path:
+        """Write a minimal .pre-commit-config.yaml with ``hook_count`` hooks."""
+        repos = [
+            {
+                "repo": "local",
+                "hooks": [{"id": f"hook-{i}"} for i in range(hook_count)],
+            }
+        ]
+        config_path = path / ".pre-commit-config.yaml"
+        config_path.write_text(yaml.dump({"repos": repos}), encoding="utf-8")
+        return config_path
+
+    def test_count_precommit_hooks_counts_all_hooks(self) -> None:
+        """Hook count is the sum of hooks across every repo entry."""
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = tmp_path / ".pre-commit-config.yaml"
+            config_path.write_text(
+                yaml.dump(
+                    {
+                        "repos": [
+                            {"repo": "a", "hooks": [{"id": "x"}, {"id": "y"}]},
+                            {"repo": "b", "hooks": [{"id": "z"}]},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            assert MetricsGenerator.count_precommit_hooks(config_path) == 3
+
+    def test_count_precommit_hooks_missing_file_returns_zero(self) -> None:
+        """A missing config file yields zero hooks (graceful degradation)."""
+        with TemporaryDirectory() as tmp:
+            missing = Path(tmp) / ".pre-commit-config.yaml"
+
+            assert MetricsGenerator.count_precommit_hooks(missing) == 0
+
+    def test_count_precommit_hooks_empty_config_returns_zero(self) -> None:
+        """An empty or repo-less config yields zero hooks."""
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / ".pre-commit-config.yaml"
+            config_path.write_text("", encoding="utf-8")
+
+            assert MetricsGenerator.count_precommit_hooks(config_path) == 0
+
+    def test_count_precommit_hooks_malformed_yaml_returns_zero(self) -> None:
+        """Malformed YAML degrades to zero hooks rather than raising."""
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / ".pre-commit-config.yaml"
+            config_path.write_text("repos: [unterminated", encoding="utf-8")
+
+            assert MetricsGenerator.count_precommit_hooks(config_path) == 0
+
+    def test_count_precommit_hooks_non_mapping_top_level_returns_zero(self) -> None:
+        """A top-level list (not a mapping) yields zero hooks."""
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / ".pre-commit-config.yaml"
+            config_path.write_text("- just\n- a\n- list\n", encoding="utf-8")
+
+            assert MetricsGenerator.count_precommit_hooks(config_path) == 0
+
+    def test_count_precommit_hooks_ignores_malformed_repo_entries(self) -> None:
+        """Non-dict repo entries and hookless repos contribute zero hooks."""
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / ".pre-commit-config.yaml"
+            config_path.write_text(
+                yaml.dump(
+                    {
+                        "repos": [
+                            "not-a-mapping",
+                            {"repo": "no-hooks-key"},
+                            {"repo": "string-hooks", "hooks": "oops"},
+                            {"repo": "valid", "hooks": [{"id": "a"}, {"id": "b"}]},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            assert MetricsGenerator.count_precommit_hooks(config_path) == 2
+
+    def test_precommit_card_is_first_card(self) -> None:
+        """Pre-Commit Status card renders before the Code Coverage card."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            precommit_hooks_total=32,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "Pre-Commit Status" in dashboard
+        assert dashboard.index("Pre-Commit Status") < dashboard.index("Code Coverage")
+
+    def test_precommit_card_shows_total_hooks_threshold(self) -> None:
+        """Threshold shows ``X/Y Hooks`` using the configured total."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            precommit_hooks_total=32,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "32/32 Hooks" in dashboard
+
+    def test_precommit_card_has_value_and_status_ids(self) -> None:
+        """Card exposes the DOM ids the JS uses to populate it."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            precommit_hooks_total=10,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert 'id="precommit-value"' in dashboard
+        assert 'id="precommit-threshold"' in dashboard
+        assert 'id="precommit-status"' in dashboard
+
+    def test_precommit_js_color_codes_by_percentage(self) -> None:
+        """JS applies green/yellow/red classes per the issue thresholds."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            precommit_hooks_total=32,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        # 100% -> pass (green); 90-99% -> warn (yellow); <90% -> fail (red)
+        assert "precommit_status" in dashboard
+        assert ">= 100" in dashboard
+        assert ">= 90" in dashboard
+
+    def test_precommit_card_renders_with_zero_total(self) -> None:
+        """A zero hook total renders ``0/0 Hooks`` without crashing."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            precommit_hooks_total=0,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "0/0 Hooks" in dashboard
+
+
 class TestCIIntegration:
     """Test CI integration configuration generation."""
 
@@ -1558,13 +1725,17 @@ class TestDashboardNewCards:
         assert "Test Count" in dashboard
         assert "tests-value" in dashboard
 
-    def test_dashboard_has_eight_metric_cards(self) -> None:
-        """Test dashboard has exactly 8 metric cards."""
+    def test_dashboard_has_nine_metric_cards(self) -> None:
+        """Test dashboard has exactly 9 metric cards.
+
+        Eight original quality cards plus the Pre-Commit Status card added
+        at index 0 (Issue #154).
+        """
         dashboard = self._get_dashboard()
 
         # Count metric-card div occurrences
         card_count = dashboard.count('class="metric-card"')
-        assert card_count == 8
+        assert card_count == 9
 
 
 class TestDashboardJavaScript:

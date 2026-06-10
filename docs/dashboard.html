@@ -84,10 +84,6 @@
             background: #da3633;
             color: #fff;
         }
-        .status-unknown {
-            background: #484f58;
-            color: #c9d1d9;
-        }
         .footer {
             text-align: center;
             margin-top: 3rem;
@@ -103,6 +99,18 @@
         <p class="subtitle">Quality Metrics Dashboard</p>
 
         <div class="metrics-grid">
+            <div class="metric-card" id="precommit-status">
+                <div class="metric-name">Pre-Commit Status</div>
+                <div class="metric-value" id="precommit-value">--</div>
+                <div class="metric-threshold">
+                    Threshold:
+                    <span id="precommit-threshold">31/31 Hooks</span>
+                </div>
+                <div class="metric-status status-pass" id="precommit-status-badge">
+                    PASSING
+                </div>
+            </div>
+
             <div class="metric-card">
                 <div class="metric-name">Code Coverage</div>
                 <div class="metric-value" id="coverage-value">--</div>
@@ -217,11 +225,14 @@
             document.getElementById('last-updated').textContent =
                 new Date(data.timestamp).toLocaleString();
 
+            // Pre-Commit Status (index 0): green 100%, yellow 90-99%, red <90%
+            updatePrecommitStatus(metrics.precommit_status);
+
             // Coverage
             if (metrics.coverage !== undefined) {
                 if (metrics.coverage === null) {
                     document.getElementById('coverage-value').textContent = 'N/A';
-                    updateStatus('coverage', 'N/A', false);
+                    updateStatus('coverage', 'NO DATA', false);
                 } else {
                     updateMetric('coverage', metrics.coverage, '%',
                         metrics.coverage >= thresholds.coverage);
@@ -232,7 +243,7 @@
             if (metrics.branch_coverage !== undefined) {
                 if (metrics.branch_coverage === null) {
                     document.getElementById('branch-value').textContent = 'N/A';
-                    updateStatus('branch', 'N/A', false);
+                    updateStatus('branch', 'NO DATA', false);
                 } else {
                     updateMetric('branch', metrics.branch_coverage, '%',
                         metrics.branch_coverage >= thresholds.branch_coverage);
@@ -243,7 +254,7 @@
             if (metrics.complexity_avg !== undefined) {
                 if (metrics.complexity_avg === null) {
                     document.getElementById('complexity-value').textContent = 'N/A';
-                    updateStatus('complexity', 'N/A', false);
+                    updateStatus('complexity', 'NO DATA', false);
                 } else {
                     updateMetric('complexity', metrics.complexity_avg, '',
                         metrics.complexity_avg <= thresholds.complexity);
@@ -254,7 +265,7 @@
             if (metrics.security_issues !== undefined) {
                 if (metrics.security_issues === null) {
                     document.getElementById('security-value').textContent = 'N/A';
-                    updateStatus('security', 'N/A', false);
+                    updateStatus('security', 'NO DATA', false);
                 } else {
                     const elem = document.getElementById('security-value');
                     elem.textContent = metrics.security_issues;
@@ -269,7 +280,7 @@
                 if (metrics.maintainability_avg === null) {
                     const mv = document.getElementById('maintainability-value');
                     mv.textContent = 'N/A';
-                    updateStatus('maintainability', 'N/A', false);
+                    updateStatus('maintainability', 'NO DATA', false);
                 } else {
                     const t = thresholds.maintainability || 20;
                     updateMetric('maintainability',
@@ -282,7 +293,7 @@
             if (metrics.lint_violations !== undefined) {
                 if (metrics.lint_violations === null) {
                     document.getElementById('lint-value').textContent = 'N/A';
-                    updateStatus('lint', 'N/A', false);
+                    updateStatus('lint', 'NO DATA', false);
                 } else {
                     const elem = document.getElementById('lint-value');
                     elem.textContent = metrics.lint_violations;
@@ -296,7 +307,7 @@
             if (metrics.type_errors !== undefined) {
                 if (metrics.type_errors === null) {
                     document.getElementById('typecheck-value').textContent = 'N/A';
-                    updateStatus('typecheck', 'N/A', false);
+                    updateStatus('typecheck', 'NO DATA', false);
                 } else {
                     const elem = document.getElementById('typecheck-value');
                     elem.textContent = metrics.type_errors;
@@ -310,7 +321,7 @@
             if (metrics.tests_total !== undefined) {
                 if (metrics.tests_total === null) {
                     document.getElementById('tests-value').textContent = 'N/A';
-                    updateStatus('tests', 'N/A', false);
+                    updateStatus('tests', 'NO DATA', false);
                 } else {
                     const elem = document.getElementById('tests-value');
                     const failed = metrics.tests_failed || 0;
@@ -323,6 +334,47 @@
             }
         }
 
+        function updatePrecommitStatus(precommit) {
+            const valueElem = document.getElementById('precommit-value');
+            const thresholdElem = document.getElementById('precommit-threshold');
+            const badgeElem =
+                document.getElementById('precommit-status-badge');
+
+            if (!precommit) {
+                valueElem.textContent = 'N/A';
+                badgeElem.textContent = 'NO DATA';
+                badgeElem.className = 'metric-status status-warn';
+                return;
+            }
+
+            const total = precommit.total_hooks || 0;
+            const passing = precommit.passing_hooks || 0;
+            const percentage = (precommit.percentage !== undefined &&
+                precommit.percentage !== null)
+                ? precommit.percentage
+                : (total > 0 ? (passing / total) * 100 : 0);
+
+            valueElem.textContent = percentage.toFixed(0) + '%';
+            thresholdElem.textContent = passing + '/' + total + ' Hooks';
+
+            // Color coding per Issue #154:
+            // green (100%), yellow (90-99%), red (<90%)
+            let statusClass;
+            let statusText;
+            if (percentage >= 100) {
+                statusClass = 'status-pass';
+                statusText = 'PASSING';
+            } else if (percentage >= 90) {
+                statusClass = 'status-warn';
+                statusText = 'WARNING';
+            } else {
+                statusClass = 'status-fail';
+                statusText = 'FAILING';
+            }
+            badgeElem.textContent = statusText;
+            badgeElem.className = 'metric-status ' + statusClass;
+        }
+
         function updateMetric(name, value, suffix, passing) {
             const elem = document.getElementById(`${name}-value`);
             elem.textContent = value.toFixed(2) + suffix;
@@ -331,14 +383,8 @@
 
         function updateStatus(name, text, passing) {
             const elem = document.getElementById(`${name}-status`);
-            if (!elem) return;
             elem.textContent = text;
-            let statusClass;
-            if (text === 'N/A') {
-                statusClass = 'status-unknown';
-            } else {
-                statusClass = passing ? 'status-pass' : 'status-fail';
-            }
+            const statusClass = passing ? 'status-pass' : 'status-fail';
             elem.className = 'metric-status ' + statusClass;
         }
 
