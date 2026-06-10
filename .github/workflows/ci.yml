@@ -264,13 +264,30 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
+      # Cache the whole virtualenv so ensure_venv() in scripts/common.sh
+      # activates a prebuilt .venv instead of creating a temporary venv
+      # and reinstalling every dependency from scratch on each run.
+      - name: Restore cached virtualenv
+        id: venv-cache
+        uses: actions/cache@v5
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('requirements.txt', 'requirements-dev.txt', 'pyproject.toml') }}
+
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          if [ "${{ steps.venv-cache.outputs.cache-hit }}" != "true" ]; then
+            python -m venv .venv
+            .venv/bin/pip install --upgrade pip
+            .venv/bin/pip install -e . -r requirements-dev.txt
+          fi
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
+      # No --html: the metrics below come from `coverage report` terminal
+      # output, so rendering every source file to HTML is wasted work in CI.
+      # The flag remains available for local use.
       - name: Generate coverage report
-        run: ./scripts/coverage.sh --html
+        run: ./scripts/coverage.sh
 
       - name: Extract coverage metrics
         id: coverage
@@ -324,13 +341,6 @@ jobs:
           echo "Badge files generated:"
           ls -la badges/
 
-      - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-report
-          path: htmlcov/
-          retention-days: 30
-
       - name: Upload badge artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -365,7 +375,7 @@ jobs:
             | Threshold | ${threshold}% |
             | Status | ${status} |
 
-            [View detailed HTML report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+            [View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
 
             // Find existing coverage comment
             const { data: comments } = await github.rest.issues.listComments({
