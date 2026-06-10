@@ -132,6 +132,7 @@ Primary programming language for the project.
 - `swift` - Swift 5.9/5.10/6.0 with Swift Package Manager (SPM), watchOS-ready
 - `kotlin` - Kotlin 2.0 with Gradle (Kotlin DSL) on JDK 17/21, Wear OS-ready
 - `cpp` - C/C++ (C++17 pinned, C++20-ready sources) with CMake ≥3.20 + Conan 2, Tizen-watch-ready
+- `java` - Java 17 with Maven (pure logic), Wear OS (legacy Android Wear)-ready
 
 **Examples**:
 ```bash
@@ -142,12 +143,13 @@ Primary programming language for the project.
 --language swift
 --language kotlin
 --language cpp
+--language java
 ```
 
 **Interactive Fallback**:
 If not provided, will prompt with options:
 ```
-Primary language: [python/typescript/go/rust/swift/kotlin/cpp]
+Primary language: [python/typescript/go/rust/swift/kotlin/cpp/java]
 ```
 
 **Swift Toolchain**:
@@ -232,6 +234,44 @@ are linted by cppcheck. Local prerequisites: CMake ≥3.20, Conan 2,
 keg-only `llvm` formula; Debian/Ubuntu:
 `apt-get install clang-format clang-tidy cppcheck lcov`), and
 `pip install lizard flawfinder`.
+
+**Java Toolchain**:
+
+A `--language java` project is a legacy Android Wear (Wear OS)
+watch-app scaffold — the maintenance path for existing Java watch apps —
+wired with this quality toolchain. Most of the tooling runs as Maven
+goals pinned in the generated `pom.xml`, so the only extra install is
+the formatter:
+
+| Concern | Tool | Where it runs |
+|---------|------|---------------|
+| Formatting | google-java-format (a `repo: local` system hook — `brew install google-java-format`; Google style, no config file by design) | `scripts/format.sh`, pre-commit |
+| Code style | Checkstyle (`mvn checkstyle:check`, google_checks) | `scripts/lint.sh`, pre-commit, CI |
+| Source analysis + complexity (≤10) | PMD (`mvn pmd:check` — the CCN bound lives in the companion `pmd-ruleset.xml` at the project root, shared by the script, the pre-commit hook, and CI) | `scripts/lint.sh`, pre-commit, CI |
+| Tests | JUnit 4 via Maven Surefire (`mvn test`) | `scripts/test.sh`, CI |
+| Coverage (≥90%) | JaCoCo (`mvn jacoco:check` — the bound lives in `pom.xml`) | `scripts/test.sh --coverage`, CI |
+| Secret scanning | gitleaks + detect-secrets | pre-commit |
+| Security scan | SpotBugs static bytecode analysis (compile-first: `mvn compile spotbugs:check` — the goal silently passes on an empty `target/classes`) | `scripts/security.sh`, pre-commit, CI |
+| Dependency CVE scan | OWASP dependency-check (`mvn dependency-check:check`, CVSS ≥7 bound in `pom.xml`; needs a free NVD API key exported as `NVD_API_KEY`, otherwise skipped with a warning) | `scripts/security.sh` |
+| Mutation testing | pitest | periodic quality gate (tracked by the opt-in metrics dashboard) |
+| Documentation | javadoc | tracked by the opt-in metrics dashboard |
+| Architecture rules | ArchUnit test (`plans/architecture/`; copy it into the package-matched `src/test/java/<package>/architecture/` path to enforce — ArchUnit is already test-scoped in the pom) | `plans/architecture/run-check.sh` |
+
+CI runs on ubuntu runners with a JDK 17/21 (Temurin) quality matrix
+running the same Maven goals as the local build — Checkstyle, PMD, the
+compile-first SpotBugs step, tests with JaCoCo, a best-effort Codecov
+upload (informational only: the enforced ≥90% gate is the pom-backed
+`mvn jacoco:check` step), plus a build-and-package job. The scaffold
+deliberately splits into **two builds**: `pom.xml` builds only the
+pure-logic sources (`src/main/java` + `src/test/java`), so `mvn test`
+and every quality goal run on any host, while the watch app under
+`app/` needs the Android SDK and the androidx.wear AAR, which plain
+Maven cannot consume (the android-maven-plugin is unmaintained) —
+build the APK with Android tooling (Android Studio / Gradle), adding
+`src/main/java/` as a source root. Local prerequisites: JDK 17+ (the
+pom pins `maven.compiler.release` 17, within CI's 17/21 matrix), Maven,
+and `brew install google-java-format` for the generated pre-commit
+format hook.
 
 ##### `--output-dir` / `-o PATH` (Optional)
 
@@ -454,7 +494,7 @@ The `init` command validates:
 - Not a Windows reserved name
 
 **Language**:
-- Must be one of: python, typescript, go, rust, swift, kotlin, cpp
+- Must be one of: python, typescript, go, rust, swift, kotlin, cpp, java
 - Case-insensitive
 
 **Output Directory**:
@@ -724,6 +764,33 @@ Tizen Studio CLI — only for packaging; everything above runs without it.
 See the [C/C++ Toolchain](#--language---l-text-optional) table above
 for the full tool list, and [examples/cpp/](../examples/cpp/) for real
 generated output.
+
+### Creating a Java (Wear OS legacy) Project
+
+```bash
+# Local prerequisites: JDK 17+ and Maven, plus the formatter for the
+# generated pre-commit hooks (the linters are Maven plugins pinned in
+# the generated pom.xml - no extra installs)
+brew install google-java-format
+
+start-green-stay-green init \
+  --project-name wrist-tempo \
+  --language java \
+  --no-interactive
+
+cd wrist-tempo
+mvn test
+pre-commit install
+./scripts/check-all.sh
+```
+
+Building the watch APK additionally requires Android tooling (Android
+Studio / Gradle) — only for the `app/` module; everything above runs
+with plain Maven.
+
+See the [Java Toolchain](#--language---l-text-optional) table above
+for the full tool list, and [examples/java/](../examples/java/) for
+real generated output.
 
 ### Batch Creating Projects
 

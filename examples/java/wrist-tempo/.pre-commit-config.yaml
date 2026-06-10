@@ -1,0 +1,77 @@
+# Pre-commit hooks configuration for wrist-tempo
+# Install: pre-commit install
+# Run manually: pre-commit run --all-files
+
+default_language_version: {}
+repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v4.5.0
+  hooks:
+  - id: trailing-whitespace
+  - id: end-of-file-fixer
+  - id: check-yaml
+  - id: check-json
+  - id: check-xml
+  - id: check-added-large-files
+    args:
+    - --maxkb=500
+  - id: check-case-conflict
+  - id: check-merge-conflict
+  - id: check-symlinks
+  - id: detect-private-key
+  - id: fix-byte-order-marker
+  - id: mixed-line-ending
+    args:
+    - --fix=lf
+  - id: no-commit-to-branch
+    args:
+    - --branch
+    - main
+- repo: local
+  hooks:
+  - id: google-java-format
+    name: google-java-format
+    entry: google-java-format --dry-run --set-exit-if-changed
+    language: system
+    types:
+    - java
+  - id: checkstyle
+    name: Checkstyle (mvn)
+    entry: mvn -q checkstyle:check
+    language: system
+    types:
+    - java
+    pass_filenames: false
+  - id: pmd
+    name: PMD (mvn)
+    entry: mvn -q pmd:check
+    language: system
+    types:
+    - java
+    pass_filenames: false
+  - id: spotbugs
+    name: SpotBugs (mvn)
+    entry: mvn -q compile spotbugs:check
+    language: system
+    types:
+    - java
+    pass_filenames: false
+- repo: https://github.com/gitleaks/gitleaks
+  rev: v8.18.4
+  hooks:
+  - id: gitleaks
+- repo: https://github.com/shellcheck-py/shellcheck-py
+  rev: v0.9.0.6
+  hooks:
+  - id: shellcheck
+- repo: https://github.com/Yelp/detect-secrets
+  rev: v1.4.0
+  hooks:
+  - id: detect-secrets
+    args:
+    - --baseline
+    - .secrets.baseline
+ci:
+  autofix_commit_msg: 'style: auto-fix by pre-commit hooks'
+  autoupdate_commit_msg: 'chore: update pre-commit hooks'
+  skip: []
