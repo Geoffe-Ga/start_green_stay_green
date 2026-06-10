@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -55,9 +56,11 @@ def _recent_submitted_at() -> str:
     the EXPIRED branch unintentionally. Re-anchoring on
     :func:`datetime.now` per-test makes the expiry guard test only
     when explicitly asserted (via ``patch.object`` of
-    ``is_potentially_expired`` itself).
+    ``is_potentially_expired`` itself). The one-hour future anchor
+    removes even the theoretical race where test wall time eats into
+    the SLA window.
     """
-    return datetime.now(UTC).isoformat()
+    return (datetime.now(UTC) + timedelta(hours=1)).isoformat()
 
 
 def _entry(agent_name: str, custom_id: str | None = None) -> SubagentBatchEntry:
