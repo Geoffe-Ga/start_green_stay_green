@@ -9,6 +9,7 @@ import sqlite3
 # Import the module we're testing
 import sys
 from tempfile import TemporaryDirectory
+from unittest.mock import Mock
 from unittest.mock import patch
 
 import pytest
@@ -1045,6 +1046,94 @@ class TestCollectCIStatus:
         assert status["passing_jobs"] == 7
         assert status["percentage"] == 100.0
         assert status["status"] == "passing"
+
+    def test_api_skipped_jobs_excluded_from_denominator(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Skipped jobs do not count against the passing percentage.
+
+        A conditionally-skipped job (e.g. a deploy gated on a branch
+        condition) must not drag an otherwise all-green run below 100%.
+        """
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        def fake_api(path: str, _token: str) -> dict[str, object]:
+            if "/jobs" in path:
+                return {
+                    "jobs": [
+                        {"conclusion": "success"},
+                        {"conclusion": "success"},
+                        {"conclusion": "skipped"},
+                    ]
+                }
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 9,
+                        "html_url": "https://github.com/owner/repo/actions/runs/9",
+                    }
+                ]
+            }
+
+        with patch.object(collect_metrics, "_github_api_json", side_effect=fake_api):
+            collector = MetricsCollector("test", {})
+            collector.collect_ci_status(Path("/nonexistent"))
+
+        status = collector.metrics["ci_status"]
+        assert status["total_jobs"] == 2
+        assert status["passing_jobs"] == 2
+        assert status["percentage"] == 100.0
+        assert status["status"] == "passing"
+
+    def test_api_all_jobs_skipped_degrades_to_unknown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A run where every job was skipped yields an unknown status."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        def fake_api(path: str, _token: str) -> dict[str, object]:
+            if "/jobs" in path:
+                return {"jobs": [{"conclusion": "skipped"}] * 2}
+            return {"workflow_runs": [{"id": 9}]}
+
+        with patch.object(collect_metrics, "_github_api_json", side_effect=fake_api):
+            collector = MetricsCollector("test", {})
+            collector.collect_ci_status(Path("/nonexistent"))
+
+        status = collector.metrics["ci_status"]
+        assert status["total_jobs"] == 0
+        assert status["status"] == "unknown"
+
+    def test_token_with_embedded_whitespace_is_rejected(self) -> None:
+        """A token containing whitespace never reaches the HTTP layer.
+
+        ``http.client`` does not sanitize header values; rejecting
+        whitespace-bearing tokens closes the header-injection path.
+        """
+        with patch("http.client.HTTPSConnection") as mock_connection:
+            result = collect_metrics._github_api_json(
+                "/repos/owner/repo/actions/runs", "bad\ntoken: injected"
+            )
+
+        assert result is None
+        mock_connection.assert_not_called()
+
+    def test_token_surrounding_whitespace_is_stripped(self) -> None:
+        """Leading/trailing whitespace on the token is stripped, not fatal."""
+        response = Mock()
+        response.status = 200
+        response.read.return_value = b'{"ok": true}'
+        connection = Mock()
+        connection.getresponse.return_value = response
+
+        with patch("http.client.HTTPSConnection", return_value=connection):
+            result = collect_metrics._github_api_json("/path", "  good-token\n")
+
+        assert result == {"ok": True}
+        headers = connection.request.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Bearer good-token"
 
     def test_api_failure_falls_back_to_static_count(
         self, monkeypatch: pytest.MonkeyPatch

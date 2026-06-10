@@ -54,8 +54,14 @@ def _github_api_json(path: str, token: str) -> object | None:
 
     Returns:
         The decoded JSON payload, or ``None`` on any network, HTTP, or
-        decoding failure (callers fall back to static counting).
+        decoding failure (callers fall back to static counting). Tokens
+        containing interior whitespace are rejected outright —
+        ``http.client`` does not sanitize header values, so this closes
+        the header-injection path.
     """
+    token = token.strip()
+    if not token or re.search(r"\s", token):
+        return None
     connection = http.client.HTTPSConnection(
         GITHUB_API_HOST, timeout=GITHUB_API_TIMEOUT_SECONDS
     )
@@ -106,24 +112,29 @@ def _latest_main_run(runs_payload: object) -> dict[str, Any] | None:
 def _job_conclusion_counts(jobs_payload: object) -> tuple[int, int] | None:
     """Count total and successful jobs from a jobs API payload.
 
+    Conditionally-skipped jobs (``conclusion: "skipped"``) are excluded
+    from the denominator: a deploy job gated on a branch condition must
+    not drag an otherwise all-green run below 100%.
+
     Args:
         jobs_payload: Decoded JSON from the run-jobs endpoint.
 
     Returns:
-        A ``(total_jobs, passing_jobs)`` tuple, or ``None`` when the
-        payload is malformed.
+        A ``(total_jobs, passing_jobs)`` tuple counting only jobs that
+        actually ran, or ``None`` when the payload is malformed.
     """
     if not isinstance(jobs_payload, dict):
         return None
     jobs = jobs_payload.get("jobs")
     if not isinstance(jobs, list):
         return None
-    passing = sum(
-        1
+    ran_jobs = [
+        job
         for job in jobs
-        if isinstance(job, dict) and job.get("conclusion") == "success"
-    )
-    return (len(jobs), passing)
+        if isinstance(job, dict) and job.get("conclusion") != "skipped"
+    ]
+    passing = sum(1 for job in ran_jobs if job.get("conclusion") == "success")
+    return (len(ran_jobs), passing)
 
 
 def _fetch_ci_status_from_api(repo: str, token: str) -> dict[str, object] | None:
@@ -154,6 +165,8 @@ def _fetch_ci_status_from_api(repo: str, token: str) -> dict[str, object] | None
     if run is None:
         return None
 
+    # GitHub paginates this endpoint at 100 jobs per page; runs with more
+    # jobs than that would be silently under-counted here.
     jobs_payload = _github_api_json(
         f"/repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100", token
     )
