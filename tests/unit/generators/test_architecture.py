@@ -313,6 +313,166 @@ class TestArchitectureEnforcementGeneratorGo:
         )
 
 
+class TestArchitectureEnforcementGeneratorRust:
+    """Test Rust-specific architecture rules."""
+
+    def test_generate_rust_creates_cargo_deny_config(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test generating cargo-deny config for Rust."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="rust", project_name="test-project")
+
+        # Should create the cargo-deny config file
+        config_file = output_dir / "deny.toml"
+        assert config_file.exists()
+
+        # Should create README and run script
+        assert (output_dir / "README.md").exists()
+        assert (output_dir / "run-check.sh").exists()
+
+    def test_rust_config_enforces_layer_separation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test Rust config enforces layered architecture via bans."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="rust", project_name="myapp")
+
+        config = (output_dir / "deny.toml").read_text()
+
+        # Should define dependency bans expressing the layer rules
+        assert "[bans]" in config
+        assert "domain" in config.lower()
+        assert "presentation" in config.lower()
+
+    def test_rust_config_enforces_domain_independence(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test Rust config keeps inner layers free of outer-layer deps."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="rust", project_name="myapp")
+
+        config = (output_dir / "deny.toml").read_text()
+
+        # Layer crates are banned outside their wrapper (consumer) crates,
+        # which is how cargo-deny expresses "only outer layers may depend
+        # on this crate".
+        assert "wrappers" in config
+        assert "infrastructure" in config.lower()
+
+    def test_rust_config_cycle_comment_is_accurate(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Cycle prevention is attributed to Cargo, not to cargo-deny.
+
+        cargo-deny does not detect dependency cycles; Cargo itself rejects
+        circular dependencies between crates at build time. The generated
+        config must say so rather than overclaiming what cargo-deny does.
+        """
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="rust", project_name="myapp")
+
+        config = (output_dir / "deny.toml").read_text()
+
+        # An accurate statement about Cargo's built-in cycle rejection
+        # must be present.
+        assert "# Cargo itself rejects circular crate dependencies" in config
+
+    def test_rust_readme_mentions_cargo_deny(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Rust README references the cargo-deny tooling."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="rust", project_name="myapp")
+
+        readme = (output_dir / "README.md").read_text()
+        assert "cargo-deny" in readme
+
+    def test_rust_run_script_invokes_cargo_deny(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Rust run-check.sh script invokes cargo-deny."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="rust", project_name="myapp")
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "cargo-deny" in script
+
+    def test_rust_result_reports_rust_language(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the result object records the Rust language."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        result = generator.generate(language="rust", project_name="myapp")
+
+        assert result.language == "rust"
+
+    def test_rust_run_script_uses_display_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Rust run-check.sh announces the 'Rust' display name."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="rust", project_name="myapp")
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "Checking Rust architecture" in script
+
+    def test_rust_run_script_prefixes_config_path(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Rust run-check.sh points at the plans/architecture config."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="rust", project_name="myapp")
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "cargo-deny check --config plans/architecture/deny.toml" in script
+
+    def test_rust_run_script_probes_cargo_deny_binary(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """run-check.sh guards on the cargo-deny binary, not bare cargo.
+
+        Probing ``cargo`` would succeed on any Rust toolchain even when the
+        cargo-deny subcommand is missing, so the availability guard must
+        target the ``cargo-deny`` binary itself.
+        """
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        generator.generate(language="rust", project_name="myapp")
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "command -v cargo-deny" in script
+
+
 class TestArchitectureEnforcementGeneratorTypeScript:
     """Test TypeScript-specific architecture rules."""
 
@@ -358,6 +518,7 @@ class TestLanguageTooling:
             ("python", "Python"),
             ("typescript", "TypeScript"),
             ("go", "Go"),
+            ("rust", "Rust"),
         ],
     )
     def test_each_tooling_carries_a_display_name(
@@ -366,7 +527,7 @@ class TestLanguageTooling:
         """Display name is a single-source-of-truth field on the dataclass."""
         assert _LANGUAGE_TOOLING[language].display_name == expected_display
 
-    @pytest.mark.parametrize("language", ["python", "typescript", "go"])
+    @pytest.mark.parametrize("language", ["python", "typescript", "go", "rust"])
     def test_run_cmd_is_a_config_file_template(self, language: str) -> None:
         """run_cmd holds a {config_file} placeholder, not a literal path."""
         tooling = _LANGUAGE_TOOLING[language]
@@ -432,6 +593,6 @@ class TestLanguageTooling:
             result = generator.generate(language=language, project_name="myapp")
             assert result.language == language
 
-        assert "rust" not in _LANGUAGE_TOOLING
+        assert "ruby" not in _LANGUAGE_TOOLING
         with pytest.raises(ValueError, match="Unsupported language"):
-            generator.generate(language="rust", project_name="myapp")
+            generator.generate(language="ruby", project_name="myapp")

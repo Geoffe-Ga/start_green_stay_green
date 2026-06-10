@@ -1442,6 +1442,21 @@ class TestGenerateSteps:
         assert mock_generator.generate.call_args.kwargs["language"] == "go"
 
     @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
+    def test_generate_architecture_step_rust(self, mock_generator_class: Mock) -> None:
+        """Test _generate_architecture_step generates rules for Rust."""
+        mock_generator = MagicMock()
+        mock_generator_class.return_value = mock_generator
+        mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_architecture_step(mock_path, "my-project", "rust")
+
+        # Rust now has architecture parity: the generator must be invoked.
+        mock_generator.generate.assert_called_once()
+        assert mock_generator.generate.call_args.kwargs["language"] == "rust"
+
+    @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
     def test_generate_architecture_step_skips_unsupported(
         self, mock_generator_class: Mock
     ) -> None:

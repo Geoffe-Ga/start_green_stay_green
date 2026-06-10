@@ -1,17 +1,20 @@
 """Architecture enforcement generator.
 
 Generates architecture validation configuration for import-linter (Python),
-dependency-cruiser (TypeScript), and go-arch-lint (Go).
+dependency-cruiser (TypeScript), go-arch-lint (Go), and cargo-deny (Rust).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 import warnings
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from start_green_stay_green.ai.orchestrator import AIOrchestrator
 
 
@@ -22,7 +25,7 @@ class ArchitectureResult:
     Attributes:
         output_dir: Directory containing generated files.
         files_created: List of files created.
-        language: Target language (python, typescript, go).
+        language: Target language (python, typescript, go, rust).
     """
 
     output_dir: Path
@@ -83,6 +86,17 @@ _LANGUAGE_TOOLING: dict[str, _LanguageTooling] = {
         docs_url="https://github.com/fe3dback/go-arch-lint",
         display_name="Go",
     ),
+    "rust": _LanguageTooling(
+        tool="cargo-deny",
+        config_file="deny.toml",
+        install_cmd="cargo install cargo-deny",
+        # Invoke the cargo-deny binary directly (not `cargo deny`) so the
+        # run script's `command -v` guard probes the actual tool rather
+        # than the always-present cargo wrapper.
+        run_cmd="cargo-deny check --config {config_file}",
+        docs_url="https://embarkstudios.github.io/cargo-deny/",
+        display_name="Rust",
+    ),
 }
 
 
@@ -90,8 +104,9 @@ class ArchitectureEnforcementGenerator:
     """Generates architecture enforcement configuration.
 
     Generates import-linter config for Python, dependency-cruiser
-    config for TypeScript, and go-arch-lint config for Go to enforce
-    layer separation and prevent circular dependencies.
+    config for TypeScript, go-arch-lint config for Go, and cargo-deny
+    config for Rust to enforce layer separation and prevent circular
+    dependencies.
 
     Attributes:
         orchestrator: AI orchestrator for content generation.
@@ -138,7 +153,7 @@ class ArchitectureEnforcementGenerator:
         """Generate architecture enforcement configuration.
 
         Args:
-            language: Target language (python, typescript, go).
+            language: Target language (python, typescript, go, rust).
             project_name: Name of the project.
 
         Returns:
@@ -155,14 +170,15 @@ class ArchitectureEnforcementGenerator:
         # Create output directory
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        files_created = []
-
-        if language == "python":
-            files_created.extend(self._generate_python_config(project_name))
-        elif language == "typescript":
-            files_created.extend(self._generate_typescript_config(project_name))
-        elif language == "go":
-            files_created.extend(self._generate_go_config(project_name))
+        # Dispatch table keeps generate() flat as languages are added:
+        # each entry is a zero-argument builder returning the config files.
+        config_builders: dict[str, Callable[[], list[Path]]] = {
+            "python": partial(self._generate_python_config, project_name),
+            "typescript": partial(self._generate_typescript_config, project_name),
+            "go": partial(self._generate_go_config, project_name),
+            "rust": self._generate_rust_config,
+        }
+        files_created = config_builders[language]()
 
         # Generate README and run script
         files_created.extend(
@@ -371,6 +387,87 @@ commonComponents:
         config_path.write_text(config_content)
         return [config_path]
 
+    # Unlike the Python config, the Rust config is project-name agnostic:
+    # cargo-deny bans reference the per-layer workspace crate names, which
+    # are fixed by the generated structure, so no project_name parameter
+    # is needed here.
+    def _generate_rust_config(self) -> list[Path]:
+        """Generate cargo-deny configuration for Rust.
+
+        cargo-deny enforces dependency rules over the Cargo crate graph.
+        Layered architecture in Rust is modeled as one workspace crate per
+        layer; the ``[bans]`` wrappers below restrict which crates may
+        consume each layer, providing the same layer-separation and
+        domain-independence guarantees as import-linter (Python),
+        dependency-cruiser (TypeScript), and go-arch-lint (Go). Cycle
+        prevention needs no rule at all: Cargo rejects circular crate
+        dependencies at build time.
+
+        Returns:
+            List of files created.
+        """
+        config_path = self.output_dir / "deny.toml"
+
+        # Generate cargo-deny configuration. The bans section expresses the
+        # layer rules: a layer crate is "banned" everywhere except inside
+        # its wrapper (consumer) crates, so only outer layers may depend on
+        # inner machinery. The remaining sections add dependency hygiene
+        # (duplicate versions, licenses, advisories, sources).
+        config_content = """\
+# cargo-deny configuration enforcing layered architecture and
+# dependency hygiene.
+#
+# Layered architecture in Rust is modeled as one workspace crate per
+# layer (presentation, application, domain, infrastructure).
+# Cargo itself rejects circular crate dependencies at build time, so
+# no cycle rule is needed here; the bans below enforce the remaining
+# layer rules: outer layers depend inward, never the reverse.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# Allow only widely compatible licenses; extend as needed.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+]
+
+[bans]
+# Duplicate crate versions create the same hidden coupling and bloat
+# that tangled imports do in other ecosystems.
+multiple-versions = "deny"
+wildcards = "deny"
+# Enforce layered architecture:
+#   presentation -> application -> domain
+# A layer crate may only be consumed by the layers listed as wrappers,
+# and the domain crate (unrestricted below) must itself stay pure: it
+# may not depend on application, presentation, or infrastructure.
+deny = [
+    # Only the presentation layer may drive the application layer.
+    { crate = "application", wrappers = ["presentation"] },
+    # Infrastructure is wired in by the outer layers, never by domain.
+    { crate = "infrastructure", wrappers = ["application", "presentation"] },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+"""
+
+        config_path.write_text(config_content)
+        return [config_path]
+
     def _generate_readme(self, language: str, project_name: str) -> Path:
         """Generate README with usage instructions.
 
@@ -454,11 +551,13 @@ Edit the configuration file:
 - Python: `.importlinter`
 - TypeScript: `.dependency-cruiser.js`
 - Go: `.go-arch-lint.yml`
+- Rust: `deny.toml`
 
 See documentation:
 - Python: https://import-linter.readthedocs.io/
 - TypeScript: https://github.com/sverweij/dependency-cruiser
 - Go: https://github.com/fe3dback/go-arch-lint
+- Rust: https://embarkstudios.github.io/cargo-deny/
 
 ## Integration
 
