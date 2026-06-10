@@ -108,8 +108,6 @@ EXPECTED_KEY_FILES: dict[str, list[str]] = {
         "src/test/java/com/example/test_project/GreetingTest.java",
         "app/src/main/AndroidManifest.xml",
         "app/src/main/java/com/example/test_project/MainActivity.java",
-        # #367 quality tooling generates for java too (the PR #430
-        # review's deferred follow-up — closed by #368).
         ".pre-commit-config.yaml",
         "scripts/check-all.sh",
         ".github/workflows/ci.yml",

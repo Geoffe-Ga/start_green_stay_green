@@ -47,8 +47,11 @@ jobs:
 
       # The upload is best-effort: no CODECOV_TOKEN is provisioned in a
       # fresh project, and tokenless uploads are rate-limited, so a
-      # failed upload must not fail CI. The enforced >=90% coverage
-      # gate is the `mvn jacoco:check` step below, backed by the pom.
+      # failed upload must not fail CI. Java can afford this leniency
+      # because — unlike the other reference workflows, where the
+      # Codecov upload is the only coverage surface — the enforced
+      # >=90% gate is the local `mvn jacoco:check` step below, backed
+      # by the pom: Codecov here is informational, not load-bearing.
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
