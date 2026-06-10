@@ -73,8 +73,11 @@ class TestGetSetupInstructions:
         )
         assert "python -m venv .venv" in instructions
 
-    def test_python_includes_venv_activation(self) -> None:
+    def test_python_includes_venv_activation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Python setup should activate the virtualenv."""
+        monkeypatch.delenv("SHELL", raising=False)
         instructions = _get_setup_instructions(
             ("python",), Path("/home/user/my-project")
         )

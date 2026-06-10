@@ -1502,6 +1502,8 @@ def _generate_project_files(
         raise typer.Exit(code=1) from e
 
 
+# "python" is intentionally absent: its venv activation line depends on the
+# user's shell, so its steps are built dynamically in _get_setup_instructions.
 _LANG_SETUP_STEPS: dict[str, list[str]] = {
     "typescript": ["npm install"],
     "go": ["go mod download"],
