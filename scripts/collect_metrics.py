@@ -8,6 +8,11 @@ This script aggregates metrics from:
 - bandit security scanning (security-report.json)
 - quality scripts via --metrics flag (script mode)
 
+Threshold convention (Issue #206): pass/fail status is ALWAYS recomputed in
+Python from the thresholds dict (see ``_default_thresholds``). Quality
+scripts emit raw numbers; any ``status`` field they include is ignored so
+threshold ownership lives in exactly one place.
+
 Output: metrics.json in the specified output directory
 """
 
@@ -219,8 +224,8 @@ class MetricsCollector:
         cov_data = json.loads(coverage_file.read_text())
         total_cov = cov_data["totals"]["percent_covered"]
         self.metrics["coverage"] = round(total_cov, 2)
-        self.metrics["coverage_status"] = (
-            "pass" if total_cov >= self.thresholds["coverage"] else "fail"
+        self.metrics["coverage_status"] = self._compute_status(
+            total_cov, self.thresholds["coverage"]
         )
 
         # Branch coverage
@@ -229,8 +234,8 @@ class MetricsCollector:
         if num_branches > 0:
             branch_cov = (covered_branches / num_branches) * 100
             self.metrics["branch_coverage"] = round(branch_cov, 2)
-            self.metrics["branch_coverage_status"] = (
-                "pass" if branch_cov >= self.thresholds["branch_coverage"] else "fail"
+            self.metrics["branch_coverage_status"] = self._compute_status(
+                branch_cov, self.thresholds["branch_coverage"]
             )
 
     def collect_complexity(self, complexity_file: Path) -> None:
@@ -266,8 +271,8 @@ class MetricsCollector:
             raise ValueError(msg)
 
         self.metrics["complexity_avg"] = round(comp, 2)
-        self.metrics["complexity_status"] = (
-            "pass" if comp <= self.thresholds["complexity"] else "fail"
+        self.metrics["complexity_status"] = self._compute_status(
+            comp, self.thresholds["complexity"], higher_is_better=False
         )
 
     def collect_docs_coverage(self, docs_file: Path) -> None:
@@ -304,8 +309,8 @@ class MetricsCollector:
             raise ValueError(msg)
 
         self.metrics["docs_coverage"] = round(docs, 2)
-        self.metrics["docs_status"] = (
-            "pass" if docs >= self.thresholds["docs_coverage"] else "fail"
+        self.metrics["docs_status"] = self._compute_status(
+            docs, self.thresholds["docs_coverage"]
         )
 
     def collect_security(self, security_file: Path) -> None:
@@ -326,8 +331,8 @@ class MetricsCollector:
         security_data = json.loads(security_file.read_text())
         issues = len(security_data["results"])
         self.metrics["security_issues"] = issues
-        self.metrics["security_status"] = (
-            "pass" if issues == self.thresholds["security_issues"] else "fail"
+        self.metrics["security_status"] = self._compute_status(
+            issues, self.thresholds["security_issues"], higher_is_better=False
         )
 
     def collect_precommit_status(self, config_path: Path) -> None:
@@ -378,8 +383,8 @@ class MetricsCollector:
             score: Mutation score (0-100)
         """
         self.metrics["mutation_score"] = score
-        self.metrics["mutation_status"] = (
-            "pass" if score >= self.thresholds["mutation_score"] else "fail"
+        self.metrics["mutation_status"] = self._compute_status(
+            score, self.thresholds["mutation_score"]
         )
 
     def _set_mutation_unknown(self) -> None:
@@ -458,8 +463,8 @@ class MetricsCollector:
         if total > 0:
             score = round((killed / total) * 100, 1)
             self.metrics["mutation_score"] = score
-            self.metrics["mutation_status"] = (
-                "pass" if score >= self.thresholds["mutation_score"] else "fail"
+            self.metrics["mutation_status"] = self._compute_status(
+                score, self.thresholds["mutation_score"]
             )
         else:
             self._set_mutation_unknown()
@@ -501,52 +506,98 @@ class MetricsCollector:
     def collect_lint_metrics(self, scripts_dir: Path) -> None:
         """Collect lint metrics via lint.sh --metrics.
 
+        Status is recomputed from the ``lint_violations`` threshold; any
+        ``status`` field emitted by the script is ignored (Issue #206).
+
         Args:
             scripts_dir: Directory containing quality scripts
         """
         data = self.collect_from_script("lint.sh", scripts_dir)
-        if data is not None:
-            self.metrics["lint_violations"] = data.get("violations", 0)
-            self.metrics["lint_status"] = data.get("status", "unknown")
-        else:
-            self.metrics["lint_violations"] = None
-            self.metrics["lint_status"] = "unknown"
+        violations = data.get("violations") if data is not None else None
+        self.metrics["lint_violations"] = violations
+        self.metrics["lint_status"] = self._compute_status(
+            violations, self.thresholds["lint_violations"], higher_is_better=False
+        )
 
     def collect_typecheck_metrics(self, scripts_dir: Path) -> None:
         """Collect type checking metrics via typecheck.sh --metrics.
+
+        Status is recomputed from the ``type_errors`` threshold; any
+        ``status`` field emitted by the script is ignored (Issue #206).
 
         Args:
             scripts_dir: Directory containing quality scripts
         """
         data = self.collect_from_script("typecheck.sh", scripts_dir)
-        if data is not None:
-            self.metrics["type_errors"] = data.get("errors", 0)
-            self.metrics["typecheck_status"] = data.get("status", "unknown")
-        else:
-            self.metrics["type_errors"] = None
-            self.metrics["typecheck_status"] = "unknown"
+        errors = data.get("errors") if data is not None else None
+        self.metrics["type_errors"] = errors
+        self.metrics["typecheck_status"] = self._compute_status(
+            errors, self.thresholds["type_errors"], higher_is_better=False
+        )
+
+    def collect_security_metrics(self, scripts_dir: Path) -> None:
+        """Collect security metrics via security.sh --metrics.
+
+        Status is recomputed from the ``security_issues`` threshold; any
+        ``status`` field emitted by the script is ignored (Issue #206). A
+        null ``bandit_issues`` value (scan failed) yields ``unknown``.
+
+        Args:
+            scripts_dir: Directory containing quality scripts
+        """
+        data = self.collect_from_script("security.sh", scripts_dir)
+        issues = data.get("bandit_issues") if data is not None else None
+        self.metrics["security_issues"] = issues
+        self.metrics["security_status"] = self._compute_status(
+            issues, self.thresholds["security_issues"], higher_is_better=False
+        )
+
+    def collect_coverage_metrics(self, scripts_dir: Path) -> None:
+        """Collect coverage metrics via coverage.sh --metrics.
+
+        Status is recomputed from the ``coverage`` and ``branch_coverage``
+        thresholds; any ``status`` field emitted by the script is ignored
+        (Issue #206). Missing raw percentages yield ``unknown``.
+
+        Args:
+            scripts_dir: Directory containing quality scripts
+        """
+        data = self.collect_from_script("coverage.sh", scripts_dir)
+        cov_pct = data.get("coverage_pct") if data is not None else None
+        branch_pct = data.get("branch_coverage_pct") if data is not None else None
+        self.metrics["coverage"] = cov_pct
+        self.metrics["coverage_status"] = self._compute_status(
+            cov_pct, self.thresholds["coverage"]
+        )
+        self.metrics["branch_coverage"] = branch_pct
+        self.metrics["branch_coverage_status"] = self._compute_status(
+            branch_pct, self.thresholds["branch_coverage"]
+        )
 
     def collect_test_metrics(self, scripts_dir: Path) -> None:
         """Collect test count metrics via test.sh --metrics.
+
+        Status is recomputed from raw counts; any ``status`` field emitted
+        by the script is ignored (Issue #206). Tests have no tunable
+        threshold: any failed test is a failure, and zero collected tests
+        (a broken suite) or missing counts yield ``unknown``.
 
         Args:
             scripts_dir: Directory containing quality scripts
         """
         data = self.collect_from_script("test.sh", scripts_dir)
-        if data is not None:
-            self.metrics["tests_total"] = data.get("tests_total", 0)
-            self.metrics["tests_passed"] = data.get("tests_passed", 0)
-            self.metrics["tests_failed"] = data.get("tests_failed", 0)
-            self.metrics["tests_skipped"] = data.get("tests_skipped", 0)
-            self.metrics["tests_status"] = data.get(
-                "status", "pass" if data.get("tests_failed", 0) == 0 else "fail"
-            )
-        else:
-            self.metrics["tests_total"] = None
-            self.metrics["tests_passed"] = None
-            self.metrics["tests_failed"] = None
-            self.metrics["tests_skipped"] = None
+        if data is None:
+            data = {}
+        total = data.get("tests_total")
+        failed = data.get("tests_failed")
+        self.metrics["tests_total"] = total
+        self.metrics["tests_passed"] = data.get("tests_passed")
+        self.metrics["tests_failed"] = failed
+        self.metrics["tests_skipped"] = data.get("tests_skipped")
+        if not total or failed is None:
             self.metrics["tests_status"] = "unknown"
+        else:
+            self.metrics["tests_status"] = "pass" if failed == 0 else "fail"
 
     def collect_complexity_from_script(self, scripts_dir: Path) -> None:
         """Collect complexity metrics via complexity.sh --metrics.
@@ -565,7 +616,7 @@ class MetricsCollector:
             )
             self.metrics["maintainability_avg"] = mi_avg
             self.metrics["maintainability_status"] = self._compute_status(
-                mi_avg, self.thresholds.get("maintainability", 20)
+                mi_avg, self.thresholds["maintainability"]
             )
         else:
             self.metrics["complexity_avg"] = None
@@ -592,7 +643,15 @@ class MetricsCollector:
 
 
 def _default_thresholds() -> dict[str, int | float]:
-    """Return default quality thresholds aligned with SGSG standards."""
+    """Return default quality thresholds aligned with SGSG standards.
+
+    This is the single source of truth for pass/fail thresholds
+    (Issue #206): every status in metrics.json is computed from these
+    values, never from a quality script's own hardcoded threshold.
+
+    Returns:
+        Mapping of metric name to its pass/fail threshold.
+    """
     return {
         "coverage": 90,
         "branch_coverage": 85,
@@ -603,50 +662,23 @@ def _default_thresholds() -> dict[str, int | float]:
         "maintainability": 20,
         "lint_violations": 0,
         "type_errors": 0,
-        "tests_total": 0,
     }
 
 
 def _collect_script_mode(
     collector: MetricsCollector,
     args: argparse.Namespace,
-    thresholds: dict[str, int | float],
 ) -> None:
     """Collect metrics using script mode (--metrics flag on each script).
 
     Args:
         collector: MetricsCollector instance
         args: Parsed CLI arguments
-        thresholds: Quality thresholds
     """
     scripts_dir = args.scripts_dir
 
     # Coverage via script
-    cov_data = collector.collect_from_script("coverage.sh", scripts_dir)
-    if cov_data is not None:
-        cov_pct = cov_data.get("coverage_pct")
-        if cov_pct is not None:
-            collector.metrics["coverage"] = cov_pct
-            collector.metrics["coverage_status"] = (
-                "pass" if cov_pct >= thresholds["coverage"] else "fail"
-            )
-        else:
-            collector.metrics["coverage"] = None
-            collector.metrics["coverage_status"] = "unknown"
-        branch_pct = cov_data.get("branch_coverage_pct")
-        if branch_pct is not None:
-            collector.metrics["branch_coverage"] = branch_pct
-            collector.metrics["branch_coverage_status"] = (
-                "pass" if branch_pct >= thresholds["branch_coverage"] else "fail"
-            )
-        else:
-            collector.metrics["branch_coverage"] = None
-            collector.metrics["branch_coverage_status"] = "unknown"
-    else:
-        collector.metrics["coverage"] = None
-        collector.metrics["coverage_status"] = "unknown"
-        collector.metrics["branch_coverage"] = None
-        collector.metrics["branch_coverage_status"] = "unknown"
+    collector.collect_coverage_metrics(scripts_dir)
 
     # Complexity + Maintainability via script
     collector.collect_complexity_from_script(scripts_dir)
@@ -660,13 +692,7 @@ def _collect_script_mode(
         collector.metrics["docs_status"] = "unknown"
 
     # Security via script
-    sec_data = collector.collect_from_script("security.sh", scripts_dir)
-    if sec_data is not None:
-        collector.metrics["security_issues"] = sec_data.get("bandit_issues", 0)
-        collector.metrics["security_status"] = sec_data.get("status", "unknown")
-    else:
-        collector.metrics["security_issues"] = None
-        collector.metrics["security_status"] = "unknown"
+    collector.collect_security_metrics(scripts_dir)
 
     # Mutation score: read SQLite cache directly (not mutation.sh --metrics)
     # because running mutmut is expensive; the cache already has results.
@@ -816,7 +842,7 @@ def main() -> int:
     collector = MetricsCollector(args.project_name, thresholds)
 
     if args.metrics_mode == "script":
-        _collect_script_mode(collector, args, thresholds)
+        _collect_script_mode(collector, args)
     else:
         _collect_file_mode(collector, args)
 

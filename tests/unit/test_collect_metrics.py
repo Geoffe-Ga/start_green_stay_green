@@ -750,6 +750,271 @@ class TestNewMetricMethods:
         assert collector.metrics["maintainability_status"] == "unknown"
 
 
+class TestUnifiedThresholdConvention:
+    """Issue #206: Python owns status computation via the thresholds dict.
+
+    Shell scripts emit raw numbers (and a legacy ``status`` field); the
+    collector must ignore any script-provided status and recompute pass/fail
+    from ``self.thresholds`` so threshold changes propagate everywhere.
+    """
+
+    def test_lint_status_ignores_script_status_field(self) -> None:
+        """Lint status comes from the threshold, not the script's status."""
+        collector = MetricsCollector("test", {"lint_violations": 5})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"violations": 3, "status": "fail"},
+        ):
+            collector.collect_lint_metrics(Path("/scripts"))
+
+        assert collector.metrics["lint_violations"] == 3
+        assert collector.metrics["lint_status"] == "pass"
+
+    @pytest.mark.parametrize(
+        ("threshold", "expected"),
+        [(0, "fail"), (2, "fail"), (3, "pass"), (10, "pass")],
+    )
+    def test_lint_threshold_change_flips_status(
+        self, threshold: int, expected: str
+    ) -> None:
+        """Changing the lint threshold changes the computed status."""
+        collector = MetricsCollector("test", {"lint_violations": threshold})
+
+        with patch.object(
+            collector, "collect_from_script", return_value={"violations": 3}
+        ):
+            collector.collect_lint_metrics(Path("/scripts"))
+
+        assert collector.metrics["lint_status"] == expected
+
+    def test_lint_missing_raw_value_is_unknown(self) -> None:
+        """A payload without a raw count yields unknown, not a trusted pass."""
+        collector = MetricsCollector("test", {"lint_violations": 0})
+
+        with patch.object(
+            collector, "collect_from_script", return_value={"status": "pass"}
+        ):
+            collector.collect_lint_metrics(Path("/scripts"))
+
+        assert collector.metrics["lint_violations"] is None
+        assert collector.metrics["lint_status"] == "unknown"
+
+    def test_typecheck_status_ignores_script_status_field(self) -> None:
+        """Typecheck status comes from the threshold, not the script."""
+        collector = MetricsCollector("test", {"type_errors": 10})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"errors": 5, "status": "fail"},
+        ):
+            collector.collect_typecheck_metrics(Path("/scripts"))
+
+        assert collector.metrics["type_errors"] == 5
+        assert collector.metrics["typecheck_status"] == "pass"
+
+    @pytest.mark.parametrize(
+        ("threshold", "expected"),
+        [(0, "fail"), (5, "pass")],
+    )
+    def test_typecheck_threshold_change_flips_status(
+        self, threshold: int, expected: str
+    ) -> None:
+        """Changing the type-error threshold changes the computed status."""
+        collector = MetricsCollector("test", {"type_errors": threshold})
+
+        with patch.object(collector, "collect_from_script", return_value={"errors": 5}):
+            collector.collect_typecheck_metrics(Path("/scripts"))
+
+        assert collector.metrics["typecheck_status"] == expected
+
+    def test_typecheck_missing_raw_value_is_unknown(self) -> None:
+        """A payload without a raw count yields unknown, not a trusted pass."""
+        collector = MetricsCollector("test", {"type_errors": 0})
+
+        with patch.object(
+            collector, "collect_from_script", return_value={"status": "pass"}
+        ):
+            collector.collect_typecheck_metrics(Path("/scripts"))
+
+        assert collector.metrics["type_errors"] is None
+        assert collector.metrics["typecheck_status"] == "unknown"
+
+    def test_security_metrics_ignores_script_status_field(self) -> None:
+        """Security status comes from the threshold, not the script."""
+        collector = MetricsCollector("test", {"security_issues": 5})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"bandit_issues": 3, "status": "fail"},
+        ):
+            collector.collect_security_metrics(Path("/scripts"))
+
+        assert collector.metrics["security_issues"] == 3
+        assert collector.metrics["security_status"] == "pass"
+
+    @pytest.mark.parametrize(
+        ("threshold", "expected"),
+        [(0, "fail"), (2, "pass")],
+    )
+    def test_security_threshold_change_flips_status(
+        self, threshold: int, expected: str
+    ) -> None:
+        """Changing the security threshold changes the computed status."""
+        collector = MetricsCollector("test", {"security_issues": threshold})
+
+        with patch.object(
+            collector, "collect_from_script", return_value={"bandit_issues": 2}
+        ):
+            collector.collect_security_metrics(Path("/scripts"))
+
+        assert collector.metrics["security_status"] == expected
+
+    def test_security_metrics_null_issues_is_unknown(self) -> None:
+        """A null bandit_issues payload (scan failed) yields unknown."""
+        collector = MetricsCollector("test", {"security_issues": 0})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"bandit_issues": None, "status": "unknown"},
+        ):
+            collector.collect_security_metrics(Path("/scripts"))
+
+        assert collector.metrics["security_issues"] is None
+        assert collector.metrics["security_status"] == "unknown"
+
+    def test_security_metrics_script_failure_is_unknown(self) -> None:
+        """A failed security script run yields unknown status."""
+        collector = MetricsCollector("test", {"security_issues": 0})
+
+        with patch.object(collector, "collect_from_script", return_value=None):
+            collector.collect_security_metrics(Path("/scripts"))
+
+        assert collector.metrics["security_issues"] is None
+        assert collector.metrics["security_status"] == "unknown"
+
+    def test_file_mode_security_threshold_propagates(self) -> None:
+        """File-mode security uses <= threshold, so raising it passes."""
+        with TemporaryDirectory() as tmpdir:
+            sec_file = Path(tmpdir) / "security.json"
+            sec_file.write_text(
+                json.dumps({"results": [{"issue": "a"}, {"issue": "b"}]})
+            )
+
+            collector = MetricsCollector("test", {"security_issues": 5})
+            collector.collect_security(sec_file)
+
+            assert collector.metrics["security_issues"] == 2
+            assert collector.metrics["security_status"] == "pass"
+
+    def test_tests_status_ignores_script_status_field(self) -> None:
+        """Test status is recomputed from raw counts, not trusted."""
+        collector = MetricsCollector("test", {})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={
+                "tests_total": 100,
+                "tests_passed": 97,
+                "tests_failed": 3,
+                "tests_skipped": 0,
+                "status": "pass",
+            },
+        ):
+            collector.collect_test_metrics(Path("/scripts"))
+
+        assert collector.metrics["tests_status"] == "fail"
+
+    def test_tests_zero_collected_is_unknown(self) -> None:
+        """Zero collected tests (broken suite) yields unknown, not pass."""
+        collector = MetricsCollector("test", {})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={
+                "tests_total": 0,
+                "tests_passed": 0,
+                "tests_failed": 0,
+                "tests_skipped": 0,
+            },
+        ):
+            collector.collect_test_metrics(Path("/scripts"))
+
+        assert collector.metrics["tests_status"] == "unknown"
+
+    def test_tests_missing_raw_counts_is_unknown(self) -> None:
+        """A payload without raw counts yields unknown status."""
+        collector = MetricsCollector("test", {})
+
+        with patch.object(
+            collector, "collect_from_script", return_value={"status": "pass"}
+        ):
+            collector.collect_test_metrics(Path("/scripts"))
+
+        assert collector.metrics["tests_total"] is None
+        assert collector.metrics["tests_status"] == "unknown"
+
+    def test_coverage_metrics_threshold_propagates(self) -> None:
+        """Script-mode coverage status follows the thresholds dict."""
+        collector = MetricsCollector("test", {"coverage": 80, "branch_coverage": 95})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"coverage_pct": 85.0, "branch_coverage_pct": 90.0},
+        ):
+            collector.collect_coverage_metrics(Path("/scripts"))
+
+        assert collector.metrics["coverage"] == 85.0
+        assert collector.metrics["coverage_status"] == "pass"
+        assert collector.metrics["branch_coverage"] == 90.0
+        assert collector.metrics["branch_coverage_status"] == "fail"
+
+    def test_coverage_metrics_null_values_are_unknown(self) -> None:
+        """Missing coverage numbers yield unknown statuses."""
+        collector = MetricsCollector("test", {"coverage": 90, "branch_coverage": 85})
+
+        with patch.object(collector, "collect_from_script", return_value={}):
+            collector.collect_coverage_metrics(Path("/scripts"))
+
+        assert collector.metrics["coverage"] is None
+        assert collector.metrics["coverage_status"] == "unknown"
+        assert collector.metrics["branch_coverage"] is None
+        assert collector.metrics["branch_coverage_status"] == "unknown"
+
+    def test_coverage_metrics_script_failure_is_unknown(self) -> None:
+        """A failed coverage script run yields unknown statuses."""
+        collector = MetricsCollector("test", {"coverage": 90, "branch_coverage": 85})
+
+        with patch.object(collector, "collect_from_script", return_value=None):
+            collector.collect_coverage_metrics(Path("/scripts"))
+
+        assert collector.metrics["coverage"] is None
+        assert collector.metrics["coverage_status"] == "unknown"
+
+    def test_default_thresholds_contains_only_active_keys(self) -> None:
+        """Every default threshold key drives at least one status."""
+        thresholds = collect_metrics._default_thresholds()
+
+        assert set(thresholds) == {
+            "coverage",
+            "branch_coverage",
+            "mutation_score",
+            "complexity",
+            "docs_coverage",
+            "security_issues",
+            "maintainability",
+            "lint_violations",
+            "type_errors",
+        }
+
+
 class TestCollectPrecommitStatus:
     """Tests for pre-commit status collection (Issue #154)."""
 
