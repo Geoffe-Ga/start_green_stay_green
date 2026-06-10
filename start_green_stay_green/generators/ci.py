@@ -77,11 +77,12 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         "test_framework": "xctest",
         "linters": ["swiftlint"],
         "formatters": ["swift-format"],
-        # SwiftLint has no dedicated security ruleset; the generated
-        # .swiftlint.yml opts into its crash-safety/randomness rules.
-        # gitleaks covers secret scanning (shared with pre-commit) and
-        # Periphery covers dead-code analysis (scripts/security.sh).
-        "security_tools": ["swiftlint", "gitleaks", "periphery"],
+        # SwiftLint's crash-safety/randomness rules also serve security
+        # duty, but it is listed once (under linters) so tool-install
+        # consumers don't double-install it. gitleaks covers secret
+        # scanning (shared with pre-commit) and Periphery covers
+        # dead-code analysis (scripts/security.sh).
+        "security_tools": ["gitleaks", "periphery"],
         "supported_versions": ["5.9", "5.10", "6.0"],
         "package_manager": "spm",
     },

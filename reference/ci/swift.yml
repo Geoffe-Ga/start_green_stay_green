@@ -61,13 +61,20 @@ jobs:
       - name: Run tests with coverage
         run: swift test --enable-code-coverage
 
-      # Same data source and parsing as `scripts/test.sh --coverage`:
-      # `swift test` writes an llvm-cov export JSON and --show-codecov-path
-      # locates it without re-running the suite. Threshold: >=90% lines —
-      # tests must keep pace with code for this gate to stay green.
+      # Same data source and parsing as `scripts/test.sh --coverage`. The
+      # coverage run above writes an llvm-cov export JSON under
+      # .build/**/codecov/; it is located with `find` rather than asking
+      # swift test for the path, because that query re-runs the whole
+      # suite — doubling CI time and decoupling the measured coverage
+      # from the displayed test results. Threshold: >=90% lines — tests
+      # must keep pace with code to stay green.
       - name: Check coverage threshold (>=90%)
         run: |
-          CODECOV_JSON="$(swift test --show-codecov-path)"
+          CODECOV_JSON="$(find .build -name '*.json' -path '*/codecov/*' | head -1)"
+          if [ -z "$CODECOV_JSON" ]; then
+            echo "::error::No llvm-cov export JSON found under .build — did the coverage run fail?"
+            exit 1
+          fi
           python3 - "$CODECOV_JSON" 90 << 'PYEOF'
           import json
           import sys
@@ -83,6 +90,9 @@ jobs:
     name: Swift ${{ matrix.swift-version }} Tests
     runs-on: macos-latest
     strategy:
+      # Run every leg to completion: the point of a version matrix is to
+      # see exactly which Swift versions fail, not just the first one.
+      fail-fast: false
       matrix:
         swift-version: ["5.9", "5.10", "6.0"]
 
@@ -121,11 +131,25 @@ jobs:
       # dynamically because the name derives from the generated project.
       # The simulator is matched by UDID: name/OS destination specifiers
       # break when the image's simulator runtimes drift from the Xcode SDK.
+      # Both values are validated before they reach GITHUB_ENV: jq emits
+      # the string "null" on a missing match, which would otherwise surface
+      # later as a cryptic `xcodebuild -destination id=null` failure, and
+      # unvalidated writes to GITHUB_ENV are the documented env-injection
+      # vector in Actions. The UDID must look like a simulator UUID and the
+      # scheme must be a real, non-empty name.
       - name: Discover scheme and simulator
         run: |
-          SCHEME="$(xcodebuild -list -json | jq -r '.workspace.schemes[0]')"
+          SCHEME="$(xcodebuild -list -json | jq -r '.workspace.schemes[0] // empty')"
+          if [ -z "$SCHEME" ] || [ "$SCHEME" = "null" ]; then
+            echo "::error::No xcodebuild scheme found. Does the package define any products?"
+            exit 1
+          fi
           UDID="$(xcrun simctl list devices available --json \
-            | jq -r '[.devices[][] | select(.name | startswith("Apple Watch"))][0].udid')"
+            | jq -r '[.devices[][] | select(.name | startswith("Apple Watch"))][0].udid // empty')"
+          if ! printf '%s' "$UDID" | grep -Eq '^[0-9A-Fa-f-]{36}$'; then
+            echo "::error::No Apple Watch simulator found. Ensure the watchOS runtime is installed on this runner."
+            exit 1
+          fi
           echo "Scheme: $SCHEME / Simulator UDID: $UDID"
           echo "SCHEME=$SCHEME" >> "$GITHUB_ENV"
           echo "UDID=$UDID" >> "$GITHUB_ENV"

@@ -1158,8 +1158,12 @@ jobs:
         assert LANGUAGE_CONFIGS["swift"]["formatters"] == ["swift-format"]
 
     def test_swift_security_tools_exact(self) -> None:
-        """Test Swift security_tools list is exact."""
-        expected = ["swiftlint", "gitleaks", "periphery"]
+        """Test Swift security_tools list is exact.
+
+        SwiftLint serves security duty too but is listed only under
+        linters so tool-install consumers don't double-install it.
+        """
+        expected = ["gitleaks", "periphery"]
         assert LANGUAGE_CONFIGS["swift"]["security_tools"] == expected
 
     def test_swift_supported_versions_exact(self) -> None:
@@ -1449,6 +1453,44 @@ class TestSwiftReferenceTemplate:
         for name, job in parsed["jobs"].items():
             assert job["runs-on"] == "macos-latest", f"{name} must run on macOS"
 
+    def test_watchos_job_guards_against_null_discovery(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """Scheme/UDID discovery fails loudly instead of passing null on.
+
+        jq emits the string "null" when no Apple Watch simulator (or no
+        scheme) matches; without guards that value reaches
+        ``xcodebuild -destination id=null`` as a cryptic late failure,
+        and unvalidated writes to GITHUB_ENV are the documented Actions
+        env-injection vector. The UDID must look like a simulator UUID.
+        """
+        content = swift_workflow.content
+        assert "No Apple Watch simulator found" in content
+        assert "No xcodebuild scheme found" in content
+        assert "^[0-9A-Fa-f-]{36}$" in content
+
+    def test_coverage_gate_does_not_rerun_swift_test(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """The coverage gate locates the codecov JSON without re-testing.
+
+        ``swift test --show-codecov-path`` re-runs the entire suite (it
+        is not a pure query), doubling CI time and decoupling measured
+        coverage from the displayed test results, so the gate must find
+        the export JSON from the single coverage run instead.
+        """
+        content = swift_workflow.content
+        assert "--show-codecov-path" not in content
+        assert "find .build" in content
+        assert "*/codecov/*" in content
+
+    def test_version_matrix_does_not_fail_fast(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """Matrix legs run to completion so every failing version is seen."""
+        parsed = yaml.safe_load(swift_workflow.content)
+        assert parsed["jobs"]["test"]["strategy"]["fail-fast"] is False
+
     def test_version_matrix_covers_swift_59_510_60(
         self, swift_workflow: CIWorkflow
     ) -> None:
@@ -1468,8 +1510,9 @@ class TestSwiftReferenceTemplate:
     ) -> None:
         """Coverage gate parses the same llvm-cov JSON as scripts/test.sh."""
         assert "swift test --enable-code-coverage" in swift_workflow.content
-        # Same data source as the generated scripts/test.sh --coverage:
-        assert "swift test --show-codecov-path" in swift_workflow.content
+        # Same data source as the generated scripts/test.sh --coverage
+        # (the export JSON from the single coverage run)...
+        assert "*/codecov/*" in swift_workflow.content
         # ...and the same 90% line-coverage threshold.
         assert '["data"][0]["totals"]["lines"]["percent"]' in swift_workflow.content
         assert 'python3 - "$CODECOV_JSON" 90' in swift_workflow.content
