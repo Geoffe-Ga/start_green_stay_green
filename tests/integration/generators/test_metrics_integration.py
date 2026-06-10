@@ -134,10 +134,12 @@ class TestMetricsGeneratorIntegration:
             )
 
             # Check dashboard includes thresholds
-            # (mutation ≥75% and docs ≥92% removed — tiles deferred)
+            # (mutation ≥75% and docs ≥92% re-added — Issue #217)
             dashboard_content = artifacts["dashboard"].read_text()
             assert "≥85%" in dashboard_content
             assert "≥80%" in dashboard_content
+            assert "≥75%" in dashboard_content
+            assert "≥92%" in dashboard_content
 
     def test_ci_integration_config_completeness(self) -> None:
         """Test that CI integration config is complete and usable."""
@@ -517,7 +519,9 @@ class TestDashboardSync:
     EXPECTED_VALUE_IDS: ClassVar[list[str]] = [
         "coverage-value",
         "branch-value",
+        "mutation-value",
         "complexity-value",
+        "docs-value",
         "security-value",
         "maintainability-value",
         "lint-value",
@@ -528,7 +532,9 @@ class TestDashboardSync:
     EXPECTED_STATUS_IDS: ClassVar[list[str]] = [
         "coverage-status",
         "branch-status",
+        "mutation-status",
         "complexity-status",
+        "docs-status",
         "security-status",
         "maintainability-status",
         "lint-status",
@@ -608,7 +614,9 @@ class TestDashboardSync:
         expected_js_keys = [
             "metrics.coverage",
             "metrics.branch_coverage",
+            "metrics.mutation_score",
             "metrics.complexity_avg",
+            "metrics.docs_coverage",
             "metrics.security_issues",
             "metrics.maintainability_avg",
             "metrics.lint_violations",
@@ -641,10 +649,10 @@ class TestDashboardSync:
         )
 
     def test_deployed_no_data_cards_render_gray_not_red(self) -> None:
-        """Fresh dashboards must show the eight existing cards' no-data state gray.
+        """Fresh dashboards must show the simple cards' no-data state gray.
 
         Regression guard for Issue #154: a brand-new project has no
-        ``metrics.json`` values, so the eight pre-existing cards fall into
+        ``metrics.json`` values, so the simple value cards fall into
         their ``null`` branch and call ``updateStatus(name, 'N/A', false)``.
         ``updateStatus`` must map the ``'N/A'`` text to the gray
         ``status-unknown`` state (not red ``status-fail``) so a fresh project

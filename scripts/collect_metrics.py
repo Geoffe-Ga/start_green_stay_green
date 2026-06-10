@@ -552,6 +552,33 @@ class MetricsCollector:
             issues, self.thresholds["security_issues"], higher_is_better=False
         )
 
+    def collect_docs_metrics(self, scripts_dir: Path, docs_file: Path) -> None:
+        """Collect documentation coverage via metrics-docs.sh --metrics (#217).
+
+        Runs the canonical docstring-coverage script (ruff D rules over an
+        AST item count) and recomputes status from the ``docs_coverage``
+        threshold (Issue #206). When the script yields no usable payload,
+        falls back to parsing a pre-generated report file; if that also
+        fails, the metric degrades to ``None``/``unknown``.
+
+        Args:
+            scripts_dir: Directory containing quality scripts
+            docs_file: Fallback docs report file (e.g., docs-report.txt)
+        """
+        data = self.collect_from_script("metrics-docs.sh", scripts_dir)
+        pct = data.get("docs_coverage_pct") if data is not None else None
+        if pct is None and docs_file.exists():
+            try:
+                self.collect_docs_coverage(docs_file)
+            except ValueError:
+                pct = None
+            else:
+                return
+        self.metrics["docs_coverage"] = pct
+        self.metrics["docs_status"] = self._compute_status(
+            pct, self.thresholds["docs_coverage"]
+        )
+
     def collect_coverage_metrics(self, scripts_dir: Path) -> None:
         """Collect coverage metrics via coverage.sh --metrics.
 
@@ -683,13 +710,8 @@ def _collect_script_mode(
     # Complexity + Maintainability via script
     collector.collect_complexity_from_script(scripts_dir)
 
-    # Docs coverage via file
-    try:
-        collector.collect_docs_coverage(args.docs_file)
-    except (FileNotFoundError, ValueError) as e:
-        print(f"Warning: Could not parse docs coverage ({type(e).__name__}): {e}")
-        collector.metrics["docs_coverage"] = None
-        collector.metrics["docs_status"] = "unknown"
+    # Docs coverage via script (Issue #217), report-file fallback
+    collector.collect_docs_metrics(scripts_dir, args.docs_file)
 
     # Security via script
     collector.collect_security_metrics(scripts_dir)
