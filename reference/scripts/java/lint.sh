@@ -6,5 +6,7 @@ mvn checkstyle:check
 echo "Running PMD..."
 mvn pmd:check
 echo "Running SpotBugs..."
-mvn spotbugs:check
+# SpotBugs reads bytecode; without compiled classes `mvn spotbugs:check`
+# silently passes, so compile first.
+mvn compile spotbugs:check
 echo "✓ All linters passed!"

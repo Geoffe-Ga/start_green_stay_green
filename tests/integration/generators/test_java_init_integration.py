@@ -259,6 +259,49 @@ class TestJavaInitManifests:
         assert "mvn checkstyle:check" in content
         assert "mvn jacoco:check" in content
 
+    def test_ci_workflow_compiles_before_spotbugs(self, java_project: Path) -> None:
+        """The generated workflow's SpotBugs step is never a no-op (#368).
+
+        SpotBugs reads bytecode, so a bare `mvn spotbugs:check` silently
+        passes when target/classes is empty — the generated CI must
+        compile within the same invocation, matching the pre-commit hook
+        and scripts/security.sh.
+        """
+        content = (java_project / ".github" / "workflows" / "ci.yml").read_text()
+        parsed = yaml.safe_load(content)
+        run_commands = [
+            cmd
+            for job in parsed["jobs"].values()
+            for step in job["steps"]
+            if (cmd := step.get("run"))
+        ]
+        spotbugs_runs = [cmd for cmd in run_commands if "spotbugs:check" in cmd]
+        assert spotbugs_runs, "CI must run the SpotBugs gate"
+        for command in spotbugs_runs:
+            assert "compile" in command
+            assert command.index("compile") < command.index("spotbugs:check")
+
+    def test_ci_codecov_upload_cannot_fail_a_fresh_project(
+        self, java_project: Path
+    ) -> None:
+        """The Codecov upload is best-effort in generated projects (#368).
+
+        A fresh `green init` project ships no CODECOV_TOKEN secret, so
+        `fail_ci_if_error: true` would start the project red; the real
+        coverage gate is the pom-backed `mvn jacoco:check` step.
+        """
+        content = (java_project / ".github" / "workflows" / "ci.yml").read_text()
+        parsed = yaml.safe_load(content)
+        codecov_steps = [
+            step
+            for job in parsed["jobs"].values()
+            for step in job["steps"]
+            if "codecov" in step.get("uses", "")
+        ]
+        assert codecov_steps, "CI must still upload coverage to Codecov"
+        for step in codecov_steps:
+            assert step["with"]["fail_ci_if_error"] is False
+
 
 class TestJavaInitSources:
     """Assert the generated Java source and test files."""
