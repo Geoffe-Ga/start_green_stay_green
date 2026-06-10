@@ -26,7 +26,7 @@ from typer.testing import CliRunner
 import yaml
 
 from start_green_stay_green.cli import app
-from start_green_stay_green.utils.kotlin import android_package_path
+from start_green_stay_green.utils.java import android_package_path
 
 # Project name chosen to exercise the hyphen-to-underscore Android
 # package conversion (wear-timer -> com.example.wear_timer).

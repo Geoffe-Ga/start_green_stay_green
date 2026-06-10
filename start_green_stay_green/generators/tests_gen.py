@@ -15,8 +15,8 @@ from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
 from start_green_stay_green.utils.cpp import cpp_identifier
-from start_green_stay_green.utils.kotlin import android_package
-from start_green_stay_green.utils.kotlin import android_package_path
+from start_green_stay_green.utils.java import android_package
+from start_green_stay_green.utils.java import android_package_path
 from start_green_stay_green.utils.naming import pascal_case
 
 if TYPE_CHECKING:
@@ -62,9 +62,10 @@ class TestsGenerator(BaseGenerator):
 
     All 10 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin, cpp) are available at the generator level. Note that
-    the full CLI pipeline (``sgsg init``) skips its quality-tooling steps
-    (pre-commit, scripts, CI, architecture, metrics) for java, csharp, ruby,
-    and cpp; C/C++ tooling arrives with #362/#363.
+    the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
+    architecture, and metrics steps for java (#367), csharp, and ruby —
+    the CI workflow step covers every language. Kotlin (#357/#358) and
+    C/C++ (#362/#363) run the full pipeline.
 
     Attributes:
         output_dir: Directory where tests structure will be created
@@ -361,62 +362,70 @@ mod tests {{
 """
 
     def _generate_java_tests(self) -> dict[str, Path]:
-        """Generate Java tests structure.
+        """Generate the Java JUnit 4 unit-test scaffold (#366).
+
+        Creates ``src/test/java/<package>/GreetingTest.java``, a plain
+        JVM JUnit 4 test run by Maven Surefire (``mvn test``) against the
+        pure-logic ``Greeting`` class — no Android SDK, emulator, or
+        Robolectric needed, so it runs on any host including the
+        generated CI pipeline's runners.
 
         Returns:
             Dictionary mapping file names to file paths
         """
         files: dict[str, Path] = {}
 
-        # Create src/test/java/{package_name} directory
-        test_dir = self.output_dir / "src" / "test" / "java" / self.config.package_name
+        package_path = android_package_path(self.config.package_name)
+        test_dir = self.output_dir / "src" / "test" / "java" / package_path
         test_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate src/test/java/{package_name}/MainTest.java
-        test_main_key = f"src/test/java/{self.config.package_name}/MainTest.java"
-        files[test_main_key] = self._write_file(
-            test_dir / "MainTest.java",
-            self._java_test_main_java(),
+        test_key = f"src/test/java/{package_path}/GreetingTest.java"
+        files[test_key] = self._write_file(
+            test_dir / "GreetingTest.java",
+            self._java_greeting_test(),
         )
 
         return files
 
-    def _java_test_main_java(self) -> str:
-        """Generate Java MainTest.java content.
+    def _java_greeting_test(self) -> str:
+        """Generate the Java JUnit 4 test content.
+
+        The generated test exercises real behavior rather than comparing
+        two identical string literals: it calls the scaffold's
+        ``Greeting.greet`` concatenation logic with both the project name
+        and an arbitrary name, so the equality assertions verify the
+        assembly logic.
 
         Returns:
-            Content for MainTest.java with JUnit @Test annotation
+            Content for the JUnit 4 test class file.
         """
-        # Convert package_name to valid Java package (e.g., my_project -> my.project)
-        package_name = self.config.package_name.replace("_", ".")
+        package = android_package(self.config.package_name)
+        return f"""package {package};
 
-        return f"""package {package_name};
+import static org.junit.Assert.assertEquals;
 
-import org.junit.jupiter.api.Test;
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.Test;
 
 /**
- * Tests for {self.config.project_name} main entry point
+ * Verifies the greeting assembly logic in {{@link Greeting}}.
+ *
+ * <p>Plain JVM JUnit 4 run by Maven Surefire ({{@code mvn test}}) -
+ * no Android SDK, emulator, or Robolectric needed.</p>
  */
-public class MainTest {{
+public class GreetingTest {{
 
     @Test
-    public void testMainRuns() {{
-        // Test that Main class exists and can be instantiated
-        // This verifies the Hello World entry point compiles correctly
-        assertDoesNotThrow(() -> {{
-            Main.main(new String[]{{}});
-        }}, "main() should run without throwing exceptions");
+    public void greetingIsAssembledFromProjectName() {{
+        // Greeting.greet() concatenates its argument, so this verifies
+        // real logic rather than comparing two identical literals.
+        assertEquals(
+                "Hello from {self.config.project_name}!",
+                Greeting.greet("{self.config.project_name}"));
     }}
 
     @Test
-    public void testMainMethodExists() {{
-        // Verify main method exists
-        try {{
-            Main.class.getMethod("main", String[].class);
-        }} catch (NoSuchMethodException e) {{
-            fail("main(String[] args) method should exist");
-        }}
+    public void greetingReflectsAnArbitraryName() {{
+        assertEquals("Hello from wear!", Greeting.greet("wear"));
     }}
 }}
 """

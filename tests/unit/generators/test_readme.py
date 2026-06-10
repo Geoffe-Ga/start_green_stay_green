@@ -15,7 +15,7 @@ EXPECTED_COMMANDS: dict[str, list[str]] = {
     "typescript": ["npm install", "npm test"],
     "go": ["go build", "go test"],
     "rust": ["cargo build", "cargo test"],
-    "java": ["mvn compile", "mvn test"],
+    "java": ["mvn test", "mvn jacoco:check"],
     "csharp": ["dotnet build", "dotnet test"],
     "ruby": ["bundle install", "rspec"],
     "swift": ["swift build", "swift test"],
@@ -547,6 +547,81 @@ class TestKotlinReadme:
         with tempfile.TemporaryDirectory() as tmpdir:
             content = self._readme_content(tmpdir)
             assert "./scripts/check-all.sh" in content
+
+
+class TestJavaReadme:
+    """Test the Java legacy Android Wear README content (#366)."""
+
+    @staticmethod
+    def _readme_content(tmpdir: str) -> str:
+        """Generate the java README and return its text.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            The rendered README.md content.
+        """
+        config = ReadmeConfig(
+            project_name="test-project",
+            language="java",
+            package_name="test_project",
+        )
+        files = ReadmeGenerator(Path(tmpdir), config).generate()
+        readme_path: Path = files["README.md"]
+        return readme_path.read_text()
+
+    def test_java_readme_targets_legacy_android_wear(self) -> None:
+        """README documents the Wear OS (legacy Android Wear) target."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Wear OS" in content
+            assert "legacy Android Wear" in content
+            assert "androidx.wear" in content
+
+    def test_java_readme_documents_two_builds_split(self) -> None:
+        """README explains that the APK build needs Android tooling."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "## The two builds" in content
+            assert "Android Studio" in content
+            assert "android-maven-plugin is unmaintained" in content
+
+    def test_java_readme_documents_maven_usage(self) -> None:
+        """README documents the pure-logic Maven commands."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "mvn test" in content
+            assert "mvn jacoco:check" in content
+            assert "mvn checkstyle:check" in content
+            assert "mvn pmd:check" in content
+            assert "mvn spotbugs:check" in content
+
+    def test_java_readme_advertises_only_generated_artifacts(self) -> None:
+        """README keeps the #367 quality tooling under a Planned section.
+
+        Pre-commit hooks, quality scripts, the metrics dashboard, and
+        architecture rules are not generated for java yet, so they must
+        not carry a checkmark; the CI workflow IS generated (ci.py) and
+        may be advertised as real.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Planned / coming soon" in content
+            assert "#367" in content
+            assert ".github/workflows/ci.yml" in content
+            # No checkmarked claims for the not-yet-generated tooling.
+            assert "✅ Pre-commit hooks" not in content
+            assert "✅ Quality scripts" not in content
+            # The old overclaiming boilerplate is gone.
+            assert "OWASP" not in content
+            assert "checkstyle.xml" not in content
+
+    def test_java_readme_names_the_sanitized_application_id(self) -> None:
+        """README surfaces the com.example application ID."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "com.example.test_project" in content
 
 
 class TestCppReadme:

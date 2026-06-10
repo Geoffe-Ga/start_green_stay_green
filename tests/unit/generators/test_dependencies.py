@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import tomllib
 
+from defusedxml import ElementTree as DefusedElementTree
 import pytest
 
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
@@ -12,12 +13,19 @@ from start_green_stay_green.generators.dependencies import DependencyConfig
 from start_green_stay_green.utils.cpp import CATCH2_VERSION
 from start_green_stay_green.utils.cpp import CMAKE_MINIMUM_VERSION
 from start_green_stay_green.utils.cpp import CPP_STANDARD
+from start_green_stay_green.utils.java import CHECKSTYLE_PLUGIN_VERSION
+from start_green_stay_green.utils.java import JACOCO_VERSION
+from start_green_stay_green.utils.java import JAVA_RELEASE
+from start_green_stay_green.utils.java import JUNIT4_VERSION
+from start_green_stay_green.utils.java import PMD_PLUGIN_VERSION
+from start_green_stay_green.utils.java import SPOTBUGS_PLUGIN_VERSION
+from start_green_stay_green.utils.java import SUREFIRE_VERSION
+from start_green_stay_green.utils.java import android_package
 from start_green_stay_green.utils.kotlin import AGP_VERSION
 from start_green_stay_green.utils.kotlin import JUNIT_VERSION
 from start_green_stay_green.utils.kotlin import KONSIST_VERSION
 from start_green_stay_green.utils.kotlin import KOTLIN_VERSION
 from start_green_stay_green.utils.kotlin import KOVER_VERSION
-from start_green_stay_green.utils.kotlin import android_package
 from start_green_stay_green.utils.swift import package_swift
 
 # Expected primary dependency file per language
@@ -347,7 +355,7 @@ class TestMultiLanguageDependencies:
 
             content = files["pom.xml"].read_text()
             assert "<project" in content
-            assert "junit" in content.lower() or "test" in content.lower()
+            assert "junit" in content.lower()
 
     def test_csharp_csproj_has_project(self) -> None:
         """Test C# .csproj contains Project element."""
@@ -577,6 +585,105 @@ class TestKotlinDependencies:
                 f'testImplementation("com.lemonappdev:konsist:{KONSIST_VERSION}")'
                 in content
             )
+
+
+class TestJavaDependencies:
+    """Test the Java Maven (pure-logic) manifest generation (#366)."""
+
+    @staticmethod
+    def _pom(tmpdir: str) -> str:
+        """Generate the java dependency files and return the pom content.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            The generated ``pom.xml`` content.
+        """
+        config = DependencyConfig(
+            project_name="wrist-timer",
+            language="java",
+            package_name="wrist_timer",
+        )
+        files = DependenciesGenerator(Path(tmpdir), config).generate()
+        pom_path: Path = files["pom.xml"]
+        return pom_path.read_text()
+
+    def test_pom_is_well_formed_xml_with_maven_namespace(self) -> None:
+        """pom.xml parses as XML rooted at the Maven project element."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = DefusedElementTree.fromstring(self._pom(tmpdir))
+            assert root.tag == "{http://maven.apache.org/POM/4.0.0}project"
+
+    def test_pom_names_project_under_com_example(self) -> None:
+        """The artifact is the project name under the com.example group."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._pom(tmpdir)
+            assert "<groupId>com.example</groupId>" in content
+            assert "<artifactId>wrist-timer</artifactId>" in content
+
+    def test_pom_targets_pinned_java_release(self) -> None:
+        """The compiler release matches the pinned Java version."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._pom(tmpdir)
+            release = f"<maven.compiler.release>{JAVA_RELEASE}"
+            assert f"{release}</maven.compiler.release>" in content
+
+    def test_pom_manages_junit4_test_dependency(self) -> None:
+        """JUnit 4 (the Android-ecosystem convention) is test-scoped."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._pom(tmpdir)
+            assert "<artifactId>junit</artifactId>" in content
+            assert f"<version>{JUNIT4_VERSION}</version>" in content
+            assert "<scope>test</scope>" in content
+            # The old JUnit 5 (jupiter) manifest is gone.
+            assert "jupiter" not in content
+
+    def test_pom_wires_surefire_and_compiler_plugins(self) -> None:
+        """Surefire (mvn test) and the compiler plugin are pinned."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._pom(tmpdir)
+            assert "<artifactId>maven-surefire-plugin</artifactId>" in content
+            assert f"<version>{SUREFIRE_VERSION}</version>" in content
+
+    def test_pom_carries_the_jacoco_coverage_gate(self) -> None:
+        """The JaCoCo plugin enforces the >=90% line-coverage bound.
+
+        The rules live at plugin level so the CI's standalone
+        ``mvn jacoco:check`` invocation (reference/ci/java.yml) applies
+        them too, not just the lifecycle-bound check execution.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._pom(tmpdir)
+            assert "<artifactId>jacoco-maven-plugin</artifactId>" in content
+            assert f"<version>{JACOCO_VERSION}</version>" in content
+            assert "<goal>prepare-agent</goal>" in content
+            assert "<minimum>0.90</minimum>" in content
+
+    def test_pom_declares_every_ci_quality_plugin(self) -> None:
+        """Checkstyle, PMD, and SpotBugs back the CI's mvn goals.
+
+        reference/ci/java.yml runs checkstyle:check, pmd:check, and
+        spotbugs:check; the spotbugs prefix only resolves when the
+        plugin is declared in the pom.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._pom(tmpdir)
+            assert "<artifactId>maven-checkstyle-plugin</artifactId>" in content
+            assert f"<version>{CHECKSTYLE_PLUGIN_VERSION}</version>" in content
+            assert "<configLocation>google_checks.xml</configLocation>" in content
+            assert "<artifactId>maven-pmd-plugin</artifactId>" in content
+            assert f"<version>{PMD_PLUGIN_VERSION}</version>" in content
+            assert "<artifactId>spotbugs-maven-plugin</artifactId>" in content
+            assert f"<version>{SPOTBUGS_PLUGIN_VERSION}</version>" in content
+
+    def test_pom_documents_two_builds_split(self) -> None:
+        """The pom discloses that the APK build is Android tooling's job."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._pom(tmpdir)
+            assert "THE TWO BUILDS" in content
+            assert "Android Studio" in content
+            assert "android-maven-plugin is unmaintained" in content
 
 
 class TestCppDependencies:

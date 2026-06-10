@@ -16,7 +16,7 @@ EXPECTED_TEST_FILES: dict[str, list[str]] = {
     "typescript": ["tests/index.test.ts"],
     "go": ["cmd/test_project/main_test.go"],
     "rust": ["tests/integration_test.rs"],
-    "java": ["src/test/java/test_project/MainTest.java"],
+    "java": ["src/test/java/com/example/test_project/GreetingTest.java"],
     "csharp": ["tests/MainTests.cs"],
     "ruby": ["spec/test_project_spec.rb", "spec/spec_helper.rb"],
     "swift": ["Tests/test_projectTests/test_projectTests.swift"],
@@ -354,7 +354,7 @@ class TestMultiLanguageTests:
             assert "#[test]" in content
 
     def test_java_test_has_test_annotation(self) -> None:
-        """Test Java test file has @Test annotation."""
+        """Test Java test file has the JUnit 4 @Test annotation."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = Config(
                 project_name="test-project",
@@ -364,8 +364,40 @@ class TestMultiLanguageTests:
             generator = Generator(Path(tmpdir), config)
             files = generator.generate()
 
-            content = files["src/test/java/test_project/MainTest.java"].read_text()
+            content = files[
+                "src/test/java/com/example/test_project/GreetingTest.java"
+            ].read_text()
             assert "@Test" in content
+            # JUnit 4 (org.junit), matching the pom — not JUnit 5 (jupiter).
+            assert "import org.junit.Test;" in content
+            assert "import static org.junit.Assert.assertEquals;" in content
+            assert "jupiter" not in content
+
+    def test_java_test_exercises_the_greeting_logic(self) -> None:
+        """The Java scaffold test verifies real concatenation logic.
+
+        It must compare ``Greeting.greet()`` output against expected
+        literals — for both the project name and an arbitrary name — so
+        the assertions are not tautological.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="java",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files[
+                "src/test/java/com/example/test_project/GreetingTest.java"
+            ].read_text()
+            assert "package com.example.test_project;" in content
+            assert '"Hello from test-project!"' in content
+            assert 'Greeting.greet("test-project")' in content
+            assert 'assertEquals("Hello from wear!", Greeting.greet("wear"));' in (
+                content
+            )
 
     def test_csharp_test_has_fact_attribute(self) -> None:
         """Test C# test file has [Fact] attribute."""

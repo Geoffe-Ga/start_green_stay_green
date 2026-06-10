@@ -33,7 +33,7 @@ EXPECTED_ENTRY_POINTS: dict[str, str] = {
     "typescript": "src/index.ts",
     "go": "cmd/test_project/main.go",
     "rust": "src/main.rs",
-    "java": "src/main/java/test_project/Main.java",
+    "java": "app/src/main/java/com/example/test_project/MainActivity.java",
     "csharp": "src/Program.cs",
     "ruby": "lib/test_project.rb",
     "swift": "Sources/test_project/TestProjectApp.swift",
@@ -54,7 +54,10 @@ EXPECTED_CONFIG_FILES: dict[str, list[str]] = {
     ],
     "go": ["go.mod"],
     "rust": ["Cargo.toml"],
-    "java": ["pom.xml"],
+    # The Maven manifest (pom.xml) is owned by DependenciesGenerator for
+    # java (#366); the structure scaffold ships only sources and the
+    # Android manifest/layout XML.
+    "java": [],
     "csharp": [],
     "ruby": ["Gemfile"],
     "swift": ["Package.swift"],
@@ -321,11 +324,13 @@ class TestMultiLanguageStructure:
             assert entry_path.exists()
             content = entry_path.read_text()
             assert len(content) > 0, f"Entry point empty for {lang}"
-            # Should contain hello/print message
+            # Should contain hello/print message (or assemble it via the
+            # scaffold's greet()/greeting() pure-logic function).
             assert (
                 "hello" in content.lower()
                 or "print" in content.lower()
                 or "fmt" in content.lower()
+                or "greet" in content.lower()
             )
 
     @pytest.mark.parametrize("lang", SUPPORTED_LANGUAGES)
@@ -421,8 +426,8 @@ class TestMultiLanguageStructure:
             assert "[package]" in content
             assert "test-project" in content
 
-    def test_java_creates_pom_xml(self) -> None:
-        """Test Java generates pom.xml."""
+    def test_java_creates_pure_logic_greeting(self) -> None:
+        """Java generates the Maven-buildable pure-logic Greeting class."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = StructureConfig(
                 project_name="test-project",
@@ -432,9 +437,11 @@ class TestMultiLanguageStructure:
             generator = StructureGenerator(Path(tmpdir), config)
             files = generator.generate()
 
-            assert "pom.xml" in files
-            content = files["pom.xml"].read_text()
-            assert "<project" in content
+            key = "src/main/java/com/example/test_project/Greeting.java"
+            assert key in files
+            content = files[key].read_text()
+            assert "package com.example.test_project;" in content
+            assert 'return "Hello from " + projectName + "!";' in content
 
     def test_csharp_creates_program_cs(self) -> None:
         """Test C# generates Program.cs source file."""
@@ -679,6 +686,170 @@ class TestKotlinStructure:
             assert "settings.gradle.kts" not in files
             assert "build.gradle.kts" not in files
             assert "app/build.gradle.kts" not in files
+
+
+class TestJavaStructure:
+    """Test the Java legacy Android Wear structure generation (#366)."""
+
+    def test_java_creates_android_manifest(self) -> None:
+        """Java generates an AndroidManifest.xml for the app module."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="java",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            manifest_key = "app/src/main/AndroidManifest.xml"
+            assert manifest_key in files
+            content = files[manifest_key].read_text()
+            assert "<manifest" in content
+            assert "MainActivity" in content
+
+    def test_java_manifest_declares_wear_device_profile(self) -> None:
+        """The manifest requires the watch hardware feature (Wear OS)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="java",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            content = files["app/src/main/AndroidManifest.xml"].read_text()
+            assert (
+                '<uses-feature android:name="android.hardware.type.watch" />' in content
+            )
+
+    def test_java_manifest_declares_standalone_wear_app(self) -> None:
+        """The manifest marks the app standalone (no phone companion)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="java",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            content = files["app/src/main/AndroidManifest.xml"].read_text()
+            assert "com.google.android.wearable.standalone" in content
+            assert 'android:value="true"' in content
+
+    def test_java_manifest_declares_package_application_id(self) -> None:
+        """The manifest carries the sanitized package as application ID.
+
+        Unlike the Kotlin scaffold there are no Gradle manifests for the
+        Java app module, so the manifest is the single home of the ID.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="wrist-timer",
+                language="java",
+                package_name="wrist-timer",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            content = files["app/src/main/AndroidManifest.xml"].read_text()
+            root = DefusedElementTree.fromstring(content)
+            assert root.tag == "manifest"
+            assert root.get("package") == "com.example.wrist_timer"
+
+    def test_java_manifest_is_well_formed_xml(self) -> None:
+        """The generated AndroidManifest.xml parses as XML."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="java",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            content = files["app/src/main/AndroidManifest.xml"].read_text()
+            root = DefusedElementTree.fromstring(content)
+            assert root.tag == "manifest"
+
+    def test_java_creates_wear_main_activity(self) -> None:
+        """Java generates a legacy Wear MainActivity (no WearableActivity)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="java",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            key = "app/src/main/java/com/example/test_project/MainActivity.java"
+            assert key in files
+            content = files[key].read_text()
+            assert "package com.example.test_project;" in content
+            assert "public class MainActivity extends Activity" in content
+            assert "setContentView(R.layout.activity_main);" in content
+            assert 'Greeting.greet("test-project")' in content
+            assert "extends WearableActivity" not in content
+
+    def test_java_main_activity_documents_two_builds_split(self) -> None:
+        """MainActivity discloses that the APK build is Android tooling's."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="java",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            key = "app/src/main/java/com/example/test_project/MainActivity.java"
+            content = files[key].read_text()
+            assert "Android Studio" in content
+            assert "Maven" in content
+
+    def test_java_creates_box_inset_layout(self) -> None:
+        """The layout XML roots at androidx.wear.widget.BoxInsetLayout."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="java",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            key = "app/src/main/res/layout/activity_main.xml"
+            assert key in files
+            content = files[key].read_text()
+            root = DefusedElementTree.fromstring(content)
+            assert root.tag == "androidx.wear.widget.BoxInsetLayout"
+            assert 'android:id="@+id/greeting"' in content
+            assert 'app:boxedEdges="all"' in content
+
+    def test_java_pure_logic_unit_is_android_free(self) -> None:
+        """Greeting.java has no Android imports (Maven-buildable)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="java",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            content = files[
+                "src/main/java/com/example/test_project/Greeting.java"
+            ].read_text()
+            assert "import android" not in content
+            assert "public final class Greeting" in content
+            assert 'return "Hello from " + projectName + "!";' in content
+
+    def test_java_does_not_write_maven_manifest(self) -> None:
+        """pom.xml belongs to DependenciesGenerator, not structure (#366)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="java",
+                package_name="test_project",
+            )
+            files = StructureGenerator(Path(tmpdir), config).generate()
+
+            assert "pom.xml" not in files
+            assert not (Path(tmpdir) / "pom.xml").exists()
 
 
 class TestCppStructure:

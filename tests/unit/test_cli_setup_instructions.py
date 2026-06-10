@@ -7,8 +7,9 @@ import pytest
 from start_green_stay_green.cli import _get_setup_instructions
 from start_green_stay_green.cli import _venv_activation_command
 
-# Languages exercised by the per-language common-tail tests; "java" covers
-# the unknown-language default path.
+# Languages exercised by the per-language common-tail tests. The
+# unknown-language default path is covered separately with "ruby"
+# (java gained its own Maven step with #366).
 ALL_LANGUAGES = (
     "python",
     "typescript",
@@ -209,6 +210,16 @@ class TestGetSetupInstructions:
         test_idx = instructions.index("ctest --test-dir build")
         assert conan_idx < instructions.index(configure_cmds[0]) < build_idx < test_idx
         assert not any("tizen" in c for c in instructions)
+
+    def test_java_runs_the_pure_logic_maven_tests(self) -> None:
+        """java setup runs mvn test — what the generated pom can do (#366).
+
+        The watch APK build needs Android tooling (Android Studio /
+        Gradle) that init cannot install, so no Gradle/APK step appears.
+        """
+        instructions = _get_setup_instructions(("java",), Path("/home/user/wear-proj"))
+        assert "mvn test" in instructions
+        assert not any("gradle" in c for c in instructions)
 
     def test_unknown_language_has_sensible_default(self) -> None:
         """Unknown languages should still get pre-commit + check-all."""

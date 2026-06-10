@@ -324,10 +324,11 @@ class TestGeneratorOnlyLanguagePipelineGates:
     """Pipeline steps skip gracefully for generator-only languages (#356).
 
     java/csharp/ruby have structure/dependencies/tests/readme generators
-    but no quality-tooling support — instead of crashing init, the tooling
-    steps must no-op with an informational message. Kotlin graduated from
-    this set when #357 wired its pre-commit/scripts/metrics/architecture
-    tooling and #358 wired its CI workflow.
+    (java's are the Wear OS scaffold, #366) and a CI workflow via ci.py,
+    but no pre-commit/scripts/metrics/architecture support (#367 for
+    java) — instead of crashing init, those tooling steps must no-op
+    with an informational message. Kotlin graduated from this set when
+    #357 wired its quality tooling and #358 wired its CI workflow.
     """
 
     def test_precommit_step_writes_for_kotlin(self, tmp_path: Path) -> None:
@@ -337,6 +338,28 @@ class TestGeneratorOnlyLanguagePipelineGates:
         config = tmp_path / ".pre-commit-config.yaml"
         assert config.exists()
         assert "ktlint" in config.read_text()
+
+    def test_precommit_step_skips_java_without_writing(self, tmp_path: Path) -> None:
+        """Pre-commit config stays out of scope for java until #367."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "java")
+
+        assert not (tmp_path / ".pre-commit-config.yaml").exists()
+
+    def test_scripts_step_skips_java_without_python_fallback(
+        self, tmp_path: Path
+    ) -> None:
+        """java must not receive the Python-fallback quality scripts."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "java")
+
+        assert not (tmp_path / "scripts").exists()
+
+    def test_ci_step_writes_java_workflow(self, tmp_path: Path) -> None:
+        """The java CI workflow is generated (ci.py has a java config)."""
+        cli_mod._generate_ci_step(tmp_path, "my-project", "java", None)
+
+        ci_file = tmp_path / ".github" / "workflows" / "ci.yml"
+        assert ci_file.exists()
+        assert "Java Quality Checks" in ci_file.read_text()
 
     def test_precommit_step_skips_ruby_without_writing(self, tmp_path: Path) -> None:
         """No .pre-commit-config.yaml is written and no error is raised."""

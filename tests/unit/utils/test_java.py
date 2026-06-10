@@ -1,11 +1,17 @@
-"""Unit tests for the shared Kotlin/Android naming helpers."""
+"""Unit tests for the shared Java/Android naming helpers.
+
+The Android package sanitization rules are Java's package rules, so the
+canonical implementation lives in ``utils/java.py`` (#366) and is shared
+by the Java and Kotlin Wear OS scaffolds. These tests moved here from
+``test_kotlin.py`` together with the implementation.
+"""
 
 from __future__ import annotations
 
 import pytest
 
-from start_green_stay_green.utils.kotlin import android_package
-from start_green_stay_green.utils.kotlin import android_package_path
+from start_green_stay_green.utils.java import android_package
+from start_green_stay_green.utils.java import android_package_path
 
 
 class TestAndroidPackage:
@@ -49,7 +55,7 @@ class TestAndroidPackagePath:
     """Tests for :func:`android_package_path`."""
 
     def test_returns_slash_separated_source_path(self) -> None:
-        """The path form swaps dots for slashes (Kotlin source layout)."""
+        """The path form swaps dots for slashes (Java source layout)."""
         assert android_package_path("wrist_timer") == "com/example/wrist_timer"
 
     def test_matches_android_package_segments(self) -> None:
