@@ -1,0 +1,9 @@
+# Conan 2 manifest for wrist-pulse.
+# Catch2 backs the unit-test scaffold (tests/test_greeting.cpp); the
+# Tizen native SDK is provided by Tizen Studio, not by Conan.
+[requires]
+catch2/3.8.0
+
+[generators]
+CMakeDeps
+CMakeToolchain

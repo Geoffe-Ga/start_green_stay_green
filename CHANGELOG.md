@@ -38,6 +38,24 @@ Phase 6 follow-ups in progress (issues #316–#319).
   (#359), documentation (#360). A real generated example lives in
   `examples/kotlin/`.
 
+- **C/C++ (Tizen native) language support** — `green init --language cpp`
+  generates a Tizen native watch-app scaffold (Samsung Galaxy Watch,
+  appcore `watch_app` lifecycle + EFL UI) with a deliberate two-build
+  split: the pure-logic library and its Catch2 tests build with plain
+  CMake ≥3.20 + Conan 2 (C++17 pinned) on any host, while `.tpk`
+  packaging stays a local Tizen Studio CLI step. Full quality stack:
+  clang-format + clang-tidy + cppcheck pre-commit hooks and scripts,
+  lizard complexity gate (≤10), a ≥90% gcov/lcov coverage gate,
+  gitleaks/detect-secrets secret scanning, flawfinder CWE-mapped
+  dangerous-API scanning, a stdlib-Python include-boundary architecture
+  checker, and an ubuntu-24.04 CI pipeline that runs the generated
+  scripts themselves with a gcc/clang build-and-test matrix. Foundation
+  (#361), quality tooling (#362), CI pipeline (#363), tests (#364),
+  documentation (#365). A real generated example lives in
+  `examples/cpp/`. Also fixed with #365: the generated Swift README now
+  advertises its real CI pipeline (generated since #353) instead of
+  listing CI/CD as planned.
+
 ## [1.0.0] — 2026-05-10
 
 First tagged release. Bundles the entire claude-init optimization
