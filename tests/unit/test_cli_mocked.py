@@ -42,6 +42,7 @@ from start_green_stay_green import cli
 from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
+from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
 from start_green_stay_green.utils.enhance_state import BatchProgress
@@ -521,6 +522,114 @@ class TestGetAPIKeyWithSource:
             key, source = cli._get_api_key_with_source(None, no_interactive=True)
             assert key is None
             assert source is None
+
+
+class TestProviderModelSelection:
+    """Test the ``--provider`` / ``--model`` selection wiring in the CLI."""
+
+    def test_lazy_sources_read_provider_specific_env_var(self) -> None:
+        """The env-var source honors the per-provider key var name."""
+        with (
+            patch(
+                "start_green_stay_green.cli.get_api_key_from_keyring",
+                return_value=None,
+            ),
+            patch.dict(
+                "os.environ",
+                {"CUSTOM_KEY_VAR": "custom-env-key"},  # pragma: allowlist secret
+                clear=True,
+            ),
+        ):
+            sources = list(cli._lazy_api_key_sources(None, "CUSTOM_KEY_VAR"))
+        # Last yielded source is the env var; it must read CUSTOM_KEY_VAR.
+        assert sources[-1] == ("custom-env-key", "environment variable")
+
+    @patch("start_green_stay_green.cli.AIOrchestrator")
+    @patch("start_green_stay_green.cli.build_provider")
+    @patch(
+        "start_green_stay_green.cli._get_api_key_with_source",
+        return_value=("k", "command line"),
+    )
+    def test_initialize_orchestrator_threads_flags_into_selection(
+        self,
+        mock_get_key: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_build: Mock,
+        mock_orch: Mock,
+    ) -> None:
+        """Flags resolve to a selection that drives build_provider + orchestrator."""
+        with patch.dict("os.environ", {}, clear=True):
+            cli._initialize_orchestrator(
+                api_key_arg="k",
+                no_interactive=True,
+                selection_inputs=cli._SelectionInputs(model_flag="model-from-flag"),
+            )
+        # build_provider receives the resolved provider + model.
+        _, build_kwargs = mock_build.call_args
+        assert mock_build.call_args.args[0] == "anthropic"
+        assert build_kwargs["model"] == "model-from-flag"
+        # The orchestrator is constructed with the resolved model + provider.
+        _, orch_kwargs = mock_orch.call_args
+        assert orch_kwargs["model"] == "model-from-flag"
+        assert orch_kwargs["provider"] is mock_build.return_value
+
+    @patch("start_green_stay_green.cli.console")
+    def test_initialize_orchestrator_unknown_provider_prints_and_returns_none(
+        self, mock_console: Mock
+    ) -> None:
+        """An unknown ``--provider`` prints an error and yields no orchestrator."""
+        with patch.dict("os.environ", {}, clear=True):
+            result = cli._initialize_orchestrator(
+                api_key_arg="k",
+                no_interactive=True,
+                selection_inputs=cli._SelectionInputs(provider_flag="does-not-exist"),
+            )
+        assert result is None
+        mock_console.print.assert_called()
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        # The supported set must appear exactly once — the underlying
+        # ``ValueError`` already names it, so the CLI must not append a
+        # second ``(supported: …)`` copy (regression: #383).
+        assert printed.count("Supported providers:") == 1
+        assert "(supported:" not in printed
+
+    @patch("start_green_stay_green.cli.console")
+    @patch(
+        "start_green_stay_green.cli.build_provider",
+        side_effect=ProviderUnavailableError("install hint here"),
+    )
+    @patch(
+        "start_green_stay_green.cli._get_api_key_with_source",
+        return_value=("k", "command line"),
+    )
+    def test_initialize_orchestrator_missing_extra_prints_hint(
+        self,
+        mock_get_key: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_build: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_console: Mock,
+    ) -> None:
+        """A missing provider extra surfaces the install hint, not a crash."""
+        with patch.dict("os.environ", {}, clear=True):
+            result = cli._initialize_orchestrator(api_key_arg="k", no_interactive=True)
+        assert result is None
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "install hint here" in printed
+
+    @patch("start_green_stay_green.cli.build_provider")
+    @patch("start_green_stay_green.cli.AIOrchestrator")
+    @patch(
+        "start_green_stay_green.cli._get_api_key_with_source",
+        return_value=("k", "command line"),
+    )
+    def test_env_var_selects_model_over_default(
+        self,
+        mock_get_key: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_orch: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_build: Mock,
+    ) -> None:
+        """``GREEN_LLM_MODEL`` overrides the default model when no flag given."""
+        with patch.dict("os.environ", {"GREEN_LLM_MODEL": "env-model"}, clear=True):
+            cli._initialize_orchestrator(api_key_arg="k", no_interactive=True)
+        assert mock_build.call_args.kwargs["model"] == "env-model"
 
 
 class TestInitCommand:
@@ -1876,8 +1985,45 @@ class TestEnhanceCommand:
         )
         assert result.exit_code == 1
         flat = self._flat(result.stdout)
-        assert "requires an Anthropic API key" in flat
+        # ``enhance`` now accepts ``--provider``/``--model``, so the
+        # no-key message must be provider-neutral (regression: #383).
+        assert "requires an API key for the selected provider" in flat
+        assert "Anthropic API key" not in flat
         assert "ANTHROPIC_API_KEY" in flat
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_omits_config_tier_by_design(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """``enhance`` intentionally has no config-file tier (see #396).
+
+        Unlike ``green init`` (4 tiers), ``enhance`` has no ``--config``
+        flag and loads no config file, so it deliberately wires only
+        CLI flag > env > built-in default. The selection inputs it builds
+        must therefore carry ``config_data is None`` — the config tier is
+        a no-op here. Tracked for future wiring as issue #396.
+        """
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path, name="no-config", language="python")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--model", "Flag-Model", "--no-interactive"],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        selection_inputs = mock_init.call_args.kwargs["selection_inputs"]
+        # The config tier is omitted by design: enhance has no config input.
+        assert selection_inputs.config_data is None
+        # The CLI ``--model`` flag still flows through (case preserved).
+        assert selection_inputs.model_flag == "Flag-Model"
 
     @patch("start_green_stay_green.cli._enhance_subagents")
     @patch("start_green_stay_green.cli._enhance_claude_md")

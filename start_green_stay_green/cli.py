@@ -42,6 +42,11 @@ from start_green_stay_green.ai.batch_dispatch import resume_subagent_batch
 from start_green_stay_green.ai.batch_dispatch import submit_subagent_batch
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
+from start_green_stay_green.ai.provider_selection import ProviderSelection
+from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
+from start_green_stay_green.ai.provider_selection import build_provider
+from start_green_stay_green.ai.provider_selection import resolve_api_key_env_var
+from start_green_stay_green.ai.provider_selection import resolve_provider_selection
 from start_green_stay_green.generators.architecture import (
     ArchitectureEnforcementGenerator,
 )
@@ -132,6 +137,31 @@ config_file_option = Annotated[
         "--config-file",
         help="Path to configuration file (YAML or TOML).",
         exists=False,
+    ),
+]
+
+provider_option = Annotated[
+    str | None,
+    typer.Option(
+        "--provider",
+        help=(
+            "LLM provider for AI features. Precedence: this flag > "
+            "GREEN_LLM_PROVIDER env > config file > default (anthropic). "
+            "The provider's API key is read from its own env var "
+            "(ANTHROPIC_API_KEY for anthropic)."
+        ),
+    ),
+]
+
+model_option = Annotated[
+    str | None,
+    typer.Option(
+        "--model",
+        help=(
+            "Model identifier for AI features. Precedence: this flag > "
+            "GREEN_LLM_MODEL env > config file > the provider's default "
+            "model."
+        ),
     ),
 ]
 
@@ -503,6 +533,7 @@ def _warn_if_cli_api_key(source: str) -> None:
 
 def _lazy_api_key_sources(
     api_key_arg: str | None,
+    api_key_env_var: str = "ANTHROPIC_API_KEY",
 ) -> Generator[tuple[str | None, str]]:
     """Yield API key sources lazily to avoid unnecessary keychain prompts.
 
@@ -511,26 +542,35 @@ def _lazy_api_key_sources(
 
     Args:
         api_key_arg: API key from command line argument.
+        api_key_env_var: Name of the environment variable holding the
+            selected provider's key (``ANTHROPIC_API_KEY`` for the
+            default Anthropic provider, kept unchanged).
 
     Yields:
         (key_or_none, source_name) tuples.
     """
     yield api_key_arg, "command line"
     yield get_api_key_from_keyring(), "keyring"
-    yield os.getenv("ANTHROPIC_API_KEY"), "environment variable"
+    yield os.getenv(api_key_env_var), "environment variable"
 
 
 def _get_api_key_with_source(
     api_key_arg: str | None,
+    api_key_env_var: str = "ANTHROPIC_API_KEY",
     *,
     no_interactive: bool,
 ) -> tuple[str, str] | tuple[None, None]:
     """Get API key from the first available source.
 
+    Args:
+        api_key_arg: API key from the command line argument.
+        api_key_env_var: Environment variable to read the key from.
+        no_interactive: Disable the interactive keyring prompt.
+
     Returns:
         (api_key, source) tuple, or (None, None) if not found.
     """
-    for key, source in _lazy_api_key_sources(api_key_arg):
+    for key, source in _lazy_api_key_sources(api_key_arg, api_key_env_var):
         if key:
             _warn_if_cli_api_key(source)
             return key, source
@@ -543,34 +583,136 @@ def _get_api_key_with_source(
     return None, None
 
 
+@dataclass(frozen=True)
+class _SelectionInputs:
+    """The three provider/model selection inputs threaded from a command.
+
+    Bundles the ``--provider`` / ``--model`` flag values and the parsed
+    config-file mapping so the orchestrator-init helpers pass one object
+    instead of three loose arguments (keeping them under the project's
+    argument-count limit).
+
+    Attributes:
+        provider_flag: Value of ``--provider`` (or ``None``).
+        model_flag: Value of ``--model`` (or ``None``).
+        config_data: Parsed config-file mapping (may be empty).
+    """
+
+    provider_flag: str | None = None
+    model_flag: str | None = None
+    config_data: dict[str, str] | None = None
+
+
+def _resolve_orchestrator_selection(
+    inputs: _SelectionInputs,
+) -> ProviderSelection | None:
+    """Resolve the provider/model selection, reporting any bad input.
+
+    Args:
+        inputs: The bundled ``--provider`` / ``--model`` / config-file
+            selection inputs.
+
+    Returns:
+        The resolved :class:`ProviderSelection`, or ``None`` when the
+        provider name is unknown (an error has already been printed).
+    """
+    try:
+        return resolve_provider_selection(
+            provider_flag=inputs.provider_flag,
+            model_flag=inputs.model_flag,
+            config=inputs.config_data or {},
+            env=os.environ,
+        )
+    except ValueError as e:
+        # ``e`` already names the supported set ("Supported providers: …"),
+        # so we must not append a second copy here (regression: #383).
+        console.print(
+            f"[red]Error:[/red] {e}",
+            style="bold",
+        )
+        return None
+
+
+def _build_orchestrator_from_selection(
+    selection: ProviderSelection,
+    api_key: str,
+    source: str,
+) -> AIOrchestrator | None:
+    """Build an orchestrator from a resolved selection and key.
+
+    Args:
+        selection: Resolved provider/model.
+        api_key: Resolved API key for the provider.
+        source: Human-readable origin of the key (for the status line).
+
+    Returns:
+        The constructed :class:`AIOrchestrator`, or ``None`` if the
+        provider's optional extra is missing or the key is rejected
+        (an actionable error has already been printed).
+    """
+    try:
+        provider = build_provider(
+            selection.provider,
+            api_key=api_key,
+            model=selection.model,
+        )
+        orchestrator = AIOrchestrator(
+            api_key=api_key,
+            model=selection.model,
+            provider=provider,
+        )
+    except ProviderUnavailableError as e:
+        console.print(f"[red]Error:[/red] {e}", style="bold")
+        return None
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] Invalid API key: {e}", style="bold")
+        return None
+    console.print(
+        f"[green]✓[/green] AI features enabled "
+        f"({selection.provider} {selection.model}, key from {source})"
+    )
+    return orchestrator
+
+
 def _initialize_orchestrator(
     api_key_arg: str | None = None,
     *,
     no_interactive: bool = False,
+    selection_inputs: _SelectionInputs | None = None,
 ) -> AIOrchestrator | None:
-    """Initialize AI orchestrator with optional API key.
+    """Initialize AI orchestrator with a resolved provider/model + key.
+
+    Provider and model are resolved with the precedence CLI flag > env
+    (``GREEN_LLM_PROVIDER`` / ``GREEN_LLM_MODEL``) > config file >
+    built-in default (Anthropic + the current model id). The API key is
+    then read from the *selected* provider's env var
+    (``ANTHROPIC_API_KEY`` for Anthropic), keyring, or CLI argument.
 
     Args:
         api_key_arg: API key from CLI argument.
         no_interactive: Disable interactive prompts.
+        selection_inputs: Bundled ``--provider`` / ``--model`` /
+            config-file selection inputs. Defaults to an empty bundle,
+            which resolves to the built-in Anthropic default.
 
     Returns:
-        AIOrchestrator instance if API key found, None otherwise.
+        AIOrchestrator instance if a provider and key resolve, else None.
     """
-    api_key, source = _get_api_key_with_source(
-        api_key_arg, no_interactive=no_interactive
+    selection = _resolve_orchestrator_selection(
+        selection_inputs or _SelectionInputs(),
     )
-
-    if not api_key:
+    if selection is None:
         return None
 
-    try:
-        orchestrator = AIOrchestrator(api_key=api_key)
-        console.print(f"[green]✓[/green] AI features enabled (from {source})")
-        return orchestrator  # noqa: TRY300  # Happy path return is clearer
-    except ValueError as e:
-        console.print(f"[red]Error:[/red] Invalid API key: {e}", style="bold")
+    api_key, source = _get_api_key_with_source(
+        api_key_arg,
+        resolve_api_key_env_var(selection.provider),
+        no_interactive=no_interactive,
+    )
+    if api_key is None or source is None:
         return None
+
+    return _build_orchestrator_from_selection(selection, api_key, source)
 
 
 def _copy_reference_skills(
@@ -1491,6 +1633,7 @@ def _resolve_pass2_orchestrator(
     offline: bool,
     no_enhance: bool,
     no_interactive: bool,
+    selection_inputs: _SelectionInputs | None = None,
 ) -> AIOrchestrator | None:
     """Decide whether Pass 2 should run, and return the orchestrator if so.
 
@@ -1514,7 +1657,11 @@ def _resolve_pass2_orchestrator(
         )
         return None
 
-    orchestrator = _initialize_orchestrator(api_key, no_interactive=no_interactive)
+    orchestrator = _initialize_orchestrator(
+        api_key,
+        no_interactive=no_interactive,
+        selection_inputs=selection_inputs,
+    )
 
     if no_enhance:
         # Always print *something* so the user knows --no-enhance had an
@@ -1707,6 +1854,8 @@ def init(  # noqa: PLR0913
         ),
     ] = None,
     config: config_file_option = None,
+    provider: provider_option = None,
+    model: model_option = None,
 ) -> None:
     """Initialize a new project with quality controls.
 
@@ -1732,6 +1881,8 @@ def init(  # noqa: PLR0913
         enable_live_dashboard: Generate live metrics dashboard with workflow.
         timing_json: Optional path to write a timing/telemetry JSON report.
         config: Configuration file path.
+        provider: Optional LLM provider override (``--provider``).
+        model: Optional model override (``--model``).
 
     Raises:
         typer.Exit: If validation fails or generation errors occur.
@@ -1776,6 +1927,11 @@ def init(  # noqa: PLR0913
         offline=offline,
         no_enhance=no_enhance,
         no_interactive=no_interactive,
+        selection_inputs=_SelectionInputs(
+            provider_flag=provider,
+            model_flag=model,
+            config_data=config_data,
+        ),
     )
 
     # Create project directory
@@ -1929,6 +2085,7 @@ def _require_enhance_orchestrator(
     api_key: str | None,
     *,
     no_interactive: bool,
+    selection_inputs: _SelectionInputs | None = None,
 ) -> AIOrchestrator:
     """Resolve an :class:`AIOrchestrator` for the ``enhance`` command.
 
@@ -1940,6 +2097,8 @@ def _require_enhance_orchestrator(
     Args:
         api_key: Optional CLI-supplied key.
         no_interactive: Skip any keyring prompts.
+        selection_inputs: Bundled ``--provider`` / ``--model`` /
+            config-file selection inputs.
 
     Returns:
         A real ``AIOrchestrator`` ready to dispatch.
@@ -1947,13 +2106,17 @@ def _require_enhance_orchestrator(
     Raises:
         typer.Exit: With code 1 if no key could be resolved.
     """
-    orchestrator = _initialize_orchestrator(api_key, no_interactive=no_interactive)
+    orchestrator = _initialize_orchestrator(
+        api_key,
+        no_interactive=no_interactive,
+        selection_inputs=selection_inputs,
+    )
     if orchestrator is None:
         console.print(
-            "[red]Error:[/red] `green enhance` requires an Anthropic API "
-            "key — there is no deterministic fallback for AI-tuned "
-            "artifacts.\n  Set ANTHROPIC_API_KEY (or store one in the "
-            "keyring on first run).",
+            "[red]Error:[/red] `green enhance` requires an API key for the "
+            "selected provider — there is no deterministic fallback for "
+            "AI-tuned artifacts.\n  Set ANTHROPIC_API_KEY (or store one in "
+            "the keyring on first run).",
             style="bold",
         )
         raise typer.Exit(code=1)
@@ -2767,6 +2930,8 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
             ),
         ),
     ] = False,
+    provider: provider_option = None,
+    model: model_option = None,
 ) -> None:
     r"""Re-run Pass 2 (AI tuning) on an existing green-init project.
 
@@ -2800,6 +2965,16 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
             with ``--wait`` for in-process polling.
         wait: Block in-process when ``--batch`` is set; polls every
             30 s until the batch ends or the timeout elapses.
+        provider: Optional LLM provider override (``--provider``).
+        model: Optional model override (``--model``). The case of the
+            model id is preserved verbatim (API identifiers are
+            case-sensitive).
+
+    Note:
+        Unlike ``green init``, ``enhance`` has no config-file tier: it
+        loads no config file, so provider/model resolve from CLI flag >
+        env (``GREEN_LLM_PROVIDER`` / ``GREEN_LLM_MODEL``) > built-in
+        default only. Wiring a config source is tracked as issue #396.
 
     Raises:
         typer.Exit: If the path is invalid, project metadata cannot
@@ -2821,7 +2996,19 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
     if wait and not batch:
         console.print("[red]Error:[/red] --wait only applies in --batch mode.")
         raise typer.Exit(code=1)
-    orchestrator = _require_enhance_orchestrator(api_key, no_interactive=no_interactive)
+    orchestrator = _require_enhance_orchestrator(
+        api_key,
+        no_interactive=no_interactive,
+        # ``enhance`` intentionally omits the config-file tier: it has no
+        # ``--config`` flag and loads no config file, so only CLI flag >
+        # env > built-in default apply here (3 tiers, vs. ``init``'s 4).
+        # ``config_data`` is therefore left unset (``None``). Wiring a
+        # config source into ``enhance`` is tracked as issue #396.
+        selection_inputs=_SelectionInputs(
+            provider_flag=provider,
+            model_flag=model,
+        ),
+    )
     file_writer = FileWriter(
         project_root=project_path,
         force=force,

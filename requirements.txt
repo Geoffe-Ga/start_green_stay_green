@@ -13,8 +13,12 @@ jinja2>=3.1.0,<4.0.0
 pyyaml>=6.0.0,<7.0.0
 toml>=0.10.2,<1.0.0
 
-# AI integration
-anthropic>=0.18.0,<1.0.0
+# AI integration is an optional extra as of #383 — the core CLI imports
+# and runs without it. Install the provider SDK with:
+#   pip install 'start-green-stay-green[anthropic]'
+# (declared under [project.optional-dependencies].anthropic in
+# pyproject.toml). Intentionally NOT listed here so the core install
+# stays SDK-free.
 
 # HTTP client
 httpx>=0.25.0,<1.0.0
