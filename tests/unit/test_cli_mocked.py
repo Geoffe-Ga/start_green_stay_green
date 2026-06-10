@@ -1964,6 +1964,40 @@ class TestEnhanceCommand:
     @patch("start_green_stay_green.cli._enhance_subagents")
     @patch("start_green_stay_green.cli._enhance_claude_md")
     @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_omits_config_tier_by_design(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """``enhance`` intentionally has no config-file tier (see #396).
+
+        Unlike ``green init`` (4 tiers), ``enhance`` has no ``--config``
+        flag and loads no config file, so it deliberately wires only
+        CLI flag > env > built-in default. The selection inputs it builds
+        must therefore carry ``config_data is None`` — the config tier is
+        a no-op here. Tracked for future wiring as issue #396.
+        """
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path, name="no-config", language="python")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--model", "Flag-Model", "--no-interactive"],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        selection_inputs = mock_init.call_args.kwargs["selection_inputs"]
+        # The config tier is omitted by design: enhance has no config input.
+        assert selection_inputs.config_data is None
+        # The CLI ``--model`` flag still flows through (case preserved).
+        assert selection_inputs.model_flag == "Flag-Model"
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
     def test_default_runs_every_target(
         self,
         mock_init: Mock,

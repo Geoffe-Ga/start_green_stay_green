@@ -160,6 +160,74 @@ def test_coalesce_returns_none_when_all_candidates_blank() -> None:
     assert _coalesce(None, "", "   ") is None
 
 
+# ----------------------- model-id case preservation -----------------------
+def test_model_flag_preserves_mixed_case() -> None:
+    """A ``--model`` value keeps its exact case (model ids are case-sensitive)."""
+    selection = resolve_provider_selection(
+        provider_flag=None,
+        model_flag="Claude-Sonnet-MixedCase",
+        config={},
+        env={},
+    )
+    assert selection.model == "Claude-Sonnet-MixedCase"
+
+
+def test_env_model_preserves_mixed_case() -> None:
+    """``GREEN_LLM_MODEL`` keeps its exact case through resolution."""
+    selection = resolve_provider_selection(
+        provider_flag=None,
+        model_flag=None,
+        config={},
+        env={"GREEN_LLM_MODEL": "GPT-4o-Env"},
+    )
+    assert selection.model == "GPT-4o-Env"
+
+
+def test_config_model_preserves_mixed_case() -> None:
+    """A config ``llm_model`` value keeps its exact case through resolution."""
+    selection = resolve_provider_selection(
+        provider_flag=None,
+        model_flag=None,
+        config={"llm_model": "Config-Model-CamelCase"},
+        env={},
+    )
+    assert selection.model == "Config-Model-CamelCase"
+
+
+def test_model_flag_is_trimmed_but_not_folded() -> None:
+    """Surrounding whitespace is stripped from the model, but case is kept."""
+    selection = resolve_provider_selection(
+        provider_flag=None,
+        model_flag="  Foo-Bar  ",
+        config={},
+        env={},
+    )
+    assert selection.model == "Foo-Bar"
+
+
+@pytest.mark.parametrize(
+    ("provider_flag", "config", "env"),
+    [
+        ("ANTHROPIC", {}, {}),
+        (None, {"llm_provider": "ANTHROPIC"}, {}),
+        (None, {}, {"GREEN_LLM_PROVIDER": "ANTHROPIC"}),
+    ],
+)
+def test_provider_remains_case_insensitive_across_tiers(
+    provider_flag: str | None,
+    config: dict[str, str],
+    env: dict[str, str],
+) -> None:
+    """Provider names stay case-insensitive (registry keys) at every tier."""
+    selection = resolve_provider_selection(
+        provider_flag=provider_flag,
+        model_flag=None,
+        config=config,
+        env=env,
+    )
+    assert selection.provider == "anthropic"
+
+
 # --------------------------- api-key env var ------------------------------
 def test_anthropic_api_key_env_var_is_unchanged() -> None:
     """The Anthropic provider still reads ``ANTHROPIC_API_KEY``."""

@@ -157,36 +157,52 @@ def supported_providers() -> tuple[str, ...]:
     return tuple(sorted(_PROVIDERS))
 
 
-def _normalize(value: str | None) -> str | None:
-    """Trim and case-fold ``value``; treat blank/``None`` as unset.
+def _normalize(value: str | None, *, fold: bool = True) -> str | None:
+    """Trim ``value`` (optionally case-folding); treat blank/``None`` as unset.
+
+    Args:
+        value: The raw candidate value, or ``None``.
+        fold: When ``True`` (the default), the trimmed value is
+            case-folded — correct for provider names, which are
+            case-insensitive registry keys. Pass ``fold=False`` for
+            model ids, which are case-sensitive API identifiers whose
+            case must be preserved verbatim.
 
     Returns:
-        The normalized non-empty string, or ``None`` when ``value`` is
-        ``None`` or only whitespace (so the next precedence tier wins).
+        The trimmed string (case-folded only when ``fold`` is ``True``),
+        or ``None`` when ``value`` is ``None`` or only whitespace (so the
+        next precedence tier wins).
     """
     if value is None:
         return None
     trimmed = value.strip()
-    return trimmed.casefold() if trimmed else None
+    if not trimmed:
+        return None
+    return trimmed.casefold() if fold else trimmed
 
 
-def _coalesce(*candidates: str | None) -> str | None:
+def _coalesce(*candidates: str | None, fold: bool = True) -> str | None:
     """Return the first normalized, non-blank candidate, or ``None``.
 
     Args:
         *candidates: Values in descending precedence order.
+        fold: Threaded into each :func:`_normalize` call. ``True``
+            case-folds (provider names); ``False`` preserves case
+            (model ids).
 
     Returns:
         The first candidate that is not ``None`` after normalization.
     """
     for candidate in candidates:
-        normalized = _normalize(candidate)
+        normalized = _normalize(candidate, fold=fold)
         if normalized is not None:
             return normalized
     return None
 
 
-def _coalesce_with_default(default: str, *candidates: str | None) -> str:
+def _coalesce_with_default(
+    default: str, *candidates: str | None, fold: bool = True
+) -> str:
     """Coalesce ``candidates`` then fall back to a guaranteed ``default``.
 
     Args:
@@ -194,13 +210,19 @@ def _coalesce_with_default(default: str, *candidates: str | None) -> str:
             Module-level constants (:data:`DEFAULT_PROVIDER`,
             :data:`DEFAULT_MODEL`) supply this, so the result is always
             a concrete ``str`` — no ``None`` and therefore no defensive
-            ``assert`` at the call site.
+            ``assert`` at the call site. The default is returned verbatim
+            (never folded) when every candidate is unset.
         *candidates: Higher-precedence values in descending order.
+        fold: Threaded into :func:`_coalesce`. ``True`` case-folds the
+            chosen candidate (provider names); ``False`` preserves case
+            (model ids). Has no effect on ``default``, which is returned
+            as-is.
 
     Returns:
-        The first non-blank candidate, or the ``default`` (normalized).
+        The first non-blank candidate (normalized per ``fold``), or the
+        ``default``.
     """
-    return _coalesce(*candidates, default) or default
+    return _coalesce(*candidates, fold=fold) or default
 
 
 def _require_known(provider: str) -> str:
@@ -242,6 +264,11 @@ def resolve_provider_selection(
     Blank / whitespace-only values at any tier are treated as unset, so
     they fall through to the next tier rather than erroring.
 
+    Provider names are normalized case-insensitively (they are registry
+    keys), but model ids are preserved verbatim (only trimmed): they are
+    case-sensitive API identifiers, so ``--model GPT-4o`` reaches the
+    provider as ``GPT-4o``.
+
     Args:
         provider_flag: Value of the ``--provider`` CLI flag, or ``None``.
         model_flag: Value of the ``--model`` CLI flag, or ``None``.
@@ -256,17 +283,21 @@ def resolve_provider_selection(
     Raises:
         ValueError: If the resolved provider is not registered.
     """
+    # Provider names are case-insensitive registry keys → fold.
     provider = _coalesce_with_default(
         DEFAULT_PROVIDER,
         provider_flag,
         env.get(ENV_PROVIDER),
         config.get(_CONFIG_PROVIDER_KEY),
     )
+    # Model ids are case-sensitive API identifiers → preserve case
+    # (trim only). ``--model GPT-4o`` must reach the API as ``GPT-4o``.
     model = _coalesce_with_default(
         DEFAULT_MODEL,
         model_flag,
         env.get(ENV_MODEL),
         config.get(_CONFIG_MODEL_KEY),
+        fold=False,
     )
     return ProviderSelection(provider=_require_known(provider), model=model)
 

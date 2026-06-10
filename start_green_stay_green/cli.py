@@ -2965,7 +2965,15 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         wait: Block in-process when ``--batch`` is set; polls every
             30 s until the batch ends or the timeout elapses.
         provider: Optional LLM provider override (``--provider``).
-        model: Optional model override (``--model``).
+        model: Optional model override (``--model``). The case of the
+            model id is preserved verbatim (API identifiers are
+            case-sensitive).
+
+    Note:
+        Unlike ``green init``, ``enhance`` has no config-file tier: it
+        loads no config file, so provider/model resolve from CLI flag >
+        env (``GREEN_LLM_PROVIDER`` / ``GREEN_LLM_MODEL``) > built-in
+        default only. Wiring a config source is tracked as issue #396.
 
     Raises:
         typer.Exit: If the path is invalid, project metadata cannot
@@ -2990,6 +2998,11 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
     orchestrator = _require_enhance_orchestrator(
         api_key,
         no_interactive=no_interactive,
+        # ``enhance`` intentionally omits the config-file tier: it has no
+        # ``--config`` flag and loads no config file, so only CLI flag >
+        # env > built-in default apply here (3 tiers, vs. ``init``'s 4).
+        # ``config_data`` is therefore left unset (``None``). Wiring a
+        # config source into ``enhance`` is tracked as issue #396.
         selection_inputs=_SelectionInputs(
             provider_flag=provider,
             model_flag=model,
