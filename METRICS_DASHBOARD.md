@@ -153,6 +153,7 @@ artifacts = generator.write_all(Path("output"))
 - **Rust**: cargo-tarpaulin, cargo-mutants, clippy, rustdoc, cargo-audit
 - **Swift**: swift test + llvm-cov, muter, swiftlint, swift-docc, periphery
 - **Kotlin**: kover (./gradlew koverVerifyDebug), pitest, detekt, dokka, OWASP dependency-check
+- **C/C++**: lcov (cmake -DENABLE_COVERAGE=ON + ctest), mull, lizard (CCN), doxygen, cppcheck + flawfinder, conan audit
 
 ## Configuration Options
 
@@ -365,7 +366,7 @@ config = MetricsGenerationConfig(
 )
 ```
 
-**Solution**: Use a supported language (python, typescript, javascript, go, rust, swift, kotlin)
+**Solution**: Use a supported language (python, typescript, javascript, go, rust, swift, kotlin, cpp)
 
 ### Invalid Threshold
 
