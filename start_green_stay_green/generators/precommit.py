@@ -25,7 +25,7 @@ class GenerationConfig:
 
     Attributes:
         project_name: Name of the project.
-        language: Programming language (python, typescript, go, rust).
+        language: Programming language (python, typescript, go, rust, swift).
         language_config: Additional language-specific configuration.
     """
 
@@ -350,6 +350,82 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         ],
         "default_language_version": {},
     },
+    "swift": {
+        "hooks": [
+            {
+                "repo": "https://github.com/pre-commit/pre-commit-hooks",
+                "rev": "v4.5.0",
+                "hooks": [
+                    {"id": "trailing-whitespace"},
+                    {"id": "end-of-file-fixer"},
+                    {"id": "check-yaml"},
+                    {"id": "check-json"},
+                    {"id": "check-added-large-files", "args": ["--maxkb=500"]},
+                    {"id": "check-case-conflict"},
+                    {"id": "check-merge-conflict"},
+                    {"id": "check-symlinks"},
+                    {"id": "detect-private-key"},
+                    {"id": "fix-byte-order-marker"},
+                    {"id": "mixed-line-ending", "args": ["--fix=lf"]},
+                    {"id": "no-commit-to-branch", "args": ["--branch", "main"]},
+                ],
+            },
+            # swift-format and SwiftLint run as `repo: local` system hooks
+            # (mirroring how the Rust hooks invoke the cargo toolchain):
+            # apple/swift-format ships no .pre-commit-hooks.yaml, and
+            # realm/SwiftLint's remote hook builds SwiftLint from source via
+            # SPM on first run (a multi-minute build). Install both with:
+            # `brew install swift-format swiftlint`.
+            {
+                "repo": "local",
+                "hooks": [
+                    {
+                        "id": "swift-format",
+                        "name": "swift-format",
+                        "entry": "swift-format format --in-place",
+                        "language": "system",
+                        "types": ["swift"],
+                    },
+                    {
+                        "id": "swiftlint",
+                        "name": "SwiftLint",
+                        # --strict promotes warnings to errors; reads the
+                        # generated .swiftlint.yml (cyclomatic_complexity
+                        # <=10 plus the crash-safety/security opt-in rules).
+                        "entry": "swiftlint lint --strict",
+                        "language": "system",
+                        "types": ["swift"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                ],
+            },
+            {
+                "repo": "https://github.com/gitleaks/gitleaks",
+                "rev": "v8.18.4",
+                "hooks": [
+                    {"id": "gitleaks"},
+                ],
+            },
+            {
+                "repo": "https://github.com/shellcheck-py/shellcheck-py",
+                "rev": "v0.9.0.6",
+                "hooks": [
+                    {"id": "shellcheck"},
+                ],
+            },
+            {
+                "repo": "https://github.com/Yelp/detect-secrets",
+                "rev": "v1.4.0",
+                "hooks": [
+                    {
+                        "id": "detect-secrets",
+                        "args": ["--baseline", ".secrets.baseline"],
+                    },
+                ],
+            },
+        ],
+        "default_language_version": {},
+    },
 }
 
 
@@ -359,7 +435,7 @@ class PreCommitGenerator(BaseGenerator):
     Customizes pre-commit hooks based on project language and requirements.
     Includes formatting, linting, security, and general file quality checks.
 
-    Supports: Python, TypeScript, Go, Rust, and other languages.
+    Supports: Python, TypeScript, Go, Rust, Swift, and other languages.
 
     Attributes:
         orchestrator: Optional AI orchestrator for enhanced generation.

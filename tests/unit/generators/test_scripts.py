@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 
 import pytest
+import yaml
 
 from start_green_stay_green.generators.scripts import ScriptConfig
 from start_green_stay_green.generators.scripts import ScriptsGenerator
@@ -63,7 +64,7 @@ class TestScriptConfig:
 
     def test_script_config_language_various_values(self) -> None:
         """Test ScriptConfig accepts various language values."""
-        languages = ["python", "typescript", "go", "rust", "javascript"]
+        languages = ["python", "typescript", "go", "rust", "swift", "javascript"]
         for lang in languages:
             config = ScriptConfig(
                 language=lang,
@@ -599,6 +600,132 @@ class TestScriptsGeneratorRustGeneration:
             assert "cargo test" in content
 
 
+class TestScriptsGeneratorSwiftGeneration:
+    """Test Swift script generation (#352)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Generate Swift scripts into ``tmpdir`` and return the mapping."""
+        config = ScriptConfig(
+            language="swift",
+            package_name="my_watch_app",
+        )
+        generator = ScriptsGenerator(Path(tmpdir), config)
+        return generator.generate()
+
+    def test_generate_swift_scripts_creates_files(self) -> None:
+        """Test generate creates the full Swift script set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            assert "check-all.sh" in scripts
+            assert "format.sh" in scripts
+            assert "lint.sh" in scripts
+            assert "test.sh" in scripts
+            assert "security.sh" in scripts
+
+    def test_swift_format_script_uses_swift_format(self) -> None:
+        """Test Swift format.sh uses swift-format."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "swift-format" in content
+
+    def test_swift_lint_script_uses_swiftlint_strict(self) -> None:
+        """Test Swift lint.sh runs SwiftLint with --strict."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "swiftlint lint --strict" in content
+
+    def test_swift_test_script_enables_code_coverage(self) -> None:
+        """Test Swift test.sh runs swift test with coverage instrumentation."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "swift test --enable-code-coverage" in content
+
+    def test_swift_test_script_enforces_90_percent_coverage(self) -> None:
+        """Coverage mode reads the llvm-cov codecov JSON and gates at 90%."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            # llvm-cov export JSON path comes from swift test itself.
+            assert "--show-codecov-path" in content
+            assert "THRESHOLD=90" in content
+
+    def test_swift_security_script_uses_periphery(self) -> None:
+        """Test Swift security.sh runs Periphery dead-code analysis."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "periphery scan" in content
+
+    def test_swift_check_all_runs_full_toolchain(self) -> None:
+        """check-all.sh runs format, lint, tests (with coverage), security."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["check-all.sh"].read_text()
+            assert 'run_check "Format" "format.sh"' in content
+            assert 'run_check "Linting" "lint.sh"' in content
+            assert 'run_check "Tests" "test.sh" --coverage' in content
+            assert 'run_check "Security" "security.sh"' in content
+
+    def test_swift_writes_swiftlint_config_companion(self) -> None:
+        """A .swiftlint.yml companion lands at the project root."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            config_path = Path(tmpdir) / ".swiftlint.yml"
+            assert config_path.exists()
+
+    def test_swiftlint_config_is_parseable_yaml(self) -> None:
+        """.swiftlint.yml must be syntactically valid YAML."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".swiftlint.yml").read_text()
+            parsed = yaml.safe_load(content)
+            assert isinstance(parsed, dict)
+
+    def test_swiftlint_config_caps_cyclomatic_complexity_at_10(self) -> None:
+        """.swiftlint.yml errors when cyclomatic complexity exceeds 10."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".swiftlint.yml").read_text()
+            parsed = yaml.safe_load(content)
+            assert parsed["cyclomatic_complexity"]["error"] == 10
+
+    def test_swiftlint_config_preserves_existing_file(self) -> None:
+        """An existing user .swiftlint.yml is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / ".swiftlint.yml"
+            existing.write_text("disabled_rules: [todo]\n")
+
+            self._generate(tmpdir)
+
+            assert existing.read_text() == "disabled_rules: [todo]\n"
+
+    def test_swiftlint_config_documents_security_gap(self) -> None:
+        """.swiftlint.yml discloses that secret scanning lives in pre-commit.
+
+        SwiftLint has no dedicated security ruleset; the config must say
+        where secret scanning actually happens instead of overclaiming.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".swiftlint.yml").read_text()
+            assert "gitleaks" in content
+
+
 class TestScriptsGeneratorLanguageFallback:
     """Test language fallback behavior."""
 
@@ -847,6 +974,20 @@ class TestMutationKillers:
             # Should generate Rust scripts with clippy
             content = scripts["lint.sh"].read_text()
             assert "clippy" in content
+
+    def test_swift_language_dispatches_to_swift_generator(self) -> None:
+        """Test 'swift' language dispatches to Swift generator."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="swift",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            # Should generate Swift scripts with SwiftLint
+            content = scripts["lint.sh"].read_text()
+            assert "swiftlint" in content
 
     def test_generated_scripts_exact_count_python(self) -> None:
         """Test Python generator creates EXACTLY 12 scripts.
@@ -1527,7 +1668,7 @@ class TestPrStatusScript:
 
     def test_pr_status_script_generated_for_all_languages(self) -> None:
         """Test pr-status.sh is generated for all supported languages."""
-        languages = ["python", "typescript", "go", "rust"]
+        languages = ["python", "typescript", "go", "rust", "swift"]
         for lang in languages:
             with tempfile.TemporaryDirectory() as tmpdir:
                 config = ScriptConfig(

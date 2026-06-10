@@ -1,5 +1,6 @@
 """Unit tests for Pre-commit Generator."""
 
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -404,6 +405,126 @@ class TestGenerateWithRust:
         assert "clippy" in hook_ids
 
 
+class TestGenerateWithSwift:
+    """Test content generation for Swift projects."""
+
+    @staticmethod
+    def _parsed_repos(generator: PreCommitGenerator) -> list[dict[str, Any]]:
+        """Generate the Swift config and return its parsed repos list."""
+        config = GenerationConfig(
+            project_name="swift-project",
+            language="swift",
+            language_config={},
+        )
+        result = generator.generate(config)
+        yaml_content = "\n".join(
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        )
+        parsed = yaml.safe_load(yaml_content)
+        return list(parsed["repos"])
+
+    def test_generate_swift_returns_dict(self, mock_orchestrator: Mock) -> None:
+        """Test generate returns dict for Swift."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        config = GenerationConfig(
+            project_name="swift-project",
+            language="swift",
+            language_config={},
+        )
+        result = generator.generate(config)
+        assert isinstance(result, dict)
+        assert result["content"]
+
+    def test_generate_swift_content_is_valid_yaml(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Generated Swift pre-commit config must be parseable YAML."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        assert isinstance(repos, list)
+        assert repos
+
+    def test_generate_swift_includes_swift_format(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test generated Swift config includes a swift-format hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(
+            (repo for repo in repos if repo.get("repo") == "local"),
+            None,
+        )
+        assert local_repo is not None
+        hook_ids = [hook.get("id", "") for hook in local_repo.get("hooks", [])]
+        assert "swift-format" in hook_ids
+
+    def test_generate_swift_includes_swiftlint(self, mock_orchestrator: Mock) -> None:
+        """Test generated Swift config includes a SwiftLint hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(
+            (repo for repo in repos if repo.get("repo") == "local"),
+            None,
+        )
+        assert local_repo is not None
+        hook_ids = [hook.get("id", "") for hook in local_repo.get("hooks", [])]
+        assert "swiftlint" in hook_ids
+
+    def test_swift_swiftlint_hook_is_strict(self, mock_orchestrator: Mock) -> None:
+        """The SwiftLint hook runs with --strict so warnings fail commits."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        swiftlint = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "swiftlint"
+        )
+        assert "--strict" in swiftlint["entry"]
+
+    def test_swift_local_hooks_use_system_language(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Local Swift hooks invoke system binaries, not SPM source builds.
+
+        Building SwiftLint from source via pre-commit's swift language
+        support takes multiple minutes on first run; the hooks must probe
+        the brew/toolchain-installed binaries instead.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        for hook in local_repo["hooks"]:
+            assert hook["language"] == "system", f"{hook['id']} not language: system"
+            assert hook["types"] == ["swift"], f"{hook['id']} missing swift types"
+
+    def test_generate_swift_includes_gitleaks(self, mock_orchestrator: Mock) -> None:
+        """Test generated Swift config includes the gitleaks secrets hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        gitleaks_repo = next(
+            (repo for repo in repos if "gitleaks/gitleaks" in repo.get("repo", "")),
+            None,
+        )
+        assert gitleaks_repo is not None
+        hook_ids = [hook.get("id", "") for hook in gitleaks_repo.get("hooks", [])]
+        assert "gitleaks" in hook_ids
+
+    def test_generate_swift_includes_detect_secrets(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Swift keeps the detect-secrets hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("Yelp/detect-secrets" in url for url in repo_urls)
+
+    def test_generate_swift_includes_shellcheck(self, mock_orchestrator: Mock) -> None:
+        """Swift keeps the shellcheck hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("shellcheck-py" in url for url in repo_urls)
+
+
 class TestValidateLanguage:
     """Test language validation functionality."""
 
@@ -425,6 +546,13 @@ class TestValidateLanguage:
         """Test validate_language returns True for Go."""
         generator = PreCommitGenerator(mock_orchestrator)
         assert generator.validate_language("go")
+
+    def test_validate_language_swift_returns_true(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test validate_language returns True for Swift."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        assert generator.validate_language("swift")
 
     def test_validate_language_rust_returns_true(self, mock_orchestrator: Mock) -> None:
         """Test validate_language returns True for Rust."""
@@ -493,11 +621,19 @@ class TestGetSupportedLanguages:
         result = generator.get_supported_languages()
         assert "rust" in result
 
+    def test_get_supported_languages_includes_swift(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_supported_languages includes swift."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_supported_languages()
+        assert "swift" in result
+
     def test_get_supported_languages_exact_count(self, mock_orchestrator: Mock) -> None:
         """Test get_supported_languages returns expected count."""
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_supported_languages()
-        assert len(result) == 4
+        assert len(result) == 5
 
     def test_get_supported_languages_no_duplicates(
         self, mock_orchestrator: Mock
@@ -545,6 +681,14 @@ class TestGetLanguageHooks:
         """Test get_language_hooks returns list for rust."""
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_language_hooks("rust")
+        assert isinstance(result, list)
+
+    def test_get_language_hooks_swift_returns_list(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_language_hooks returns list for swift."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_language_hooks("swift")
         assert isinstance(result, list)
 
     def test_get_language_hooks_unsupported_raises_error(
@@ -608,6 +752,16 @@ class TestCountHooksForLanguage:
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.count_hooks_for_language("rust")
         assert isinstance(result, int)
+
+    def test_count_hooks_swift_counts_every_hook(self, mock_orchestrator: Mock) -> None:
+        """Test count_hooks_for_language sums all Swift hooks exactly.
+
+        12 shared pre-commit-hooks + swift-format + swiftlint + gitleaks
+        + shellcheck + detect-secrets = 17.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.count_hooks_for_language("swift")
+        assert result == 17
 
     def test_count_hooks_unsupported_raises_error(
         self, mock_orchestrator: Mock
@@ -696,6 +850,10 @@ class TestLanguageConfigsStructure:
     def test_language_configs_has_rust(self) -> None:
         """Test LANGUAGE_CONFIGS has rust entry."""
         assert "rust" in LANGUAGE_CONFIGS
+
+    def test_language_configs_has_swift(self) -> None:
+        """Test LANGUAGE_CONFIGS has swift entry."""
+        assert "swift" in LANGUAGE_CONFIGS
 
     def test_each_language_has_hooks_key(self) -> None:
         """Test each language config has hooks key."""
@@ -1655,6 +1813,11 @@ class TestLanguageConfigsStructureValidation:
                 # Skip local hooks (id-only entries)
                 if "id" in repo and "repo" not in repo:
                     continue
+                # Skip `repo: local` blocks: pre-commit's schema defines
+                # local repos without a rev (hooks declare entry/language
+                # inline). Used by Swift's system-binary hooks.
+                if repo.get("repo") == "local":
+                    continue
                 actual_keys = set(repo.keys())
                 assert required_keys.issubset(actual_keys), (
                     f"{language} repo {idx} missing keys: "
@@ -1709,6 +1872,10 @@ class TestLanguageConfigsStructureValidation:
     def test_rust_repos_exact_count(self) -> None:
         """Test Rust has exactly 4 repository configurations."""
         assert len(LANGUAGE_CONFIGS["rust"]["hooks"]) == 4
+
+    def test_swift_repos_exact_count(self) -> None:
+        """Test Swift has exactly 5 repository configurations."""
+        assert len(LANGUAGE_CONFIGS["swift"]["hooks"]) == 5
 
     def test_every_hook_has_id_key(self) -> None:
         """Test every individual hook has an 'id' key."""

@@ -5,6 +5,7 @@ import tomllib
 from unittest.mock import create_autospec
 
 import pytest
+import yaml
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.generators.architecture import (
@@ -527,6 +528,188 @@ class TestArchitectureEnforcementGeneratorRust:
         assert "command -v cargo-deny" in script
 
 
+class TestArchitectureEnforcementGeneratorSwift:
+    """Test Swift-specific architecture rules (#352)."""
+
+    @staticmethod
+    def _generate(tmp_path: Path) -> Path:
+        """Generate the Swift architecture config and return its directory."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+        generator.generate(language="swift", project_name="myapp")
+        return output_dir
+
+    def test_generate_swift_creates_swiftlint_architecture_config(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test generating SwiftLint custom-rules config for Swift."""
+        output_dir = self._generate(tmp_path)
+
+        # Should create the SwiftLint custom-rules config file
+        config_file = output_dir / ".swiftlint-architecture.yml"
+        assert config_file.exists()
+
+        # Should create README and run script
+        assert (output_dir / "README.md").exists()
+        assert (output_dir / "run-check.sh").exists()
+
+    def test_swift_config_is_parseable_yaml(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """.swiftlint-architecture.yml must be syntactically valid YAML."""
+        output_dir = self._generate(tmp_path)
+
+        config = (output_dir / ".swiftlint-architecture.yml").read_text()
+        parsed = yaml.safe_load(config)  # raises on parse error
+        assert isinstance(parsed, dict)
+
+    def test_swift_config_enforces_layer_separation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test Swift config expresses layer rules as custom regex rules."""
+        output_dir = self._generate(tmp_path)
+
+        config = (output_dir / ".swiftlint-architecture.yml").read_text()
+        parsed = yaml.safe_load(config)
+
+        rules = parsed["custom_rules"]
+        assert "domain_layer_purity" in rules
+        assert "application_layer_boundary" in rules
+        assert "infrastructure_layer_boundary" in rules
+        assert "presentation_layer_boundary" in rules
+
+    def test_swift_config_keeps_domain_pure(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The domain rule forbids importing every outer-layer module."""
+        output_dir = self._generate(tmp_path)
+
+        config = (output_dir / ".swiftlint-architecture.yml").read_text()
+        parsed = yaml.safe_load(config)
+
+        domain_rule = parsed["custom_rules"]["domain_layer_purity"]
+        for module in ("Presentation", "Application", "Infrastructure"):
+            assert module in domain_rule["regex"]
+        assert domain_rule["severity"] == "error"
+
+    def test_swift_config_runs_only_custom_rules(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The architecture pass stays orthogonal to the general lint pass."""
+        output_dir = self._generate(tmp_path)
+
+        config = (output_dir / ".swiftlint-architecture.yml").read_text()
+        parsed = yaml.safe_load(config)
+
+        assert parsed["only_rules"] == ["custom_rules"]
+
+    def test_swift_config_documents_regex_limits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The config documents what regex custom rules cannot enforce.
+
+        No native Swift layer linter exists; SwiftLint custom rules match
+        source text, not a resolved dependency graph. The generated config
+        must disclose that limit (mirroring the Rust deny.toml gap note)
+        rather than imply complete enforcement.
+        """
+        output_dir = self._generate(tmp_path)
+
+        config = (output_dir / ".swiftlint-architecture.yml").read_text()
+        assert "regex matches over source text" in config
+        assert "not a resolved dependency graph" in config
+
+    def test_swift_config_cycle_comment_is_accurate(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Cycle prevention is attributed to SPM, not to SwiftLint.
+
+        SwiftLint custom rules cannot detect dependency cycles; Swift
+        Package Manager itself rejects circular target dependencies at
+        build time. The generated config must say so rather than
+        overclaiming what SwiftLint does.
+        """
+        output_dir = self._generate(tmp_path)
+
+        config = (output_dir / ".swiftlint-architecture.yml").read_text()
+        assert "Swift Package Manager itself rejects circular" in config
+
+    def test_swift_config_catches_testable_imports(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Layer rules also match @testable import statements."""
+        output_dir = self._generate(tmp_path)
+
+        config = (output_dir / ".swiftlint-architecture.yml").read_text()
+        parsed = yaml.safe_load(config)
+
+        domain_rule = parsed["custom_rules"]["domain_layer_purity"]
+        assert "@testable" in domain_rule["regex"]
+
+    def test_swift_readme_mentions_swiftlint(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Swift README references the SwiftLint tooling."""
+        output_dir = self._generate(tmp_path)
+
+        readme = (output_dir / "README.md").read_text()
+        assert "SwiftLint" in readme
+
+    def test_swift_run_script_invokes_swiftlint(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Swift run-check.sh script invokes swiftlint."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "command -v swiftlint" in script
+
+    def test_swift_run_script_prefixes_config_path(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Swift run-check.sh points at the plans/architecture config."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert (
+            "swiftlint lint --config "
+            "plans/architecture/.swiftlint-architecture.yml" in script
+        )
+
+    def test_swift_run_script_uses_display_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Swift run-check.sh announces the 'Swift' display name."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "Checking Swift architecture" in script
+
+    def test_swift_result_reports_swift_language(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the result object records the Swift language."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        result = generator.generate(language="swift", project_name="myapp")
+
+        assert result.language == "swift"
+
+
 class TestArchitectureEnforcementGeneratorTypeScript:
     """Test TypeScript-specific architecture rules."""
 
@@ -573,6 +756,7 @@ class TestLanguageTooling:
             ("typescript", "TypeScript"),
             ("go", "Go"),
             ("rust", "Rust"),
+            ("swift", "Swift"),
         ],
     )
     def test_each_tooling_carries_a_display_name(
@@ -581,7 +765,9 @@ class TestLanguageTooling:
         """Display name is a single-source-of-truth field on the dataclass."""
         assert _LANGUAGE_TOOLING[language].display_name == expected_display
 
-    @pytest.mark.parametrize("language", ["python", "typescript", "go", "rust"])
+    @pytest.mark.parametrize(
+        "language", ["python", "typescript", "go", "rust", "swift"]
+    )
     def test_run_cmd_is_a_config_file_template(self, language: str) -> None:
         """run_cmd holds a {config_file} placeholder, not a literal path."""
         tooling = _LANGUAGE_TOOLING[language]

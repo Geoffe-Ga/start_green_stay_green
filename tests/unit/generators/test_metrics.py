@@ -176,8 +176,24 @@ class TestLanguageTools:
 
     def test_supports_required_languages(self) -> None:
         """Test that all required languages are supported."""
-        required_languages = {"python", "typescript", "javascript", "go", "rust"}
+        required_languages = {
+            "python",
+            "typescript",
+            "javascript",
+            "go",
+            "rust",
+            "swift",
+        }
         assert required_languages.issubset(set(LANGUAGE_TOOLS.keys()))
+
+    def test_swift_tools(self) -> None:
+        """Test Swift tool mappings (#352)."""
+        tools = LANGUAGE_TOOLS["swift"]
+        assert tools["coverage"] == "swift test --enable-code-coverage + llvm-cov"
+        assert tools["mutation"] == "muter"
+        assert tools["complexity"] == "swiftlint (cyclomatic_complexity)"
+        assert tools["documentation"] == "swift-docc"
+        assert tools["security"] == "swiftlint + periphery"
 
     def test_python_tools(self) -> None:
         """Test Python tool mappings."""
@@ -705,6 +721,29 @@ class TestMetricsConfigGeneration:
 
         assert metrics["code_coverage"]["tool"] == "jest"
         assert metrics["mutation_score"]["tool"] == "stryker"
+
+    def test_generate_metrics_config_swift_tools(self) -> None:
+        """Swift metric config reports llvm-cov coverage and SwiftLint (#352)."""
+        config = MetricsGenerationConfig(
+            language="swift",
+            project_name="watch-app",
+        )
+        generator = MetricsGenerator(None, config)
+
+        metrics_config = generator._generate_metrics_config()
+        metrics = metrics_config["metrics"]
+
+        assert metrics_config["language"] == "swift"
+        assert (
+            metrics["code_coverage"]["tool"]
+            == "swift test --enable-code-coverage + llvm-cov"
+        )
+        assert (
+            metrics["cyclomatic_complexity"]["tool"]
+            == "swiftlint (cyclomatic_complexity)"
+        )
+        assert metrics["code_coverage"]["threshold"] == 90
+        assert metrics["cyclomatic_complexity"]["threshold"] == 10
 
 
 class TestSonarQubeGeneration:

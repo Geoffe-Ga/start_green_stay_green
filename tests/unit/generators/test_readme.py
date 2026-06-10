@@ -366,9 +366,9 @@ class TestSwiftReadme:
     def test_swift_readme_only_checkmarks_generated_features(self) -> None:
         """Swift README must not ✅ features the scaffold does not generate.
 
-        Swift is a foundation-only scaffold: pre-commit hooks, CI/CD, and the
-        SwiftLint/swift-format toolchain are deferred. The README must not
-        advertise them with a ✅ checkmark.
+        After #352 the quality toolchain (SwiftLint, swift-format,
+        pre-commit hooks, quality scripts) IS generated and may carry a
+        checkmark; the CI/CD pipeline (#353) remains deferred and must not.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ReadmeConfig(
@@ -384,15 +384,14 @@ class TestSwiftReadme:
             # Features that ARE generated may carry a checkmark.
             assert "- ✅" in content
             assert "Swift Package Manager manifest" in content
+            wired = ("SwiftLint", "swift-format", "Pre-commit hooks")
+            for feature in wired:
+                assert any(
+                    "✅" in line and feature in line for line in content.splitlines()
+                ), f"README must advertise wired feature: {feature}"
 
             # Unwired features must never be claimed with a ✅ checkmark.
-            unwired = (
-                "SwiftLint",
-                "swift-format",
-                "Pre-commit hooks",
-                "CI/CD pipeline",
-                "Security scanning",
-            )
+            unwired = ("CI/CD pipeline",)
             for feature in unwired:
                 assert (
                     f"✅ {feature}" not in content
@@ -417,11 +416,14 @@ class TestSwiftReadme:
 
             content = files["README.md"].read_text()
             assert "Planned / coming soon" in content
-            assert "SwiftLint" in content
             assert "CI/CD pipeline" in content
 
-    def test_swift_readme_does_not_instruct_pre_commit_install(self) -> None:
-        """README must not tell users to install non-existent pre-commit hooks."""
+    def test_swift_readme_instructs_pre_commit_install(self) -> None:
+        """README tells users to install the now-generated pre-commit hooks.
+
+        Inverted from the #351 foundation scaffold: #352 wires a Swift
+        .pre-commit-config.yaml, so the README must document installing it.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ReadmeConfig(
                 project_name="test-project",
@@ -432,4 +434,18 @@ class TestSwiftReadme:
             files = generator.generate()
 
             content = files["README.md"].read_text()
-            assert "pre-commit install" not in content
+            assert "pre-commit install" in content
+
+    def test_swift_readme_documents_quality_tool_installs(self) -> None:
+        """README documents installing the brew-distributed quality tools."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "brew install swiftlint swift-format periphery" in content

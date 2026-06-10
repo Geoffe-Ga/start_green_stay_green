@@ -464,6 +464,14 @@ LANGUAGE_TOOLS: dict[str, dict[str, str]] = {
         "security": "cargo-audit",
         "dependency_check": "cargo-outdated",
     },
+    "swift": {
+        "coverage": "swift test --enable-code-coverage + llvm-cov",
+        "mutation": "muter",
+        "complexity": "swiftlint (cyclomatic_complexity)",
+        "documentation": "swift-docc",
+        "security": "swiftlint + periphery",
+        "dependency_check": "swift package update --dry-run",
+    },
 }
 
 

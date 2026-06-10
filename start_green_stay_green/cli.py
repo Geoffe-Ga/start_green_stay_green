@@ -1207,18 +1207,18 @@ def _generate_architecture_step(
 
     Architecture configuration is fully deterministic (import-linter for
     Python, dependency-cruiser for TypeScript, go-arch-lint for Go,
-    cargo-deny for Rust). Runs regardless of API key availability; only
-    Python, TypeScript, Go, and Rust projects produce output. The previous
-    ``orchestrator`` argument was unused and has been removed from this
-    private helper.
+    cargo-deny for Rust, SwiftLint custom rules for Swift). Runs regardless
+    of API key availability; only Python, TypeScript, Go, Rust, and Swift
+    projects produce output. The previous ``orchestrator`` argument was
+    unused and has been removed from this private helper.
     """
-    if language not in {"python", "typescript", "go", "rust"}:
+    if language not in {"python", "typescript", "go", "rust", "swift"}:
         # The generator only supports these languages; surface a dim info
         # line so users understand why no architecture rules were generated
-        # for, e.g., a Swift project rather than seeing silence.
+        # for, e.g., a Java project rather than seeing silence.
         console.print(
             f"[dim]Architecture rules unavailable for {language} "
-            "(supported: python, typescript, go, rust)[/dim]"
+            "(supported: python, typescript, go, rust, swift)[/dim]"
         )
         return
 
