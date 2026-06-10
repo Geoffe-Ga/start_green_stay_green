@@ -17,8 +17,8 @@ Start Green Stay Green is a meta-tool that scaffolds new software projects with 
 
 - **Enterprise-Grade Quality**: 90%+ code coverage, mutation testing, comprehensive linting
 - **AI Integration**: Pre-configured AI subagent profiles and code review workflows
-- **Multi-Language Support**: Python, TypeScript, Go, Rust, Swift (watchOS), Kotlin (Wear OS), and C/C++ (Tizen)
-- **Architecture Enforcement**: import-linter (Python), dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust), SwiftLint custom rules (Swift), Konsist (Kotlin), and an include-boundary checker (C/C++)
+- **Multi-Language Support**: Python, TypeScript, Go, Rust, Swift (watchOS), Kotlin (Wear OS), C/C++ (Tizen), and Java (Wear OS legacy)
+- **Architecture Enforcement**: import-linter (Python), dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust), SwiftLint custom rules (Swift), Konsist (Kotlin), an include-boundary checker (C/C++), and ArchUnit (Java)
 - **Complete CI/CD**: GitHub Actions workflows with quality gates
 - **Additive Init**: Safe to re-run in existing directories — preserves your files
 - **Developer Experience**: Rich console output, interactive prompts, dry-run mode
@@ -432,6 +432,7 @@ Project names must follow these rules:
 - **Swift**: swift test (≥90% coverage via llvm-cov), SwiftLint, swift-format, Periphery
 - **Kotlin**: ./gradlew test (≥90% coverage via Kover), detekt, ktlint, OWASP dependency-check
 - **C/C++**: ctest (≥90% coverage via gcov/lcov), clang-format, clang-tidy + cppcheck, lizard, flawfinder
+- **Java**: mvn test (≥90% coverage via JaCoCo), google-java-format, Checkstyle + PMD, SpotBugs, OWASP dependency-check
 
 See the [CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for the
 full per-language toolchain table and prerequisites.
@@ -762,6 +763,7 @@ All contributions must:
 - ✅ Swift (watchOS) language support — scaffold, quality tooling, CI, tests (#351, #352, #353, #354)
 - ✅ Kotlin (Wear OS) language support — scaffold, quality tooling, CI, tests (#356, #357, #358, #359)
 - ✅ C/C++ (Tizen native) language support — scaffold, quality tooling, CI, tests (#361, #362, #363, #364)
+- ✅ Java (Wear OS legacy) scaffold + CI and quality tooling (#366, #367)
 
 ### Planned
 

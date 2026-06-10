@@ -26,7 +26,7 @@ class GenerationConfig:
     Attributes:
         project_name: Name of the project.
         language: Programming language (python, typescript, go, rust,
-            swift, kotlin, cpp).
+            swift, kotlin, cpp, java).
         language_config: Additional language-specific configuration.
     """
 
@@ -509,6 +509,125 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         ],
         "default_language_version": {},
     },
+    "java": {
+        "hooks": [
+            {
+                "repo": "https://github.com/pre-commit/pre-commit-hooks",
+                "rev": "v4.5.0",
+                "hooks": [
+                    {"id": "trailing-whitespace"},
+                    {"id": "end-of-file-fixer"},
+                    {"id": "check-yaml"},
+                    {"id": "check-json"},
+                    # AndroidManifest.xml and the res/layout XML are the
+                    # scaffold's Android surface, so XML well-formedness
+                    # is gated here (the tizen-manifest.xml precedent).
+                    {"id": "check-xml"},
+                    {"id": "check-added-large-files", "args": ["--maxkb=500"]},
+                    {"id": "check-case-conflict"},
+                    {"id": "check-merge-conflict"},
+                    {"id": "check-symlinks"},
+                    {"id": "detect-private-key"},
+                    {"id": "fix-byte-order-marker"},
+                    {"id": "mixed-line-ending", "args": ["--fix=lf"]},
+                    {"id": "no-commit-to-branch", "args": ["--branch", "main"]},
+                ],
+            },
+            # google-java-format runs as a `repo: local` system hook
+            # (the Swift/Kotlin precedent): unlike clang-format there is
+            # no official pre-commit mirror — the only hook repos are
+            # unofficial wrappers that download release jars at runtime.
+            # Install with: `brew install google-java-format` (macOS) or
+            # grab the all-deps release jar from
+            # https://github.com/google/google-java-format/releases and
+            # wrap it in a `google-java-format` launcher script.
+            #
+            # checkstyle/pmd/spotbugs invoke the Maven goals the #366 pom
+            # already pins and configures (google_checks, the
+            # pmd-ruleset.xml CCN companion, SpotBugs). Maven-goal hooks
+            # are slower than native binaries but zero-install and
+            # cannot version-drift from the build: pom.xml is the single
+            # source of tool truth, locally, in pre-commit, and in CI.
+            {
+                "repo": "local",
+                "hooks": [
+                    {
+                        "id": "google-java-format",
+                        "name": "google-java-format",
+                        # Check-mode: --replace exits 0 whether or not it
+                        # changed files, so it can never fail a commit.
+                        # --dry-run --set-exit-if-changed fails the hook
+                        # on unformatted files; scripts/format.sh keeps
+                        # --replace for the fixing path.
+                        "entry": (
+                            "google-java-format --dry-run" " --set-exit-if-changed"
+                        ),
+                        "language": "system",
+                        "types": ["java"],
+                    },
+                    {
+                        "id": "checkstyle",
+                        "name": "Checkstyle (mvn)",
+                        # Reads the google_checks configLocation pinned
+                        # in pom.xml.
+                        "entry": "mvn -q checkstyle:check",
+                        "language": "system",
+                        "types": ["java"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                    {
+                        "id": "pmd",
+                        "name": "PMD (mvn)",
+                        # Reads the pom's rulesets: the maven-pmd-plugin
+                        # defaults plus the pmd-ruleset.xml companion
+                        # (cyclomatic complexity <=10 gate) that
+                        # scripts/lint.sh shares.
+                        "entry": "mvn -q pmd:check",
+                        "language": "system",
+                        "types": ["java"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                    {
+                        "id": "spotbugs",
+                        "name": "SpotBugs (mvn)",
+                        # SpotBugs reads bytecode and `mvn spotbugs:check`
+                        # silently skips when target/classes is empty, so
+                        # the compile phase runs first or the gate would
+                        # be a no-op.
+                        "entry": "mvn -q compile spotbugs:check",
+                        "language": "system",
+                        "types": ["java"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                ],
+            },
+            {
+                "repo": "https://github.com/gitleaks/gitleaks",
+                "rev": "v8.18.4",
+                "hooks": [
+                    {"id": "gitleaks"},
+                ],
+            },
+            {
+                "repo": "https://github.com/shellcheck-py/shellcheck-py",
+                "rev": "v0.9.0.6",
+                "hooks": [
+                    {"id": "shellcheck"},
+                ],
+            },
+            {
+                "repo": "https://github.com/Yelp/detect-secrets",
+                "rev": "v1.4.0",
+                "hooks": [
+                    {
+                        "id": "detect-secrets",
+                        "args": ["--baseline", ".secrets.baseline"],
+                    },
+                ],
+            },
+        ],
+        "default_language_version": {},
+    },
     "cpp": {
         "hooks": [
             {
@@ -634,7 +753,7 @@ class PreCommitGenerator(BaseGenerator):
     Includes formatting, linting, security, and general file quality checks.
 
     Supports: Python, TypeScript, Go, Rust, Swift, Kotlin, C/C++ (cpp),
-    and other languages.
+    Java, and other languages.
 
     Attributes:
         orchestrator: Optional AI orchestrator for enhanced generation.
@@ -854,12 +973,7 @@ class PreCommitGenerator(BaseGenerator):
             >>> len(hooks) > 0
             True
         """
-        if language not in LANGUAGE_CONFIGS:
-            msg = (
-                f"Unsupported language: {language}. "
-                f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
-            )
-            raise ValueError(msg)
+        self._validate_language_supported(language)
         # Cast to satisfy mypy strict mode - dict access returns Any
         return cast("list[dict[str, Any]]", LANGUAGE_CONFIGS[language]["hooks"])
 
@@ -892,12 +1006,7 @@ class PreCommitGenerator(BaseGenerator):
             >>> count > 20
             True
         """
-        if language not in LANGUAGE_CONFIGS:
-            msg = (
-                f"Unsupported language: {language}. "
-                f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
-            )
-            raise ValueError(msg)
+        self._validate_language_supported(language)
 
         hooks_config = LANGUAGE_CONFIGS[language]["hooks"]
         return self._sum_hooks_in_repos(hooks_config)

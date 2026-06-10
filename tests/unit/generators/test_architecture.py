@@ -1152,6 +1152,229 @@ class TestArchitectureEnforcementGeneratorCpp:
         assert result.language == "cpp"
 
 
+class TestArchitectureEnforcementGeneratorJava:
+    """Test Java-specific architecture rules (#367)."""
+
+    @staticmethod
+    def _generate(tmp_path: Path, project_name: str = "my-app") -> Path:
+        """Generate the Java architecture config and return its directory."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+        generator.generate(language="java", project_name=project_name)
+        return output_dir
+
+    def test_generate_java_creates_archunit_test(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test generating the ArchUnit architecture test for Java."""
+        output_dir = self._generate(tmp_path)
+
+        # Should create the ArchUnit test template
+        config_file = output_dir / "ArchitectureTest.java"
+        assert config_file.exists()
+
+        # Should create README and run script
+        assert (output_dir / "README.md").exists()
+        assert (output_dir / "run-check.sh").exists()
+
+    def test_java_config_is_structurally_valid_java(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """ArchitectureTest.java must be structurally valid Java source.
+
+        There is no Java parser in the test environment, so validity is
+        checked structurally (the Kotlin precedent): balanced braces/
+        parentheses, a package declaration first, imports before the
+        class, and no unrendered template placeholders.
+        """
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.java").read_text()
+        code_lines = [
+            line
+            for line in source.splitlines()
+            if line.strip() and not line.lstrip().startswith(("//", "*", "/*"))
+        ]
+        code = "\n".join(code_lines)
+
+        assert code.count("{") == code.count("}")
+        assert code.count("(") == code.count(")")
+        # The first statement must be the package declaration, followed by
+        # the imports, then the class.
+        assert code_lines[0].startswith("package ")
+        assert code_lines[0].rstrip().endswith(";")
+        import_lines = [line for line in code_lines if line.startswith("import ")]
+        assert import_lines
+        assert all(line.rstrip().endswith(";") for line in import_lines)
+        assert code.index("package ") < code.index("import ")
+        assert code.index("import ") < code.index("public class ArchitectureTest")
+        assert "@Test" in code
+        # No unrendered Python format placeholders may survive.
+        assert "{namespace}" not in source
+
+    def test_java_config_uses_archunit_api(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The test drives ArchUnit's layered-architecture API."""
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.java").read_text()
+        assert "import com.tngtech.archunit.core.domain.JavaClasses;" in source
+        assert "import com.tngtech.archunit.core.importer.ClassFileImporter;" in source
+        assert "import com.tngtech.archunit.library.Architectures;" in source
+        assert "Architectures.layeredArchitecture()" in source
+        assert ".consideringOnlyDependenciesInLayers()" in source
+
+    def test_java_config_enforces_layer_separation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test Java config defines all four layers with inward deps."""
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.java").read_text()
+        for layer in ("Domain", "Application", "Presentation", "Infrastructure"):
+            assert f'.layer("{layer}")' in source
+        assert '.whereLayer("Presentation").mayNotBeAccessedByAnyLayer()' in source
+        assert (
+            '.whereLayer("Application").mayOnlyBeAccessedByLayers("Presentation")'
+            in source
+        )
+        assert '.whereLayer("Infrastructure").mayNotBeAccessedByAnyLayer()' in source
+        assert (
+            '"Application", "Presentation", "Infrastructure"' in source
+        ), "Domain must be accessible from the three outer layers only"
+
+    def test_java_config_checks_package_cycles(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The test adds a slices cycle rule — Maven cannot do it.
+
+        Unlike Gradle project graphs or Cargo crate graphs, javac and
+        Maven accept circular package dependencies, so cycle prevention
+        must be enforced by ArchUnit itself rather than attributed to
+        the build system (the inverse of the Kotlin/Rust notes).
+        """
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.java").read_text()
+        assert ".beFreeOfCycles()" in source
+        assert "SlicesRuleDefinition.slices()" in source
+        assert "do NOT reject" in source
+
+    def test_java_config_derives_layer_packages_from_project_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Layer packages come from the shared Android namespace helper.
+
+        A hyphenated project name must produce the sanitized namespace
+        (my-app -> com.example.my_app), keeping the architecture test in
+        sync with the scaffolded sources.
+        """
+        output_dir = self._generate(tmp_path, project_name="my-app")
+
+        source = (output_dir / "ArchitectureTest.java").read_text()
+        assert '"com.example.my_app"' in source
+        assert "package com.example.my_app.architecture;" in source
+
+    def test_java_config_documents_bytecode_analysis_limits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The test documents what ArchUnit cannot enforce.
+
+        ArchUnit analyzes compiled bytecode; the generated test must
+        disclose that reflection/DI wiring is invisible and that the
+        classes must be compiled first (mirroring the Konsist, Rust
+        deny.toml, and Swift regex-rule gap notes).
+        """
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.java").read_text()
+        assert "reflection" in source
+        assert "bytecode" in source
+        assert "target/classes" in source
+
+    def test_java_config_documents_wiring_requirement(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The test discloses it only enforces once wired into src/test/java."""
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.java").read_text()
+        assert "src/test/java" in source
+        assert "cp plans/architecture/ArchitectureTest.java" in source
+
+    def test_java_config_documents_optional_layers_default(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The warn-first optional-layers default carries a tighten-me note."""
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.java").read_text()
+        assert ".withOptionalLayers(true)" in source
+        assert "withOptionalLayers(false)" in source
+
+    def test_java_readme_mentions_archunit(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Java README references the ArchUnit tooling."""
+        output_dir = self._generate(tmp_path)
+
+        readme = (output_dir / "README.md").read_text()
+        assert "ArchUnit" in readme
+
+    def test_java_run_script_probes_maven(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Java run-check.sh probes the mvn binary."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "command -v mvn" in script
+
+    def test_java_run_script_runs_architecture_test(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Java run-check.sh runs the ArchUnit test via Maven."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "-Dtest=ArchitectureTest" in script
+
+    def test_java_run_script_uses_display_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the Java run-check.sh announces the 'Java' display name."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "Checking Java architecture" in script
+
+    def test_java_result_reports_java_language(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the result object records the Java language."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        result = generator.generate(language="java", project_name="my-app")
+
+        assert result.language == "java"
+
+
 class TestArchitectureEnforcementGeneratorTypeScript:
     """Test TypeScript-specific architecture rules."""
 
@@ -1201,6 +1424,7 @@ class TestLanguageTooling:
             ("swift", "Swift"),
             ("kotlin", "Kotlin"),
             ("cpp", "C/C++"),
+            ("java", "Java"),
         ],
     )
     def test_each_tooling_carries_a_display_name(
@@ -1234,16 +1458,55 @@ class TestLanguageTooling:
         assert "{config_file}" not in tooling.run_cmd
         assert f"plans/architecture/{tooling.config_file}" in tooling.install_cmd
 
+    def test_java_install_cmd_carries_the_config_path(self) -> None:
+        """Java references its config via install_cmd, not run_cmd (#367).
+
+        ArchUnit's 'config' is a JUnit test compiled into the project —
+        the Konsist precedent — so the Maven run command takes no
+        config-file flag and the wiring step (copying the template into
+        src/test/java) lives in install_cmd.
+        """
+        tooling = _LANGUAGE_TOOLING["java"]
+        assert "{config_file}" not in tooling.run_cmd
+        assert f"plans/architecture/{tooling.config_file}" in tooling.install_cmd
+
+    def test_java_install_cmd_resolves_package_matched_path(self) -> None:
+        """Java's install command targets the package-matching directory.
+
+        javac requires ArchitectureTest.java to live in the directory
+        matching its declared package; a flat copy into src/test/java/
+        is a guaranteed compile error (kotlinc tolerates the flat copy,
+        javac does not).
+        """
+        cmd = ArchitectureEnforcementGenerator._resolved_install_cmd(
+            "java", "my-watch-app"
+        )
+        assert "mkdir -p src/test/java/com/example/my_watch_app/architecture" in cmd
+        assert "src/test/java/com/example/my_watch_app/architecture/" in cmd
+        assert "{package_path}" not in cmd
+
+    def test_non_java_install_cmds_pass_through_unchanged(self) -> None:
+        """Languages without the placeholder return their command as-is."""
+        for language in ("python", "kotlin", "cpp"):
+            cmd = ArchitectureEnforcementGenerator._resolved_install_cmd(
+                language, "my-app"
+            )
+            assert cmd == _LANGUAGE_TOOLING[language].install_cmd
+
     def test_build_run_script_uses_display_name_not_a_dict(self) -> None:
         """_build_run_script reads display_name from the dataclass."""
         for language in _LANGUAGE_TOOLING:
-            script = ArchitectureEnforcementGenerator._build_run_script(language)
+            script = ArchitectureEnforcementGenerator._build_run_script(
+                language, "my-app"
+            )
             assert _LANGUAGE_TOOLING[language].display_name in script
 
     def test_build_run_script_prefixes_config_via_template(self) -> None:
         """The plans/architecture prefix is inserted via the template."""
         for language, tooling in _LANGUAGE_TOOLING.items():
-            script = ArchitectureEnforcementGenerator._build_run_script(language)
+            script = ArchitectureEnforcementGenerator._build_run_script(
+                language, "my-app"
+            )
             assert f"plans/architecture/{tooling.config_file}" in script
 
     def test_template_prefix_immune_to_substring_collision(self) -> None:

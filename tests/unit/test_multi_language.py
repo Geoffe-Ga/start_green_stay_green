@@ -161,7 +161,8 @@ class TestMultiLanguageGeneration:
 
 
 class TestMultiLanguageArchitectureParity:
-    """Go (#341), Rust (#342), Swift (#352), Kotlin (#357), cpp (#362)."""
+    """Go (#341), Rust (#342), Swift (#352), Kotlin (#357), cpp (#362),
+    java (#367)."""
 
     def test_go_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
         """Go must emit an architecture-enforcement config like py/ts."""
@@ -198,8 +199,16 @@ class TestMultiLanguageArchitectureParity:
         config = tmp_path / "plans" / "architecture" / "check_architecture.py"
         assert config.exists(), "cpp init must emit the include-boundary checker"
 
+    def test_java_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
+        """java must emit an architecture-enforcement config like py/ts/go."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "java")
+
+        config = tmp_path / "plans" / "architecture" / "ArchitectureTest.java"
+        assert config.exists(), "java init must emit the ArchUnit test template"
+
     @pytest.mark.parametrize(
-        "language", ["python", "typescript", "go", "rust", "swift", "kotlin", "cpp"]
+        "language",
+        ["python", "typescript", "go", "rust", "swift", "kotlin", "cpp", "java"],
     )
     def test_supported_languages_emit_architecture_config(
         self, tmp_path: Path, language: str
@@ -323,12 +332,12 @@ class TestSequentialLanguageDetection:
 class TestGeneratorOnlyLanguagePipelineGates:
     """Pipeline steps skip gracefully for generator-only languages (#356).
 
-    java/csharp/ruby have structure/dependencies/tests/readme generators
-    (java's are the Wear OS scaffold, #366) and a CI workflow via ci.py,
-    but no pre-commit/scripts/metrics/architecture support (#367 for
-    java) — instead of crashing init, those tooling steps must no-op
-    with an informational message. Kotlin graduated from this set when
-    #357 wired its quality tooling and #358 wired its CI workflow.
+    csharp/ruby have structure/dependencies/tests/readme generators but
+    no pre-commit/scripts/metrics/architecture support — instead of
+    crashing init, those tooling steps must no-op with an informational
+    message. Kotlin graduated from this set when #357 wired its quality
+    tooling and #358 wired its CI workflow; java graduated with #367
+    (its CI workflow has been real since #366).
     """
 
     def test_precommit_step_writes_for_kotlin(self, tmp_path: Path) -> None:
@@ -338,28 +347,6 @@ class TestGeneratorOnlyLanguagePipelineGates:
         config = tmp_path / ".pre-commit-config.yaml"
         assert config.exists()
         assert "ktlint" in config.read_text()
-
-    def test_precommit_step_skips_java_without_writing(self, tmp_path: Path) -> None:
-        """Pre-commit config stays out of scope for java until #367."""
-        cli_mod._generate_precommit_step(tmp_path, "my-project", "java")
-
-        assert not (tmp_path / ".pre-commit-config.yaml").exists()
-
-    def test_scripts_step_skips_java_without_python_fallback(
-        self, tmp_path: Path
-    ) -> None:
-        """java must not receive the Python-fallback quality scripts."""
-        cli_mod._generate_scripts_step(tmp_path, "my-project", "java")
-
-        assert not (tmp_path / "scripts").exists()
-
-    def test_ci_step_writes_java_workflow(self, tmp_path: Path) -> None:
-        """The java CI workflow is generated (ci.py has a java config)."""
-        cli_mod._generate_ci_step(tmp_path, "my-project", "java", None)
-
-        ci_file = tmp_path / ".github" / "workflows" / "ci.yml"
-        assert ci_file.exists()
-        assert "Java Quality Checks" in ci_file.read_text()
 
     def test_precommit_step_skips_ruby_without_writing(self, tmp_path: Path) -> None:
         """No .pre-commit-config.yaml is written and no error is raised."""
@@ -480,3 +467,64 @@ class TestCppPipelineGates:
 
         checker = tmp_path / "plans" / "architecture" / "check_architecture.py"
         assert checker.exists()
+
+
+class TestJavaPipelineGates:
+    """Pipeline steps all run for java after #367.
+
+    The #366 foundation shipped structure/dependencies/tests/readme plus
+    the CI workflow; #367 wired the pre-commit/scripts/metrics/
+    architecture tooling, so every step must now generate real
+    artifacts.
+    """
+
+    def test_precommit_step_writes_for_java(self, tmp_path: Path) -> None:
+        """java now generates a pre-commit config (#367)."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "java")
+
+        config = tmp_path / ".pre-commit-config.yaml"
+        assert config.exists()
+        content = config.read_text()
+        assert "checkstyle" in content
+        assert "google-java-format" in content
+
+    def test_scripts_step_writes_java_scripts(self, tmp_path: Path) -> None:
+        """java now receives its own quality scripts (#367)."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "java")
+
+        test_script = tmp_path / "scripts" / "test.sh"
+        assert test_script.exists()
+        assert "mvn test" in test_script.read_text()
+
+    def test_scripts_step_writes_pmd_ruleset_at_project_root(
+        self, tmp_path: Path
+    ) -> None:
+        """The pmd-ruleset.xml companion lands at the root.
+
+        The pom's PMD plugin and lint.sh resolve the ruleset relative to
+        the project root, not the scripts directory.
+        """
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "java")
+
+        assert (tmp_path / "pmd-ruleset.xml").exists()
+
+    def test_ci_step_writes_java_workflow(self, tmp_path: Path) -> None:
+        """The java CI workflow is generated (ci.py has a java config)."""
+        cli_mod._generate_ci_step(tmp_path, "my-project", "java", None)
+
+        ci_file = tmp_path / ".github" / "workflows" / "ci.yml"
+        assert ci_file.exists()
+        assert "Java Quality Checks" in ci_file.read_text()
+
+    def test_metrics_step_writes_java_dashboard(self, tmp_path: Path) -> None:
+        """The metrics dashboard is now generated for java (#367)."""
+        cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "java")
+
+        assert (tmp_path / "docs" / "metrics.json").exists()
+
+    def test_architecture_step_writes_java_rules(self, tmp_path: Path) -> None:
+        """Architecture rules are now generated for java (#367)."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "java")
+
+        template = tmp_path / "plans" / "architecture" / "ArchitectureTest.java"
+        assert template.exists()

@@ -1,8 +1,8 @@
 """Scripts directory generator.
 
 Generates quality control scripts adapted to target project languages and structure.
-Supports Python, TypeScript, Go, Rust, Swift, Kotlin, C/C++, and other
-languages with appropriate tooling.
+Supports Python, TypeScript, Go, Rust, Swift, Kotlin, C/C++, Java, and
+other languages with appropriate tooling.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ class ScriptConfig:
 
     Attributes:
         language: Programming language (python, typescript, go, rust,
-            swift, kotlin, cpp, etc.)
+            swift, kotlin, cpp, java, etc.)
         package_name: Name of the main package/module
         supports_pytest: Whether project uses pytest for testing
         supports_coverage: Whether project uses coverage reporting
@@ -205,6 +205,7 @@ class ScriptsGenerator:
             "swift": self._generate_swift_scripts,
             "kotlin": self._generate_kotlin_scripts,
             "cpp": self._generate_cpp_scripts,
+            "java": self._generate_java_scripts,
         }
         # Fallback to Python scripts for unknown languages.
         builder = builders.get(self.config.language, self._generate_python_scripts)
@@ -480,6 +481,50 @@ class ScriptsGenerator:
         # project root, not added to the scripts dict (not executables).
         self._write_companion_config(".clang-format", _CLANG_FORMAT_CONFIG_TEMPLATE)
         self._write_companion_config(".clang-tidy", _CLANG_TIDY_CONFIG_TEMPLATE)
+
+        return scripts
+
+    def _generate_java_scripts(self) -> dict[str, Path]:
+        """Generate Java-specific quality control scripts (#367).
+
+        Emits check/format/lint/test/security scripts plus a companion
+        ``pmd-ruleset.xml`` at the project root (the single home of the
+        cyclomatic-complexity <=10 gate) so the lint script, the
+        pre-commit PMD hook, and the pom's PMD plugin all share one
+        ruleset. Unlike prior languages, most of the heavy tooling
+        already lives in the #366 pom (Surefire, JaCoCo with the >=90%
+        bound, Checkstyle, PMD, SpotBugs, dependency-check), so these
+        scripts mostly invoke the Maven goals the pom pins rather than
+        standalone binaries.
+
+        Returns:
+            Dictionary mapping script names to file paths
+        """
+        scripts: dict[str, Path] = {}
+
+        scripts["check-all.sh"] = self._write_script(
+            "check-all.sh",
+            self._java_check_all_script(),
+        )
+        scripts["format.sh"] = self._write_script(
+            "format.sh",
+            self._java_format_script(),
+        )
+        scripts["lint.sh"] = self._write_script(
+            "lint.sh",
+            self._java_lint_script(),
+        )
+        scripts["test.sh"] = self._write_script(
+            "test.sh",
+            self._java_test_script(),
+        )
+        scripts["security.sh"] = self._write_script(
+            "security.sh",
+            self._java_security_script(),
+        )
+        # Companion PMD ruleset — written at the project root, not
+        # added to the scripts dict (it isn't an executable).
+        self._write_companion_config("pmd-ruleset.xml", self._PMD_RULESET_TEMPLATE)
 
         return scripts
 
@@ -4310,6 +4355,508 @@ echo "✓ Security checks passed"
 exit 0
 """
 
+    # Java script generators
+
+    def _java_check_all_script(self) -> str:
+        """Generate Java check-all.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/check-all.sh - Run all quality checks
+# Usage: ./scripts/check-all.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run all quality checks in sequence.
+
+Runs:
+  1. Format check (google-java-format)
+  2. Static analysis + complexity <=10 (Checkstyle + PMD via Maven)
+  3. Tests + coverage >=90% (mvn test + JaCoCo)
+  4. Security (SpotBugs + OWASP dependency-check via Maven)
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All checks passed
+    1           One or more checks failed
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+VERBOSE_FLAG=""
+if $VERBOSE; then
+    VERBOSE_FLAG="--verbose"
+fi
+
+echo "=== Running All Quality Checks ==="
+echo ""
+
+FAILED_CHECKS=()
+PASSED_CHECKS=()
+
+run_check() {
+    local check_name=$1
+    local script=$2
+    shift 2
+
+    echo "Running: $check_name"
+    # "${@}" is safe under set -u even when no extra args remain
+    # (unlike a named local array, which needs the
+    # ${args[@]+"${args[@]}"} guard the python template uses).
+    if "$SCRIPT_DIR/$script" "${@}" $VERBOSE_FLAG; then
+        PASSED_CHECKS+=("$check_name")
+        echo "✓ $check_name passed"
+    else
+        FAILED_CHECKS+=("$check_name")
+        echo "✗ $check_name failed" >&2
+    fi
+    echo ""
+}
+
+run_check "Format" "format.sh"
+run_check "Linting" "lint.sh"
+run_check "Tests" "test.sh" --coverage
+run_check "Security" "security.sh"
+
+echo "=== Quality Checks Summary ==="
+echo "Passed: ${#PASSED_CHECKS[@]}"
+echo "Failed: ${#FAILED_CHECKS[@]}"
+
+if [ ${#FAILED_CHECKS[@]} -gt 0 ]; then
+    exit 1
+else
+    echo "✓ All quality checks passed!"
+    exit 0
+fi
+"""
+
+    def _java_format_script(self) -> str:
+        """Generate Java format.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/format.sh - Format Java code
+# Usage: ./scripts/format.sh [--fix] [--check] [--verbose] [--help]
+# Default (no flags) writes formatting in place, same as --fix; use
+# --check for a non-mutating verification pass.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+FIX=false
+CHECK=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --fix)
+            FIX=true
+            shift
+            ;;
+        --check)
+            CHECK=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Format Java code using google-java-format — the same binary the
+pre-commit hook invokes, so the two can never disagree.
+
+Covers the Maven sources (src/) and the Android app module (app/);
+google-java-format takes no config file, so Google style is the single,
+unconfigurable standard (Checkstyle's google_checks accepts it).
+
+OPTIONS:
+    --fix       Apply formatting (default, writes in place)
+    --check     Check only, fail if formatting needed
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           Code is properly formatted
+    1           Formatting issues found
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+if ! command -v google-java-format &> /dev/null; then
+    echo "✗ google-java-format not found" >&2
+    echo "  Install with: brew install google-java-format (macOS)" >&2
+    echo "  or wrap the all-deps release jar from" >&2
+    echo "  https://github.com/google/google-java-format/releases" >&2
+    echo "  in a 'google-java-format' launcher on your PATH" >&2
+    exit 1
+fi
+
+echo "=== Formatting (google-java-format) ==="
+
+# find -exec ... + propagates a non-zero exit status when any
+# google-java-format invocation fails, so violations fail the script.
+# Fixing is the default; an explicit --fix overrides --check.
+if $CHECK && ! $FIX; then
+    find src app -type f -name '*.java' \\
+        -exec google-java-format --dry-run --set-exit-if-changed {} + || \\
+        { echo "✗ Format check failed" >&2; exit 1; }
+    echo "✓ Code formatting check passed"
+else
+    find src app -type f -name '*.java' \\
+        -exec google-java-format --replace {} + || \\
+        { echo "✗ Formatting failed" >&2; exit 1; }
+    echo "✓ Code formatted successfully"
+fi
+exit 0
+"""
+
+    def _java_lint_script(self) -> str:
+        """Generate Java lint.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/lint.sh - Static analysis: Checkstyle + PMD (via Maven)
+# Usage: ./scripts/lint.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run static analysis via the Maven goals the pom pins and configures
+(pom.xml is the single source of tool versions and configuration):
+  - Checkstyle (google_checks): mvn -q checkstyle:check
+  - PMD: mvn -q pmd:check — runs the maven-pmd-plugin default rules
+    plus the pmd-ruleset.xml companion at the project root, the single
+    home of the CyclomaticComplexity <=10 gate (PMD reports methods at
+    complexity >= 11).
+
+SpotBugs deliberately lives in scripts/security.sh (bytecode analysis,
+needs a compile pass) so the two scripts never double-report.
+
+Install: brew install maven (macOS) / apt-get install maven (Debian)
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All checks passed
+    1           Static-analysis or complexity issues found
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+if ! command -v mvn &> /dev/null; then
+    echo "✗ mvn not found - the lint goals are Maven goals" >&2
+    echo "  Install with: brew install maven (macOS)" >&2
+    echo "             or: apt-get install maven (Debian/Ubuntu)" >&2
+    exit 1
+fi
+
+echo "=== Static Analysis (Checkstyle + PMD) ==="
+
+echo "--- Checkstyle (google_checks, pinned in pom.xml) ---"
+mvn -q checkstyle:check || \\
+    { echo "✗ Checkstyle found issues" >&2; exit 1; }
+
+echo "--- PMD (default rules + pmd-ruleset.xml CCN <=10 gate) ---"
+mvn -q pmd:check || \\
+    { echo "✗ PMD found issues" >&2; exit 1; }
+
+echo "✓ Linting checks passed"
+exit 0
+"""
+
+    def _java_test_script(self) -> str:
+        """Generate Java test.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/test.sh - Run Java tests via Maven
+# Usage: ./scripts/test.sh [--coverage] [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+COVERAGE=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --coverage)
+            COVERAGE=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run the JUnit 4 unit tests (mvn test, via Surefire).
+
+Only the pure-logic Maven build is measured: the app/ module needs the
+Android SDK, sits outside the Maven build, and is therefore honestly
+outside the coverage denominator too (see "The two builds" in the
+README).
+
+OPTIONS:
+    --coverage  Enforce >=90% line coverage via JaCoCo
+                (the bound lives in pom.xml — the jacoco-maven-plugin
+                rules block is its single home; this script never
+                restates the number)
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All tests passed (and coverage met, with --coverage)
+    1           Test failures or coverage below threshold
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+if ! command -v mvn &> /dev/null; then
+    echo "✗ mvn not found - the test suite runs via Maven" >&2
+    echo "  Install with: brew install maven (macOS)" >&2
+    echo "             or: apt-get install maven (Debian/Ubuntu)" >&2
+    exit 1
+fi
+
+echo "=== Running Tests (mvn) ==="
+
+if $COVERAGE; then
+    # `mvn clean verify` runs the full lifecycle, so the pom's bound
+    # jacoco executions (prepare-agent -> report -> check) fire in
+    # order. Invoking jacoco:check as a standalone goal can silently
+    # pass against an empty report when the agent binding is missing —
+    # the same silent no-op class as the SpotBugs compile guard. The
+    # >=90% line bound lives only in pom.xml.
+    mvn clean verify || \\
+        { echo "✗ Tests or coverage gate failed" >&2; exit 1; }
+else
+    mvn test || { echo "✗ Tests failed" >&2; exit 1; }
+fi
+
+echo "✓ Tests passed"
+exit 0
+"""
+
+    def _java_security_script(self) -> str:
+        """Generate Java security.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/security.sh - Security checks for Java
+# Usage: ./scripts/security.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run security checks.
+
+Division of labor:
+  - Secret scanning (gitleaks + detect-secrets) runs in pre-commit.
+  - Checkstyle and PMD source analysis run in lint.sh.
+  - This script runs SpotBugs (static bytecode analysis) and OWASP
+    dependency-check CVE scanning, both via the Maven plugins pinned
+    in pom.xml — no extra installs.
+
+dependency-check needs an NVD API key (free:
+https://nvd.nist.gov/developers/request-an-api-key); without one the
+NVD download is throttled to impracticality, so the scan is skipped
+with a warning until NVD_API_KEY is exported.
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           No issues found (or dependency-check skipped; see above)
+    1           SpotBugs findings or vulnerable dependencies (CVSS >= 7)
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+if ! command -v mvn &> /dev/null; then
+    echo "✗ mvn not found - the security goals are Maven goals" >&2
+    echo "  Install with: brew install maven (macOS)" >&2
+    echo "             or: apt-get install maven (Debian/Ubuntu)" >&2
+    exit 1
+fi
+
+echo "=== Security (SpotBugs + OWASP dependency-check) ==="
+
+echo "--- SpotBugs (static bytecode analysis) ---"
+# spotbugs:check silently skips when target/classes is empty, so the
+# compile phase runs first or the gate would be a no-op.
+mvn -q compile spotbugs:check || \\
+    { echo "✗ SpotBugs found issues" >&2; exit 1; }
+
+echo "--- OWASP dependency-check (CVE scan) ---"
+# Pragmatic default: a missing NVD API key warns instead of failing so
+# a fresh clone passes check-all.sh out of the box (the CVSS>=7 failure
+# bound lives in pom.xml). Tighten by replacing the warning block with
+# 'exit 1' once NVD_API_KEY is exported everywhere (including CI).
+if [ -z "${NVD_API_KEY:-}" ]; then
+    echo "⚠ NVD_API_KEY not set - skipping dependency CVE scan" >&2
+    echo "⚠ Request a free key:" >&2
+    echo "⚠   https://nvd.nist.gov/developers/request-an-api-key" >&2
+    echo "⚠ then export NVD_API_KEY before rerunning" >&2
+else
+    mvn -q -DnvdApiKey="$NVD_API_KEY" dependency-check:check || \\
+        { echo "✗ dependency-check found vulnerable dependencies" >&2; exit 1; }
+fi
+
+echo "✓ Security checks passed"
+exit 0
+"""
+
+    # PMD companion ruleset template. Shared by scripts/lint.sh, the
+    # pre-commit PMD hook, and CI — all three run `mvn pmd:check`, and
+    # pom.xml layers this file on top of the maven-pmd-plugin default
+    # rules. This file is the SINGLE home of the Java
+    # cyclomatic-complexity bound (mirroring the <=10 gate radon/eslint/
+    # gocyclo/clippy/SwiftLint/detekt/lizard apply for the other
+    # languages); neither the scripts nor the pom restate the number.
+    _PMD_RULESET_TEMPLATE = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PMD companion ruleset generated by Start Green Stay Green.
+
+  Shared by scripts/lint.sh, the pre-commit PMD hook, and CI: all three
+  run `mvn pmd:check`, and pom.xml layers this file on top of the
+  maven-pmd-plugin default rules (kept explicitly there so adding this
+  companion does not silently drop the stock analysis).
+
+  Complexity gate: PMD reports methods whose cyclomatic complexity is
+  >= methodReportLevel, so 11 reports 11+ and enforces the <= 10
+  ceiling the other supported languages gate on. This file is the
+  single home of that bound.
+-->
+<ruleset name="start-green-stay-green"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0
+         https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+    <description>
+        Cyclomatic-complexity ceiling for generated Java projects:
+        methods report at complexity 11 and above, enforcing a ceiling
+        of 10 (see the comment above for the off-by-one mapping).
+    </description>
+    <rule ref="category/java/design.xml/CyclomaticComplexity">
+        <properties>
+            <!-- Reports at complexity >= 11, i.e. every method must
+                 stay <= 10. classReportLevel is pinned explicitly:
+                 PMD 7's CyclomaticComplexity has two independent
+                 thresholds, and leaving the class level implicit
+                 invites surprise class-level violations. -->
+            <property name="methodReportLevel" value="11" />
+            <property name="classReportLevel" value="80" />
+        </properties>
+    </rule>
+</ruleset>
+"""
+
     # Language-agnostic script generators
 
     def _pr_status_script(self) -> str:
@@ -4415,15 +4962,16 @@ cmd_list() {{
         echo "Running: gh ${{args[*]}}"
     fi
 
-    local fmt="%-12s %-30s %-20s %-12s %-18s %s\\n"
-    printf "$fmt" "ID" "BRANCH" "WORKFLOW" \\
+    # Literal format string at each call site: a variable format
+    # trips shellcheck SC2059 in generated projects' own hooks.
+    printf '%-12s %-30s %-20s %-12s %-18s %s\\n' "ID" "BRANCH" "WORKFLOW" \\
         "STATUS" "CONCLUSION" "CREATED"
-    printf "$fmt" "----" "------" "--------" \\
+    printf '%-12s %-30s %-20s %-12s %-18s %s\\n' "----" "------" "--------" \\
         "------" "----------" "-------"
 
     gh "${{args[@]}}" | while IFS=$'\\t' \\
         read -r id branch_name workflow status conclusion created; do
-        printf "$fmt" "$id" "$branch_name" \\
+        printf '%-12s %-30s %-20s %-12s %-18s %s\\n' "$id" "$branch_name" \\
             "$workflow" "$status" "$conclusion" "$created"
     done
 }}

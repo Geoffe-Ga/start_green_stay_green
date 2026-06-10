@@ -70,9 +70,9 @@ class ReadmeGenerator(BaseGenerator):
     All 10 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin, cpp) are available at the generator level. Note that
     the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
-    architecture, and metrics steps for java (#367), csharp, and ruby —
-    the CI workflow step covers every language. Kotlin (#357/#358) and
-    C/C++ (#362/#363) run the full pipeline.
+    architecture, and metrics steps for csharp and ruby —
+    the CI workflow step covers every language. Kotlin (#357/#358),
+    C/C++ (#362/#363), and Java (#366/#367) run the full pipeline.
 
     Attributes:
         output_dir: Directory where README.md will be created
@@ -789,18 +789,17 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
     def _java_readme_content(self) -> str:
         """Generate Java README.md content.
 
-        Only artifacts the scaffold actually generates carry a checkmark:
-        the legacy Android Wear app skeleton, the pure-logic Maven build
-        (JUnit 4 + Surefire, the JaCoCo coverage gate, and the
-        Checkstyle/PMD/SpotBugs plugins matching the generated CI
-        workflow), and the CI pipeline itself, which ``ci.py`` already
-        generates for java. The #367 quality tooling (pre-commit hooks,
-        quality scripts, metrics dashboard, architecture rules) stays
-        under "Planned / coming soon". The two-builds split is documented
-        explicitly: the pure logic builds and tests with plain Maven
-        anywhere, while the watch APK needs Android tooling (Android
-        Studio / Gradle) the generator does not scaffold — the Tizen
-        Studio precedent (#361).
+        Only artifacts the scaffold actually generates carry a checkmark.
+        With the #367 quality toolchain (google-java-format, Maven-goal
+        pre-commit hooks, quality scripts, the JaCoCo coverage gate, the
+        pmd-ruleset.xml complexity companion, and the ArchUnit
+        architecture test) joining the #366 foundation and its CI
+        pipeline, every roadmap item is real and the 'Planned / coming
+        soon' section is gone (the Kotlin #360 / C/C++ #365 precedent).
+        The two-builds split is documented explicitly: the pure logic
+        builds and tests with plain Maven anywhere, while the watch APK
+        needs Android tooling (Android Studio / Gradle) the generator
+        does not scaffold — the Tizen Studio precedent (#361).
 
         Returns:
             Content for README.md
@@ -816,9 +815,9 @@ project generated with Start Green Stay Green.
 
 ## Description
 
-This Java scaffold is the foundation of a quality-controlled legacy
-Android Wear watch-app project — the maintenance path for existing Java
-watch apps. The following are generated today:
+This Java scaffold is a quality-controlled legacy Android Wear
+watch-app project — the maintenance path for existing Java watch apps.
+The following are generated today:
 
 - ✅ Wear OS app skeleton (`app/src/main/`): `AndroidManifest.xml` with
   the watch `uses-feature` and standalone metadata, a `MainActivity`
@@ -829,19 +828,22 @@ watch apps. The following are generated today:
   testable without the Android SDK
 - ✅ Maven build (`pom.xml`, Java {JAVA_RELEASE}) for the pure logic:
   JUnit 4 tests via Surefire, JaCoCo coverage gate (≥90% line), and the
-  Checkstyle/PMD/SpotBugs plugins the CI workflow invokes
+  Checkstyle/PMD/SpotBugs/dependency-check plugins every quality gate
+  invokes
 - ✅ JUnit 4 unit-test scaffold
   (`src/test/java/{package_path}/GreetingTest.java`)
+- ✅ Code quality tools (google-java-format + Checkstyle + PMD, with
+  the complexity gate in `pmd-ruleset.xml`)
+- ✅ Pre-commit hooks (format, Maven-goal linters, secret scanning via
+  gitleaks + detect-secrets)
+- ✅ Quality scripts (`./scripts/check-all.sh` with the ≥90% JaCoCo
+  coverage gate)
+- ✅ Security scanning (SpotBugs + OWASP dependency-check via
+  `./scripts/security.sh`)
+- ✅ Architecture enforcement (ArchUnit test, `plans/architecture/`)
 - ✅ CI/CD pipeline (`.github/workflows/ci.yml` — JDK 17/21 matrix
   running the same `mvn` quality goals as the local build)
 - ✅ This README
-
-**Planned / coming soon** (quality tooling, #367):
-
-- ⏳ Pre-commit hooks configuration
-- ⏳ Quality scripts (`./scripts/check-all.sh` and friends)
-- ⏳ Metrics dashboard
-- ⏳ Architecture enforcement rules
 
 ## The two builds (read this first)
 
@@ -849,7 +851,7 @@ This project deliberately splits into two builds:
 
 1. **Pure logic + unit tests — plain Maven, no Android SDK.** `pom.xml`
    builds only `src/main/java` and `src/test/java`, so `mvn test` and
-   every CI quality goal run on any host — including the generated CI
+   every quality goal run on any host — including the generated CI
    pipeline's runners.
 2. **The watch app itself — Android tooling.** `app/src/main/` needs the
    Android SDK and the androidx.wear AAR
@@ -869,6 +871,12 @@ cd {self.config.project_name}
 
 # Build the pure logic and run its tests (needs JDK {JAVA_RELEASE}+ and Maven)
 mvn test
+
+# Install the formatter (the linters are Maven plugins — no installs)
+brew install google-java-format
+
+# Install the pre-commit hooks
+pre-commit install
 ```
 
 ## Usage
@@ -891,52 +899,59 @@ Hello from {self.config.project_name}!
 
 ### Running Quality Checks
 
-These match the generated CI pipeline (`.github/workflows/ci.yml`)
-goal-for-goal:
-
 ```bash
-# Run all tests (JUnit 4 via Surefire)
-mvn test
+# Run every quality gate (format, lint, tests + coverage, security)
+./scripts/check-all.sh
 
-# Run tests with the JaCoCo coverage report
-mvn clean test jacoco:report
-
-# Enforce the >=90% line-coverage gate
-mvn jacoco:check
-
-# Run Checkstyle (google_checks)
-mvn checkstyle:check
-
-# Run PMD
-mvn pmd:check
-
-# Run SpotBugs
-mvn spotbugs:check
+# Or invoke the underlying Maven goals directly — the same goals the
+# scripts, the pre-commit hooks, and CI run (pom.xml is the single
+# source of tool versions and thresholds):
+mvn test                          # JUnit 4 via Surefire
+mvn clean test jacoco:report      # tests + coverage report
+mvn jacoco:check                  # enforce the >=90% line bound
+mvn checkstyle:check              # Checkstyle (google_checks)
+mvn pmd:check                     # PMD + pmd-ruleset.xml CCN <=10 gate
+mvn compile spotbugs:check        # SpotBugs (needs compiled classes)
 ```
+
+> **Note:** CI runs these same gates on every push and pull request via
+> the generated GitHub Actions pipeline (see *Quality Tools* below).
 
 ### Quality Tools
 
 This scaffold currently includes:
 
 - **JUnit 4**: Unit-test framework (run by Maven Surefire)
-- **JaCoCo**: Coverage gate ≥90% line coverage (`mvn jacoco:check`;
-  only the Maven-built pure-logic sources count — `app/` needs the
-  Android SDK, sits outside the Maven build, and is honestly outside
-  the coverage denominator too)
-- **Checkstyle**: Code style checker (google_checks)
-- **PMD**: Source code analyzer
-- **SpotBugs**: Static bytecode analysis
+- **google-java-format**: Formatting (`./scripts/format.sh`; Google
+  style, no config file by design)
+- **Checkstyle**: Code style checker (google_checks, `./scripts/lint.sh`)
+- **PMD**: Source analysis + cyclomatic complexity ≤10
+  (`pmd-ruleset.xml` is the single home of the bound)
+- **JaCoCo**: Coverage gate ≥90% line coverage
+  (`./scripts/test.sh --coverage`; the bound lives in `pom.xml`. Only
+  the Maven-built pure-logic sources count — `app/` needs the Android
+  SDK, sits outside the Maven build, and is honestly outside the
+  coverage denominator too)
+- **SpotBugs**: Static bytecode analysis (`./scripts/security.sh`)
+- **OWASP dependency-check**: Dependency CVE scan
+  (`./scripts/security.sh`; needs an NVD API key — the script explains)
+- **Pre-commit hooks**: google-java-format, Checkstyle/PMD/SpotBugs as
+  Maven goals, gitleaks, detect-secrets
+- **Architecture rules**: ArchUnit test (`plans/architecture/`; copy
+  into `src/test/java/` to enforce — the README there explains)
 - **CI pipeline**: GitHub Actions (`.github/workflows/ci.yml`) running
   the same `mvn` goals on a JDK 17/21 matrix
-
-Pre-commit hooks, quality scripts, the metrics dashboard, and
-architecture rules are **not** generated for Java yet (#367).
 
 ### Project Structure
 
 ```
 {self.config.project_name}/
 ├── pom.xml                          # Maven build (pure logic only)
+├── pmd-ruleset.xml                  # Complexity gate (CCN <=10)
+├── .pre-commit-config.yaml          # Format/lint/secret-scan hooks
+├── scripts/                         # check-all, format, lint, test,
+│                                    # security
+├── plans/architecture/              # ArchUnit test template
 ├── src/
 │   ├── main/java/{package_path}/
 │   │   └── Greeting.java            # Pure logic: greet()
@@ -973,9 +988,14 @@ This scaffold is a MAXIMUM QUALITY Java project. Today it provides:
 - **Java {JAVA_RELEASE} with compile-time type checking**
   (`maven.compiler.release`)
 - **JUnit 4 test scaffold**: ready for you to add tests
-- **Coverage gate**: `mvn jacoco:check` enforces ≥90% line coverage
-- **Style and static analysis**: Checkstyle, PMD, and SpotBugs wired
-  into the pom
+- **Coverage gate**: `./scripts/test.sh --coverage` enforces ≥90% line
+  coverage via JaCoCo (`mvn jacoco:check`; the bound lives in `pom.xml`)
+- **Complexity gate**: PMD fails on cyclomatic complexity >10
+  (`pmd-ruleset.xml`)
+- **Formatting & static analysis**: google-java-format, Checkstyle,
+  PMD, and SpotBugs, locally and in pre-commit
+- **Architecture enforcement**: ArchUnit layer rules
+  (`plans/architecture/`)
 - **CI enforcement**: every gate above also runs in GitHub Actions on
   every push and pull request, on JDK 17 and 21
 

@@ -13,7 +13,9 @@ from start_green_stay_green.generators.dependencies import DependencyConfig
 from start_green_stay_green.utils.cpp import CATCH2_VERSION
 from start_green_stay_green.utils.cpp import CMAKE_MINIMUM_VERSION
 from start_green_stay_green.utils.cpp import CPP_STANDARD
+from start_green_stay_green.utils.java import ARCHUNIT_VERSION
 from start_green_stay_green.utils.java import CHECKSTYLE_PLUGIN_VERSION
+from start_green_stay_green.utils.java import DEPENDENCY_CHECK_PLUGIN_VERSION
 from start_green_stay_green.utils.java import JACOCO_VERSION
 from start_green_stay_green.utils.java import JAVA_RELEASE
 from start_green_stay_green.utils.java import JUNIT4_VERSION
@@ -684,6 +686,48 @@ class TestJavaDependencies:
             assert "THE TWO BUILDS" in content
             assert "Android Studio" in content
             assert "android-maven-plugin is unmaintained" in content
+
+    def test_pom_manages_archunit_test_dependency(self) -> None:
+        """ArchUnit is test-scoped so the architecture test compiles (#367).
+
+        The #357 manifest-touch precedent: the architecture template in
+        plans/architecture only compiles once copied into src/test/java,
+        and that copy needs the archunit dependency already declared.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._pom(tmpdir)
+            assert "<groupId>com.tngtech.archunit</groupId>" in content
+            assert "<artifactId>archunit</artifactId>" in content
+            assert f"<version>{ARCHUNIT_VERSION}</version>" in content
+
+    def test_pom_pmd_plugin_layers_the_ccn_companion_ruleset(self) -> None:
+        """The PMD plugin layers quickstart baseline + pmd-ruleset.xml.
+
+        The companion ruleset (written by the scripts generator) is the
+        single home of the <=10 cyclomatic-complexity bound; the PMD 7
+        ``category/java/quickstart.xml`` baseline is referenced
+        explicitly (pre-7 ``rulesets/java/*`` paths no longer resolve)
+        so adding the companion does not silently drop stock analysis.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._pom(tmpdir)
+            assert "<ruleset>category/java/quickstart.xml</ruleset>" in content
+            assert "<ruleset>pmd-ruleset.xml</ruleset>" in content
+
+    def test_pom_declares_owasp_dependency_check_plugin(self) -> None:
+        """dependency-check-maven is pinned with the CVSS>=7 failure gate.
+
+        Declared in the pom (rather than a brew-installed CLI) so
+        ``mvn dependency-check:check`` resolves with zero extra installs
+        — the org.owasp group is not in Maven's default plugin-prefix
+        search path.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._pom(tmpdir)
+            assert "<groupId>org.owasp</groupId>" in content
+            assert "<artifactId>dependency-check-maven</artifactId>" in content
+            assert f"<version>{DEPENDENCY_CHECK_PLUGIN_VERSION}</version>" in content
+            assert "<failBuildOnCVSS>7</failBuildOnCVSS>" in content
 
 
 class TestCppDependencies:

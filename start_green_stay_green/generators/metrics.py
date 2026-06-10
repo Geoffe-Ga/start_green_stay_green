@@ -495,6 +495,22 @@ LANGUAGE_TOOLS: dict[str, dict[str, str]] = {
         "security": "cppcheck + flawfinder",
         "dependency_check": "conan audit",
     },
+    # Java (#367): every gate is a Maven goal backed by the #366 pom.
+    # Coverage is the pom's JaCoCo plugin (the >=90% bound lives at
+    # plugin level in pom.xml); PMD's CyclomaticComplexity rule (via the
+    # pmd-ruleset.xml companion) owns the <=10 complexity gate, so
+    # Checkstyle does not duplicate it. pitest is a periodic mutation
+    # gate like mull/muter, not a per-commit hook. Each tool appears in
+    # exactly one category: SpotBugs owns security (scripts/security.sh)
+    # and OWASP dependency-check owns dependency CVE scanning.
+    "java": {
+        "coverage": "JaCoCo (mvn jacoco:check)",
+        "mutation": "pitest",
+        "complexity": "PMD (CyclomaticComplexity, pmd-ruleset.xml)",
+        "documentation": "javadoc",
+        "security": "SpotBugs (mvn spotbugs:check)",
+        "dependency_check": "OWASP dependency-check (mvn dependency-check:check)",
+    },
 }
 
 

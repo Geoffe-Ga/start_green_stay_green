@@ -595,27 +595,36 @@ class TestJavaReadme:
             assert "mvn jacoco:check" in content
             assert "mvn checkstyle:check" in content
             assert "mvn pmd:check" in content
-            assert "mvn spotbugs:check" in content
+            # The honest SpotBugs invocation compiles first:
+            # spotbugs:check silently skips without compiled classes.
+            assert "mvn compile spotbugs:check" in content
 
-    def test_java_readme_advertises_only_generated_artifacts(self) -> None:
-        """README keeps the #367 quality tooling under a Planned section.
+    def test_java_readme_advertises_the_wired_quality_tooling(self) -> None:
+        """README advertises the #367 quality tooling as real.
 
-        Pre-commit hooks, quality scripts, the metrics dashboard, and
-        architecture rules are not generated for java yet, so they must
-        not carry a checkmark; the CI workflow IS generated (ci.py) and
-        may be advertised as real.
+        With the #367 toolchain (google-java-format, Maven-goal
+        pre-commit hooks, quality scripts, PMD complexity gate, ArchUnit
+        architecture test) and the #366 CI pipeline both generated,
+        every roadmap item is real and the 'Planned / coming soon'
+        section is gone — the Kotlin (#360) / C/C++ (#365) precedent.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             content = self._readme_content(tmpdir)
-            assert "Planned / coming soon" in content
-            assert "#367" in content
+            assert "Planned / coming soon" not in content
             assert ".github/workflows/ci.yml" in content
-            # No checkmarked claims for the not-yet-generated tooling.
-            assert "✅ Pre-commit hooks" not in content
-            assert "✅ Quality scripts" not in content
-            # The old overclaiming boilerplate is gone.
-            assert "OWASP" not in content
-            assert "checkstyle.xml" not in content
+            assert "✅ Pre-commit hooks" in content
+            assert "✅ Quality scripts" in content
+            assert "./scripts/check-all.sh" in content
+            assert "google-java-format" in content
+            assert "ArchUnit" in content
+            assert "plans/architecture" in content
+            assert "pmd-ruleset.xml" in content
+
+    def test_java_readme_documents_coverage_denominator_limit(self) -> None:
+        """README discloses that app/ sits outside the coverage denominator."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "coverage denominator" in content
 
     def test_java_readme_names_the_sanitized_application_id(self) -> None:
         """README surfaces the com.example application ID."""

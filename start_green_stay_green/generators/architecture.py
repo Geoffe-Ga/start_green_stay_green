@@ -2,8 +2,8 @@
 
 Generates architecture validation configuration for import-linter (Python),
 dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust),
-SwiftLint custom rules (Swift), Konsist (Kotlin), and a stdlib-Python
-include-boundary checker (C/C++).
+SwiftLint custom rules (Swift), Konsist (Kotlin), a stdlib-Python
+include-boundary checker (C/C++), and ArchUnit (Java).
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import warnings
 
 from start_green_stay_green.utils.java import android_package
+from start_green_stay_green.utils.java import android_package_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -30,7 +31,7 @@ class ArchitectureResult:
         output_dir: Directory containing generated files.
         files_created: List of files created.
         language: Target language (python, typescript, go, rust, swift,
-            kotlin, cpp).
+            kotlin, cpp, java).
     """
 
     output_dir: Path
@@ -156,6 +157,24 @@ _LANGUAGE_TOOLING: dict[str, _LanguageTooling] = {
         docs_url="check_architecture.py (see its header comment)",
         display_name="C/C++",
     ),
+    "java": _LanguageTooling(
+        # ArchUnit's 'config' is a test compiled into the project, so
+        # run_cmd carries no {config_file} placeholder and the one-time
+        # wiring lives in install_cmd. The {package_path} placeholder is
+        # resolved per-project by _resolved_install_cmd: javac requires
+        # the file to sit in its package-matching directory (unlike
+        # kotlinc, which tolerates the flat copy the Kotlin entry uses).
+        tool="ArchUnit",
+        config_file="ArchitectureTest.java",
+        install_cmd=(
+            "mkdir -p src/test/java/{package_path} && "
+            "cp plans/architecture/ArchitectureTest.java "
+            "src/test/java/{package_path}/"
+        ),
+        run_cmd="mvn test -Dtest=ArchitectureTest",
+        docs_url="https://www.archunit.org/",
+        display_name="Java",
+    ),
 }
 
 
@@ -165,8 +184,9 @@ class ArchitectureEnforcementGenerator:
     Generates import-linter config for Python, dependency-cruiser
     config for TypeScript, go-arch-lint config for Go, cargo-deny
     config for Rust, SwiftLint custom rules for Swift, a Konsist
-    test for Kotlin, and a runnable include-boundary checker for C/C++
-    to enforce layer separation and prevent circular dependencies.
+    test for Kotlin, a runnable include-boundary checker for C/C++,
+    and an ArchUnit test for Java to enforce layer separation and
+    prevent circular dependencies.
 
     Attributes:
         orchestrator: AI orchestrator for content generation.
@@ -214,7 +234,7 @@ class ArchitectureEnforcementGenerator:
 
         Args:
             language: Target language (python, typescript, go, rust,
-                swift, kotlin, cpp).
+                swift, kotlin, cpp, java).
             project_name: Name of the project.
 
         Returns:
@@ -241,6 +261,7 @@ class ArchitectureEnforcementGenerator:
             "swift": self._generate_swift_config,
             "kotlin": partial(self._generate_kotlin_config, project_name),
             "cpp": self._generate_cpp_config,
+            "java": partial(self._generate_java_config, project_name),
         }
         files_created = config_builders[language]()
 
@@ -919,6 +940,124 @@ if __name__ == "__main__":
         config_path.write_text(config_content)
         return [config_path]
 
+    def _generate_java_config(self, project_name: str) -> list[Path]:
+        """Generate the ArchUnit architecture test for Java.
+
+        ArchUnit is the canonical Java architecture-testing library
+        (JUnit-based), so layer rules are expressed as an ArchUnit test
+        over the compiled classes — the Java analogue of the Kotlin
+        Konsist test. The emitted file is a template parked in
+        ``plans/architecture``: it only enforces once copied into the
+        ``src/test/java`` source set (the archunit dependency is already
+        declared in the generated ``pom.xml``). The test documents that
+        wiring step and ArchUnit's enforcement limits explicitly,
+        mirroring the Konsist, Rust ``deny.toml``, and Swift custom-rule
+        gap notes, and runs with optional layers (warn-first) plus a
+        documented tighten-me switch. Unlike Gradle/Cargo, Maven does
+        not reject package cycles, so an explicit slices rule enforces
+        cycle freedom inside the test. The dependency matrix mirrors the
+        Go config: presentation -> application -> domain, with
+        infrastructure allowed to depend on domain only.
+
+        Args:
+            project_name: Name of the project; layer packages derive
+                from its sanitized Android namespace so the test stays
+                in sync with the scaffolded sources.
+
+        Returns:
+            List of files created.
+        """
+        config_path = self.output_dir / "ArchitectureTest.java"
+
+        namespace = android_package(project_name)
+        config_content = f"""\
+// ArchUnit architecture test enforcing layered architecture.
+//
+// ArchUnit (https://www.archunit.org/) is the canonical Java
+// architecture-testing library: layer rules are expressed as a JUnit
+// test over the compiled classes — the Java analogue of the Kotlin
+// Konsist test.
+//
+// Wiring (one-time): this file is a template parked in
+// plans/architecture; it only enforces once it lives in a test source
+// set. javac requires the file to sit in the directory matching its
+// declared package, so copy it in and run:
+//   mkdir -p src/test/java/{namespace.replace(".", "/")}/architecture
+//   cp plans/architecture/ArchitectureTest.java \\
+//       src/test/java/{namespace.replace(".", "/")}/architecture/
+//   mvn test -Dtest=ArchitectureTest
+// The archunit test dependency is already declared in pom.xml.
+//
+// Enforcement limits (documented, not hidden):
+//   - ArchUnit analyzes compiled bytecode (target/classes), so the
+//     classes must compile first (mvn test does); dependencies created
+//     via reflection or dependency-injection wiring are invisible, and
+//     the Android app/ module sits outside the Maven build entirely.
+//   - Layers are defined by the package convention below
+//     ({namespace}.<layer>..); code outside those packages is
+//     unchecked.
+//   - withOptionalLayers(true) is the pragmatic warn-first default: a
+//     layer whose package does not exist yet passes. Tighten by
+//     switching to withOptionalLayers(false) once every layer package
+//     exists.
+//   - Unlike Gradle project graphs or Cargo crate graphs, javac and
+//     Maven do NOT reject circular package dependencies, so cycle
+//     prevention cannot be attributed to the build system: the slices
+//     rule below enforces it inside this test.
+//
+// Dependency matrix (mirrors the Go go-arch-lint config):
+//   presentation -> application, domain
+//   application  -> domain
+//   infrastructure -> domain
+//   domain       -> (nothing)
+package {namespace}.architecture;
+
+import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
+import com.tngtech.archunit.library.Architectures;
+import com.tngtech.archunit.library.dependencies.SlicesRuleDefinition;
+import org.junit.Test;
+
+public class ArchitectureTest {{
+
+  private static final String BASE_PACKAGE = "{namespace}";
+
+  private JavaClasses projectClasses() {{
+    return new ClassFileImporter().importPackages(BASE_PACKAGE);
+  }}
+
+  @Test
+  public void layersDependOnlyInward() {{
+    Architectures.layeredArchitecture()
+        .consideringOnlyDependenciesInLayers()
+        .withOptionalLayers(true)
+        .layer("Domain").definedBy(BASE_PACKAGE + ".domain..")
+        .layer("Application").definedBy(BASE_PACKAGE + ".application..")
+        .layer("Presentation").definedBy(BASE_PACKAGE + ".presentation..")
+        .layer("Infrastructure").definedBy(BASE_PACKAGE + ".infrastructure..")
+        .whereLayer("Presentation").mayNotBeAccessedByAnyLayer()
+        .whereLayer("Application").mayOnlyBeAccessedByLayers("Presentation")
+        .whereLayer("Infrastructure").mayNotBeAccessedByAnyLayer()
+        .whereLayer("Domain")
+        .mayOnlyBeAccessedByLayers(
+            "Application", "Presentation", "Infrastructure")
+        .check(projectClasses());
+  }}
+
+  @Test
+  public void layerPackagesAreFreeOfCycles() {{
+    SlicesRuleDefinition.slices()
+        .matching(BASE_PACKAGE + ".(*)..")
+        .should()
+        .beFreeOfCycles()
+        .check(projectClasses());
+  }}
+}}
+"""
+
+        config_path.write_text(config_content)
+        return [config_path]
+
     def _generate_readme(self, language: str, project_name: str) -> Path:
         """Generate README with usage instructions.
 
@@ -933,7 +1072,7 @@ if __name__ == "__main__":
 
         tooling = _LANGUAGE_TOOLING[language]
         tool = tooling.tool
-        install_cmd = tooling.install_cmd
+        install_cmd = self._resolved_install_cmd(language, project_name)
         # Manual invocation runs from the config directory, so the bare
         # config filename is correct here (no plans/architecture/ prefix).
         run_cmd = tooling.run_cmd.format(config_file=tooling.config_file)
@@ -1006,6 +1145,7 @@ Edit the configuration file:
 - Swift: `.swiftlint-architecture.yml`
 - Kotlin: `ArchitectureTest.kt`
 - C/C++: `check_architecture.py` (the ALLOWED_DEPENDENCIES matrix at the top)
+- Java: `ArchitectureTest.java` (the layered-architecture rules in the test)
 
 See documentation:
 - Python: https://import-linter.readthedocs.io/
@@ -1015,6 +1155,7 @@ See documentation:
 - Swift: https://realm.github.io/SwiftLint/custom_rules.html
 - Kotlin: https://docs.konsist.lemonappdev.com/
 - C/C++: the header comment in check_architecture.py (self-documented)
+- Java: https://www.archunit.org/
 
 ## Integration
 
@@ -1035,9 +1176,7 @@ Add to CI pipeline:
         readme_path.write_text(readme_content)
         return readme_path
 
-    def _generate_run_script(
-        self, language: str, project_name: str  # noqa: ARG002
-    ) -> Path:
+    def _generate_run_script(self, language: str, project_name: str) -> Path:
         """Generate executable run-check.sh script.
 
         Args:
@@ -1049,7 +1188,7 @@ Add to CI pipeline:
         """
         script_path = self.output_dir / "run-check.sh"
 
-        script_content = self._build_run_script(language)
+        script_content = self._build_run_script(language, project_name)
 
         script_path.write_text(script_content)
 
@@ -1059,7 +1198,30 @@ Add to CI pipeline:
         return script_path
 
     @staticmethod
-    def _build_run_script(language: str) -> str:
+    def _resolved_install_cmd(language: str, project_name: str) -> str:
+        """Resolve the install command's per-project placeholders.
+
+        Java's install command carries a ``{package_path}`` placeholder:
+        javac requires ``ArchitectureTest.java`` to live in the directory
+        matching its declared package, which derives from the project
+        name. Languages without the placeholder return their command
+        unchanged.
+
+        Args:
+            language: Target language.
+            project_name: Name of the project.
+
+        Returns:
+            The install command with any placeholders resolved.
+        """
+        install_cmd = _LANGUAGE_TOOLING[language].install_cmd
+        if "{package_path}" not in install_cmd:
+            return install_cmd
+        package_path = android_package_path(project_name) + "/architecture"
+        return install_cmd.replace("{package_path}", package_path)
+
+    @staticmethod
+    def _build_run_script(language: str, project_name: str) -> str:
         """Build the run-check.sh contents for a language.
 
         Derives the command and the binary-availability guard from the
@@ -1068,11 +1230,16 @@ Add to CI pipeline:
 
         Args:
             language: Target language.
+            project_name: Name of the project (resolves the install
+                command's per-project placeholders).
 
         Returns:
             The shell script source for run-check.sh.
         """
         tooling = _LANGUAGE_TOOLING[language]
+        install_cmd = ArchitectureEnforcementGenerator._resolved_install_cmd(
+            language, project_name
+        )
         # The first token of run_cmd is the binary to probe with command -v.
         binary = tooling.run_cmd.split()[0]
         # Fill the {config_file} placeholder with the path-prefixed config so
@@ -1088,7 +1255,7 @@ set -euo pipefail
 echo "🏛️  Checking {tooling.display_name} architecture with {tooling.tool}..."
 
 if ! command -v {binary} &> /dev/null; then
-    echo "❌ {tooling.tool} not found. Install with: {tooling.install_cmd}"
+    echo "❌ {tooling.tool} not found. Install with: {install_cmd}"
     exit 1
 fi
 

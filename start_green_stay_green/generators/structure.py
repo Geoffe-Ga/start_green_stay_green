@@ -66,9 +66,9 @@ class StructureGenerator(BaseGenerator):
     All 10 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin, cpp) are available at the generator level. Note that
     the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
-    architecture, and metrics steps for java (#367), csharp, and ruby —
-    the CI workflow step covers every language. Kotlin (#357/#358) and
-    C/C++ (#362/#363) run the full pipeline.
+    architecture, and metrics steps for csharp and ruby —
+    the CI workflow step covers every language. Kotlin (#357/#358),
+    C/C++ (#362/#363), and Java (#366/#367) run the full pipeline.
 
     Attributes:
         output_dir: Directory where structure will be created

@@ -18,7 +18,9 @@ from start_green_stay_green.utils.cpp import CATCH2_VERSION
 from start_green_stay_green.utils.cpp import CMAKE_MINIMUM_VERSION
 from start_green_stay_green.utils.cpp import CPP_STANDARD
 from start_green_stay_green.utils.cpp import cpp_identifier
+from start_green_stay_green.utils.java import ARCHUNIT_VERSION
 from start_green_stay_green.utils.java import CHECKSTYLE_PLUGIN_VERSION
+from start_green_stay_green.utils.java import DEPENDENCY_CHECK_PLUGIN_VERSION
 from start_green_stay_green.utils.java import JACOCO_VERSION
 from start_green_stay_green.utils.java import JAVA_RELEASE
 from start_green_stay_green.utils.java import JUNIT4_VERSION
@@ -83,9 +85,9 @@ class DependenciesGenerator(BaseGenerator):
     All 10 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin, cpp) are available at the generator level. Note that
     the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
-    architecture, and metrics steps for java (#367), csharp, and ruby —
-    the CI workflow step covers every language. Kotlin (#357/#358) and
-    C/C++ (#362/#363) run the full pipeline.
+    architecture, and metrics steps for csharp and ruby —
+    the CI workflow step covers every language. Kotlin (#357/#358),
+    C/C++ (#362/#363), and Java (#366/#367) run the full pipeline.
 
     Attributes:
         output_dir: Directory where dependency files will be written
@@ -585,9 +587,13 @@ nursery = "warn"
             Content for the pure-logic Maven build: JUnit 4 + Surefire,
             the JaCoCo agent/report executions with a >=90% line-coverage
             rule (configured at plugin level so the CI's standalone
-            ``mvn jacoco:check`` invocation picks it up too), and the
-            Checkstyle (google_checks), PMD, and SpotBugs plugins
-            matching the generated CI workflow's ``mvn`` commands.
+            ``mvn jacoco:check`` invocation picks it up too), the
+            Checkstyle (google_checks), PMD (stock rules plus the
+            pmd-ruleset.xml complexity companion), SpotBugs, and OWASP
+            dependency-check plugins matching the generated CI workflow
+            and quality scripts' ``mvn`` commands, and the test-scoped
+            ArchUnit dependency backing the architecture test template
+            (#367).
         """
         return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!--
@@ -628,6 +634,19 @@ Wear OS app</description>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <version>{JUNIT4_VERSION}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- ArchUnit backs the architecture test template parked in
+             plans/architecture/ArchitectureTest.java; declared here so
+             the template compiles the moment it is copied into
+             src/test/java (see plans/architecture/README.md). The base
+             artifact (not archunit-junit4) is deliberate: the template
+             uses plain @Test methods with explicit ClassFileImporter
+             calls, so the JUnit-runner integration adds nothing. -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit</artifactId>
+            <version>{ARCHUNIT_VERSION}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -699,14 +718,44 @@ Wear OS app</description>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-pmd-plugin</artifactId>
                 <version>{PMD_PLUGIN_VERSION}</version>
+                <configuration>
+                    <rulesets>
+                        <!-- PMD 7's category path for the curated
+                             baseline rules (the pre-7 rulesets/java/*
+                             paths no longer resolve). -->
+                        <ruleset>category/java/quickstart.xml</ruleset>
+                        <!-- Companion at the project root (written by the
+                             scripts generator): the SINGLE home of the
+                             cyclomatic-complexity <= 10 gate, shared by
+                             scripts/lint.sh, the pre-commit PMD hook, and
+                             CI. -->
+                        <ruleset>pmd-ruleset.xml</ruleset>
+                    </rulesets>
+                </configuration>
             </plugin>
             <!-- Declared so the CI's `mvn spotbugs:check` resolves: the
                  com.github.spotbugs plugin group is not in Maven's
-                 default plugin-prefix search path. -->
+                 default plugin-prefix search path. NOTE: spotbugs:check
+                 silently skips without compiled classes - run
+                 `mvn compile spotbugs:check` (scripts/security.sh and
+                 the pre-commit hook do). -->
             <plugin>
                 <groupId>com.github.spotbugs</groupId>
                 <artifactId>spotbugs-maven-plugin</artifactId>
                 <version>{SPOTBUGS_PLUGIN_VERSION}</version>
+            </plugin>
+            <!-- Declared so `mvn dependency-check:check` resolves (the
+                 org.owasp group is also outside Maven's default
+                 plugin-prefix search path). The CVSS >= 7 failure bound
+                 lives here; scripts/security.sh invokes the goal and
+                 documents the NVD_API_KEY requirement. -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>{DEPENDENCY_CHECK_PLUGIN_VERSION}</version>
+                <configuration>
+                    <failBuildOnCVSS>7</failBuildOnCVSS>
+                </configuration>
             </plugin>
         </plugins>
     </build>
