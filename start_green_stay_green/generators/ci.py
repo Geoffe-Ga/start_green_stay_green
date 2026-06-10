@@ -86,6 +86,30 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         "supported_versions": ["5.9", "5.10", "6.0"],
         "package_manager": "spm",
     },
+    "kotlin": {
+        # JUnit on the plain JVM via Gradle; coverage is measured and
+        # gated by Kover (koverVerifyDebug), whose >=90% bound lives in
+        # the generated app/build.gradle.kts — the single source of
+        # truth, deliberately not duplicated in the workflow.
+        "test_framework": "junit",
+        # ktlint genuinely is both a linter and a formatter (like ruff,
+        # eslint, and rubocop), so it appears in both lists. detekt's
+        # potential-bugs rules serve security duty too, but it is listed
+        # once (here) so tool-install consumers don't double-install it.
+        "linters": ["ktlint", "detekt"],
+        "formatters": ["ktlint"],
+        # gitleaks covers secret scanning (shared with pre-commit) and
+        # OWASP dependency-check covers dependency CVE scanning
+        # (scripts/security.sh).
+        "security_tools": ["gitleaks", "dependency-check"],
+        # JDK LTS releases the CI matrix runs Gradle/AGP on. The Kotlin
+        # version (2.0.21) is pinned by the generated root
+        # build.gradle.kts — a project decision, not a CI input — and
+        # bytecode always targets 17 via jvmToolchain(17), so the JVM
+        # executing the build is the meaningful matrix axis.
+        "supported_versions": ["17", "21"],
+        "package_manager": "gradle",
+    },
     "java": {
         "test_framework": "junit",
         "linters": ["checkstyle"],
@@ -164,7 +188,7 @@ class CIGenerator(BaseGenerator):
                 deterministic template-based path
                 (``generate_workflow_from_template``).
             language: Target language (python, typescript, go, rust, swift,
-                java, csharp, ruby).
+                kotlin, java, csharp, ruby).
             framework: Optional framework (e.g., FastAPI, Express, Gin).
             reference_dir: Directory containing ``<language>.yml``
                 reference templates. Defaults to ``reference/ci/`` shipped

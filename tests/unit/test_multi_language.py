@@ -320,7 +320,7 @@ class TestGeneratorOnlyLanguagePipelineGates:
     but no quality-tooling support — instead of crashing init, the tooling
     steps must no-op with an informational message. Kotlin graduated from
     this set when #357 wired its pre-commit/scripts/metrics/architecture
-    tooling; only its CI step (#358) still skips.
+    tooling and #358 wired its CI workflow.
     """
 
     def test_precommit_step_writes_for_kotlin(self, tmp_path: Path) -> None:
@@ -359,11 +359,13 @@ class TestGeneratorOnlyLanguagePipelineGates:
 
         assert not (tmp_path / "scripts").exists()
 
-    def test_ci_step_skips_kotlin_without_workflow(self, tmp_path: Path) -> None:
-        """No ci.yml is written for kotlin (CI generation is #358)."""
+    def test_ci_step_writes_kotlin_workflow(self, tmp_path: Path) -> None:
+        """The kotlin CI workflow is now generated (#358)."""
         cli_mod._generate_ci_step(tmp_path, "my-project", "kotlin", None)
 
-        assert not (tmp_path / ".github" / "workflows" / "ci.yml").exists()
+        ci_file = tmp_path / ".github" / "workflows" / "ci.yml"
+        assert ci_file.exists()
+        assert "Kotlin Quality Checks" in ci_file.read_text()
 
     def test_metrics_step_writes_kotlin_dashboard(self, tmp_path: Path) -> None:
         """The metrics dashboard is now generated for kotlin (#357)."""

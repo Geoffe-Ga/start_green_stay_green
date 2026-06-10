@@ -11,9 +11,10 @@ toolchain — so they pass on CI runners where the Android SDK and Gradle
 are not installed, mirroring ``test_swift_init_integration.py`` (#354).
 
 With #357 the quality toolchain (pre-commit config, quality scripts,
-metrics dashboard, architecture rules) is generated for Kotlin; only the
-CI workflow remains deferred (#358), so this suite locks in the presence
-of the tooling artifacts and the *absence* of ci.yml.
+metrics dashboard, architecture rules) landed, and with #358 the CI
+workflow (.github/workflows/ci.yml) is generated too, so this suite
+locks in the presence of all tooling artifacts; only the wrapper
+binaries remain forbidden output.
 """
 
 from pathlib import Path
@@ -107,6 +108,8 @@ class TestKotlinInitTree:
             "scripts/security.sh",
             "plans/architecture/ArchitectureTest.kt",
             "plans/architecture/run-check.sh",
+            # CI pipeline (#358) is now generated alongside the tooling.
+            ".github/workflows/ci.yml",
         ],
     )
     def test_quality_tooling_artifact_generated(
@@ -120,8 +123,6 @@ class TestKotlinInitTree:
     @pytest.mark.parametrize(
         "relative_path",
         [
-            # CI is #358 — it must not be generated yet.
-            ".github/workflows/ci.yml",
             # Binary wrapper artifacts must never be scaffolded.
             "gradlew",
             "gradle/wrapper/gradle-wrapper.jar",
@@ -130,7 +131,7 @@ class TestKotlinInitTree:
     def test_out_of_scope_artifact_not_generated(
         self, kotlin_project: Path, relative_path: str
     ) -> None:
-        """The scaffold must not emit #358 artifacts or wrapper binaries."""
+        """The scaffold must never emit wrapper binaries."""
         assert not (kotlin_project / relative_path).exists()
 
 
@@ -179,6 +180,37 @@ class TestKotlinInitQualityTooling:
         build = (kotlin_project / "app" / "build.gradle.kts").read_text()
         assert 'id("org.jetbrains.kotlinx.kover")' in build
         assert "minBound(90)" in build
+
+
+class TestKotlinInitCIWorkflow:
+    """Assert the generated CI workflow matches the scaffold (#358)."""
+
+    def test_ci_workflow_parses_and_declares_kotlin_jobs(
+        self, kotlin_project: Path
+    ) -> None:
+        """ci.yml parses as YAML and carries the quality/test/wear jobs."""
+        content = (kotlin_project / ".github" / "workflows" / "ci.yml").read_text()
+        parsed = yaml.safe_load(content)
+        assert parsed["name"] == "Kotlin Quality Checks"
+        assert set(parsed["jobs"]) == {"quality", "test", "wear"}
+
+    def test_ci_workflow_never_invokes_the_missing_wrapper(
+        self, kotlin_project: Path
+    ) -> None:
+        """CI provisions Gradle itself: the scaffold ships no gradlew.
+
+        Run commands are parsed (comments may mention the wrapper when
+        documenting why the workflow avoids it).
+        """
+        content = (kotlin_project / ".github" / "workflows" / "ci.yml").read_text()
+        parsed = yaml.safe_load(content)
+        run_commands = [
+            step.get("run", "")
+            for job in parsed["jobs"].values()
+            for step in job["steps"]
+        ]
+        assert not any("gradlew" in cmd for cmd in run_commands)
+        assert "gradle/actions/setup-gradle" in content
 
 
 class TestKotlinInitManifests:

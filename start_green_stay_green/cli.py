@@ -1117,9 +1117,10 @@ def _generate_ci_step(
     only used to opt into the legacy AI-tuned path for backward
     compatibility. ``project_name`` is forwarded to the template
     renderer so any ``<<% project_name %>>`` placeholder lands with
-    the real value rather than the empty string. Languages CIGenerator
-    does not support yet (kotlin CI lands with #358) are skipped with an
-    informational message instead of aborting init.
+    the real value rather than the empty string. Languages without a
+    CIGenerator config are skipped with an informational message instead
+    of aborting init — with kotlin wired in (#358) every CLI language
+    has one, so this guard is defensive for future additions.
     """
     if language not in CI_LANGUAGE_CONFIGS:
         console.print(
