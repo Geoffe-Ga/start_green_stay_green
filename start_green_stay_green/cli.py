@@ -2313,10 +2313,46 @@ def _compute_target_source_hash(
     return hash_helper(project_name, language)
 
 
-def _enhance_claude_md(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
-    project_path: Path,
-    project_name: str,
-    language: str,
+@dataclass(frozen=True)
+class _EnhanceProjectContext:
+    """Project metadata threaded through the enhance dispatchers.
+
+    Bundles the three identifiers that every enhance helper needs to
+    know about the project under tune: where it lives, what it's
+    called, and what language preset to use. Grouping them keeps the
+    enhance pipeline helpers (:func:`_enhance_claude_md`,
+    :func:`_enhance_subagents`, :func:`_dispatch_enhance_targets`,
+    :func:`_run_enhance_pipeline`, :func:`_run_enhance_batch`, and
+    :func:`_submit_subagent_batch_cli`) below the ``PLR0913``
+    threshold without splitting concerns. See issues #316 and #326.
+    """
+
+    project_path: Path
+    project_name: str
+    language: str
+
+
+@dataclass(frozen=True)
+class _EnhanceRunOptions:
+    """Per-invocation behaviour flags for the enhance pipeline.
+
+    Bundles the three knobs that control *how* a ``green enhance`` run
+    writes (or doesn't write) its output: ``dry_run`` skips writes but
+    keeps the API calls, ``force`` bypasses the unchanged-source skip,
+    and ``file_writer`` carries the conflict-resolution policy.
+    Companion to :class:`_EnhanceProjectContext` (which carries *what*
+    is being tuned) so :func:`_dispatch_enhance_targets` and
+    :func:`_run_enhance_pipeline` stay below the ``PLR0913`` threshold.
+    See issue #326.
+    """
+
+    dry_run: bool
+    force: bool
+    file_writer: FileWriter | None
+
+
+def _enhance_claude_md(
+    project: _EnhanceProjectContext,
     orchestrator: AIOrchestrator,
     *,
     dry_run: bool,
@@ -2325,22 +2361,23 @@ def _enhance_claude_md(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
     """Re-tune the modular ``CLAUDE.md`` tree against the existing project.
 
     Mirrors :func:`_generate_claude_md_step`'s tuning path but writes
-    to the existing project rather than a fresh scaffold. Emits the index
-    ``CLAUDE.md`` plus the six ``.claude/docs/*.md`` split files. ``dry_run``
-    skips the writes but still runs the API call so the user sees the
-    full token-usage telemetry (and any errors) they'd see for real.
+    to the existing project (``project.project_path``) rather than a
+    fresh scaffold. Emits the index ``CLAUDE.md`` plus the six
+    ``.claude/docs/*.md`` split files. ``dry_run`` skips the writes but
+    still runs the API call so the user sees the full token-usage
+    telemetry (and any errors) they'd see for real.
     """
     with step_timer("enhance_claude_md"), console.status("Re-tuning CLAUDE.md..."):
         claude_md_generator = ClaudeMdGenerator(orchestrator)
         project_config: dict[str, Any] = {
-            "project_name": project_name,
-            "language": language,
+            "project_name": project.project_name,
+            "language": project.language,
             "scripts": list(_CLAUDE_MD_SCRIPTS),
             "skills": REQUIRED_SKILLS.copy(),
         }
         if dry_run:
             index_result, _docs = claude_md_generator.render_modular(project_config)
-            target = project_path / "CLAUDE.md"
+            target = project.project_path / "CLAUDE.md"
             console.print(
                 f"[dim]--dry-run: would rewrite {target} and "
                 f".claude/docs/ ({len(index_result.content):,} index chars).[/dim]"
@@ -2348,17 +2385,15 @@ def _enhance_claude_md(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
             return
         _write_modular_claude_md(
             claude_md_generator,
-            project_path,
+            project.project_path,
             project_config,
             file_writer,
         )
     console.print("[green]✓[/green] Re-tuned CLAUDE.md (modular .claude/docs)")
 
 
-def _enhance_subagents(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
-    project_path: Path,
-    project_name: str,
-    language: str,
+def _enhance_subagents(
+    project: _EnhanceProjectContext,
     orchestrator: AIOrchestrator,
     *,
     dry_run: bool,
@@ -2369,14 +2404,14 @@ def _enhance_subagents(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
     Same parallel-fan-out path as Pass 2 of init, but writes back to
     ``<project>/.claude/agents`` instead of generating it fresh.
     """
-    target_dir = project_path / ".claude" / "agents"
+    target_dir = project.project_path / ".claude" / "agents"
     target_dir.mkdir(parents=True, exist_ok=True)
 
     with step_timer("enhance_subagents"), console.status("Re-tuning subagents..."):
         subagents_generator = SubagentsGenerator(orchestrator)
         target_context = (
-            f"Project: {project_name}, "
-            f"Language: {language}, "
+            f"Project: {project.project_name}, "
+            f"Language: {project.language}, "
             f"Type: existing project being re-tuned via `green enhance`"
         )
         results = run_async(
@@ -2516,20 +2551,19 @@ def _assert_enhance_dispatch_intact() -> None:
 _assert_enhance_dispatch_intact()
 
 
-def _dispatch_enhance_targets(  # noqa: PLR0913 — orchestration glue
+def _dispatch_enhance_targets(
     targets: tuple[str, ...],
     *,
-    project_path: Path,
-    project_name: str,
-    language: str,
+    project: _EnhanceProjectContext,
     orchestrator: AIOrchestrator,
     state: EnhanceState,
-    target_hashes: dict[str, str],
-    dry_run: bool,
-    force: bool,
-    file_writer: FileWriter | None,
+    options: _EnhanceRunOptions,
 ) -> list[str]:
     """Drive Pass 2 across each selected target with the skip/force logic.
+
+    Each target's source hash is computed here (the hash helpers are
+    pure functions of the project name + language) and reused for both
+    the skip check and the ``mark_completed`` record.
 
     Returns the list of target names that were skipped because the
     source hash matched a stored completion. The caller uses that to
@@ -2538,8 +2572,12 @@ def _dispatch_enhance_targets(  # noqa: PLR0913 — orchestration glue
     skipped: list[str] = []
     for target in targets:
         spec = _ENHANCE_DISPATCH[target]
-        target_hash = target_hashes[target]
-        if not force and state.is_unchanged(target, target_hash):
+        target_hash = _compute_target_source_hash(
+            target,
+            project.project_name,
+            project.language,
+        )
+        if not options.force and state.is_unchanged(target, target_hash):
             console.print(spec.skip_message)
             skipped.append(target)
             continue
@@ -2547,14 +2585,12 @@ def _dispatch_enhance_targets(  # noqa: PLR0913 — orchestration glue
         # decorations are honoured.
         helper: Callable[..., None] = globals()[spec.helper_name]
         helper(
-            project_path,
-            project_name,
-            language,
+            project,
             orchestrator,
-            dry_run=dry_run,
-            file_writer=file_writer,
+            dry_run=options.dry_run,
+            file_writer=options.file_writer,
         )
-        if not dry_run:
+        if not options.dry_run:
             state.mark_completed(target, target_hash, orchestrator.model)
     return skipped
 
@@ -2589,48 +2625,38 @@ def _print_enhance_summary(*, project_name: str, dry_run: bool) -> None:
         console.print(f"\n[green]✓[/green] Enhancement complete: {project_name}")
 
 
-def _run_enhance_pipeline(  # noqa: PLR0913 — orchestration glue
+def _run_enhance_pipeline(
     *,
-    project_path: Path,
-    project_name: str,
-    language: str,
+    project: _EnhanceProjectContext,
     selected_targets: tuple[str, ...],
     orchestrator: AIOrchestrator,
-    file_writer: FileWriter | None,
-    dry_run: bool,
-    force: bool,
+    options: _EnhanceRunOptions,
 ) -> None:
     """Execute the full Pass 2 pipeline + persist state on success."""
     console.print(
-        f"[dim]Enhancing project: {project_name} ({language})"
+        f"[dim]Enhancing project: {project.project_name} ({project.language})"
         f"  →  targets: {', '.join(selected_targets)}"
-        f"{'  [DRY RUN]' if dry_run else ''}[/dim]"
+        f"{'  [DRY RUN]' if options.dry_run else ''}[/dim]"
     )
-    state = load_state(project_path)
-    target_hashes = {
-        target: _compute_target_source_hash(target, project_name, language)
-        for target in selected_targets
-    }
+    state = load_state(project.project_path)
     skipped = _dispatch_enhance_targets(
         selected_targets,
-        project_path=project_path,
-        project_name=project_name,
-        language=language,
+        project=project,
         orchestrator=orchestrator,
         state=state,
-        target_hashes=target_hashes,
-        dry_run=dry_run,
-        force=force,
-        file_writer=file_writer,
+        options=options,
     )
     _persist_enhance_state(
-        project_path,
+        project.project_path,
         state,
         skipped=skipped,
         selected_targets=selected_targets,
-        dry_run=dry_run,
+        dry_run=options.dry_run,
     )
-    _print_enhance_summary(project_name=project_name, dry_run=dry_run)
+    _print_enhance_summary(
+        project_name=project.project_name,
+        dry_run=options.dry_run,
+    )
 
 
 def _validate_enhance_path(project_path: Path) -> None:
@@ -2698,23 +2724,6 @@ def _validate_batch_targets(selected_targets: tuple[str, ...]) -> None:
     )
     console.print(msg)
     raise typer.Exit(code=1)
-
-
-@dataclass(frozen=True)
-class _EnhanceProjectContext:
-    """Project metadata threaded through the enhance dispatchers.
-
-    Bundles the three identifiers that every enhance helper needs to
-    know about the project under tune: where it lives, what it's
-    called, and what language preset to use. Grouping them drops
-    :func:`_run_enhance_batch` and :func:`_submit_subagent_batch_cli`
-    below the ``PLR0913`` threshold without splitting concerns. See
-    issue #316.
-    """
-
-    project_path: Path
-    project_name: str
-    language: str
 
 
 def _run_enhance_batch(
@@ -3111,13 +3120,15 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         console=console,
     )
 
+    project = _EnhanceProjectContext(
+        project_path=project_path,
+        project_name=resolved_name,
+        language=resolved_language,
+    )
+
     if batch:
         _run_enhance_batch(
-            project=_EnhanceProjectContext(
-                project_path=project_path,
-                project_name=resolved_name,
-                language=resolved_language,
-            ),
+            project=project,
             orchestrator=orchestrator,
             file_writer=file_writer,
             dry_run=dry_run,
@@ -3126,14 +3137,14 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         return
 
     _run_enhance_pipeline(
-        project_path=project_path,
-        project_name=resolved_name,
-        language=resolved_language,
+        project=project,
         selected_targets=selected_targets,
         orchestrator=orchestrator,
-        file_writer=file_writer,
-        dry_run=dry_run,
-        force=force,
+        options=_EnhanceRunOptions(
+            dry_run=dry_run,
+            force=force,
+            file_writer=file_writer,
+        ),
     )
 
 

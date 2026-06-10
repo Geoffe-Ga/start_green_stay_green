@@ -1381,9 +1381,11 @@ class TestGenerateSteps:
         # the test needs no live API; the modular tree is still emitted.
         with patch("start_green_stay_green.cli.console"):
             cli._enhance_claude_md(
-                tmp_path,
-                "enhanced-project",
-                "python",
+                cli._EnhanceProjectContext(
+                    project_path=tmp_path,
+                    project_name="enhanced-project",
+                    language="python",
+                ),
                 cast("AIOrchestrator", None),
                 dry_run=False,
                 file_writer=None,
@@ -1396,9 +1398,11 @@ class TestGenerateSteps:
         """_enhance_claude_md dry-run renders but writes nothing."""
         with patch("start_green_stay_green.cli.console"):
             cli._enhance_claude_md(
-                tmp_path,
-                "dryrun-project",
-                "python",
+                cli._EnhanceProjectContext(
+                    project_path=tmp_path,
+                    project_name="dryrun-project",
+                    language="python",
+                ),
                 cast("AIOrchestrator", None),
                 dry_run=True,
                 file_writer=None,
@@ -2207,9 +2211,9 @@ class TestEnhanceCommand:
         # The helper was called with the *explicit* values, not the
         # auto-detected ones.
         call = mock_claude.call_args
-        # positional args: (project_path, project_name, language, orchestrator)
-        assert call.args[1] == "explicit-name"
-        assert call.args[2] == "typescript"
+        # positional args: (project: _EnhanceProjectContext, orchestrator)
+        assert call.args[0].project_name == "explicit-name"
+        assert call.args[0].language == "typescript"
 
     @patch("start_green_stay_green.cli._initialize_orchestrator")
     def test_unknown_language_in_override_exits(
