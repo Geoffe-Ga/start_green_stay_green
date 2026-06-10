@@ -9,7 +9,7 @@ from start_green_stay_green.cli import _venv_activation_command
 
 # Languages exercised by the per-language common-tail tests; "java" covers
 # the unknown-language default path.
-ALL_LANGUAGES = ("python", "typescript", "go", "rust", "swift", "java")
+ALL_LANGUAGES = ("python", "typescript", "go", "rust", "swift", "kotlin", "java")
 
 
 class TestVenvActivationCommand:
