@@ -3976,13 +3976,15 @@ echo "=== Formatting (clang-format) ==="
 # Fixing is the default; an explicit --fix overrides --check.
 if $CHECK && ! $FIX; then
     find src inc tests -type f \\
-        \\( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \\) \\
+        \\( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \\
+           -o -name '*.h' -o -name '*.hh' -o -name '*.hpp' \\) \\
         -exec clang-format --dry-run --Werror {} + || \\
         { echo "✗ Format check failed" >&2; exit 1; }
     echo "✓ Code formatting check passed"
 else
     find src inc tests -type f \\
-        \\( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \\) \\
+        \\( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \\
+           -o -name '*.h' -o -name '*.hh' -o -name '*.hpp' \\) \\
         -exec clang-format -i {} + || \\
         { echo "✗ Formatting failed" >&2; exit 1; }
     echo "✓ Code formatted successfully"
@@ -4074,7 +4076,7 @@ if [ ! -f build/compile_commands.json ]; then
     echo "✗ build/compile_commands.json not found - clang-tidy needs it" >&2
     echo "  Configure the build first (CMAKE_EXPORT_COMPILE_COMMANDS is ON):" >&2
     echo "    conan install . --output-folder=build --build=missing" >&2
-    echo "    cmake -B build -S . \\" >&2
+    echo "    cmake -B build -S . \\\\" >&2
     echo "        -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake" >&2
     exit 1
 fi
@@ -4180,8 +4182,8 @@ fi
 if [ ! -f build/CMakeCache.txt ]; then
     echo "✗ build/ is not configured - run the setup steps first:" >&2
     echo "    conan install . --output-folder=build --build=missing" >&2
-    echo "    cmake -B build -S . \\" >&2
-    echo "        -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake \\" >&2
+    echo "    cmake -B build -S . \\\\" >&2
+    echo "        -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake \\\\" >&2
     echo "        -DCMAKE_BUILD_TYPE=Release" >&2
     exit 1
 fi

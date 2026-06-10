@@ -1,6 +1,8 @@
 """Unit tests for Scripts Generator."""
 
 from pathlib import Path
+import shutil
+import subprocess
 import tempfile
 
 import pytest
@@ -969,6 +971,43 @@ class TestScriptsGeneratorCppGeneration:
             assert "clang-format -i" in content
             assert "clang-format --dry-run --Werror" in content
             assert ".clang-format" in content
+
+    def test_cpp_format_script_covers_all_cpp_extensions(self) -> None:
+        """format.sh finds every extension the pre-commit hook covers.
+
+        The clang-format hook uses types_or c/c++ (covering .c/.cc/.cxx/
+        .hh automatically); the standalone script's find must not
+        silently skip those files.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            for ext in ("*.c", "*.cc", "*.cpp", "*.cxx", "*.h", "*.hh", "*.hpp"):
+                assert f"-name '{ext}'" in content, ext
+
+    def test_cpp_shell_scripts_pass_bash_syntax_check(self) -> None:
+        """Every generated cpp shell script parses under bash -n.
+
+        Completes the parse-validation pattern: the templates embed
+        run_check() with array expansions, so a literal syntax check
+        guards against template-escaping regressions.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            for name, path in scripts.items():
+                if not name.endswith(".sh"):
+                    continue
+                bash = shutil.which("bash")
+                assert bash is not None, "bash not found on PATH"
+                result = subprocess.run(  # noqa: S603  # Issue #362: bash -n on generated content, no untrusted input
+                    [bash, "-n", str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, f"{name}: {result.stderr}"
 
     def test_cpp_lint_script_runs_full_static_analysis(self) -> None:
         """lint.sh runs clang-tidy, cppcheck, and the lizard CCN gate."""
