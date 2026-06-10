@@ -3,10 +3,10 @@
 Tests the complete sgsg init flow for supported languages, verifying
 that the CLI produces valid project structures end-to-end.
 
-Note: swift, java, csharp, and ruby are supported at the generator level but
+Note: java, csharp, and ruby are supported at the generator level but
 the full CLI pipeline (PreCommitGenerator) only supports python, typescript,
-go, and rust currently. Those 4 languages are tested at the unit/integration
-level via test_language_generators.py.
+go, rust, and swift currently. The generator-level languages are tested at
+the unit/integration level via test_language_generators.py.
 
 All tests use an environment with API keys stripped and a null keyring
 backend to prevent real Anthropic API calls. See Issue #196.
@@ -23,7 +23,7 @@ import pytest
 from tests.conftest import get_env_without_api_keys
 
 # Languages fully supported in the CLI pipeline (all generators)
-CLI_SUPPORTED_LANGUAGES = ("python", "typescript", "go", "rust")
+CLI_SUPPORTED_LANGUAGES = ("python", "typescript", "go", "rust", "swift")
 
 # Expected key files per language that sgsg init should create
 EXPECTED_KEY_FILES: dict[str, list[str]] = {
@@ -54,6 +54,14 @@ EXPECTED_KEY_FILES: dict[str, list[str]] = {
         "src/main.rs",
         "Cargo.toml",
         "tests/integration_test.rs",
+        "README.md",
+    ],
+    "swift": [
+        "Sources/test_project/TestProjectApp.swift",
+        "Sources/test_project/ContentView.swift",
+        "Package.swift",
+        "Tests/test_projectTests/test_projectTests.swift",
+        ".swiftlint.yml",
         "README.md",
     ],
 }

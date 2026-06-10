@@ -92,7 +92,7 @@ class TestPreCommitGeneratorIntegration:
     def test_multiple_languages_workflow(self, mock_orchestrator: Mock) -> None:
         """Test generating configs for multiple languages."""
         generator = PreCommitGenerator(mock_orchestrator)
-        languages = ["python", "typescript", "go", "rust"]
+        languages = ["python", "typescript", "go", "rust", "swift"]
 
         for language in languages:
             config = GenerationConfig(
