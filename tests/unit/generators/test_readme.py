@@ -497,38 +497,36 @@ class TestKotlinReadme:
             assert "not generated" in content.lower()
 
     def test_kotlin_readme_only_checkmarks_generated_features(self) -> None:
-        """Kotlin README must not ✅ features the scaffold does not generate.
+        """Kotlin README ✅-marks the full generated pipeline.
 
         After #357 the quality toolchain (ktlint, detekt, pre-commit
-        hooks, quality scripts) IS generated and may carry a checkmark;
-        the CI/CD pipeline (#358) remains deferred and must not.
+        hooks, quality scripts) IS generated, and after #358 the CI
+        pipeline is too — every one of them must carry a checkmark.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             content = self._readme_content(tmpdir)
 
-            # Features that ARE generated may carry a checkmark.
             assert "- ✅" in content
-            wired = ("ktlint", "detekt", "Pre-commit hooks")
+            wired = ("ktlint", "detekt", "Pre-commit hooks", "CI/CD pipeline")
             for feature in wired:
                 assert any(
                     "✅" in line and feature in line for line in content.splitlines()
                 ), f"README must advertise wired feature: {feature}"
 
-            # Unwired features must never be claimed with a ✅ checkmark.
-            unwired = ("CI/CD pipeline",)
-            for feature in unwired:
-                for line in content.splitlines():
-                    if feature in line:
-                        assert (
-                            "✅" not in line
-                        ), f"Unwired feature {feature!r} marked with ✅"
+    def test_kotlin_readme_advertises_generated_ci_pipeline(self) -> None:
+        """The CI pipeline (#358) is generated — no 'Planned' disclosure left.
 
-    def test_kotlin_readme_lists_unwired_features_as_planned(self) -> None:
-        """Deferred Kotlin tooling is disclosed under a 'Planned' section."""
+        Inverted from the #356/#357 scaffolds, which truthfully deferred
+        CI under a 'Planned / coming soon' section. #358 generates
+        .github/workflows/ci.yml, so the README must document it as real
+        (ubuntu runners, JDK 17/21 matrix) and drop the planned section.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             content = self._readme_content(tmpdir)
-            assert "Planned / coming soon" in content
-            assert "CI/CD pipeline" in content
+            assert "Planned / coming soon" not in content
+            assert ".github/workflows/ci.yml" in content
+            assert "JDK 17 and 21" in content
+            assert "ubuntu" in content
 
     def test_kotlin_readme_instructs_pre_commit_install(self) -> None:
         """README tells users to install the now-generated pre-commit hooks.

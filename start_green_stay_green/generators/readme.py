@@ -64,8 +64,7 @@ class ReadmeGenerator(BaseGenerator):
     ruby, swift, kotlin) are available at the generator level. Note that the
     full CLI pipeline (``sgsg init``) skips its quality-tooling steps
     (pre-commit, scripts, CI, architecture, metrics) for java, csharp, and
-    ruby; Kotlin's quality tooling landed with #357 and only its CI step
-    (#358) still skips.
+    ruby; Kotlin runs the full pipeline (quality tooling #357, CI #358).
 
     Attributes:
         output_dir: Directory where README.md will be created
@@ -1394,12 +1393,13 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
     def _kotlin_readme_content(self) -> str:
         """Generate Kotlin README.md content.
 
-        Mirrors the truthful present/planned split the Swift README uses:
-        only artifacts the scaffold actually generates carry a checkmark.
-        The #357 quality toolchain (ktlint/detekt, pre-commit hooks,
+        Only artifacts the scaffold actually generates carry a checkmark.
+        With the #357 quality toolchain (ktlint/detekt, pre-commit hooks,
         quality scripts, Kover coverage gate, Konsist architecture test)
-        is generated and advertised; the CI pipeline (#358) remains
-        disclosed as planned.
+        and the #358 CI pipeline both generated, every roadmap item is
+        real and the 'Planned / coming soon' section is gone (#360). The
+        Gradle wrapper remains a documented install step — binary
+        artifacts are never scaffolded.
 
         Returns:
             Content for README.md
@@ -1431,15 +1431,10 @@ Wear OS 3) project. The following are generated today:
 - ✅ Quality scripts (./scripts/check-all.sh with a 90%+ Kover coverage gate)
 - ✅ Security scanning (OWASP dependency-check via ./scripts/security.sh)
 - ✅ Architecture enforcement (Konsist test, plans/architecture/)
+- ✅ CI/CD pipeline (.github/workflows/ci.yml — ubuntu runners, quality
+  job with the Kover coverage gate, JDK 17 and 21 test matrix, Wear OS
+  APK build)
 - ✅ This README
-
-### Planned / coming soon
-
-These quality features are part of the Start Green Stay Green roadmap for
-Kotlin but are **not yet generated** by this scaffold — do not assume they
-are configured:
-
-- CI/CD pipeline (GitHub Actions)
 
 ## Installation
 
@@ -1491,8 +1486,10 @@ Hello from {self.config.project_name}!
 ./scripts/check-all.sh
 ```
 
-> **Note:** A CI pipeline (GitHub Actions) is on the roadmap but not yet
-> configured by this scaffold. See *Planned / coming soon* above.
+> **Note:** CI runs these same gates on every push and pull request via
+> the generated GitHub Actions pipeline (see *Quality Tools* below). CI
+> provisions its own pinned Gradle, so it stays green even before you
+> commit a wrapper.
 
 ### Quality Tools
 
@@ -1506,6 +1503,9 @@ This scaffold currently includes:
 - **OWASP dependency-check**: Dependency CVE scan (./scripts/security.sh)
 - **Pre-commit hooks**: ktlint, detekt, gitleaks, detect-secrets
 - **Architecture rules**: Konsist test (plans/architecture/)
+- **CI pipeline**: GitHub Actions (.github/workflows/ci.yml) on ubuntu
+  runners — quality job (ktlint, detekt, gitleaks, Kover gate), unit
+  tests on JDK 17 and 21, Wear OS debug-APK build
 
 ### Project Structure
 
@@ -1547,9 +1547,8 @@ This scaffold is a MAXIMUM QUALITY Kotlin project. Today it provides:
 - **Complexity gate**: detekt errors on cyclomatic complexity >10
 - **Formatting & static analysis**: ktlint and detekt, locally and in
   pre-commit
-
-A CI pipeline is planned (see *Planned / coming soon* above) and is not
-yet wired into this scaffold.
+- **CI enforcement**: every gate above also runs in GitHub Actions on
+  every push and pull request
 
 ## License
 

@@ -26,6 +26,18 @@ Phase 6 follow-ups in progress (issues #316–#319).
   tooling (#352), CI pipeline (#353), tests (#354), documentation
   (#355). A real generated example lives in `examples/swift/`.
 
+- **Kotlin (Wear OS) language support** — `green init --language kotlin`
+  generates a Gradle (Kotlin DSL) Wear OS app scaffold (Galaxy Watch 4+ /
+  Wear OS 3, Jetpack Compose for Wear OS, Kotlin 2.0 on JDK 17/21) with
+  the full quality stack: ktlint + detekt pre-commit hooks and scripts
+  (complexity ≤10), JUnit tests with a ≥90% Kover coverage gate,
+  gitleaks/detect-secrets secret scanning, OWASP dependency-check CVE
+  scanning, Konsist architecture enforcement, and an ubuntu-runner CI
+  pipeline with a JDK 17/21 test matrix plus a Wear OS debug-APK build.
+  Foundation (#356), quality tooling (#357), CI pipeline (#358), tests
+  (#359), documentation (#360). A real generated example lives in
+  `examples/kotlin/`.
+
 ## [1.0.0] — 2026-05-10
 
 First tagged release. Bundles the entire claude-init optimization

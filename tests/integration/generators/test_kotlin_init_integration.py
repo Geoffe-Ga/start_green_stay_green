@@ -299,8 +299,16 @@ class TestKotlinInitReadme:
         assert "Wear OS" in readme
         assert "Jetpack Compose" in readme
 
-    def test_readme_discloses_planned_tooling(self, kotlin_project: Path) -> None:
-        """README lists the deferred CI pipeline (#358) as planned."""
+    def test_readme_advertises_generated_ci_pipeline(
+        self, kotlin_project: Path
+    ) -> None:
+        """README documents the now-generated CI pipeline (#358) as real.
+
+        The ci.yml the README advertises must actually exist next to it
+        — the truthfulness contract that previously kept CI under a
+        'Planned / coming soon' section.
+        """
         readme = (kotlin_project / "README.md").read_text()
-        assert "Planned / coming soon" in readme
-        assert "CI/CD pipeline" in readme
+        assert "Planned / coming soon" not in readme
+        assert ".github/workflows/ci.yml" in readme
+        assert (kotlin_project / ".github" / "workflows" / "ci.yml").is_file()

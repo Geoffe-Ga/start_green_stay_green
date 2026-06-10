@@ -39,8 +39,8 @@ The core insight: Claude Code can produce excellent code **if given strict guard
 ### Supported Target Languages
 
 The tool generates quality infrastructure for projects in any of the following languages.
-**Implemented today**: Python, TypeScript, Go, Rust, and Swift (watchOS).
-The remaining rows are planned.
+**Implemented today**: Python, TypeScript, Go, Rust, Swift (watchOS), and
+Kotlin (Wear OS). The remaining rows are planned.
 
 | Language | Package Manager | Test Framework | Linter | Formatter |
 |----------|----------------|----------------|--------|-----------|
@@ -49,11 +49,11 @@ The remaining rows are planned.
 | Go | go modules | go test | golangci-lint | gofmt/goimports |
 | Rust | cargo | cargo test | clippy | rustfmt |
 | Swift | Swift Package Manager (SPM), Swift 5.9/5.10/6.0 | XCTest (`swift test` + llvm-cov coverage) | SwiftLint | swift-format |
+| Kotlin | Gradle (Kotlin DSL), Kotlin 2.0 on JDK 17/21 | JUnit (`./gradlew test` + Kover ≥90% coverage) | detekt + ktlint | ktlint |
 | Java | maven/gradle | junit | checkstyle | google-java-format |
 | C# | nuget/dotnet | xunit/nunit | roslyn | dotnet format |
 | Ruby | bundler | rspec | rubocop | rubocop |
 | PHP | composer | phpunit | phpstan | php-cs-fixer |
-| Kotlin | gradle/maven | junit | ktlint | ktlint |
 
 ---
 

@@ -17,7 +17,7 @@ Start Green Stay Green is a meta-tool that scaffolds new software projects with 
 
 - **Enterprise-Grade Quality**: 90%+ code coverage, mutation testing, comprehensive linting
 - **AI Integration**: Pre-configured AI subagent profiles and code review workflows
-- **Multi-Language Support**: Python, TypeScript, Go, Rust, and Swift (watchOS)
+- **Multi-Language Support**: Python, TypeScript, Go, Rust, Swift (watchOS), and Kotlin (Wear OS)
 - **Architecture Enforcement**: import-linter (Python), dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust), SwiftLint custom rules (Swift), and Konsist (Kotlin)
 - **Complete CI/CD**: GitHub Actions workflows with quality gates
 - **Additive Init**: Safe to re-run in existing directories — preserves your files
@@ -524,6 +524,34 @@ See [examples/swift/](examples/swift/) for real generated output and the
 [CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
 the full Swift toolchain table.
 
+### Example 6: Kotlin (Wear OS) Project
+
+```bash
+# Prerequisites: JDK 17+ and a local Gradle install (the Gradle wrapper
+# is NOT generated — binary artifacts are never scaffolded), plus the
+# quality toolchain for the generated pre-commit hooks:
+brew install gradle ktlint detekt   # or your platform's SDK manager
+
+start-green-stay-green init \
+  --project-name wrist-counter \
+  --language kotlin \
+  --no-interactive
+
+cd wrist-counter
+gradle wrapper        # materialize gradlew once, locally
+./gradlew build
+pre-commit install
+./scripts/check-all.sh  # ktlint, detekt, ./gradlew test + ≥90% Kover coverage
+```
+
+The generated CI pipeline runs on ubuntu runners with a JDK 17/21 test
+matrix, a quality job enforcing the Kover ≥90% coverage gate, and a
+Wear OS debug-APK build (CI provisions its own pinned Gradle, so it is
+green before you commit a wrapper). See [examples/kotlin/](examples/kotlin/)
+for real generated output and the
+[CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
+the full Kotlin toolchain table.
+
 ## Project Structure
 
 After running `start-green-stay-green init`, your project will have:
@@ -694,6 +722,7 @@ All contributions must:
 - ✅ YAML-aware pre-commit config merging (#253)
 - ✅ Multi-language `--language` support (#254)
 - ✅ Swift (watchOS) language support — scaffold, quality tooling, CI, tests (#351, #352, #353, #354)
+- ✅ Kotlin (Wear OS) language support — scaffold, quality tooling, CI, tests (#356, #357, #358, #359)
 
 ### Planned
 
