@@ -62,6 +62,8 @@ from start_green_stay_green.generators.github_actions import (
 )
 from start_green_stay_green.generators.metrics import MetricsGenerationConfig
 from start_green_stay_green.generators.metrics import MetricsGenerator
+from start_green_stay_green.generators.metrics import ci_status
+from start_green_stay_green.generators.metrics import count_ci_jobs
 from start_green_stay_green.generators.metrics import precommit_status
 from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import PreCommitGenerator
@@ -1286,6 +1288,7 @@ def _generate_metrics_dashboard_step(
         precommit_hooks_total = MetricsGenerator.count_precommit_hooks(
             project_path / ".pre-commit-config.yaml"
         )
+        ci_jobs_total = count_ci_jobs(project_path / ".github" / "workflows")
         config = MetricsGenerationConfig(
             language=language,
             project_name=project_name,
@@ -1295,6 +1298,7 @@ def _generate_metrics_dashboard_step(
             complexity_threshold=10,
             doc_coverage_threshold=95,
             precommit_hooks_total=precommit_hooks_total,
+            ci_jobs_total=ci_jobs_total,
             enable_dashboard=True,
             enable_badges=True,
         )
@@ -1319,6 +1323,7 @@ def _generate_metrics_dashboard_step(
             },
             "metrics": {
                 "precommit_status": precommit_status(precommit_hooks_total),
+                "ci_status": ci_status(ci_jobs_total),
                 "coverage": 0.0,
                 "coverage_status": "fail",
                 "branch_coverage": 0.0,

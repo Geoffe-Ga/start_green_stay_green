@@ -16,7 +16,10 @@ from __future__ import annotations
 import argparse
 from datetime import UTC
 from datetime import datetime
+from http import HTTPStatus
+import http.client
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -25,11 +28,146 @@ import sys
 from typing import Any
 from typing import TYPE_CHECKING
 
+from start_green_stay_green.generators.metrics import ci_status
+from start_green_stay_green.generators.metrics import count_ci_jobs
 from start_green_stay_green.generators.metrics import count_precommit_hooks
 from start_green_stay_green.generators.metrics import precommit_status
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+# GitHub REST API endpoint used by the hybrid CI Status collection
+# (Issue #159). HTTPS is enforced by construction via HTTPSConnection.
+GITHUB_API_HOST = "api.github.com"
+GITHUB_API_TIMEOUT_SECONDS = 10
+
+# ``owner/repo`` slug as provided by the GITHUB_REPOSITORY env var.
+GITHUB_REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def _github_api_json(path: str, token: str) -> object | None:
+    """Fetch a JSON payload from the GitHub REST API over HTTPS.
+
+    Args:
+        path: Request path (e.g., ``/repos/owner/repo/actions/runs``).
+        token: GitHub token used as a Bearer credential.
+
+    Returns:
+        The decoded JSON payload, or ``None`` on any network, HTTP, or
+        decoding failure (callers fall back to static counting).
+    """
+    connection = http.client.HTTPSConnection(
+        GITHUB_API_HOST, timeout=GITHUB_API_TIMEOUT_SECONDS
+    )
+    try:
+        connection.request(
+            "GET",
+            path,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "start-green-stay-green-metrics",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        response = connection.getresponse()
+        if response.status != HTTPStatus.OK:
+            return None
+        payload: object = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError, http.client.HTTPException):
+        return None
+    else:
+        return payload
+    finally:
+        connection.close()
+
+
+def _latest_main_run(runs_payload: object) -> dict[str, Any] | None:
+    """Extract the latest workflow run from a runs API payload.
+
+    Args:
+        runs_payload: Decoded JSON from the workflow-runs endpoint.
+
+    Returns:
+        The first (most recent) run mapping with an ``id``, or ``None``
+        when the payload is malformed or contains no runs.
+    """
+    if not isinstance(runs_payload, dict):
+        return None
+    runs = runs_payload.get("workflow_runs")
+    if not isinstance(runs, list) or not runs:
+        return None
+    run = runs[0]
+    if isinstance(run, dict) and "id" in run:
+        return run
+    return None
+
+
+def _job_conclusion_counts(jobs_payload: object) -> tuple[int, int] | None:
+    """Count total and successful jobs from a jobs API payload.
+
+    Args:
+        jobs_payload: Decoded JSON from the run-jobs endpoint.
+
+    Returns:
+        A ``(total_jobs, passing_jobs)`` tuple, or ``None`` when the
+        payload is malformed.
+    """
+    if not isinstance(jobs_payload, dict):
+        return None
+    jobs = jobs_payload.get("jobs")
+    if not isinstance(jobs, list):
+        return None
+    passing = sum(
+        1
+        for job in jobs
+        if isinstance(job, dict) and job.get("conclusion") == "success"
+    )
+    return (len(jobs), passing)
+
+
+def _fetch_ci_status_from_api(repo: str, token: str) -> dict[str, object] | None:
+    """Fetch CI job pass/fail counts for the latest main run via GitHub API.
+
+    Queries the most recent completed workflow run on ``main`` and counts
+    job conclusions (``success`` counts as passing). Any failure — invalid
+    repo slug, network error, non-200 response, malformed payload, or no
+    completed runs — returns ``None`` so the caller falls back to static
+    workflow counting. Never raises.
+
+    Args:
+        repo: ``owner/repo`` slug (from the GITHUB_REPOSITORY env var).
+        token: GitHub token (from the GITHUB_TOKEN env var).
+
+    Returns:
+        A ``ci_status`` mapping built by the canonical helper (including
+        ``run_url``), or ``None`` when the API path is unavailable.
+    """
+    if not GITHUB_REPOSITORY_PATTERN.match(repo):
+        return None
+
+    runs_payload = _github_api_json(
+        f"/repos/{repo}/actions/runs?branch=main&status=completed&per_page=1",
+        token,
+    )
+    run = _latest_main_run(runs_payload)
+    if run is None:
+        return None
+
+    jobs_payload = _github_api_json(
+        f"/repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100", token
+    )
+    counts = _job_conclusion_counts(jobs_payload)
+    if counts is None:
+        return None
+
+    total_jobs, passing_jobs = counts
+    run_url = run.get("html_url")
+    return ci_status(
+        total_jobs,
+        passing_jobs,
+        run_url=run_url if isinstance(run_url, str) else None,
+    )
 
 
 class MetricsCollector:
@@ -194,6 +332,31 @@ class MetricsCollector:
         """
         total = count_precommit_hooks(config_path)
         self.metrics["precommit_status"] = precommit_status(total)
+
+    def collect_ci_status(self, workflows_dir: Path) -> None:
+        """Collect CI job status using the hybrid API/static strategy (#159).
+
+        When ``GITHUB_TOKEN`` and ``GITHUB_REPOSITORY`` are available
+        (GitHub Actions), the latest completed workflow run on ``main`` is
+        queried via the GitHub API and job conclusions are counted
+        (``success`` counts as passing), including the run URL. On any API
+        failure — or outside CI — this degrades to statically counting jobs
+        across ``.github/workflows/*.yml`` with ``unknown`` status (pass or
+        fail cannot be known statically). Never raises.
+
+        Args:
+            workflows_dir: Path to the ``.github/workflows`` directory used
+                for the static fallback count.
+        """
+        token = os.environ.get("GITHUB_TOKEN")
+        repo = os.environ.get("GITHUB_REPOSITORY")
+
+        status: dict[str, object] | None = None
+        if token and repo:
+            status = _fetch_ci_status_from_api(repo, token)
+        if status is None:
+            status = ci_status(count_ci_jobs(workflows_dir))
+        self.metrics["ci_status"] = status
 
     def add_mutation_score(self, score: float) -> None:
         """Add mutation testing score.
@@ -504,6 +667,9 @@ def _collect_script_mode(
     # Pre-Commit Status (Issue #154): derived from .pre-commit-config.yaml
     collector.collect_precommit_status(Path(".pre-commit-config.yaml"))
 
+    # CI Status (Issue #159): GitHub API when available, static otherwise
+    collector.collect_ci_status(Path(".github/workflows"))
+
 
 def _collect_file_mode(
     collector: MetricsCollector,
@@ -543,6 +709,9 @@ def _collect_file_mode(
 
     # Pre-Commit Status (Issue #154): derived from .pre-commit-config.yaml
     collector.collect_precommit_status(Path(".pre-commit-config.yaml"))
+
+    # CI Status (Issue #159): GitHub API when available, static otherwise
+    collector.collect_ci_status(Path(".github/workflows"))
 
     _collect_mutation(collector, args)
 

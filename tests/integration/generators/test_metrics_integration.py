@@ -621,6 +621,25 @@ class TestDashboardSync:
                 "Run: python scripts/regenerate_dashboard.py"
             )
 
+    def test_deployed_has_ci_status_card(self) -> None:
+        """Verify docs/dashboard.html includes the CI Status card (Issue #159).
+
+        The deployed dashboard must carry the CI Status card's DOM ids and
+        the JS handler for the ``ci_status`` metrics.json key so the live
+        GitHub Pages dashboard renders CI job health.
+        """
+        deployed = self._get_deployed()
+
+        for expected in ('id="ci-value"', 'id="ci-threshold"', 'id="ci-status"'):
+            assert expected in deployed, (
+                f"docs/dashboard.html missing {expected}. "
+                "Run: python scripts/regenerate_dashboard.py"
+            )
+        assert "metrics.ci_status" in deployed, (
+            "docs/dashboard.html JS missing handler for metrics.ci_status. "
+            "Run: python scripts/regenerate_dashboard.py"
+        )
+
     def test_deployed_no_data_cards_render_gray_not_red(self) -> None:
         """Fresh dashboards must show the eight existing cards' no-data state gray.
 

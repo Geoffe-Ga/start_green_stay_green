@@ -18,6 +18,7 @@ import sys
 
 from start_green_stay_green.generators.metrics import MetricsGenerationConfig
 from start_green_stay_green.generators.metrics import MetricsGenerator
+from start_green_stay_green.generators.metrics import count_ci_jobs
 
 
 def main() -> int:
@@ -39,10 +40,12 @@ def main() -> int:
     precommit_hooks_total = MetricsGenerator.count_precommit_hooks(
         Path(".pre-commit-config.yaml")
     )
+    ci_jobs_total = count_ci_jobs(Path(".github/workflows"))
     config = MetricsGenerationConfig(
         language="python",
         project_name=args.project_name,
         precommit_hooks_total=precommit_hooks_total,
+        ci_jobs_total=ci_jobs_total,
     )
     generator = MetricsGenerator(None, config)
     result = generator.write_dashboard(args.output_dir)

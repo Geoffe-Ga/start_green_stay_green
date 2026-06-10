@@ -148,6 +148,118 @@ def precommit_status(
     }
 
 
+def _workflow_job_count(workflow_path: Path) -> int:
+    """Return the number of jobs declared in a single workflow file.
+
+    Args:
+        workflow_path: Path to a GitHub Actions workflow YAML file.
+
+    Returns:
+        Number of entries in the workflow's ``jobs`` mapping, or ``0``
+        when the file is unreadable, malformed, or has no ``jobs`` mapping.
+    """
+    try:
+        data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return 0
+
+    jobs = data.get("jobs") if isinstance(data, dict) else None
+    return len(jobs) if isinstance(jobs, dict) else 0
+
+
+def count_ci_jobs(workflows_dir: Path) -> int:
+    """Count GitHub Actions jobs across all workflow files in a directory.
+
+    Canonical, public job-counting helper (Issue #159). Sums the ``jobs``
+    entries across every ``*.yml``/``*.yaml`` file in
+    ``.github/workflows/``. A missing directory, malformed YAML, or a
+    workflow without a ``jobs`` mapping degrades gracefully to ``0`` so
+    callers (the dashboard generator, ``start_green_stay_green.cli`` and
+    ``scripts/collect_metrics.py``) can still render a meaningful CI Status
+    card without duplicating this logic.
+
+    Args:
+        workflows_dir: Path to a ``.github/workflows`` directory.
+
+    Returns:
+        Total job count, or ``0`` when the directory is absent or contains
+        no parseable workflow jobs.
+    """
+    if not workflows_dir.is_dir():
+        return 0
+
+    workflow_files = sorted(
+        [*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")]
+    )
+    return sum(_workflow_job_count(path) for path in workflow_files)
+
+
+def _ci_status_label(total_jobs: int, passing_jobs: int | None) -> str:
+    """Derive the CI status label from job counts.
+
+    Args:
+        total_jobs: Total CI jobs counted.
+        passing_jobs: Successful jobs, or ``None`` when pass/fail data is
+            unavailable (static workflow counting).
+
+    Returns:
+        ``"unknown"`` when there is no pass/fail data or no jobs,
+        ``"passing"`` when every job succeeded, ``"failing"`` otherwise.
+    """
+    if passing_jobs is None or total_jobs <= 0:
+        return "unknown"
+    return "passing" if passing_jobs >= total_jobs else "failing"
+
+
+def ci_status(
+    total_jobs: int,
+    passing_jobs: int | None = None,
+    *,
+    run_url: str | None = None,
+) -> dict[str, object]:
+    """Build the canonical CI Status dict for the metrics dashboard.
+
+    Single source of truth (Issue #159) for the ``ci_status`` mapping
+    consumed by the dashboard's CI Status card. Both
+    ``start_green_stay_green.cli`` and ``scripts/collect_metrics.py``
+    delegate here instead of rebuilding the
+    ``total_jobs``/``passing_jobs``/``percentage``/``status`` fields.
+
+    When ``passing_jobs`` is ``None`` (jobs were counted statically from
+    workflow files, so pass/fail data is unavailable) or ``total_jobs`` is
+    ``0`` (no workflows found, or the GitHub API was unreachable), the
+    status is ``"unknown"`` so the dashboard renders the gray "N/A" no-data
+    treatment instead of a red FAILING card. Otherwise the status is
+    ``"passing"`` when every job succeeded and ``"failing"`` when any job
+    did not.
+
+    Args:
+        total_jobs: Total CI jobs counted (statically or from the API).
+        passing_jobs: Jobs whose conclusion was ``success``, or ``None``
+            when pass/fail data is unavailable (static counting).
+        run_url: HTML URL of the workflow run the counts came from, when
+            the GitHub API supplied one. Omitted from the result if
+            ``None``.
+
+    Returns:
+        A ``ci_status`` mapping with ``total_jobs``, ``passing_jobs``,
+        ``percentage`` and ``status`` keys, plus ``run_url`` when provided.
+    """
+    status = _ci_status_label(total_jobs, passing_jobs)
+    resolved_passing = passing_jobs if passing_jobs is not None else 0
+    percentage = (resolved_passing / total_jobs * 100) if total_jobs > 0 else 0.0
+
+    result: dict[str, object] = {
+        "total_jobs": total_jobs,
+        "passing_jobs": resolved_passing,
+        "percentage": percentage,
+        "status": status,
+    }
+    if run_url is not None:
+        result["run_url"] = run_url
+    return result
+
+
 @dataclass(frozen=True)
 class MetricConfig:
     """Configuration for a single quality metric.
@@ -189,6 +301,10 @@ class MetricsGenerationConfig:
             (derived from ``.pre-commit-config.yaml``). Rendered as the
             denominator of the Pre-Commit Status card's ``X/Y Hooks``
             threshold. Defaults to 0 when no config is available.
+        ci_jobs_total: Total number of CI jobs configured (derived from
+            ``.github/workflows/*.yml``). Rendered as the denominator of
+            the CI Status card's ``X/Y Jobs`` threshold. Defaults to 0
+            when no workflows are available.
         enable_sonarqube: Whether to generate SonarQube config.
         enable_badges: Whether to generate GitHub badges.
         enable_dashboard: Whether to generate dashboard template.
@@ -206,6 +322,7 @@ class MetricsGenerationConfig:
     doc_coverage_threshold: int = 95
     dependency_freshness_days: int = 30
     precommit_hooks_total: int = 0
+    ci_jobs_total: int = 0
     enable_sonarqube: bool = False
     enable_badges: bool = True
     enable_dashboard: bool = True
@@ -523,6 +640,7 @@ class MetricsGenerator(BaseGenerator):
         self._validate_non_negative(
             self.config.precommit_hooks_total, "Pre-commit hooks total"
         )
+        self._validate_non_negative(self.config.ci_jobs_total, "CI jobs total")
 
     @staticmethod
     def count_precommit_hooks(config_path: Path) -> int:
@@ -737,6 +855,12 @@ class MetricsGenerator(BaseGenerator):
         precommit_total = self.config.precommit_hooks_total
         precommit_threshold = f"{precommit_total}/{precommit_total} Hooks"
 
+        # CI Status baseline (Issue #159): render all configured jobs as the
+        # ``X/Y Jobs`` denominator. The JS later overrides this from
+        # metrics.json (or grays the card out when status is unknown).
+        ci_total = self.config.ci_jobs_total
+        ci_threshold = f"{ci_total}/{ci_total} Jobs"
+
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -850,6 +974,18 @@ class MetricsGenerator(BaseGenerator):
                     <span id="precommit-threshold">{precommit_threshold}</span>
                 </div>
                 <div class="metric-status status-pass" id="precommit-status-badge">
+                    PASSING
+                </div>
+            </div>
+
+            <div class="metric-card" id="ci-status">
+                <div class="metric-name">CI Status</div>
+                <div class="metric-value" id="ci-value">--</div>
+                <div class="metric-threshold">
+                    Threshold:
+                    <span id="ci-threshold">{ci_threshold}</span>
+                </div>
+                <div class="metric-status status-pass" id="ci-status-badge">
                     PASSING
                 </div>
             </div>
@@ -970,6 +1106,9 @@ class MetricsGenerator(BaseGenerator):
 
             // Pre-Commit Status (index 0): green 100%, yellow 90-99%, red <90%
             updatePrecommitStatus(metrics.precommit_status);
+
+            // CI Status (index 1): green 100%, yellow 85-99%, red <85%
+            updateCIStatus(metrics.ci_status);
 
             // Coverage
             if (metrics.coverage !== undefined) {{
@@ -1113,6 +1252,52 @@ class MetricsGenerator(BaseGenerator):
                 statusClass = 'status-pass';
                 statusText = 'PASSING';
             }} else if (percentage >= 90) {{
+                statusClass = 'status-warn';
+                statusText = 'WARNING';
+            }} else {{
+                statusClass = 'status-fail';
+                statusText = 'FAILING';
+            }}
+            badgeElem.textContent = statusText;
+            badgeElem.className = 'metric-status ' + statusClass;
+        }}
+
+        function updateCIStatus(ci) {{
+            const valueElem = document.getElementById('ci-value');
+            const thresholdElem = document.getElementById('ci-threshold');
+            const badgeElem = document.getElementById('ci-status-badge');
+
+            // No-data guard (Issue #159): when there is no CI data, or the
+            // status is 'unknown' (static workflow count or API failure),
+            // render the gray N/A treatment BEFORE the percentage
+            // thresholds so a 0% unknown card does not fall through to red
+            // FAILING.
+            if (!ci || ci.status === 'unknown') {{
+                valueElem.textContent = 'N/A';
+                thresholdElem.textContent = 'No data';
+                badgeElem.textContent = 'N/A';
+                badgeElem.className = 'metric-status status-unknown';
+                return;
+            }}
+
+            const total = ci.total_jobs || 0;
+            const passing = ci.passing_jobs || 0;
+            const percentage = (ci.percentage !== undefined &&
+                ci.percentage !== null)
+                ? ci.percentage
+                : (total > 0 ? (passing / total) * 100 : 0);
+
+            valueElem.textContent = percentage.toFixed(0) + '%';
+            thresholdElem.textContent = passing + '/' + total + ' Jobs';
+
+            // Color coding per Issue #159:
+            // green (100%), yellow (85-99%), red (<85%)
+            let statusClass;
+            let statusText;
+            if (percentage >= 100) {{
+                statusClass = 'status-pass';
+                statusText = 'PASSING';
+            }} else if (percentage >= 85) {{
                 statusClass = 'status-warn';
                 statusText = 'WARNING';
             }} else {{

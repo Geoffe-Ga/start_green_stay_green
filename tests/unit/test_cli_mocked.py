@@ -883,6 +883,15 @@ class TestMetricsDashboardGeneration:
         assert "thresholds" in metrics_data
         assert "metrics" in metrics_data
 
+        # Issue #159: fresh projects seed a ci_status entry. No workflows
+        # exist when the dashboard step counts jobs, so it degrades to the
+        # unknown/no-data status (rendered gray, not red).
+        ci_seed = metrics_data["metrics"]["ci_status"]
+        assert ci_seed["total_jobs"] == 0
+        assert ci_seed["passing_jobs"] == 0
+        assert ci_seed["percentage"] == 0.0
+        assert ci_seed["status"] == "unknown"
+
     @patch("start_green_stay_green.cli.shutil.copy")
     @patch("start_green_stay_green.cli.MetricsGenerator")
     def test_generate_metrics_dashboard_creates_workflows_dir(

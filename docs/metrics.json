@@ -16,6 +16,12 @@
       "percentage": 100.0,
       "status": "passing"
     },
+    "ci_status": {
+      "total_jobs": 10,
+      "passing_jobs": 10,
+      "percentage": 100.0,
+      "status": "passing"
+    },
     "coverage": 92.62,
     "coverage_status": "pass",
     "branch_coverage": 90.26,
