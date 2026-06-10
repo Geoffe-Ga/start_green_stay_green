@@ -370,7 +370,7 @@ generator.generate(language="python", project_name="my-app")
 **Tools Used**:
 - Python: import-linter
 - TypeScript: dependency-cruiser
-- Go: gorevive
+- Go: go-arch-lint
 - Rust: cargo-deny
 
 ### GitHubActionsReviewGenerator (AI-powered)

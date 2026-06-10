@@ -161,7 +161,7 @@ class TestMultiLanguageGeneration:
 
 
 class TestMultiLanguageArchitectureParity:
-    """Test that Go has architecture-enforcement parity (#341)."""
+    """Test that Go (#341) and Rust (#342) have architecture parity."""
 
     def test_go_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
         """Go must emit an architecture-enforcement config like py/ts."""
@@ -170,7 +170,14 @@ class TestMultiLanguageArchitectureParity:
         config = tmp_path / "plans" / "architecture" / ".go-arch-lint.yml"
         assert config.exists(), "Go init must emit a go-arch-lint config"
 
-    @pytest.mark.parametrize("language", ["python", "typescript", "go"])
+    def test_rust_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
+        """Rust must emit an architecture-enforcement config like py/ts/go."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "rust")
+
+        config = tmp_path / "plans" / "architecture" / "deny.toml"
+        assert config.exists(), "Rust init must emit a cargo-deny config"
+
+    @pytest.mark.parametrize("language", ["python", "typescript", "go", "rust"])
     def test_supported_languages_emit_architecture_config(
         self, tmp_path: Path, language: str
     ) -> None:
