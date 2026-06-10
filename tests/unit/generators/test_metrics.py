@@ -184,8 +184,45 @@ class TestLanguageTools:
             "rust",
             "swift",
             "kotlin",
+            "cpp",
         }
         assert required_languages.issubset(set(LANGUAGE_TOOLS.keys()))
+
+    def test_cpp_tools(self) -> None:
+        """Test C/C++ tool mappings (#362).
+
+        Each tool appears in exactly one category: lizard owns
+        complexity, cppcheck + flawfinder own security, and mutation
+        (mull) is a periodic gate like pitest/muter.
+        """
+        tools = LANGUAGE_TOOLS["cpp"]
+        assert tools["coverage"] == "lcov (cmake -DENABLE_COVERAGE=ON + ctest)"
+        assert tools["mutation"] == "mull"
+        assert tools["complexity"] == "lizard (CCN)"
+        assert tools["documentation"] == "doxygen"
+        assert tools["security"] == "cppcheck + flawfinder"
+        assert tools["dependency_check"] == "conan audit"
+
+    def test_cpp_tools_do_not_double_list_across_categories(self) -> None:
+        """No C/C++ tool is claimed by two metric categories.
+
+        The review lesson from the CI generator: listing one tool under
+        two categories overstates the toolchain. Coverage/complexity/
+        security/docs must each name disjoint tools.
+        """
+        tools = LANGUAGE_TOOLS["cpp"]
+        names_per_category = {
+            "coverage": {"lcov"},
+            "complexity": {"lizard"},
+            "security": {"cppcheck", "flawfinder"},
+            "documentation": {"doxygen"},
+        }
+        for category, names in names_per_category.items():
+            for other_category, other_names in names_per_category.items():
+                if category != other_category:
+                    assert names.isdisjoint(other_names)
+            for name in names:
+                assert name in tools[category]
 
     def test_kotlin_tools(self) -> None:
         """Test Kotlin tool mappings (#357)."""
@@ -773,6 +810,26 @@ class TestMetricsConfigGeneration:
             metrics["cyclomatic_complexity"]["tool"]
             == "detekt (CyclomaticComplexMethod)"
         )
+        assert metrics["code_coverage"]["threshold"] == 90
+        assert metrics["cyclomatic_complexity"]["threshold"] == 10
+
+    def test_generate_metrics_config_cpp_tools(self) -> None:
+        """C/C++ metric config reports lcov coverage and lizard (#362)."""
+        config = MetricsGenerationConfig(
+            language="cpp",
+            project_name="watch-app",
+        )
+        generator = MetricsGenerator(None, config)
+
+        metrics_config = generator._generate_metrics_config()
+        metrics = metrics_config["metrics"]
+
+        assert metrics_config["language"] == "cpp"
+        assert (
+            metrics["code_coverage"]["tool"]
+            == "lcov (cmake -DENABLE_COVERAGE=ON + ctest)"
+        )
+        assert metrics["cyclomatic_complexity"]["tool"] == "lizard (CCN)"
         assert metrics["code_coverage"]["threshold"] == 90
         assert metrics["cyclomatic_complexity"]["threshold"] == 10
 

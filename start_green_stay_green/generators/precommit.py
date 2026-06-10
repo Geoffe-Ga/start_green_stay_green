@@ -26,7 +26,7 @@ class GenerationConfig:
     Attributes:
         project_name: Name of the project.
         language: Programming language (python, typescript, go, rust,
-            swift, kotlin).
+            swift, kotlin, cpp).
         language_config: Additional language-specific configuration.
     """
 
@@ -509,6 +509,112 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         ],
         "default_language_version": {},
     },
+    "cpp": {
+        "hooks": [
+            {
+                "repo": "https://github.com/pre-commit/pre-commit-hooks",
+                "rev": "v4.5.0",
+                "hooks": [
+                    {"id": "trailing-whitespace"},
+                    {"id": "end-of-file-fixer"},
+                    {"id": "check-yaml"},
+                    {"id": "check-json"},
+                    # tizen-manifest.xml is the scaffold's central
+                    # manifest, so XML well-formedness is gated here.
+                    {"id": "check-xml"},
+                    {"id": "check-added-large-files", "args": ["--maxkb=500"]},
+                    {"id": "check-case-conflict"},
+                    {"id": "check-merge-conflict"},
+                    {"id": "check-symlinks"},
+                    {"id": "detect-private-key"},
+                    {"id": "fix-byte-order-marker"},
+                    {"id": "mixed-line-ending", "args": ["--fix=lf"]},
+                    {"id": "no-commit-to-branch", "args": ["--branch", "main"]},
+                ],
+            },
+            # clang-format runs from its official pre-commit mirror
+            # (pre-commit/mirrors-clang-format), which installs a pinned
+            # clang-format wheel from PyPI — no local LLVM install needed
+            # for formatting. It reads the .clang-format companion config
+            # at the project root (args: -style=file is the mirror's
+            # default), the same file scripts/format.sh uses. The rev pins
+            # LLVM 18 to match current distro toolchains (Ubuntu 24.04
+            # ships clang-format-18); bump it together with your local
+            # clang-format so the hook and format.sh agree byte-for-byte.
+            {
+                "repo": "https://github.com/pre-commit/mirrors-clang-format",
+                "rev": "v18.1.8",
+                "hooks": [
+                    {"id": "clang-format", "types_or": ["c", "c++"]},
+                ],
+            },
+            # clang-tidy and cppcheck run as `repo: local` system hooks
+            # (mirroring the Swift/Kotlin lint hooks): neither ships an
+            # official .pre-commit-hooks.yaml manifest. Install with:
+            # `brew install llvm cppcheck` (macOS) or
+            # `apt-get install clang-tidy cppcheck` (Debian/Ubuntu).
+            {
+                "repo": "local",
+                "hooks": [
+                    {
+                        "id": "clang-tidy",
+                        "name": "clang-tidy",
+                        # Reads the generated .clang-tidy companion config
+                        # (bugprone/cert/clang-analyzer/... checks promoted
+                        # to errors), the same file lint.sh uses. Requires
+                        # build/compile_commands.json, exported by the
+                        # documented cmake configure step
+                        # (CMAKE_EXPORT_COMPILE_COMMANDS is ON in the
+                        # generated CMakeLists.txt). Runs on .cpp files
+                        # only: headers have no compile command of their
+                        # own and are covered via HeaderFilterRegex.
+                        "entry": "clang-tidy -p build",
+                        "language": "system",
+                        "types": ["c++"],
+                    },
+                    {
+                        "id": "cppcheck",
+                        "name": "cppcheck",
+                        # warning/performance/portability only: style and
+                        # readability are clang-tidy's job, so the two
+                        # linters do not double-report the same findings.
+                        "entry": (
+                            "cppcheck --enable=warning,performance,portability "
+                            "--error-exitcode=1 --inline-suppr "
+                            "--suppress=missingIncludeSystem"
+                        ),
+                        "language": "system",
+                        "types_or": ["c", "c++"],
+                    },
+                ],
+            },
+            {
+                "repo": "https://github.com/gitleaks/gitleaks",
+                "rev": "v8.18.4",
+                "hooks": [
+                    {"id": "gitleaks"},
+                ],
+            },
+            {
+                "repo": "https://github.com/shellcheck-py/shellcheck-py",
+                "rev": "v0.9.0.6",
+                "hooks": [
+                    {"id": "shellcheck"},
+                ],
+            },
+            {
+                "repo": "https://github.com/Yelp/detect-secrets",
+                "rev": "v1.4.0",
+                "hooks": [
+                    {
+                        "id": "detect-secrets",
+                        "args": ["--baseline", ".secrets.baseline"],
+                    },
+                ],
+            },
+        ],
+        "default_language_version": {},
+    },
 }
 
 
@@ -518,8 +624,8 @@ class PreCommitGenerator(BaseGenerator):
     Customizes pre-commit hooks based on project language and requirements.
     Includes formatting, linting, security, and general file quality checks.
 
-    Supports: Python, TypeScript, Go, Rust, Swift, Kotlin, and other
-    languages.
+    Supports: Python, TypeScript, Go, Rust, Swift, Kotlin, C/C++ (cpp),
+    and other languages.
 
     Attributes:
         orchestrator: Optional AI orchestrator for enhanced generation.

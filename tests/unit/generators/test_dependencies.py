@@ -580,7 +580,7 @@ class TestKotlinDependencies:
 
 
 class TestCppDependencies:
-    """Test C/C++ CMake + Conan manifest generation (#361)."""
+    """Test C/C++ CMake + Conan manifest generation (#361/#362)."""
 
     @staticmethod
     def _generate(tmpdir: str) -> dict[str, Path]:
@@ -640,6 +640,35 @@ class TestCppDependencies:
                 if not line.lstrip().startswith("#")
             ]
             assert "Tizen Studio" in content
+
+    def test_cmakelists_exports_compile_commands(self) -> None:
+        """CMakeLists.txt exports the compile database clang-tidy needs.
+
+        scripts/lint.sh and the pre-commit clang-tidy hook both read
+        build/compile_commands.json (#362), so the configure step must
+        export it unconditionally.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["CMakeLists.txt"].read_text()
+            assert "set(CMAKE_EXPORT_COMPILE_COMMANDS ON)" in content
+
+    def test_cmakelists_defines_opt_in_coverage_option(self) -> None:
+        """CMakeLists.txt wires the gcov instrumentation behind an option.
+
+        scripts/test.sh --coverage reconfigures with -DENABLE_COVERAGE=ON
+        (#362); plain builds must stay uninstrumented, and the gcov
+        runtime must propagate to the test executable (PUBLIC).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["CMakeLists.txt"].read_text()
+            assert 'option(ENABLE_COVERAGE "' in content
+            assert "OFF)" in content
+            assert "target_compile_options(greeting PUBLIC --coverage" in content
+            assert "target_link_options(greeting PUBLIC --coverage)" in content
 
     def test_conanfile_pins_catch2(self) -> None:
         """conanfile.txt requires the pinned Catch2 version."""

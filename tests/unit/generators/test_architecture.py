@@ -1,6 +1,8 @@
 """Unit tests for Architecture Enforcement Generator."""
 
+import ast
 from pathlib import Path
+import runpy
 import tomllib
 from unittest.mock import create_autospec
 
@@ -926,6 +928,204 @@ class TestArchitectureEnforcementGeneratorKotlin:
         assert result.language == "kotlin"
 
 
+class TestArchitectureEnforcementGeneratorCpp:
+    """Test C/C++-specific architecture rules (#362)."""
+
+    @staticmethod
+    def _generate(tmp_path: Path, project_name: str = "my-app") -> Path:
+        """Generate the cpp architecture config and return its directory."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+        generator.generate(language="cpp", project_name=project_name)
+        return output_dir
+
+    @staticmethod
+    def _run_checker(script: Path) -> int:
+        """Execute the generated checker in-process and return its exit code.
+
+        ``runpy`` runs the script exactly as ``python3 <script>`` would
+        (``__name__ == "__main__"``, ``__file__`` set), so the script's
+        own project-root resolution from its plans/architecture location
+        is exercised for real.
+
+        Args:
+            script: Path to the generated check_architecture.py.
+
+        Returns:
+            The exit code the script passed to sys.exit().
+        """
+        try:
+            runpy.run_path(str(script), run_name="__main__")
+        except SystemExit as exc:
+            return int(exc.code) if exc.code is not None else 0
+        return 0
+
+    def test_generate_cpp_creates_include_boundary_checker(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test generating the include-boundary checker for cpp."""
+        output_dir = self._generate(tmp_path)
+
+        # Should create the runnable checker script
+        config_file = output_dir / "check_architecture.py"
+        assert config_file.exists()
+
+        # Should create README and run script
+        assert (output_dir / "README.md").exists()
+        assert (output_dir / "run-check.sh").exists()
+
+    def test_cpp_config_is_valid_python(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """check_architecture.py must parse as valid Python source."""
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "check_architecture.py").read_text()
+        ast.parse(source)
+
+    def test_cpp_config_defines_the_layer_matrix(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The editable dependency matrix mirrors the Go config."""
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "check_architecture.py").read_text()
+        assert "ALLOWED_DEPENDENCIES" in source
+        for layer in ("presentation", "application", "domain", "infrastructure"):
+            assert f'"{layer}"' in source
+        assert '"domain": frozenset(),' in source
+
+    def test_cpp_checker_passes_on_a_clean_layer_tree(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A tree honoring the matrix exits 0."""
+        output_dir = self._generate(tmp_path)
+        app_dir = tmp_path / "src" / "application"
+        app_dir.mkdir(parents=True)
+        (app_dir / "service.cpp").write_text('#include "domain/clock.h"\n')
+
+        exit_code = self._run_checker(output_dir / "check_architecture.py")
+
+        captured = capsys.readouterr()
+        assert exit_code == 0, captured.out
+        assert "Architecture OK" in captured.out
+
+    def test_cpp_checker_fails_on_a_boundary_violation(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A domain file including presentation headers exits 1."""
+        output_dir = self._generate(tmp_path)
+        domain_dir = tmp_path / "src" / "domain"
+        domain_dir.mkdir(parents=True)
+        (domain_dir / "clock.cpp").write_text('#include "presentation/widget.h"\n')
+
+        exit_code = self._run_checker(output_dir / "check_architecture.py")
+
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "layer 'domain' must not include from layer 'presentation'" in (
+            captured.out
+        )
+
+    def test_cpp_checker_warns_and_passes_without_layer_dirs(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The warn-first default passes when no layer directory exists yet.
+
+        Mirrors the Konsist non-strict default: the #361 scaffold ships a
+        flat src/, so the checker must not fail a fresh project. The
+        STRICT switch is the documented tighten-me.
+        """
+        output_dir = self._generate(tmp_path)
+
+        exit_code = self._run_checker(output_dir / "check_architecture.py")
+
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        assert "warn-first" in captured.out
+
+    def test_cpp_config_documents_textual_scan_limits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The checker documents what a textual #include scan cannot see.
+
+        Mirroring the Rust deny.toml and Swift regex-rule gap notes: the
+        script must disclose that it is not a resolved dependency graph
+        and that the C/C++ toolchain does not reject include cycles.
+        """
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "check_architecture.py").read_text()
+        assert "not a resolved dependency graph" in source
+        assert "does NOT reject include cycles" in source
+        assert "STRICT = True" in source
+
+    def test_cpp_config_documents_evaluated_alternatives(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The checker explains why IWYU/cpp-dependencies were not chosen."""
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "check_architecture.py").read_text()
+        assert "include-what-you-use" in source
+        assert "cpp-dependencies" in source
+
+    def test_cpp_readme_mentions_include_boundary_checker(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the cpp README references the include-boundary tooling."""
+        output_dir = self._generate(tmp_path)
+
+        readme = (output_dir / "README.md").read_text()
+        assert "include-boundary checker" in readme
+        assert "check_architecture.py" in readme
+
+    def test_cpp_run_script_invokes_python3(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the cpp run-check.sh probes python3 and runs the checker."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "command -v python3" in script
+        assert "python3 plans/architecture/check_architecture.py" in script
+
+    def test_cpp_run_script_uses_display_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the cpp run-check.sh announces the 'C/C++' display name."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "Checking C/C++ architecture" in script
+
+    def test_cpp_result_reports_cpp_language(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the result object records the cpp language."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        result = generator.generate(language="cpp", project_name="my-app")
+
+        assert result.language == "cpp"
+
+
 class TestArchitectureEnforcementGeneratorTypeScript:
     """Test TypeScript-specific architecture rules."""
 
@@ -974,6 +1174,7 @@ class TestLanguageTooling:
             ("rust", "Rust"),
             ("swift", "Swift"),
             ("kotlin", "Kotlin"),
+            ("cpp", "C/C++"),
         ],
     )
     def test_each_tooling_carries_a_display_name(
@@ -983,7 +1184,7 @@ class TestLanguageTooling:
         assert _LANGUAGE_TOOLING[language].display_name == expected_display
 
     @pytest.mark.parametrize(
-        "language", ["python", "typescript", "go", "rust", "swift"]
+        "language", ["python", "typescript", "go", "rust", "swift", "cpp"]
     )
     def test_run_cmd_is_a_config_file_template(self, language: str) -> None:
         """run_cmd holds a {config_file} placeholder, not a literal path."""

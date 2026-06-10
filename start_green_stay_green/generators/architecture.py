@@ -2,7 +2,8 @@
 
 Generates architecture validation configuration for import-linter (Python),
 dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust),
-SwiftLint custom rules (Swift), and Konsist (Kotlin).
+SwiftLint custom rules (Swift), Konsist (Kotlin), and a stdlib-Python
+include-boundary checker (C/C++).
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ class ArchitectureResult:
         output_dir: Directory containing generated files.
         files_created: List of files created.
         language: Target language (python, typescript, go, rust, swift,
-            kotlin).
+            kotlin, cpp).
     """
 
     output_dir: Path
@@ -131,6 +132,25 @@ _LANGUAGE_TOOLING: dict[str, _LanguageTooling] = {
         docs_url="https://docs.konsist.lemonappdev.com/",
         display_name="Kotlin",
     ),
+    "cpp": _LanguageTooling(
+        # No config-driven C/C++ layer linter exists either:
+        # include-what-you-use is about include hygiene (its .imp mapping
+        # files cannot express layer rules) and cpp-dependencies reports
+        # directory-level dependency stats without a layer-matrix config.
+        # Layer rules are therefore expressed as a runnable, stdlib-only
+        # Python script whose dependency matrix sits at the top of the
+        # file as the editable config — the same "config the user can
+        # run" shape as the Kotlin Konsist test. The generated script
+        # documents its enforcement limits explicitly.
+        tool="include-boundary checker (stdlib Python script)",
+        config_file="check_architecture.py",
+        # python3 ships on every supported dev platform and the checker
+        # is stdlib-only, so there is nothing else to install.
+        install_cmd="python3 --version  # stdlib-only checker, no install needed",
+        run_cmd="python3 {config_file}",
+        docs_url="https://github.com/Geoffe-Ga/start_green_stay_green",
+        display_name="C/C++",
+    ),
 }
 
 
@@ -139,9 +159,9 @@ class ArchitectureEnforcementGenerator:
 
     Generates import-linter config for Python, dependency-cruiser
     config for TypeScript, go-arch-lint config for Go, cargo-deny
-    config for Rust, SwiftLint custom rules for Swift, and a Konsist
-    test for Kotlin to enforce layer separation and prevent circular
-    dependencies.
+    config for Rust, SwiftLint custom rules for Swift, a Konsist
+    test for Kotlin, and a runnable include-boundary checker for C/C++
+    to enforce layer separation and prevent circular dependencies.
 
     Attributes:
         orchestrator: AI orchestrator for content generation.
@@ -189,7 +209,7 @@ class ArchitectureEnforcementGenerator:
 
         Args:
             language: Target language (python, typescript, go, rust,
-                swift, kotlin).
+                swift, kotlin, cpp).
             project_name: Name of the project.
 
         Returns:
@@ -215,6 +235,7 @@ class ArchitectureEnforcementGenerator:
             "rust": self._generate_rust_config,
             "swift": self._generate_swift_config,
             "kotlin": partial(self._generate_kotlin_config, project_name),
+            "cpp": self._generate_cpp_config,
         }
         files_created = config_builders[language]()
 
@@ -693,6 +714,181 @@ class ArchitectureTest {{
         config_path.write_text(config_content)
         return [config_path]
 
+    # Like the Rust and Swift configs, the C/C++ checker is project-name
+    # agnostic: layers are defined by the src/<layer> and inc/<layer>
+    # directory convention, which is fixed by convention rather than
+    # derived from the project name.
+    def _generate_cpp_config(self) -> list[Path]:
+        """Generate the include-boundary checker for C/C++.
+
+        No config-driven C/C++ layer linter exists (unlike import-linter,
+        dependency-cruiser, go-arch-lint, or cargo-deny):
+        include-what-you-use targets include *hygiene* — its ``.imp``
+        mapping files cannot express layer rules — and cpp-dependencies
+        reports directory-level dependency statistics without a
+        layer-matrix config. Layer rules are therefore expressed as a
+        runnable, stdlib-only Python script whose dependency matrix sits
+        at the top of the file as the editable configuration — the same
+        "config the user can run" shape as the Kotlin Konsist test. The
+        script documents its enforcement limits explicitly, mirroring the
+        Rust ``deny.toml`` and Swift custom-rule gap notes, and runs
+        warn-first (missing layer directories pass) with a documented
+        ``STRICT`` tighten-me switch. The dependency matrix mirrors the
+        Go config: presentation -> application -> domain, with
+        infrastructure allowed to depend on domain only.
+
+        Returns:
+            List of files created.
+        """
+        config_path = self.output_dir / "check_architecture.py"
+
+        config_content = '''#!/usr/bin/env python3
+"""Include-boundary architecture check for C/C++ layered projects.
+
+Generated by Start Green Stay Green. Stdlib-only: any Python 3.10+
+interpreter runs it, no install step required.
+
+Why a script and not a tool config: no config-driven C/C++ layer linter
+exists (unlike import-linter for Python, dependency-cruiser for
+TypeScript, go-arch-lint for Go, or cargo-deny for Rust).
+include-what-you-use targets include *hygiene* (its .imp mapping files
+cannot express layer rules) and cpp-dependencies reports directory-level
+dependency statistics without a layer-matrix config. This script IS the
+config: edit ALLOWED_DEPENDENCIES below to change the matrix.
+
+Enforcement limits (documented, not hidden):
+  - This is a textual scan of #include directives,
+    not a resolved dependency graph: transitive includes, forward
+    declarations, and link-time dependencies are invisible to it.
+  - Layers are defined by the src/<layer>/ and inc/<layer>/ directory
+    convention; code outside those directories is unchecked, and an
+    include only counts when its path starts with a layer name
+    (#include "domain/clock.h"). Bare includes of sibling headers are
+    NOT attributed to a layer.
+  - Unlike SPM, Cargo, or Gradle, the C/C++ toolchain
+    does NOT reject include cycles on its own (include guards merely
+    mask them), so no cycle prevention can be attributed to the build
+    system here. The layer matrix below forbids the back-edges between
+    layers; intra-layer cycles remain out of scope.
+  - Warn-first default: a layer directory that does not exist yet passes
+    with a notice. Tighten by setting STRICT = True once every layer
+    directory exists.
+
+Dependency matrix (mirrors the Go go-arch-lint config):
+  presentation -> application, domain
+  application  -> domain
+  infrastructure -> domain
+  domain       -> (nothing)
+
+Run from the project root (or via plans/architecture/run-check.sh):
+  python3 plans/architecture/check_architecture.py
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+import re
+import sys
+
+# --- Configuration (edit to fit your project) ---------------------------
+
+# Which layers may include headers from which other layers.
+ALLOWED_DEPENDENCIES: dict[str, frozenset[str]] = {
+    "presentation": frozenset({"application", "domain"}),
+    "application": frozenset({"domain"}),
+    "infrastructure": frozenset({"domain"}),
+    "domain": frozenset(),
+}
+
+# Directory roots scanned for the src/<layer> and inc/<layer> convention.
+SOURCE_ROOTS = ("src", "inc")
+
+SOURCE_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp"})
+
+# Tighten-me: set True to fail when a layer directory is missing instead
+# of passing with a notice (warn-first default while layers grow in).
+STRICT = False
+
+# -------------------------------------------------------------------------
+
+# Matches #include "<layer>/..." and #include <<layer>/...>.
+_INCLUDE_RE = re.compile(r'^\\s*#\\s*include\\s+["<]([A-Za-z0-9_]+)/')
+
+
+def _project_root() -> Path:
+    """Resolve the project root whether parked or copied.
+
+    The script ships in plans/architecture/; when run from there (or via
+    run-check.sh at the project root) the project root is two levels up.
+    If the user copies the script elsewhere, the working directory is
+    assumed to be the project root.
+    """
+    script_dir = Path(__file__).resolve().parent
+    if script_dir.name == "architecture" and script_dir.parent.name == "plans":
+        return script_dir.parent.parent
+    return Path.cwd()
+
+
+def _layer_violations(layer_dir: Path, layer: str) -> list[str]:
+    """Collect forbidden cross-layer includes inside one layer directory."""
+    allowed = ALLOWED_DEPENDENCIES[layer]
+    violations: list[str] = []
+    for source in sorted(layer_dir.rglob("*")):
+        if source.suffix not in SOURCE_SUFFIXES or not source.is_file():
+            continue
+        text = source.read_text(encoding="utf-8", errors="replace")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            match = _INCLUDE_RE.match(line)
+            if match is None:
+                continue
+            target = match.group(1)
+            if target in ALLOWED_DEPENDENCIES and target != layer:
+                if target not in allowed:
+                    violations.append(
+                        f"{source}:{line_number}: layer '{layer}' must not "
+                        f"include from layer '{target}' ({line.strip()})"
+                    )
+    return violations
+
+
+def main() -> int:
+    """Scan every layer directory and report boundary violations."""
+    root = _project_root()
+    violations: list[str] = []
+    layers_found = 0
+    for source_root in SOURCE_ROOTS:
+        for layer in ALLOWED_DEPENDENCIES:
+            layer_dir = root / source_root / layer
+            if not layer_dir.is_dir():
+                continue
+            layers_found += 1
+            violations.extend(_layer_violations(layer_dir, layer))
+
+    if layers_found == 0:
+        print(
+            "No layer directories found under "
+            f"{'/'.join(SOURCE_ROOTS)} (expected e.g. src/domain/). "
+            "Passing (warn-first default; set STRICT = True to fail)."
+        )
+        return 1 if STRICT else 0
+
+    if violations:
+        print(f"Found {len(violations)} layer-boundary violation(s):")
+        for violation in violations:
+            print(f"  {violation}")
+        return 1
+
+    print(f"Architecture OK: {layers_found} layer director(y/ies) checked.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
+
+        config_path.write_text(config_content)
+        return [config_path]
+
     def _generate_readme(self, language: str, project_name: str) -> Path:
         """Generate README with usage instructions.
 
@@ -779,6 +975,7 @@ Edit the configuration file:
 - Rust: `deny.toml`
 - Swift: `.swiftlint-architecture.yml`
 - Kotlin: `ArchitectureTest.kt`
+- C/C++: `check_architecture.py` (the ALLOWED_DEPENDENCIES matrix at the top)
 
 See documentation:
 - Python: https://import-linter.readthedocs.io/
@@ -787,6 +984,7 @@ See documentation:
 - Rust: https://embarkstudios.github.io/cargo-deny/
 - Swift: https://realm.github.io/SwiftLint/custom_rules.html
 - Kotlin: https://docs.konsist.lemonappdev.com/
+- C/C++: the header comment in check_architecture.py (self-documented)
 
 ## Integration
 
