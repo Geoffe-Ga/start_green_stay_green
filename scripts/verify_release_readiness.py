@@ -231,7 +231,11 @@ def _check_dashboard(project_dir: Path) -> list[str]:
     if not metrics_path.is_file():
         return failures
 
-    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    try:
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        failures.append(f"metrics.json is not valid JSON: {exc}")
+        return failures
     failures.extend(
         f"metrics.json missing key: {key}"
         for key in REQUIRED_METRICS_KEYS

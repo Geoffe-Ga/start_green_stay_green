@@ -96,7 +96,9 @@ class TestLiveDashboardE2E:
             dashboard = Path(tmpdir) / "dash-html-project" / "docs" / "dashboard.html"
             content = dashboard.read_text(encoding="utf-8")
 
-            assert "Quality Metrics Dashboard" in content
+            assert (
+                "Quality Metrics Dashboard" in content
+            ), "Dashboard should have its title heading"
             assert "metrics.json" in content, "Dashboard should load metrics.json"
 
     def test_metrics_json_has_expected_structure(self) -> None:
@@ -134,6 +136,9 @@ class TestLiveDashboardE2E:
             assert (
                 "start-green-stay-green" not in content
             ), "Generated metrics.yml must not leak the SGSG project name"
+            assert (
+                "dash-wf-project" in content
+            ), "Generated metrics.yml must reference the new project name"
 
     def test_init_without_dashboard_omits_artifacts(self) -> None:
         """Without --enable-live-dashboard, no dashboard artifacts are created."""
@@ -158,5 +163,7 @@ class TestLiveDashboardE2E:
             assert result.returncode == 0, f"sgsg init failed: {result.stdout}"
 
             project_dir = Path(tmpdir) / "no-dash-project"
-            assert not (project_dir / "docs" / "dashboard.html").exists()
-            assert not (project_dir / "docs" / "metrics.json").exists()
+            for relative in EXPECTED_DASHBOARD_ARTIFACTS:
+                assert not (
+                    project_dir / relative
+                ).exists(), f"Unexpected dashboard artifact without flag: {relative}"

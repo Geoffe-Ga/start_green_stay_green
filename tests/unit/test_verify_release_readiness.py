@@ -208,6 +208,15 @@ class TestDashboard:
         failures = vrr._check_dashboard(project)
         assert any("project mismatch" in f for f in failures)
 
+    def test_reports_malformed_metrics_json(self, tmp_path: Path) -> None:
+        """Malformed metrics.json is reported, not raised as a traceback."""
+        project = _make_valid_project(tmp_path)
+        (project / "docs" / "metrics.json").write_text(
+            "{not valid json", encoding="utf-8"
+        )
+        failures = vrr._check_dashboard(project)
+        assert any("not valid JSON" in f for f in failures)
+
 
 class TestOfflineEnv:
     """Tests for _offline_env."""
