@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 
+from defusedxml import ElementTree as DefusedElementTree
 import pytest
 import yaml
 
@@ -1215,6 +1216,242 @@ class TestScriptsGeneratorCppGeneration:
             assert existing_tidy.read_text() == "Checks: bugprone-*\n"
 
 
+class TestScriptsGeneratorJavaGeneration:
+    """Test Java script generation (#367)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Generate java scripts into ``tmpdir`` and return the mapping."""
+        config = ScriptConfig(
+            language="java",
+            package_name="my_wear_app",
+        )
+        generator = ScriptsGenerator(Path(tmpdir), config)
+        return generator.generate()
+
+    def test_generate_java_scripts_creates_files(self) -> None:
+        """Test generate creates the full java script set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            assert "check-all.sh" in scripts
+            assert "format.sh" in scripts
+            assert "lint.sh" in scripts
+            assert "test.sh" in scripts
+            assert "security.sh" in scripts
+
+    def test_java_shell_scripts_pass_bash_syntax_check(self) -> None:
+        """Every generated java shell script parses under bash -n.
+
+        The #362 lesson: this literal syntax check caught a real
+        template-escaping bug in the cpp scripts, so every new language
+        gets it from day one.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            for name, path in scripts.items():
+                if not name.endswith(".sh"):
+                    continue
+                bash = shutil.which("bash")
+                assert bash is not None, "bash not found on PATH"
+                result = subprocess.run(  # noqa: S603  # Issue #367: bash -n on generated content, no untrusted input
+                    [bash, "-n", str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, f"{name}: {result.stderr}"
+
+    def test_java_format_script_uses_google_java_format(self) -> None:
+        """format.sh formats in place and verifies with --dry-run."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "google-java-format" in content
+            assert "--replace" in content
+            assert "--dry-run --set-exit-if-changed" in content
+
+    def test_java_format_script_requires_the_formatter(self) -> None:
+        """format.sh fails with install instructions when the tool is absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "command -v google-java-format" in content
+            assert "brew install google-java-format" in content
+
+    def test_java_lint_script_runs_pom_backed_goals(self) -> None:
+        """lint.sh runs Checkstyle and PMD via the Maven goals the pom pins."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "mvn -q checkstyle:check" in content
+            assert "mvn -q pmd:check" in content
+
+    def test_java_lint_script_requires_maven(self) -> None:
+        """lint.sh fails with install instructions when mvn is absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "command -v mvn" in content
+            assert "brew install maven" in content
+
+    def test_java_lint_script_documents_pmd_as_complexity_owner(self) -> None:
+        """The CCN ceiling lives once, in the pmd-ruleset.xml companion.
+
+        PMD's CyclomaticComplexity rule owns the <=10 gate (single
+        source of truth); lint.sh and the script's help text must point
+        at the companion ruleset rather than duplicating a threshold.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "pmd-ruleset.xml" in content
+            assert "CyclomaticComplexity" in content
+            # No shell-side duplicate of the bound.
+            assert "MAX_CCN" not in content
+
+    def test_java_test_script_runs_maven_tests(self) -> None:
+        """test.sh runs the JUnit 4 suite via plain `mvn test`.
+
+        The literal string `mvn test` doubles as the language marker
+        cli._scripts_dir_has_other_language probes for java.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "mvn test" in content
+            assert "command -v mvn" in content
+
+    def test_java_test_script_enforces_coverage_via_pom_jacoco_gate(self) -> None:
+        """Coverage mode runs jacoco:check; the >=90% bound stays in the pom.
+
+        Unlike the cpp THRESHOLD=90 (CMake has no manifest home for the
+        bound), Maven does: the JaCoCo plugin rules in pom.xml are the
+        single source of the coverage bound, so the script must invoke
+        the gate without restating the number.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "jacoco:report" in content
+            assert "jacoco:check" in content
+            assert "pom.xml" in content
+            assert "THRESHOLD=" not in content
+
+    def test_java_test_script_documents_app_module_coverage_limit(self) -> None:
+        """test.sh discloses that the Android app module is not measured.
+
+        app/ needs the Android SDK and sits outside the Maven build, so
+        the coverage gate honestly excludes it rather than implying
+        whole-project coverage — the cpp src/main.cpp precedent.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "app/" in content
+            assert "coverage denominator" in content
+
+    def test_java_security_script_compiles_before_spotbugs(self) -> None:
+        """security.sh compiles before the SpotBugs bytecode scan.
+
+        `mvn spotbugs:check` silently skips when target/classes is
+        empty, so the script must run the compile phase first or the
+        gate is a no-op.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "mvn -q compile spotbugs:check" in content
+
+    def test_java_security_script_gates_dependency_check_on_nvd_key(self) -> None:
+        """dependency-check runs only when an NVD API key is configured.
+
+        The pom pins org.owasp:dependency-check-maven, so there is no
+        binary to install — but without an NVD API key the NVD download
+        is throttled to impracticality, so the pragmatic warn-first
+        default skips the scan with a documented tighten-me path.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "NVD_API_KEY" in content
+            assert "dependency-check:check" in content
+            assert "Tighten" in content
+
+    def test_java_security_script_documents_division_of_labor(self) -> None:
+        """security.sh discloses where the other security passes live."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "gitleaks" in content
+            assert "detect-secrets" in content
+
+    def test_java_check_all_runs_full_toolchain(self) -> None:
+        """check-all.sh runs format, lint, tests (with coverage), security."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["check-all.sh"].read_text()
+            assert 'run_check "Format" "format.sh"' in content
+            assert 'run_check "Linting" "lint.sh"' in content
+            assert 'run_check "Tests" "test.sh" --coverage' in content
+            assert 'run_check "Security" "security.sh"' in content
+
+    def test_java_writes_pmd_ruleset_companion(self) -> None:
+        """The pmd-ruleset.xml companion lands at the project root."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            assert (Path(tmpdir) / "pmd-ruleset.xml").exists()
+
+    def test_pmd_ruleset_is_well_formed_xml_with_ccn_rule(self) -> None:
+        """pmd-ruleset.xml parses as XML and gates CCN at <=10.
+
+        PMD reports methods whose complexity is >= methodReportLevel,
+        so 11 reports 11+ and enforces the <=10 ceiling the other
+        languages gate on (the detekt threshold: 11 precedent).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / "pmd-ruleset.xml").read_text()
+            root = DefusedElementTree.fromstring(content)
+            assert root.tag.endswith("ruleset")
+            assert "CyclomaticComplexity" in content
+            assert 'value="11"' in content
+            assert "methodReportLevel" in content
+
+    def test_pmd_ruleset_documents_the_threshold_mapping(self) -> None:
+        """The ruleset explains the report-at-11 == ceiling-10 mapping."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / "pmd-ruleset.xml").read_text()
+            assert "<= 10" in content
+
+    def test_pmd_ruleset_preserves_existing_file(self) -> None:
+        """An existing user pmd-ruleset.xml is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / "pmd-ruleset.xml"
+            existing.write_text("<ruleset />\n")
+
+            self._generate(tmpdir)
+
+            assert existing.read_text() == "<ruleset />\n"
+
+
 class TestScriptsGeneratorLanguageFallback:
     """Test language fallback behavior."""
 
@@ -1506,6 +1743,20 @@ class TestMutationKillers:
             content = scripts["lint.sh"].read_text()
             assert "clang-tidy" in content
 
+    def test_java_language_dispatches_to_java_generator(self) -> None:
+        """Test 'java' language dispatches to the Java generator (#367)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="java",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            # Should generate java scripts with the pom-backed goals
+            content = scripts["lint.sh"].read_text()
+            assert "checkstyle:check" in content
+
     def test_generated_scripts_exact_count_python(self) -> None:
         """Test Python generator creates EXACTLY 12 scripts.
 
@@ -1536,6 +1787,32 @@ class TestMutationKillers:
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
                 language="cpp",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            assert len(scripts) == 6
+            assert sorted(scripts) == [
+                "check-all.sh",
+                "format.sh",
+                "lint.sh",
+                "pr-status.sh",
+                "security.sh",
+                "test.sh",
+            ]
+
+    def test_generated_scripts_exact_count_java(self) -> None:
+        """Test Java generator creates EXACTLY 6 scripts (#367).
+
+        Kills mutations in script count logic and catches silent script
+        additions/removals. Scripts: check-all, format, lint, test,
+        security, pr-status (the pmd-ruleset.xml companion is written
+        separately and not counted here).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="java",
                 package_name="test",
             )
             generator = ScriptsGenerator(Path(tmpdir), config)

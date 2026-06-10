@@ -33,6 +33,14 @@ JACOCO_VERSION = "0.8.12"
 CHECKSTYLE_PLUGIN_VERSION = "3.6.0"
 PMD_PLUGIN_VERSION = "3.26.0"
 SPOTBUGS_PLUGIN_VERSION = "4.8.6.6"
+# ArchUnit backs the generated architecture test (#367); test-scoped in
+# the pom so the plans/architecture template compiles once copied into
+# src/test/java (the Konsist manifest-touch precedent from #357).
+ARCHUNIT_VERSION = "1.4.1"
+# OWASP dependency-check Maven plugin (#367); declared in the pom so
+# `mvn dependency-check:check` resolves without the org.owasp group
+# being in Maven's default plugin-prefix search path.
+DEPENDENCY_CHECK_PLUGIN_VERSION = "12.1.3"
 # Java release the pure-logic build targets; within the generated CI
 # workflow's JDK matrix (reference/ci/java.yml runs 17 and 21).
 JAVA_RELEASE = "17"

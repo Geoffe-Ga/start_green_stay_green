@@ -3,14 +3,13 @@
 Tests the complete sgsg init flow for supported languages, verifying
 that the CLI produces valid project structures end-to-end.
 
-Note: java, csharp, and ruby are supported at the generator level
-(java's scaffold is the Wear OS foundation, #366) and get a CI workflow
-via ci.py, but the remaining quality-tooling pipeline steps
-(PreCommitGenerator, scripts, metrics, architecture) skip them — #367
-tracks java. Kotlin completed the pipeline with #357/#358, and C/C++
-followed with #362 (quality tooling) and #363 (CI workflow), so both
-join CLI_SUPPORTED_LANGUAGES below (test_java_init_integration.py and
-test_language_generators.py cover the generator-only languages).
+Note: csharp and ruby are supported at the generator level, but the
+quality-tooling pipeline steps (PreCommitGenerator, scripts, metrics,
+architecture) skip them. Kotlin completed the pipeline with #357/#358,
+C/C++ followed with #362 (quality tooling) and #363 (CI workflow), and
+Java with #366 (Wear OS foundation + CI) and #367 (quality tooling), so
+all three join CLI_SUPPORTED_LANGUAGES below
+(test_language_generators.py covers the generator-only languages).
 
 All tests use an environment with API keys stripped and a null keyring
 backend to prevent real Anthropic API calls. See Issue #196.
@@ -35,6 +34,7 @@ CLI_SUPPORTED_LANGUAGES = (
     "swift",
     "kotlin",
     "cpp",
+    "java",
 )
 
 # Expected key files per language that sgsg init should create
@@ -98,6 +98,16 @@ EXPECTED_KEY_FILES: dict[str, list[str]] = {
         "tests/test_greeting.cpp",
         ".clang-format",
         ".clang-tidy",
+        ".github/workflows/ci.yml",
+        "README.md",
+    ],
+    "java": [
+        "pom.xml",
+        "pmd-ruleset.xml",
+        "src/main/java/com/example/test_project/Greeting.java",
+        "src/test/java/com/example/test_project/GreetingTest.java",
+        "app/src/main/AndroidManifest.xml",
+        "app/src/main/java/com/example/test_project/MainActivity.java",
         ".github/workflows/ci.yml",
         "README.md",
     ],

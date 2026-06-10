@@ -835,6 +835,170 @@ class TestGenerateWithCpp:
         assert any("shellcheck-py" in url for url in repo_urls)
 
 
+class TestGenerateWithJava:
+    """Test content generation for Java projects (#367)."""
+
+    @staticmethod
+    def _parsed_repos(generator: PreCommitGenerator) -> list[dict[str, Any]]:
+        """Generate the java config and return its parsed repos list."""
+        config = GenerationConfig(
+            project_name="java-project",
+            language="java",
+            language_config={},
+        )
+        result = generator.generate(config)
+        yaml_content = "\n".join(
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        )
+        parsed = yaml.safe_load(yaml_content)
+        return list(parsed["repos"])
+
+    def test_generate_java_returns_dict(self, mock_orchestrator: Mock) -> None:
+        """Test generate returns dict for java."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        config = GenerationConfig(
+            project_name="java-project",
+            language="java",
+            language_config={},
+        )
+        result = generator.generate(config)
+        assert isinstance(result, dict)
+        assert result["content"]
+
+    def test_generate_java_content_is_valid_yaml(self, mock_orchestrator: Mock) -> None:
+        """Generated java pre-commit config must be parseable YAML."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        assert isinstance(repos, list)
+        assert repos
+
+    def test_generate_java_includes_google_java_format(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """google-java-format runs as a local system hook.
+
+        Unlike clang-format, google-java-format has no official
+        pre-commit mirror (the only hook repos are unofficial wrappers
+        that download release jars at runtime), so the formatter probes
+        the installed binary — the Swift/Kotlin precedent.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(
+            (repo for repo in repos if repo.get("repo") == "local"),
+            None,
+        )
+        assert local_repo is not None
+        hook_ids = [hook.get("id", "") for hook in local_repo.get("hooks", [])]
+        assert "google-java-format" in hook_ids
+
+    def test_java_google_java_format_hook_formats_in_place(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """The formatter hook rewrites files (--replace) like ktlint --format."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        formatter = next(
+            hook
+            for hook in local_repo["hooks"]
+            if hook.get("id") == "google-java-format"
+        )
+        assert "--replace" in formatter["entry"]
+        assert formatter["types"] == ["java"]
+
+    @pytest.mark.parametrize("hook_id", ["checkstyle", "pmd", "spotbugs"])
+    def test_generate_java_includes_maven_goal_linters(
+        self, mock_orchestrator: Mock, hook_id: str
+    ) -> None:
+        """Checkstyle/PMD/SpotBugs run as Maven goals the pom resolves.
+
+        The #366 pom already pins and configures all three plugins, so
+        the hooks invoke `mvn -q <prefix>:check` — slower than native
+        binaries but zero-install and impossible to version-drift from
+        the build (single source of tool truth: pom.xml).
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        hook = next(
+            (h for h in local_repo["hooks"] if h.get("id") == hook_id),
+            None,
+        )
+        assert hook is not None, f"missing {hook_id} hook"
+        assert hook["entry"].startswith("mvn -q ")
+        assert f"{hook_id}:check" in hook["entry"]
+        assert hook["pass_filenames"] is False
+        assert hook["types"] == ["java"]
+
+    def test_java_spotbugs_hook_compiles_first(self, mock_orchestrator: Mock) -> None:
+        """The SpotBugs hook compiles before analyzing.
+
+        SpotBugs reads bytecode and `mvn spotbugs:check` silently skips
+        when target/classes is empty, so the entry must run the compile
+        phase first or the gate is a no-op.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        spotbugs = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "spotbugs"
+        )
+        assert "compile" in spotbugs["entry"]
+        assert spotbugs["entry"].index("compile") < spotbugs["entry"].index(
+            "spotbugs:check"
+        )
+
+    def test_java_local_hooks_use_system_language(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Local java hooks invoke system binaries (mvn / brew CLIs)."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        for hook in local_repo["hooks"]:
+            assert hook["language"] == "system", f"{hook['id']} not language: system"
+            assert hook["types"] == ["java"], f"{hook['id']} missing java types"
+
+    def test_generate_java_includes_check_xml(self, mock_orchestrator: Mock) -> None:
+        """AndroidManifest.xml/layout XML well-formedness is gated via check-xml."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        standard_repo = next(
+            repo for repo in repos if "pre-commit-hooks" in repo.get("repo", "")
+        )
+        hook_ids = [hook.get("id", "") for hook in standard_repo.get("hooks", [])]
+        assert "check-xml" in hook_ids
+
+    def test_generate_java_includes_gitleaks(self, mock_orchestrator: Mock) -> None:
+        """Test generated java config includes the gitleaks secrets hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        gitleaks_repo = next(
+            (repo for repo in repos if "gitleaks/gitleaks" in repo.get("repo", "")),
+            None,
+        )
+        assert gitleaks_repo is not None
+        hook_ids = [hook.get("id", "") for hook in gitleaks_repo.get("hooks", [])]
+        assert "gitleaks" in hook_ids
+
+    def test_generate_java_includes_detect_secrets(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """java keeps the detect-secrets hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("Yelp/detect-secrets" in url for url in repo_urls)
+
+    def test_generate_java_includes_shellcheck(self, mock_orchestrator: Mock) -> None:
+        """java keeps the shellcheck hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("shellcheck-py" in url for url in repo_urls)
+
+
 class TestValidateLanguage:
     """Test language validation functionality."""
 
@@ -875,6 +1039,11 @@ class TestValidateLanguage:
         """Test validate_language returns True for cpp."""
         generator = PreCommitGenerator(mock_orchestrator)
         assert generator.validate_language("cpp")
+
+    def test_validate_language_java_returns_true(self, mock_orchestrator: Mock) -> None:
+        """Test validate_language returns True for java (#367)."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        assert generator.validate_language("java")
 
     def test_validate_language_rust_returns_true(self, mock_orchestrator: Mock) -> None:
         """Test validate_language returns True for Rust."""
@@ -967,11 +1136,19 @@ class TestGetSupportedLanguages:
         result = generator.get_supported_languages()
         assert "cpp" in result
 
+    def test_get_supported_languages_includes_java(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_supported_languages includes java (#367)."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_supported_languages()
+        assert "java" in result
+
     def test_get_supported_languages_exact_count(self, mock_orchestrator: Mock) -> None:
         """Test get_supported_languages returns expected count."""
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_supported_languages()
-        assert len(result) == 7
+        assert len(result) == 8
 
     def test_get_supported_languages_no_duplicates(
         self, mock_orchestrator: Mock
@@ -1041,6 +1218,14 @@ class TestGetLanguageHooks:
         """Test get_language_hooks returns list for cpp."""
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_language_hooks("cpp")
+        assert isinstance(result, list)
+
+    def test_get_language_hooks_java_returns_list(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_language_hooks returns list for java (#367)."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_language_hooks("java")
         assert isinstance(result, list)
 
     def test_get_language_hooks_unsupported_raises_error(

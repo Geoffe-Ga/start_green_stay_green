@@ -185,8 +185,48 @@ class TestLanguageTools:
             "swift",
             "kotlin",
             "cpp",
+            "java",
         }
         assert required_languages.issubset(set(LANGUAGE_TOOLS.keys()))
+
+    def test_java_tools(self) -> None:
+        """Test Java tool mappings (#367).
+
+        Each tool appears in exactly one category: the pom's JaCoCo
+        plugin owns coverage (the >=90% bound lives in pom.xml), PMD's
+        CyclomaticComplexity rule owns complexity, SpotBugs owns
+        security, and pitest is a periodic mutation gate like mull/muter.
+        """
+        tools = LANGUAGE_TOOLS["java"]
+        assert tools["coverage"] == "JaCoCo (mvn jacoco:check)"
+        assert tools["mutation"] == "pitest"
+        assert tools["complexity"] == "PMD (CyclomaticComplexity, pmd-ruleset.xml)"
+        assert tools["documentation"] == "javadoc"
+        assert tools["security"] == "SpotBugs (mvn spotbugs:check)"
+        assert tools["dependency_check"] == (
+            "OWASP dependency-check (mvn dependency-check:check)"
+        )
+
+    def test_java_tools_do_not_double_list_across_categories(self) -> None:
+        """No Java tool is claimed by two metric categories.
+
+        The review lesson from the CI generator: listing one tool under
+        two categories overstates the toolchain. Coverage/complexity/
+        security/docs must each name disjoint tools.
+        """
+        tools = LANGUAGE_TOOLS["java"]
+        names_per_category = {
+            "coverage": {"JaCoCo"},
+            "complexity": {"PMD"},
+            "security": {"SpotBugs"},
+            "documentation": {"javadoc"},
+        }
+        for category, names in names_per_category.items():
+            for other_category, other_names in names_per_category.items():
+                if category != other_category:
+                    assert names.isdisjoint(other_names)
+            for name in names:
+                assert name in tools[category]
 
     def test_cpp_tools(self) -> None:
         """Test C/C++ tool mappings (#362).
@@ -830,6 +870,26 @@ class TestMetricsConfigGeneration:
             == "lcov (cmake -DENABLE_COVERAGE=ON + ctest)"
         )
         assert metrics["cyclomatic_complexity"]["tool"] == "lizard (CCN)"
+        assert metrics["code_coverage"]["threshold"] == 90
+        assert metrics["cyclomatic_complexity"]["threshold"] == 10
+
+    def test_generate_metrics_config_java_tools(self) -> None:
+        """Java metric config reports JaCoCo coverage and PMD CCN (#367)."""
+        config = MetricsGenerationConfig(
+            language="java",
+            project_name="wrist-timer",
+        )
+        generator = MetricsGenerator(None, config)
+
+        metrics_config = generator._generate_metrics_config()
+        metrics = metrics_config["metrics"]
+
+        assert metrics_config["language"] == "java"
+        assert metrics["code_coverage"]["tool"] == "JaCoCo (mvn jacoco:check)"
+        assert (
+            metrics["cyclomatic_complexity"]["tool"]
+            == "PMD (CyclomaticComplexity, pmd-ruleset.xml)"
+        )
         assert metrics["code_coverage"]["threshold"] == 90
         assert metrics["cyclomatic_complexity"]["threshold"] == 10
 

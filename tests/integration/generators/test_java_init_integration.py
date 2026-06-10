@@ -1,4 +1,4 @@
-"""Integration tests for ``sgsg init --language java`` (#366).
+"""Integration tests for ``sgsg init --language java`` (#366/#367).
 
 Runs the full init flow once via the Typer CliRunner and asserts the
 generated Java (Wear OS, legacy Android Wear) project tree, the Maven
@@ -10,11 +10,10 @@ These tests are structural only — they never invoke Maven, a JDK, or
 the Android SDK — so they pass on CI runners where none of those are
 installed, mirroring ``test_cpp_init_integration.py`` (#361).
 
-Foundation-stage boundaries: the CI workflow IS generated (ci.py has
-had a java config all along), while the #367 quality tooling
-(pre-commit config, quality scripts, metrics dashboard, architecture
-rules) is not — init must skip those steps with informational messages
-and the README must keep them under "Planned / coming soon".
+With #367 the quality toolchain (pre-commit config, quality scripts,
+the pmd-ruleset.xml companion, architecture rules) is generated for
+java alongside the #366 foundation and its CI workflow, so this suite
+locks in the presence of every pipeline artifact.
 """
 
 from pathlib import Path
@@ -101,12 +100,31 @@ class TestJavaInitTree:
     @pytest.mark.parametrize(
         "relative_path",
         [
-            # #367 quality tooling must not be scaffolded yet.
+            # Quality tooling (#367) is now generated alongside the
+            # foundation scaffold.
             ".pre-commit-config.yaml",
+            "pmd-ruleset.xml",
             "scripts/check-all.sh",
+            "scripts/format.sh",
+            "scripts/lint.sh",
             "scripts/test.sh",
-            "plans/architecture",
-            # The metrics dashboard is opt-in and unsupported for java.
+            "scripts/security.sh",
+            "plans/architecture/ArchitectureTest.java",
+            "plans/architecture/run-check.sh",
+        ],
+    )
+    def test_quality_tooling_artifact_generated(
+        self, java_project: Path, relative_path: str
+    ) -> None:
+        """#367 quality-tooling artifacts exist and are non-empty."""
+        file_path = java_project / relative_path
+        assert file_path.is_file(), f"Missing {relative_path}"
+        assert file_path.read_text(), f"Empty {relative_path}"
+
+    @pytest.mark.parametrize(
+        "relative_path",
+        [
+            # The metrics dashboard is opt-in (--enable-live-dashboard).
             "docs/metrics.json",
             # No Gradle manifests: the Android build is deliberately not
             # scaffolded (the two-builds split).
@@ -121,8 +139,48 @@ class TestJavaInitTree:
     def test_out_of_scope_artifact_not_generated(
         self, java_project: Path, relative_path: str
     ) -> None:
-        """The scaffold must not emit #367 tooling or Gradle manifests."""
+        """The scaffold must not emit opt-in artifacts or Gradle manifests."""
         assert not (java_project / relative_path).exists()
+
+
+class TestJavaInitQualityTooling:
+    """Assert the generated quality-tooling configs are valid (#367)."""
+
+    def test_precommit_config_parses_and_includes_java_hooks(
+        self, java_project: Path
+    ) -> None:
+        """.pre-commit-config.yaml parses and wires the Java toolchain."""
+        content = (java_project / ".pre-commit-config.yaml").read_text()
+        parsed = yaml.safe_load(
+            "\n".join(line for line in content.split("\n") if not line.startswith("#"))
+        )
+        local_repo = next(
+            repo for repo in parsed["repos"] if repo.get("repo") == "local"
+        )
+        hook_ids = {hook["id"] for hook in local_repo["hooks"]}
+        assert {"google-java-format", "checkstyle", "pmd", "spotbugs"} <= hook_ids
+
+    def test_pmd_ruleset_parses_and_gates_complexity(self, java_project: Path) -> None:
+        """pmd-ruleset.xml parses as XML and carries the CCN rule."""
+        content = (java_project / "pmd-ruleset.xml").read_text()
+        root = DefusedElementTree.fromstring(content)
+        assert root.tag.endswith("ruleset")
+        assert "CyclomaticComplexity" in content
+
+    def test_check_all_script_runs_the_java_toolchain(self, java_project: Path) -> None:
+        """check-all.sh chains format, lint, coverage-gated tests, security."""
+        content = (java_project / "scripts" / "check-all.sh").read_text()
+        assert 'run_check "Tests" "test.sh" --coverage' in content
+
+    def test_architecture_test_defines_the_layer_matrix(
+        self, java_project: Path
+    ) -> None:
+        """The ArchUnit template derives its layers from the project name."""
+        source = (
+            java_project / "plans" / "architecture" / "ArchitectureTest.java"
+        ).read_text()
+        assert f"package {_PACKAGE}.architecture;" in source
+        assert "Architectures.layeredArchitecture()" in source
 
 
 class TestJavaInitManifests:
@@ -261,11 +319,21 @@ class TestJavaInitReadme:
         assert ".github/workflows/ci.yml" in readme
         assert (java_project / ".github" / "workflows" / "ci.yml").is_file()
 
-    def test_readme_keeps_367_tooling_under_planned(self, java_project: Path) -> None:
-        """README lists the #367 quality tooling as planned, not real."""
+    def test_readme_advertises_367_tooling_as_real(self, java_project: Path) -> None:
+        """README advertises the now-generated #367 quality tooling.
+
+        Every artifact the README checkmarks must exist next to it —
+        the truthfulness contract; the 'Planned / coming soon' section
+        is gone because every roadmap item is generated.
+        """
         readme = (java_project / "README.md").read_text()
-        assert "Planned / coming soon" in readme
-        assert "#367" in readme
+        assert "Planned / coming soon" not in readme
+        assert "./scripts/check-all.sh" in readme
+        assert (java_project / "scripts" / "check-all.sh").is_file()
+        assert "plans/architecture" in readme
+        assert (
+            java_project / "plans" / "architecture" / "ArchitectureTest.java"
+        ).is_file()
 
     def test_readme_documents_android_tooling_gap(self, java_project: Path) -> None:
         """README explains that the APK build needs Android Studio/Gradle."""
@@ -275,14 +343,14 @@ class TestJavaInitReadme:
 
 
 class TestJavaInitConsoleOutput:
-    """Assert init's console output reflects the #366 boundaries."""
+    """Assert init's console output reflects the #367 wiring."""
 
-    def test_init_skips_only_the_367_steps(self, tmp_path: Path) -> None:
-        """Init skips pre-commit/scripts/architecture but generates CI.
+    def test_init_skips_no_pipeline_steps(self, tmp_path: Path) -> None:
+        """Init prints no skip notice for any java pipeline step.
 
-        The #367 quality tooling must be announced as unavailable while
-        the CI pipeline (real since ci.py gained its java config) is
-        generated without a skip notice.
+        The pre-commit, scripts, and architecture steps gained java
+        support with #367 (CI has been real since #366), so every
+        "unavailable" notice must be gone.
         """
         runner = CliRunner()
         with patch(
@@ -303,8 +371,8 @@ class TestJavaInitConsoleOutput:
                 ],
             )
         assert result.exit_code == 0
-        assert "Pre-commit config unavailable for java" in result.output
-        assert "Quality scripts unavailable for java" in result.output
-        assert "Architecture rules unavailable for java" in result.output
+        assert "Pre-commit config unavailable for java" not in result.output
+        assert "Quality scripts unavailable for java" not in result.output
+        assert "Architecture rules unavailable for java" not in result.output
         assert "CI pipeline unavailable for java" not in result.output
         assert "Generated CI pipeline" in result.output
