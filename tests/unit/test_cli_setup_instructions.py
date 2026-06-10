@@ -2,7 +2,13 @@
 
 from pathlib import Path
 
+import pytest
+
 from start_green_stay_green.cli import _get_setup_instructions
+
+# Languages exercised by the per-language common-tail tests; "java" covers
+# the unknown-language default path.
+ALL_LANGUAGES = ("python", "typescript", "go", "rust", "java")
 
 
 class TestGetSetupInstructions:
@@ -86,21 +92,17 @@ class TestGetSetupInstructions:
         assert "pre-commit install" in instructions
         assert "./scripts/check-all.sh" in instructions
 
-    def test_all_languages_end_with_check_all(self) -> None:
+    @pytest.mark.parametrize("lang", ALL_LANGUAGES)
+    def test_language_ends_with_check_all(self, lang: str) -> None:
         """Every language's instructions should end with check-all."""
-        for lang in ("python", "typescript", "go", "rust", "java"):
-            instructions = _get_setup_instructions((lang,), Path("/home/user/proj"))
-            assert (
-                instructions[-1] == "./scripts/check-all.sh"
-            ), f"{lang} should end with check-all"
+        instructions = _get_setup_instructions((lang,), Path("/home/user/proj"))
+        assert instructions[-1] == "./scripts/check-all.sh"
 
-    def test_all_languages_include_precommit(self) -> None:
+    @pytest.mark.parametrize("lang", ALL_LANGUAGES)
+    def test_language_includes_precommit(self, lang: str) -> None:
         """Every language's instructions should include pre-commit install."""
-        for lang in ("python", "typescript", "go", "rust", "java"):
-            instructions = _get_setup_instructions((lang,), Path("/home/user/proj"))
-            assert (
-                "pre-commit install" in instructions
-            ), f"{lang} should include pre-commit install"
+        instructions = _get_setup_instructions((lang,), Path("/home/user/proj"))
+        assert "pre-commit install" in instructions
 
     def test_returns_list_of_strings(self) -> None:
         """Instructions should be a list of strings."""
