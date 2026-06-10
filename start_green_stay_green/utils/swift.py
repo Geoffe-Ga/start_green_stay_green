@@ -24,7 +24,13 @@ def package_swift(package_name: str) -> str:
         The full contents of a ``Package.swift`` manifest declaring a
         watchOS app target and its XCTest test target. No ``products:``
         block is emitted because an app target is not a distributable
-        library.
+        library. Alongside the watchOS deployment target the manifest
+        declares ``.macOS(.v14)``: ``swift test`` builds the package for
+        the macOS *host*, and without an explicit entry SwiftPM falls
+        back to the macOS 10.13 default, which fails SwiftUI
+        availability checks (SwiftUI needs 10.15+, the ``App`` protocol
+        11+). The macOS minimum is what lets the generated CI and
+        ``scripts/test.sh`` run ``swift test --enable-code-coverage``.
     """
     type_name = pascal_case(package_name)
     return f"""// swift-tools-version:5.9
@@ -33,7 +39,10 @@ import PackageDescription
 let package = Package(
     name: "{type_name}",
     platforms: [
-        .watchOS(.v10)
+        .watchOS(.v10),
+        // macOS minimum for the host that `swift test` builds for; the
+        // SwiftPM default (10.13) predates SwiftUI and fails to compile.
+        .macOS(.v14)
     ],
     targets: [
         .target(name: "{package_name}"),

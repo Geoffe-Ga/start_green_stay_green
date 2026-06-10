@@ -519,6 +519,28 @@ class TestMultiLanguageStructure:
             assert "import SwiftUI" in content
             assert "App" in content
 
+    def test_swift_app_entry_point_is_watchos_only(self) -> None:
+        """@main is gated to watchOS so `swift test` can link on macOS.
+
+        SwiftPM links the package's test runner *executable* on the host
+        platform, and a second entry point in the app target collides
+        with the runner's `main` symbol (duplicate `_main` link error,
+        verified empirically for Issue #353). Gating @main behind
+        `#if os(watchOS)` keeps the watchOS entry point intact while the
+        macOS test host builds the type as plain, testable code.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["Sources/test_project/TestProjectApp.swift"].read_text()
+            assert "#if os(watchOS)\n@main\n#endif" in content
+
     def test_swift_creates_content_view(self) -> None:
         """Test Swift generates a SwiftUI ContentView with the greeting."""
         with tempfile.TemporaryDirectory() as tmpdir:

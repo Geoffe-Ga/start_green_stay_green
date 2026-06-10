@@ -24,6 +24,19 @@ class TestPackageSwift:
         content = package_swift("test_project")
         assert ".watchOS(.v10)" in content
 
+    def test_declares_macos_minimum_for_test_host(self) -> None:
+        """Manifest declares a macOS minimum so `swift test` can compile.
+
+        `swift test` builds the package for the macOS host. Without an
+        explicit macOS platform entry SwiftPM falls back to the 10.13
+        default, and the SwiftUI scaffold fails availability checks
+        (SwiftUI needs 10.15+, the App protocol 11+). Verified
+        empirically for Issue #353: the CI coverage gate can only pass
+        with this minimum declared.
+        """
+        content = package_swift("test_project")
+        assert ".macOS(.v14)" in content
+
     def test_declares_app_and_test_targets(self) -> None:
         """Both the app target and its test target are declared."""
         content = package_swift("test_project")

@@ -14,6 +14,7 @@ from unittest.mock import Mock
 
 from jinja2 import UndefinedError
 import pytest
+import yaml
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError
@@ -648,6 +649,7 @@ jobs:
             "java",
             "csharp",
             "ruby",
+            "swift",
         ],
     )
     def test_generate_workflow_all_languages(
@@ -1142,10 +1144,40 @@ jobs:
         """Test Ruby package_manager is exactly bundler."""
         assert LANGUAGE_CONFIGS["ruby"]["package_manager"] == "bundler"
 
+    # LANGUAGE_CONFIGS Exact Value Tests - Swift
+    def test_swift_test_framework_exact(self) -> None:
+        """Test Swift test_framework is exactly xctest."""
+        assert LANGUAGE_CONFIGS["swift"]["test_framework"] == "xctest"
+
+    def test_swift_linters_exact(self) -> None:
+        """Test Swift linters list is exact."""
+        assert LANGUAGE_CONFIGS["swift"]["linters"] == ["swiftlint"]
+
+    def test_swift_formatters_exact(self) -> None:
+        """Test Swift formatters list is exact."""
+        assert LANGUAGE_CONFIGS["swift"]["formatters"] == ["swift-format"]
+
+    def test_swift_security_tools_exact(self) -> None:
+        """Test Swift security_tools list is exact.
+
+        SwiftLint serves security duty too but is listed only under
+        linters so tool-install consumers don't double-install it.
+        """
+        expected = ["gitleaks", "periphery"]
+        assert LANGUAGE_CONFIGS["swift"]["security_tools"] == expected
+
+    def test_swift_supported_versions_exact(self) -> None:
+        """Test Swift supported_versions list is exact."""
+        assert LANGUAGE_CONFIGS["swift"]["supported_versions"] == ["5.9", "5.10", "6.0"]
+
+    def test_swift_package_manager_exact(self) -> None:
+        """Test Swift package_manager is exactly spm."""
+        assert LANGUAGE_CONFIGS["swift"]["package_manager"] == "spm"
+
     # Config Keys Exact Tests
-    def test_language_configs_has_exactly_7_languages(self) -> None:
-        """Test LANGUAGE_CONFIGS has exactly 7 supported languages."""
-        assert len(LANGUAGE_CONFIGS) == 7
+    def test_language_configs_has_exactly_8_languages(self) -> None:
+        """Test LANGUAGE_CONFIGS has exactly 8 supported languages."""
+        assert len(LANGUAGE_CONFIGS) == 8
 
     def test_language_configs_contains_python(self) -> None:
         """Test LANGUAGE_CONFIGS contains python key."""
@@ -1174,6 +1206,10 @@ jobs:
     def test_language_configs_contains_ruby(self) -> None:
         """Test LANGUAGE_CONFIGS contains ruby key."""
         assert "ruby" in LANGUAGE_CONFIGS
+
+    def test_language_configs_contains_swift(self) -> None:
+        """Test LANGUAGE_CONFIGS contains swift key."""
+        assert "swift" in LANGUAGE_CONFIGS
 
     def test_all_configs_have_test_framework_key(self) -> None:
         """Test all language configs have test_framework key."""
@@ -1239,7 +1275,7 @@ class TestCIGeneratorTemplatePath:
 
     @pytest.mark.parametrize(
         "language",
-        ["python", "typescript", "go", "rust"],
+        ["python", "typescript", "go", "rust", "swift"],
     )
     def test_generate_from_template_for_supported_language(self, language: str) -> None:
         """Each canonical language renders without an orchestrator."""
@@ -1381,3 +1417,150 @@ class TestCIGeneratorTemplatePath:
         generator = CIGenerator(language="python", reference_dir=reference_dir)
         with pytest.raises(UndefinedError):
             generator.generate_workflow_from_template()
+
+
+class TestSwiftReferenceTemplate:
+    """Tests for the Swift reference CI workflow (Issue #353).
+
+    The Swift scaffold is a SwiftUI + WatchKit watchOS app package, so
+    every assertion here reflects what can actually run: SwiftUI only
+    ships in Apple SDKs (macOS runners), `swift test` covers the SPM
+    path, and xcodebuild covers the watchOS-simulator path.
+    """
+
+    @pytest.fixture
+    def swift_workflow(self) -> CIWorkflow:
+        """Render the deterministic Swift reference workflow."""
+        return CIGenerator(language="swift").generate_workflow_from_template()
+
+    def test_workflow_is_valid_yaml(self, swift_workflow: CIWorkflow) -> None:
+        """Rendered workflow parses with yaml.safe_load and validates."""
+        parsed = yaml.safe_load(swift_workflow.content)
+        assert swift_workflow.is_valid
+        assert isinstance(parsed, dict)
+        assert parsed["name"] == "Swift Quality Checks"
+
+    def test_workflow_has_quality_test_and_watchos_jobs(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """Workflow declares the quality, test, and watchos jobs."""
+        parsed = yaml.safe_load(swift_workflow.content)
+        assert set(parsed["jobs"]) == {"quality", "test", "watchos"}
+
+    def test_all_jobs_run_on_macos(self, swift_workflow: CIWorkflow) -> None:
+        """Every job runs on macOS: SwiftUI cannot compile on Linux."""
+        parsed = yaml.safe_load(swift_workflow.content)
+        for name, job in parsed["jobs"].items():
+            assert job["runs-on"] == "macos-latest", f"{name} must run on macOS"
+
+    def test_watchos_job_guards_against_null_discovery(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """Scheme/UDID discovery fails loudly instead of passing null on.
+
+        jq emits the string "null" when no Apple Watch simulator (or no
+        scheme) matches; without guards that value reaches
+        ``xcodebuild -destination id=null`` as a cryptic late failure,
+        and unvalidated writes to GITHUB_ENV are the documented Actions
+        env-injection vector. The UDID must look like a simulator UUID.
+        """
+        content = swift_workflow.content
+        assert "No Apple Watch simulator found" in content
+        assert "No xcodebuild scheme found" in content
+        assert "^[0-9A-Fa-f-]{36}$" in content
+        # The scheme is character-class validated like the UDID...
+        assert "^[A-Za-z0-9._ -]+$" in content
+        # ...and discovery accepts both xcodebuild -list -json shapes
+        # (.workspace for app packages, .project for plain projects).
+        assert ".workspace.schemes // .project.schemes" in content
+
+    def test_coverage_gate_does_not_rerun_swift_test(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """The coverage gate locates the codecov JSON without re-testing.
+
+        ``swift test --show-codecov-path`` re-runs the entire suite (it
+        is not a pure query), doubling CI time and decoupling measured
+        coverage from the displayed test results, so the gate must find
+        the export JSON from the single coverage run instead.
+        """
+        content = swift_workflow.content
+        assert "--show-codecov-path" not in content
+        assert "find .build" in content
+        assert "*/codecov/*" in content
+
+    def test_version_matrix_does_not_fail_fast(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """Matrix legs run to completion so every failing version is seen."""
+        parsed = yaml.safe_load(swift_workflow.content)
+        assert parsed["jobs"]["test"]["strategy"]["fail-fast"] is False
+
+    def test_version_matrix_covers_swift_59_510_60(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """The test job matrixes over Swift 5.9, 5.10, and 6.0."""
+        parsed = yaml.safe_load(swift_workflow.content)
+        matrix = parsed["jobs"]["test"]["strategy"]["matrix"]
+        assert matrix["swift-version"] == ["5.9", "5.10", "6.0"]
+
+    def test_version_matrix_uses_pinned_setup_swift_action(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """setup-swift is pinned to a major version like other setup actions."""
+        assert "swift-actions/setup-swift@v2" in swift_workflow.content
+
+    def test_quality_job_enforces_coverage_threshold(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """Coverage gate parses the same llvm-cov JSON as scripts/test.sh."""
+        assert "swift test --enable-code-coverage" in swift_workflow.content
+        # Same data source as the generated scripts/test.sh --coverage
+        # (the export JSON from the single coverage run)...
+        assert "*/codecov/*" in swift_workflow.content
+        # ...and the same 90% line-coverage threshold.
+        assert '["data"][0]["totals"]["lines"]["percent"]' in swift_workflow.content
+        assert 'python3 - "$CODECOV_JSON" 90' in swift_workflow.content
+
+    def test_quality_job_mirrors_precommit_lint_and_format_hooks(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """CI runs the same SwiftLint/swift-format checks as pre-commit."""
+        # Check-mode counterpart of the `swift-format format --in-place`
+        # pre-commit hook (identical to scripts/format.sh --check).
+        assert "swift-format lint --strict --recursive Sources Tests" in (
+            swift_workflow.content
+        )
+        # Same invocation as the SwiftLint pre-commit hook; reads the
+        # generated .swiftlint.yml (complexity <= 10 + security rules).
+        assert "swiftlint lint --strict" in swift_workflow.content
+
+    def test_quality_job_runs_gitleaks_secret_scan(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """CI runs the gitleaks secret scan listed in security_tools."""
+        assert "gitleaks detect" in swift_workflow.content
+
+    def test_watchos_job_builds_for_watchos_simulator(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """The watchos job builds via xcodebuild for the watchOS simulator."""
+        assert "generic/platform=watchOS Simulator" in swift_workflow.content
+
+    def test_watchos_job_runs_tests_on_watchos_simulator(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """The watchos job runs XCTest on a concrete simulator device."""
+        assert "xcodebuild test" in swift_workflow.content
+        # Devices are matched by UDID (simctl discovery): name/OS matching
+        # breaks when the runner image's runtimes drift from the Xcode SDK.
+        assert "xcrun simctl list devices available --json" in swift_workflow.content
+        assert "id=$UDID" in swift_workflow.content
+
+    def test_watchos_job_discovers_scheme_dynamically(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """The xcodebuild scheme is discovered, not hardcoded."""
+        assert "xcodebuild -list -json" in swift_workflow.content
+        # The old stub hardcoded a placeholder scheme that could never exist.
+        assert "YourScheme" not in swift_workflow.content
