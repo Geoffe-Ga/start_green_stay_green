@@ -134,6 +134,7 @@ start-green-stay-green init [OPTIONS]
 - `--dry-run`: Preview what would be generated without creating files
 - `--no-interactive`: Run in non-interactive mode (requires all options)
 - `--config, --config-file PATH`: Path to configuration file (YAML or TOML)
+- `--windows-ci`: Add an opt-in `windows-latest` job to the generated CI workflow (default off; see below)
 
 **Examples:**
 
@@ -147,6 +148,9 @@ start-green-stay-green init -n my-app -l python --no-interactive
 # Multi-language project
 start-green-stay-green init -n fullstack-app -l python -l typescript
 
+# Opt into a Windows CI leg for the generated project
+start-green-stay-green init -n my-app -l python --windows-ci
+
 # Re-run safely in existing project (skips existing files)
 start-green-stay-green init -n my-app -l python
 
@@ -159,6 +163,40 @@ start-green-stay-green init -n my-app -l python --interactive
 # Dry run to preview
 start-green-stay-green init -n my-app -l typescript --dry-run
 ```
+
+#### `--windows-ci`: opt-in Windows CI leg for generated projects
+
+By default the generated `.github/workflows/ci.yml` runs on Linux only.
+Passing `--windows-ci` appends a `quality-windows` job that runs the
+project's quality gates on `windows-latest` through Git Bash — the same
+`bash scripts/<gate>.sh` invocation documented in the generated
+`scripts/README.md` — gated behind the Linux quality job so a red Linux
+run never burns Windows minutes. Default off: without the flag the
+generated CI is byte-for-byte unchanged and uses no Windows runner
+minutes.
+
+Supported languages: python, typescript, go, rust, java, csharp, ruby.
+Not supported (the flag fails fast with an explanation): swift and cpp
+(their gate toolchains are not available on `windows-latest`) and
+kotlin (the gate scripts need a Gradle wrapper jar that `init` cannot
+write). For a multi-language project the leg follows the primary
+language (the first `-l` value), matching how the CI workflow itself is
+generated. The go leg runs only its test gate — golangci-lint is
+provisioned by a Linux-only action in the quality job.
+
+To add the leg to an **existing** scaffolded repo, re-run init with the
+flag plus a conflict-resolution mode, since init never overwrites your
+files by default:
+
+```bash
+green init -n my-app -l python --windows-ci --interactive  # choose
+# "overwrite" for .github/workflows/ci.yml when prompted
+```
+
+(There is no YAML-aware merge for workflow files yet — unlike
+`.pre-commit-config.yaml`, which init merges — so overwriting the
+generated `ci.yml` is the supported path; copy your own edits back in
+afterwards.)
 
 ### `version` - Display Version Information
 

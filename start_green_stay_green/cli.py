@@ -63,6 +63,7 @@ from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.base import validate_language
 from start_green_stay_green.generators.ci import CIGenerator
 from start_green_stay_green.generators.ci import LANGUAGE_CONFIGS as CI_LANGUAGE_CONFIGS
+from start_green_stay_green.generators.ci_windows import WINDOWS_CI_LANGUAGES
 from start_green_stay_green.generators.claude_md import ClaudeMdGenerationResult
 from start_green_stay_green.generators.claude_md import ClaudeMdGenerator
 from start_green_stay_green.generators.dependencies import DependenciesGenerator
@@ -1138,20 +1139,24 @@ def _generate_ci_step(
     project_path: Path,
     project_name: str,
     language: str,
-    orchestrator: AIOrchestrator | None,
+    pass2: _Pass2Options | None,
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate the CI pipeline.
 
     Always runs the deterministic template path so a project is never
-    missing CI just because the user has no API key. ``orchestrator`` is
-    only used to opt into the legacy AI-tuned path for backward
-    compatibility. ``project_name`` is forwarded to the template
-    renderer so any ``<<% project_name %>>`` placeholder lands with
-    the real value rather than the empty string. Languages without a
-    CIGenerator config are skipped with an informational message instead
-    of aborting init — with kotlin wired in (#358) every CLI language
-    has one, so this guard is defensive for future additions.
+    missing CI just because the user has no API key.
+    ``pass2.orchestrator`` is only used to opt into the legacy AI-tuned
+    path for backward compatibility; ``pass2`` as a whole may be
+    ``None``, selecting the deterministic defaults. ``project_name`` is
+    forwarded to the template renderer so any ``<<% project_name %>>``
+    placeholder lands with the real value rather than the empty string.
+    ``pass2.windows_ci`` opts into the ``quality-windows`` leg (#388);
+    default off leaves the generated workflow unchanged. Languages
+    without a CIGenerator config are skipped with an informational
+    message instead of aborting init — with kotlin wired in (#358)
+    every CLI language has one, so this guard is defensive for future
+    additions.
     """
     if language not in CI_LANGUAGE_CONFIGS:
         console.print(
@@ -1160,13 +1165,16 @@ def _generate_ci_step(
         )
         return
 
+    if pass2 is None:
+        pass2 = _Pass2Options(orchestrator=None)
+
     with step_timer("ci"), console.status("Generating CI pipeline..."):
         ci_generator = CIGenerator(
-            orchestrator,
+            pass2.orchestrator,
             language,
             project_name=project_name,
         )
-        workflow = ci_generator.generate_workflow()
+        workflow = ci_generator.generate_workflow(windows_ci=pass2.windows_ci)
         workflows_dir = project_path / ".github" / "workflows"
         workflows_dir.mkdir(parents=True, exist_ok=True)
         ci_file = workflows_dir / "ci.yml"
@@ -1623,10 +1631,14 @@ class _Pass2Options:
         agent_targets: Resolved agent-context targets in canonical
             order. Defaults to Claude only (the backward-compatible
             default).
+        windows_ci: Opt-in ``--windows-ci`` flag (#388): append the
+            ``quality-windows`` leg to the generated CI workflow.
+            Default off keeps the generated CI unchanged.
     """
 
     orchestrator: AIOrchestrator | None
     agent_targets: tuple[str, ...] = (TARGET_CLAUDE,)
+    windows_ci: bool = False
 
 
 def _generate_pass2_polish(
@@ -1659,7 +1671,7 @@ def _generate_pass2_polish(
     """
     orchestrator = pass2.orchestrator
     emit_claude = TARGET_CLAUDE in pass2.agent_targets
-    _generate_ci_step(project_path, project_name, language, orchestrator, file_writer)
+    _generate_ci_step(project_path, project_name, language, pass2, file_writer)
     _generate_review_step(project_path, file_writer)
     if emit_claude:
         _generate_claude_md_step(
@@ -2275,6 +2287,41 @@ def _validate_pass2_flags(
         raise typer.Exit(code=1)
 
 
+def _validate_windows_ci_language(
+    *,
+    windows_ci: bool,
+    primary_language: str,
+) -> None:
+    """Fail fast when ``--windows-ci`` targets an unsupported language.
+
+    The generated CI workflow follows the project's primary language
+    (the first ``-l`` value), so the Windows leg is validated against
+    that language. Validation runs before any file is generated — and
+    before the ``--dry-run`` preview — so the user learns about the
+    unsupported combination immediately.
+
+    Args:
+        windows_ci: ``True`` if ``--windows-ci`` was passed.
+        primary_language: The resolved primary project language.
+
+    Raises:
+        typer.Exit: If the flag was passed for a language without a
+            supported Windows CI leg (see
+            :data:`~start_green_stay_green.generators.ci_windows.WINDOWS_CI_LANGUAGES`).
+    """
+    if not windows_ci or primary_language in WINDOWS_CI_LANGUAGES:
+        return
+    supported = ", ".join(WINDOWS_CI_LANGUAGES)
+    console.print(
+        f"[red]Error:[/red] --windows-ci is not supported for "
+        f"{primary_language!r} (supported: {supported}). The gates for "
+        "this language cannot run on a windows-latest runner — see "
+        "generators/ci_windows.py for the per-language rationale.",
+        style="bold",
+    )
+    raise typer.Exit(code=1)
+
+
 @app.command()
 def init(  # noqa: PLR0913
     project_name: Annotated[
@@ -2392,6 +2439,20 @@ def init(  # noqa: PLR0913
             help="Generate live metrics dashboard with auto-updating workflow.",
         ),
     ] = False,
+    windows_ci: Annotated[
+        bool,
+        typer.Option(
+            "--windows-ci",
+            help=(
+                "Add an opt-in windows-latest job to the generated CI "
+                "workflow that runs the quality gates through Git Bash "
+                "(bash scripts/<gate>.sh). Default off: without this "
+                "flag the generated CI is unchanged and uses no Windows "
+                "runner minutes. Applies to the primary language's "
+                "workflow; not supported for swift, cpp, or kotlin."
+            ),
+        ),
+    ] = False,
     timing_json: Annotated[
         Path | None,
         typer.Option(
@@ -2431,6 +2492,10 @@ def init(  # noqa: PLR0913
         no_enhance: Skip Pass 2 (AI tuning) but still resolve the API
             key for a future ``green enhance`` invocation.
         enable_live_dashboard: Generate live metrics dashboard with workflow.
+        windows_ci: Opt into a ``quality-windows`` CI job that runs the
+            generated project's quality gates on ``windows-latest``
+            through Git Bash (#388). Default off leaves the generated
+            workflow unchanged.
         timing_json: Optional path to write a timing/telemetry JSON report.
         config: Configuration file path.
         provider: Optional LLM provider override (``--provider``).
@@ -2457,6 +2522,10 @@ def init(  # noqa: PLR0913
         language, config_data, no_interactive=no_interactive
     )
     resolved_agents = _resolve_agent_targets(agent)
+    _validate_windows_ci_language(
+        windows_ci=windows_ci,
+        primary_language=resolved_languages[0],
+    )
 
     # Validate project name and paths
     try:
@@ -2506,7 +2575,11 @@ def init(  # noqa: PLR0913
             project_path,
             resolved_project_name,
             resolved_languages,
-            _Pass2Options(orchestrator=orchestrator, agent_targets=resolved_agents),
+            _Pass2Options(
+                orchestrator=orchestrator,
+                agent_targets=resolved_agents,
+                windows_ci=windows_ci,
+            ),
             file_writer,
         )
         _finalize_init(
