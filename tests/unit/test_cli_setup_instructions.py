@@ -119,7 +119,10 @@ class TestGetSetupInstructions:
         it crashes Path() on Windows runners (#380).
         """
         monkeypatch.delenv("SHELL", raising=False)
-        expected = _venv_activation_command(os.name, {})
+        # Production passes os.environ; computing the expectation with
+        # the same mapping keeps this true on Windows runners, where
+        # PSModulePath selects the PowerShell activation form.
+        expected = _venv_activation_command(os.name, os.environ)
 
         instructions = _get_setup_instructions(
             ("python",), Path("/home/user/my-project")
@@ -138,7 +141,7 @@ class TestGetSetupInstructions:
         produces for the same inputs.
         """
         monkeypatch.setenv("SHELL", "/usr/bin/fish")
-        expected = _venv_activation_command(os.name, {"SHELL": "/usr/bin/fish"})
+        expected = _venv_activation_command(os.name, os.environ)
 
         instructions = _get_setup_instructions(
             ("python",), Path("/home/user/my-project")
@@ -151,7 +154,7 @@ class TestGetSetupInstructions:
     ) -> None:
         """Unset SHELL yields the helper's platform default."""
         monkeypatch.delenv("SHELL", raising=False)
-        expected = _venv_activation_command(os.name, {})
+        expected = _venv_activation_command(os.name, os.environ)
 
         instructions = _get_setup_instructions(
             ("python",), Path("/home/user/my-project")

@@ -226,7 +226,7 @@ class TestRelativePaths:
         writer.write_file(tmp_path / "src" / "main.py", "content")
 
         call_args = mock_console.print.call_args[0][0]
-        assert "src/main.py" in call_args
+        assert str(Path("src") / "main.py") in call_args
         assert "CREATE" in call_args
 
     def test_logs_relative_path_on_skip(self, tmp_path: Path) -> None:
