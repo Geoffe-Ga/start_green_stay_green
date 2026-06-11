@@ -191,8 +191,10 @@ jobs:
   #   existing marker (applied by tests/e2e/conftest.py), NOT by skip
   #   decorations on individual tests. Windows e2e coverage is follow-up
   #   work in epic #378.
-  # - pytest is invoked directly instead of through scripts/test.sh: the
-  #   script assumes a POSIX venv layout (.venv/bin) and bash utilities.
+  # - The suites run through the cross-platform gate runner
+  #   (`python -m start_green_stay_green.gates`, #382) — the exact same
+  #   gate logic the POSIX scripts/*.sh wrappers delegate to — instead
+  #   of bash scripts, which assume a POSIX venv layout (.venv/bin).
   test-windows:
     name: Tests (Windows)
     runs-on: windows-latest
@@ -233,13 +235,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Run unit tests
-        # Same marker selection as `./scripts/test.sh --unit --ci`.
-        run: python -m pytest -m "not integration and not e2e and not flaky_in_ci"
+      # #382: the lint and test gates run through the cross-platform
+      # runner (the same logic scripts/*.sh delegates to on POSIX), so
+      # this leg verifies the documented Windows entrypoint end-to-end.
+      # Running the gates here REPLACES the direct pytest invocations —
+      # the marker selection is identical and the suites must not run
+      # twice.
+      - name: Run lint gate through cross-platform runner
+        run: python -m start_green_stay_green.gates lint
 
-      - name: Run integration tests
+      - name: Run unit tests through cross-platform runner
+        # Same marker selection as `./scripts/test.sh --unit --ci`.
+        run: python -m start_green_stay_green.gates test --unit --ci
+
+      - name: Run integration tests through cross-platform runner
         # Same marker selection as `./scripts/test.sh --integration --ci`.
-        run: python -m pytest -m "integration and not flaky_in_ci"
+        run: python -m start_green_stay_green.gates test --integration --ci
 
       - name: Track job timing
         if: always()
