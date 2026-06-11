@@ -101,6 +101,7 @@ class TestPreCommitGeneratorIntegration:
             "kotlin",
             "cpp",
             "java",
+            "csharp",
         ]
 
         for language in languages:

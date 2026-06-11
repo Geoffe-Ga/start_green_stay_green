@@ -9,7 +9,8 @@ from start_green_stay_green.cli import _venv_activation_command
 
 # Languages exercised by the per-language common-tail tests. The
 # unknown-language default path is covered separately with "ruby"
-# (java gained its own Maven step with #366).
+# (java gained its own Maven step with #366, csharp its dotnet step
+# with #371).
 ALL_LANGUAGES = (
     "python",
     "typescript",
@@ -19,6 +20,7 @@ ALL_LANGUAGES = (
     "kotlin",
     "cpp",
     "java",
+    "csharp",
 )
 
 
@@ -220,6 +222,20 @@ class TestGetSetupInstructions:
         instructions = _get_setup_instructions(("java",), Path("/home/user/wear-proj"))
         assert "mvn test" in instructions
         assert not any("gradle" in c for c in instructions)
+
+    def test_csharp_runs_the_dotnet_test_suite(self) -> None:
+        """csharp setup verifies the scaffold with one dotnet test run (#370).
+
+        ``dotnet test`` implicitly restores and builds with the csproj's
+        Roslyn analyzers as errors, so no separate restore/build steps
+        appear — the csproj is the single home of the quality policy.
+        """
+        instructions = _get_setup_instructions(
+            ("csharp",), Path("/home/user/dotnet-proj")
+        )
+        assert "dotnet test" in instructions
+        assert not any("dotnet restore" in c for c in instructions)
+        assert not any("dotnet build" in c for c in instructions)
 
     def test_unknown_language_has_sensible_default(self) -> None:
         """Unknown languages should still get pre-commit + check-all."""

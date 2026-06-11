@@ -162,7 +162,7 @@ class TestMultiLanguageGeneration:
 
 class TestMultiLanguageArchitectureParity:
     """Go (#341), Rust (#342), Swift (#352), Kotlin (#357), cpp (#362),
-    java (#367)."""
+    java (#367), csharp (#370)."""
 
     def test_go_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
         """Go must emit an architecture-enforcement config like py/ts."""
@@ -206,9 +206,26 @@ class TestMultiLanguageArchitectureParity:
         config = tmp_path / "plans" / "architecture" / "ArchitectureTest.java"
         assert config.exists(), "java init must emit the ArchUnit test template"
 
+    def test_csharp_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
+        """csharp must emit an architecture-enforcement config like py/ts/go."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "csharp")
+
+        config = tmp_path / "plans" / "architecture" / "ArchitectureTest.cs"
+        assert config.exists(), "csharp init must emit the NetArchTest template"
+
     @pytest.mark.parametrize(
         "language",
-        ["python", "typescript", "go", "rust", "swift", "kotlin", "cpp", "java"],
+        [
+            "python",
+            "typescript",
+            "go",
+            "rust",
+            "swift",
+            "kotlin",
+            "cpp",
+            "java",
+            "csharp",
+        ],
     )
     def test_supported_languages_emit_architecture_config(
         self, tmp_path: Path, language: str
