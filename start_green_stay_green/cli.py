@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from collections.abc import Sequence
 
+    from start_green_stay_green.generators.agent_context import AgentContextContent
     from start_green_stay_green.utils.enhance_state import EnhanceState
 
 from rich.console import Console
@@ -49,6 +50,12 @@ from start_green_stay_green.ai.provider_selection import ProviderUnavailableErro
 from start_green_stay_green.ai.provider_selection import build_provider
 from start_green_stay_green.ai.provider_selection import resolve_api_key_env_var
 from start_green_stay_green.ai.provider_selection import resolve_provider_selection
+from start_green_stay_green.generators.agent_context import AGENT_CONTEXT_TARGETS
+from start_green_stay_green.generators.agent_context import TARGET_AGENTS_MD
+from start_green_stay_green.generators.agent_context import TARGET_AIDER
+from start_green_stay_green.generators.agent_context import TARGET_CLAUDE
+from start_green_stay_green.generators.agent_context import load_agent_context_content
+from start_green_stay_green.generators.agent_context import render_target_files
 from start_green_stay_green.generators.architecture import (
     ArchitectureEnforcementGenerator,
 )
@@ -485,6 +492,7 @@ def _show_dry_run_preview(
     project_name: str,
     language: str,
     project_path: Path,
+    agent_targets: tuple[str, ...] = (TARGET_CLAUDE,),
 ) -> None:
     """Display dry-run preview of what would be generated.
 
@@ -492,6 +500,8 @@ def _show_dry_run_preview(
         project_name: Name of the project.
         language: Programming language.
         project_path: Path where project would be created.
+        agent_targets: Resolved ``--agent`` context targets; controls
+            which agent-context artifacts the preview lists (#387).
     """
     console.print("[bold yellow]Dry Run Mode[/bold yellow] - Preview only\n")
     console.print(f"Project: [cyan]{project_name}[/cyan]")
@@ -502,8 +512,13 @@ def _show_dry_run_preview(
     console.print("  - Pre-commit hooks")
     console.print("  - Quality scripts")
     console.print("  - Skills")
-    console.print("  - Subagent profiles")
-    console.print("  - CLAUDE.md (modular: index + .claude/docs/)")
+    if TARGET_CLAUDE in agent_targets:
+        console.print("  - Subagent profiles")
+        console.print("  - CLAUDE.md (modular: index + .claude/docs/)")
+    if TARGET_AGENTS_MD in agent_targets:
+        console.print("  - AGENTS.md (open agent-context standard)")
+    if TARGET_AIDER in agent_targets:
+        console.print("  - CONVENTIONS.md + .aider.conf.yml (aider)")
     console.print("  - GitHub Actions (AI review)")
     console.print("  - Architecture enforcement")
 
@@ -1224,6 +1239,32 @@ def _write_modular_claude_md(
     return index_result
 
 
+def _claude_context_project_config(
+    project_name: str,
+    language: str,
+) -> dict[str, Any]:
+    """Build the project config shared by every agent-context render.
+
+    Single source for the config dict used by the CLAUDE.md init step,
+    the ``enhance`` re-tune path, and the non-Claude agent-context
+    emitters (#387) — the same canonical content inputs everywhere.
+
+    Args:
+        project_name: Name of the target project.
+        language: Primary project language.
+
+    Returns:
+        Project config with ``project_name``, ``language``, ``scripts``,
+        and ``skills`` keys.
+    """
+    return {
+        "project_name": project_name,
+        "language": language,
+        "scripts": list(_CLAUDE_MD_SCRIPTS),
+        "skills": REQUIRED_SKILLS.copy(),
+    }
+
+
 def _generate_claude_md_step(
     project_path: Path,
     project_name: str,
@@ -1239,19 +1280,7 @@ def _generate_claude_md_step(
     """
     with step_timer("claude_md"), console.status("Generating CLAUDE.md..."):
         claude_md_generator = ClaudeMdGenerator(orchestrator)
-        project_config = {
-            "project_name": project_name,
-            "language": language,
-            "scripts": [
-                "check-all.sh",
-                "test.sh",
-                "lint.sh",
-                "format.sh",
-                "security.sh",
-                "mutation.sh",
-            ],
-            "skills": REQUIRED_SKILLS.copy(),
-        }
+        project_config = _claude_context_project_config(project_name, language)
         _write_modular_claude_md(
             claude_md_generator,
             project_path,
@@ -1259,6 +1288,68 @@ def _generate_claude_md_step(
             file_writer,
         )
     console.print("[green]✓[/green] Generated CLAUDE.md (modular .claude/docs)")
+
+
+def _generate_agent_context_step(
+    project_path: Path,
+    project_name: str,
+    language: str,
+    agent_targets: tuple[str, ...],
+    file_writer: FileWriter | None = None,
+) -> None:
+    """Emit agent-context files for the non-Claude targets (#387).
+
+    Renders the shared canonical content (the same split docs and
+    subagent role descriptions the Claude target uses) into each
+    selected non-Claude format: ``AGENTS.md`` for ``agents-md``,
+    ``CONVENTIONS.md`` + ``.aider.conf.yml`` for ``aider``. Fully
+    deterministic — no orchestrator involved — so it runs identically
+    online and offline. When only the ``claude`` target is selected
+    this is a no-op, keeping the default output byte-for-byte
+    unchanged.
+    """
+    extra_targets = tuple(t for t in agent_targets if t != TARGET_CLAUDE)
+    if not extra_targets:
+        return
+
+    with step_timer("agent_context"), console.status("Generating agent context..."):
+        content = load_agent_context_content(
+            _claude_context_project_config(project_name, language)
+        )
+        emitted = _emit_agent_context_targets(
+            project_path, extra_targets, content, file_writer
+        )
+    console.print(f"[green]✓[/green] Generated agent context: {', '.join(emitted)}")
+
+
+def _emit_agent_context_targets(
+    project_path: Path,
+    targets: tuple[str, ...],
+    content: AgentContextContent,
+    file_writer: FileWriter | None,
+) -> list[str]:
+    """Write every file the selected non-Claude targets render.
+
+    Args:
+        project_path: Target project root directory.
+        targets: Non-Claude agent-context targets to emit.
+        content: The loaded shared agent-context content.
+        file_writer: Optional conflict-aware writer (additive init);
+            direct LF-only writes when ``None``.
+
+    Returns:
+        The emitted filenames, in emission order.
+    """
+    emitted: list[str] = []
+    for target in targets:
+        for filename, text in render_target_files(target, content).items():
+            target_file = project_path / filename
+            if file_writer is not None:
+                file_writer.write_file(target_file, text)
+            else:
+                target_file.write_text(text, encoding="utf-8", newline="\n")
+            emitted.append(filename)
+    return emitted
 
 
 def _generate_architecture_step(
@@ -1515,11 +1606,34 @@ def _generate_metrics_dashboard_step(
         )
 
 
+@dataclass(frozen=True)
+class _Pass2Options:
+    """Inputs that select what Pass 2 of init emits and how.
+
+    Bundles the orchestrator (which flips each step between "render
+    template" and "AI-tune the template") with the resolved ``--agent``
+    context targets (#387). Grouping them keeps
+    :func:`_generate_project_files` and :func:`_generate_pass2_polish`
+    below the ``PLR0913`` threshold — same pattern as
+    :class:`_EnhanceRunOptions`.
+
+    Attributes:
+        orchestrator: Optional AI orchestrator; ``None`` selects the
+            deterministic baseline path for every step.
+        agent_targets: Resolved agent-context targets in canonical
+            order. Defaults to Claude only (the backward-compatible
+            default).
+    """
+
+    orchestrator: AIOrchestrator | None
+    agent_targets: tuple[str, ...] = (TARGET_CLAUDE,)
+
+
 def _generate_pass2_polish(
     project_path: Path,
     project_name: str,
     language: str,
-    orchestrator: AIOrchestrator | None,
+    pass2: _Pass2Options,
     file_writer: FileWriter | None = None,
 ) -> None:
     """Run Pass 2 of the optimization roadmap's two-pass init model.
@@ -1529,22 +1643,35 @@ def _generate_pass2_polish(
     one of these has a deterministic baseline path too, so the function
     runs unconditionally; the orchestrator is what flips each step
     between "render template" and "AI-tune the template". When
-    ``orchestrator`` is ``None`` (``--offline`` / ``--no-enhance`` /
-    no API key), every step still runs and produces a complete project
+    ``pass2.orchestrator`` is ``None`` (``--offline`` / ``--no-enhance``
+    / no API key), every step still runs and produces a complete project
     via the deterministic path.
+
+    The Claude context artifacts (CLAUDE.md tree + subagent profiles)
+    are emitted only when the ``claude`` agent target is selected;
+    non-Claude targets are emitted by
+    :func:`_generate_agent_context_step` (#387). CI, review workflow,
+    and architecture rules are target-independent and always run.
 
     The roadmap (plans/2026-05-03-claude-init-optimization-roadmap.md)
     calls this Pass 2 to distinguish it from Pass 1's per-language
     scaffold steps.
     """
+    orchestrator = pass2.orchestrator
+    emit_claude = TARGET_CLAUDE in pass2.agent_targets
     _generate_ci_step(project_path, project_name, language, orchestrator, file_writer)
     _generate_review_step(project_path, file_writer)
-    _generate_claude_md_step(
-        project_path, project_name, language, orchestrator, file_writer
-    )
+    if emit_claude:
+        _generate_claude_md_step(
+            project_path, project_name, language, orchestrator, file_writer
+        )
     _generate_architecture_step(project_path, project_name, language, file_writer)
-    _generate_subagents_step(
-        project_path, project_name, language, orchestrator, file_writer
+    if emit_claude:
+        _generate_subagents_step(
+            project_path, project_name, language, orchestrator, file_writer
+        )
+    _generate_agent_context_step(
+        project_path, project_name, language, pass2.agent_targets, file_writer
     )
 
 
@@ -1552,7 +1679,7 @@ def _generate_project_files(
     project_path: Path,
     project_name: str,
     languages: tuple[str, ...],
-    orchestrator: AIOrchestrator | None,
+    pass2: _Pass2Options,
     file_writer: FileWriter,
 ) -> None:
     """Generate all project files with progress indicators.
@@ -1566,8 +1693,9 @@ def _generate_project_files(
         project_path: Path where project will be created.
         project_name: Name of the project.
         languages: Tuple of programming languages to generate for.
-        orchestrator: Optional AI orchestrator for AI-powered features.
-            None indicates fallback to template mode.
+        pass2: Pass 2 options bundling the optional AI orchestrator
+            (``None`` indicates fallback to template mode) and the
+            resolved agent-context targets (#387).
         file_writer: FileWriter instance for safe file operations.
 
     Raises:
@@ -1605,7 +1733,7 @@ def _generate_project_files(
                 project_path,
                 project_name,
                 primary_language,
-                orchestrator,
+                pass2,
                 file_writer,
             )
         except (AIGenerationError, OSError) as ai_err:
@@ -2036,6 +2164,71 @@ def _resolve_pass2_orchestrator(
     return orchestrator
 
 
+def _validate_agent_target(value: str) -> str:
+    """Normalize and validate one ``--agent`` value (#387).
+
+    Args:
+        value: A single agent-target name from the CLI.
+
+    Returns:
+        The lower-cased target name if it is recognised.
+
+    Raises:
+        typer.BadParameter: If the target is not in
+            :data:`AGENT_CONTEXT_TARGETS`.
+    """
+    normalized = value.strip().lower()
+    if normalized not in AGENT_CONTEXT_TARGETS:
+        valid = ", ".join(AGENT_CONTEXT_TARGETS)
+        msg = f"unknown agent target {value!r}; choose from: {valid}"
+        raise typer.BadParameter(msg)
+    return normalized
+
+
+def _resolve_agent_targets(agent: list[str] | None) -> tuple[str, ...]:
+    """Resolve the ``--agent`` flag list into context targets (#387).
+
+    Accepts both repeated flags (``--agent claude --agent agents-md``)
+    and comma-separated values (``--agent claude,agents-md``), matching
+    the ``-l`` multi-language flag's ergonomics. Omitting the flag
+    selects the backward-compatible Claude default.
+
+    Args:
+        agent: Raw values from the typer option, or ``None``.
+
+    Returns:
+        A deduplicated tuple of target names in the canonical order
+        defined by :data:`AGENT_CONTEXT_TARGETS`.
+
+    Raises:
+        typer.BadParameter: If any target is unknown, or the flag was
+            passed but resolves to no targets.
+    """
+    if not agent:
+        return (TARGET_CLAUDE,)
+    resolved = _canonicalize_agent_targets(_split_target_pieces(agent))
+    if not resolved:
+        msg = "--agent requires at least one target value"
+        raise typer.BadParameter(msg)
+    return resolved
+
+
+def _canonicalize_agent_targets(pieces: list[str]) -> tuple[str, ...]:
+    """Validate and dedupe agent-target pieces into canonical order.
+
+    Args:
+        pieces: Individual target values (already split on commas).
+
+    Returns:
+        The recognised targets in :data:`AGENT_CONTEXT_TARGETS` order.
+
+    Raises:
+        typer.BadParameter: If any piece is not a known target.
+    """
+    requested = {_validate_agent_target(piece) for piece in pieces}
+    return tuple(t for t in AGENT_CONTEXT_TARGETS if t in requested)
+
+
 def _validate_pass2_flags(
     *,
     offline: bool,
@@ -2100,6 +2293,21 @@ def init(  # noqa: PLR0913
             help=(
                 "Programming language(s). Repeat for multi-language projects: "
                 f"-l python -l typescript. ({', '.join(SUPPORTED_LANGUAGES)})"
+            ),
+        ),
+    ] = None,
+    agent: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--agent",
+            help=(
+                "Agent-context format(s) to generate. Repeat or "
+                "comma-separate for multiple targets: --agent claude "
+                "--agent agents-md. Choices: claude (default; CLAUDE.md "
+                "+ .claude/), agents-md (AGENTS.md, the open "
+                "agent-context convention), aider (CONVENTIONS.md + "
+                ".aider.conf.yml). All formats render the same shared "
+                "content."
             ),
         ),
     ] = None,
@@ -2209,6 +2417,9 @@ def init(  # noqa: PLR0913
     Args:
         project_name: Name of the project.
         language: Primary programming language.
+        agent: Agent-context format(s) to generate (``--agent``).
+            Defaults to Claude (``CLAUDE.md`` + ``.claude/``); also
+            supports ``agents-md`` and ``aider``, alone or combined.
         output_dir: Output directory (defaults to current directory).
         dry_run: Preview mode without file creation.
         force: Overwrite all existing files without prompting.
@@ -2245,6 +2456,7 @@ def init(  # noqa: PLR0913
     resolved_languages = _resolve_language_param(
         language, config_data, no_interactive=no_interactive
     )
+    resolved_agents = _resolve_agent_targets(agent)
 
     # Validate project name and paths
     try:
@@ -2259,7 +2471,10 @@ def init(  # noqa: PLR0913
     # Handle dry-run mode (skip orchestrator initialization for preview)
     if dry_run:
         _show_dry_run_preview(
-            resolved_project_name, ", ".join(resolved_languages), project_path
+            resolved_project_name,
+            ", ".join(resolved_languages),
+            project_path,
+            resolved_agents,
         )
         return
 
@@ -2291,7 +2506,7 @@ def init(  # noqa: PLR0913
             project_path,
             resolved_project_name,
             resolved_languages,
-            orchestrator,
+            _Pass2Options(orchestrator=orchestrator, agent_targets=resolved_agents),
             file_writer,
         )
         _finalize_init(
@@ -2625,12 +2840,10 @@ def _enhance_claude_md(
     """
     with step_timer("enhance_claude_md"), console.status("Re-tuning CLAUDE.md..."):
         claude_md_generator = ClaudeMdGenerator(orchestrator)
-        project_config: dict[str, Any] = {
-            "project_name": project.project_name,
-            "language": project.language,
-            "scripts": list(_CLAUDE_MD_SCRIPTS),
-            "skills": REQUIRED_SKILLS.copy(),
-        }
+        project_config = _claude_context_project_config(
+            project.project_name,
+            project.language,
+        )
         if dry_run:
             index_result, _docs = claude_md_generator.render_modular(project_config)
             target = project.project_path / "CLAUDE.md"

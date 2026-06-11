@@ -37,6 +37,15 @@ SOURCE_AGENT_CONTEXT = (
     "agent hierarchy, paper implementations, and research workflows"
 )
 
+# Match YAML frontmatter pattern:
+# ^(---\n  - Start with --- and newline (captured group 1)
+# .*?      - Match any content (non-greedy)
+# \n---)   - End with newline and --- (end group 1)
+# \n       - Newline after frontmatter
+# (.*)$    - Capture remaining content as body (group 2)
+# re.DOTALL allows . to match newlines
+_FRONTMATTER_PATTERN = re.compile(r"^(---\n.*?\n---)\n(.*)$", re.DOTALL)
+
 # Mapping from required agent names to source agent files
 REQUIRED_AGENTS = {
     "chief-architect": "chief-architect.md",
@@ -48,6 +57,30 @@ REQUIRED_AGENTS = {
     "refactorer": "implementation-specialist.md",
     "performance": "performance-specialist.md",
 }
+
+
+def split_frontmatter(content: str) -> tuple[str, str]:
+    """Split agent content into YAML frontmatter and body.
+
+    Module-level seam shared by :class:`SubagentsGenerator` and the
+    agent-context renderer (#387), so the frontmatter grammar is
+    defined exactly once.
+
+    Args:
+        content: Agent content with frontmatter.
+
+    Returns:
+        Tuple of ``(frontmatter, body)`` where ``frontmatter`` includes
+        the ``---`` delimiters.
+
+    Raises:
+        ValueError: If frontmatter not found or malformed.
+    """
+    match = _FRONTMATTER_PATTERN.match(content)
+    if not match:
+        msg = "Agent content missing YAML frontmatter"
+        raise ValueError(msg)
+    return match.group(1), match.group(2)
 
 
 @dataclass(frozen=True)
@@ -210,21 +243,7 @@ class SubagentsGenerator(BaseGenerator):
         Raises:
             ValueError: If frontmatter not found or malformed.
         """
-        # Match YAML frontmatter pattern:
-        # ^(---\n  - Start with --- and newline (captured group 1)
-        # .*?      - Match any content (non-greedy)
-        # \n---)   - End with newline and --- (end group 1)
-        # \n       - Newline after frontmatter
-        # (.*)$    - Capture remaining content as body (group 2)
-        # re.DOTALL allows . to match newlines
-        pattern = r"^(---\n.*?\n---)\n(.*)$"
-        match = re.match(pattern, content, re.DOTALL)
-
-        if not match:
-            msg = "Agent content missing YAML frontmatter"
-            raise ValueError(msg)
-
-        return match.group(1), match.group(2)
+        return split_frontmatter(content)
 
     async def _tune_agent_body(
         self,

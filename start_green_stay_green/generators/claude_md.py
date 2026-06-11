@@ -369,6 +369,31 @@ class ClaudeMdGenerator:
             for name in CLAUDE_DOC_NAMES
         }
 
+    def render_docs(self, project_config: dict[str, Any]) -> dict[str, str]:
+        """Render only the six split docs, without the index (#387).
+
+        Public seam for consumers that need the canonical doc content but
+        not the Claude-specific index — e.g. the agent-context renderer,
+        which folds these docs into ``AGENTS.md`` / ``CONVENTIONS.md``.
+        Rendering is fully deterministic (token substitution only).
+
+        Args:
+            project_config: Project configuration with keys
+                ``project_name``, ``language``, ``scripts``, ``skills``.
+
+        Returns:
+            Mapping of doc stem (see :data:`CLAUDE_DOC_NAMES`) to its
+            rendered content.
+
+        Raises:
+            ValueError: If the docs directory or any required split doc
+                is missing.
+            FileNotFoundError: If a doc file disappears between
+                validation and read.
+        """
+        self._validate_docs_dir()
+        return self._render_docs(project_config)
+
     def render_modular(
         self,
         project_config: dict[str, Any],
