@@ -434,6 +434,7 @@ Project names must follow these rules:
 - **C/C++**: ctest (≥90% coverage via gcov/lcov), clang-format, clang-tidy + cppcheck, lizard, flawfinder
 - **Java**: mvn test (≥90% coverage via JaCoCo), google-java-format, Checkstyle + PMD, SpotBugs, OWASP dependency-check
 - **C#**: dotnet test (≥90% coverage via Coverlet), dotnet format, Roslyn analyzers (CA1502 complexity ≤10), SecurityCodeScan + vulnerable-package scan
+- **Ruby**: bundle exec rspec (≥90% coverage via SimpleCov), RuboCop (format + lint + complexity ≤10 + Security cops in one `.rubocop.yml` policy home), bundler-audit
 
 See the [CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for the
 full per-language toolchain table and prerequisites.
@@ -650,6 +651,37 @@ scripts, hooks, and CI cannot drift from it. See
 [CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
 the full C# toolchain table.
 
+### Example 10: Ruby Project
+
+```bash
+# Prerequisites: Ruby 3.3+ and Bundler - every quality gem (RSpec,
+# SimpleCov, RuboCop, bundler-audit, Packwerk) is pinned in the
+# generated Gemfile, so bundle install provisions the whole toolchain
+# (Debian/Ubuntu: apt-get install ruby-full):
+brew install ruby
+
+start-green-stay-green init \
+  --project-name wrist-cadence \
+  --language ruby \
+  --no-interactive
+
+cd wrist-cadence
+bundle install
+bundle exec rspec
+pre-commit install
+./scripts/check-all.sh  # RuboCop format check + lint + complexity ≤10 + Security cops, RSpec + ≥90% SimpleCov coverage, bundler-audit dependency CVE scan
+```
+
+The generated CI pipeline runs on ubuntu runners with a Ruby 3.3/3.4
+quality matrix (the maintained Ruby lines) running the same gates as
+the local build — RuboCop reads the same `.rubocop.yml` (the single
+home of the format/lint/complexity/security-cop policy) and the ≥90%
+SimpleCov coverage bound lives only in `spec/spec_helper.rb`, so the
+scripts, hooks, and CI cannot drift from them. See
+[examples/ruby/](examples/ruby/) for real generated output and the
+[CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
+the full Ruby toolchain table.
+
 ## Project Structure
 
 After running `start-green-stay-green init`, your project will have:
@@ -824,6 +856,7 @@ All contributions must:
 - ✅ C/C++ (Tizen native) language support — scaffold, quality tooling, CI, tests (#361, #362, #363, #364)
 - ✅ Java (Wear OS legacy) language support — scaffold, quality tooling, CI, tests, docs (#366, #367, #368, #369)
 - ✅ C# (.NET) language support — quality tooling on the foundation scaffold + CI, tests, docs (#370, #371, #372)
+- ✅ Ruby language support — quality tooling on the foundation scaffold + CI, tests, docs (#373, #374, #375)
 
 ### Planned
 

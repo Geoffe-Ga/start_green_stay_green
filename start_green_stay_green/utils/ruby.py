@@ -34,7 +34,10 @@ SIMPLECOV_VERSION = "0.22"
 # RuboCop owns formatting (--autocorrect via scripts/format.sh), lint,
 # the Metrics/CyclomaticComplexity <=10 gate, and the Security cops;
 # .rubocop.yml is the single home of its policy (#373).
-RUBOCOP_VERSION = "1.87"
+# Patch-precision pessimistic pin: pre-commit runs RuboCop from its own
+# pinned environment (rev v1.87.0), so the Gemfile must not float to a
+# newer minor and silently diverge from the hook.
+RUBOCOP_VERSION = "1.87.0"
 # bundler-audit owns dependency CVE scanning (scripts/security.sh).
 BUNDLER_AUDIT_VERSION = "0.9"
 # Packwerk backs the architecture boundary rules generated into

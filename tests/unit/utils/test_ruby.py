@@ -71,7 +71,9 @@ class TestGemVersionPins:
 
     def test_rubocop_pin_is_current_stable_line(self) -> None:
         """RuboCop pins the live-verified stable line (2026-06: 1.87.0)."""
-        assert ruby.RUBOCOP_VERSION == "1.87"
+        # Patch precision keeps the Gemfile in lockstep with the
+        # pre-commit hook rev (which pins an exact tag).
+        assert ruby.RUBOCOP_VERSION == "1.87.0"
 
     def test_rspec_pin_is_current_stable_line(self) -> None:
         """RSpec pins the live-verified stable line (2026-06: 3.13.2)."""
