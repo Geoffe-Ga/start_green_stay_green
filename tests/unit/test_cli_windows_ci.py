@@ -13,6 +13,7 @@ Covers:
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,6 +28,18 @@ from start_green_stay_green.utils.file_writer import FileWriter
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(output: str) -> str:
+    """Normalize rich-rendered CLI output for substring assertions.
+
+    Rich styles, pads, borders, and may hyphen-wrap long option names
+    depending on the environment it detects, so strip ANSI sequences and
+    collapse box-drawing characters and whitespace before matching.
+    """
+    return re.sub(r"[│╭╮╰╯─\s]+", "", _ANSI_RE.sub("", output))
 
 
 class TestValidateWindowsCiLanguage:
@@ -102,7 +115,7 @@ class TestInitWindowsCiFlag:
             ],
         )
         assert result.exit_code != 0
-        assert "--windows-ci" in result.output
+        assert "--windows-ci" in _plain(result.output)
         assert not (tmp_path / "sample-swift").exists()
 
     def test_init_windows_ci_writes_windows_leg(self, tmp_path: Path) -> None:
@@ -134,4 +147,4 @@ class TestInitWindowsCiFlag:
         runner = CliRunner()
         result = runner.invoke(cli.app, ["init", "--help"])
         assert result.exit_code == 0
-        assert "--windows-ci" in result.output
+        assert "--windows-ci" in _plain(result.output)
