@@ -8,16 +8,43 @@ by ``tests/e2e/test_release_readiness_e2e.py``.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
-import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
-import verify_release_readiness as vrr
+_SCRIPT_PATH = (
+    Path(__file__).resolve().parents[2] / "scripts" / "verify_release_readiness.py"
+)
+
+
+def _load_script_module() -> ModuleType:
+    """Load the verification script directly from its file path (#402).
+
+    ``scripts/`` is not a package, so the module is loaded via importlib
+    instead of mutating ``sys.path`` (which would leak the directory into
+    every other test's import resolution).
+
+    Returns:
+        The loaded ``verify_release_readiness`` module object.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "verify_release_readiness", _SCRIPT_PATH
+    )
+    if spec is None or spec.loader is None:
+        msg = f"cannot build import spec for {_SCRIPT_PATH}"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+vrr = _load_script_module()
 
 
 def _always_posix() -> bool:
@@ -39,7 +66,7 @@ def _make_valid_project(root: Path) -> Path:
     Returns:
         The project root path.
     """
-    project = root / vrr.PROJECT_NAME
+    project: Path = root / vrr.PROJECT_NAME
     project.mkdir()
 
     for relative in vrr.REQUIRED_FILES:
@@ -170,6 +197,16 @@ class TestPrecommitHooks:
         project = _make_valid_project(tmp_path)
         assert vrr._check_precommit_hooks(project) == []
 
+    def test_missing_config_yields_no_failures(self, tmp_path: Path) -> None:
+        """An absent config returns a clean empty list, not a crash (#402).
+
+        The missing file itself is already reported by _check_required_files,
+        so this check must not raise FileNotFoundError nor double-report.
+        """
+        project = tmp_path / "empty"
+        project.mkdir()
+        assert vrr._check_precommit_hooks(project) == []
+
     def test_reports_too_few_hooks(self, tmp_path: Path) -> None:
         """Too few declared hooks are reported with the actual count."""
         project = _make_valid_project(tmp_path)
@@ -285,3 +322,118 @@ class TestVerify:
         project = _make_valid_project(tmp_path)
         (project / "README.md").unlink()
         assert vrr._verify(project) == 1
+
+
+class TestMain:
+    """Tests for main() orchestration (#402).
+
+    ``_run_init`` and ``_verify`` are mocked so no real CLI is invoked;
+    ``tempfile.mkdtemp`` is pinned to a directory under ``tmp_path`` so the
+    keep-vs-cleanup behavior can be observed hermetically.
+    """
+
+    @staticmethod
+    def _pin_mkdtemp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+        """Pin tempfile.mkdtemp to a fresh directory under tmp_path.
+
+        Args:
+            monkeypatch: The pytest monkeypatch fixture.
+            tmp_path: The pytest per-test temporary directory.
+
+        Returns:
+            The directory that main() will receive from mkdtemp.
+        """
+        tmpdir = tmp_path / "sgsg-release-pinned"
+        tmpdir.mkdir()
+        monkeypatch.setattr(vrr.tempfile, "mkdtemp", lambda **_kwargs: str(tmpdir))
+        return tmpdir
+
+    @staticmethod
+    def _verify_must_not_run(project_dir: Path) -> int:
+        """Fail the test if main() reaches _verify on an error path."""
+        msg = f"_verify must not be called, got {project_dir}"
+        raise AssertionError(msg)
+
+    def test_keep_preserves_temp_dir(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--keep leaves the generated temp directory on disk."""
+        tmpdir = self._pin_mkdtemp(monkeypatch, tmp_path)
+        (tmpdir / vrr.PROJECT_NAME).mkdir()
+        monkeypatch.setattr(vrr, "_run_init", lambda _output_dir: [])
+        monkeypatch.setattr(vrr, "_verify", lambda _project_dir: 0)
+
+        assert vrr.main(["--keep"]) == 0
+        assert tmpdir.is_dir(), "--keep must preserve the temp directory"
+        out = capsys.readouterr().out
+        assert f"Kept generated project at {tmpdir}" in out
+        assert "All automatable release-readiness checks PASSED." in out
+
+    def test_temp_dir_removed_without_keep(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Without --keep the temp directory is removed after verification."""
+        tmpdir = self._pin_mkdtemp(monkeypatch, tmp_path)
+        (tmpdir / vrr.PROJECT_NAME).mkdir()
+        monkeypatch.setattr(vrr, "_run_init", lambda _output_dir: [])
+        monkeypatch.setattr(vrr, "_verify", lambda _project_dir: 0)
+
+        assert vrr.main([]) == 0
+        assert not tmpdir.exists(), "temp directory must be cleaned up"
+        assert "Kept generated project" not in capsys.readouterr().out
+
+    def test_reports_init_failures_and_cleans_up(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Init failures are printed, exit 1, _verify skipped, dir removed."""
+        tmpdir = self._pin_mkdtemp(monkeypatch, tmp_path)
+        monkeypatch.setattr(vrr, "_run_init", lambda _output_dir: ["init boom"])
+        monkeypatch.setattr(vrr, "_verify", self._verify_must_not_run)
+
+        assert vrr.main([]) == 1
+        assert not tmpdir.exists(), "finally block must clean up on init failure"
+        assert "FAIL  generate project: init boom" in capsys.readouterr().out
+
+    def test_reports_project_dir_not_created(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A successful init without a project dir exits 1 and cleans up."""
+        tmpdir = self._pin_mkdtemp(monkeypatch, tmp_path)
+        monkeypatch.setattr(vrr, "_run_init", lambda _output_dir: [])
+        monkeypatch.setattr(vrr, "_verify", self._verify_must_not_run)
+
+        assert vrr.main([]) == 1
+        assert not tmpdir.exists(), "finally block must clean up on error path"
+        out = capsys.readouterr().out
+        expected = f"FAIL  project directory not created: {tmpdir / vrr.PROJECT_NAME}"
+        assert expected in out
+
+    def test_failure_summary_when_verify_fails(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A failing verification exits 1 with the FAILED summary line."""
+        tmpdir = self._pin_mkdtemp(monkeypatch, tmp_path)
+        (tmpdir / vrr.PROJECT_NAME).mkdir()
+        monkeypatch.setattr(vrr, "_run_init", lambda _output_dir: [])
+        monkeypatch.setattr(vrr, "_verify", lambda _project_dir: 1)
+
+        assert vrr.main([]) == 1
+        assert not tmpdir.exists(), "temp directory must be cleaned up"
+        out = capsys.readouterr().out
+        assert "Release-readiness verification FAILED." in out
+        assert "PASSED" not in out
