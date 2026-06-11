@@ -15,6 +15,7 @@ from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
 from start_green_stay_green.utils.cpp import cpp_identifier
+from start_green_stay_green.utils.csharp import csharp_namespace
 from start_green_stay_green.utils.java import android_package
 from start_green_stay_green.utils.java import android_package_path
 from start_green_stay_green.utils.naming import pascal_case
@@ -63,9 +64,10 @@ class TestsGenerator(BaseGenerator):
     All 10 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin, cpp) are available at the generator level. Note that
     the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
-    architecture, and metrics steps for csharp and ruby —
+    architecture, and metrics steps for ruby —
     the CI workflow step covers every language. Kotlin (#357/#358),
-    C/C++ (#362/#363), and Java (#366/#367) run the full pipeline.
+    C/C++ (#362/#363), Java (#366/#367), and C# (#370) run the full
+    pipeline.
 
     Attributes:
         output_dir: Directory where tests structure will be created
@@ -454,13 +456,17 @@ public class GreetingTest {{
     def _csharp_test_main_cs(self) -> str:
         """Generate C# MainTests.cs content.
 
+        The namespace derives from the shared
+        :func:`~start_green_stay_green.utils.csharp.csharp_namespace`
+        helper — the same source the structure generator uses for
+        ``Program.cs`` — so ``MainTests`` (in ``<Namespace>.Tests``)
+        resolves ``Program`` (in ``<Namespace>``) through C#'s
+        enclosing-namespace lookup without a using directive (#370).
+
         Returns:
             Content for MainTests.cs with xUnit [Fact] attribute
         """
-        # Convert package_name to PascalCase for C# namespace
-        namespace = "".join(
-            word.capitalize() for word in self.config.package_name.split("_")
-        )
+        namespace = csharp_namespace(self.config.package_name)
 
         return f"""using Xunit;
 

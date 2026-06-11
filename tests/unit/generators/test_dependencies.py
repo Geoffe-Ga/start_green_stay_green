@@ -13,6 +13,12 @@ from start_green_stay_green.generators.dependencies import DependencyConfig
 from start_green_stay_green.utils.cpp import CATCH2_VERSION
 from start_green_stay_green.utils.cpp import CMAKE_MINIMUM_VERSION
 from start_green_stay_green.utils.cpp import CPP_STANDARD
+from start_green_stay_green.utils.csharp import COVERLET_MSBUILD_VERSION
+from start_green_stay_green.utils.csharp import NETARCHTEST_RULES_VERSION
+from start_green_stay_green.utils.csharp import SECURITY_CODE_SCAN_VERSION
+from start_green_stay_green.utils.csharp import TEST_SDK_VERSION
+from start_green_stay_green.utils.csharp import XUNIT_RUNNER_VERSION
+from start_green_stay_green.utils.csharp import XUNIT_VERSION
 from start_green_stay_green.utils.java import ARCHUNIT_VERSION
 from start_green_stay_green.utils.java import CHECKSTYLE_PLUGIN_VERSION
 from start_green_stay_green.utils.java import DEPENDENCY_CHECK_PLUGIN_VERSION
@@ -728,6 +734,130 @@ class TestJavaDependencies:
             assert "<artifactId>dependency-check-maven</artifactId>" in content
             assert f"<version>{DEPENDENCY_CHECK_PLUGIN_VERSION}</version>" in content
             assert "<failBuildOnCVSS>7</failBuildOnCVSS>" in content
+
+
+class TestCsharpDependencies:
+    """Test the C# .csproj manifest generation (#370)."""
+
+    @staticmethod
+    def _csproj(tmpdir: str) -> str:
+        """Generate the csharp dependency files and return the csproj.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            The generated ``.csproj`` content.
+        """
+        config = DependencyConfig(
+            project_name="wrist-ledger",
+            language="csharp",
+            package_name="wrist_ledger",
+        )
+        files = DependenciesGenerator(Path(tmpdir), config).generate()
+        csproj_path: Path = files["wrist-ledger.csproj"]
+        return csproj_path.read_text()
+
+    def test_csproj_is_well_formed_xml_with_sdk_attribute(self) -> None:
+        """The csproj parses as XML rooted at an SDK-style Project."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = DefusedElementTree.fromstring(self._csproj(tmpdir))
+            assert root.tag == "Project"
+            assert root.get("Sdk") == "Microsoft.NET.Sdk"
+
+    def test_csproj_pins_the_xunit_test_stack(self) -> None:
+        """xUnit, its VS runner, and the test SDK are pinned from utils."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._csproj(tmpdir)
+            assert f'Include="xunit" Version="{XUNIT_VERSION}"' in content
+            assert (
+                f'Include="xunit.runner.visualstudio" Version="{XUNIT_RUNNER_VERSION}"'
+                in content
+            )
+            assert (
+                f'Include="Microsoft.NET.Test.Sdk" Version="{TEST_SDK_VERSION}"'
+                in content
+            )
+
+    def test_csproj_carries_the_coverlet_coverage_gate(self) -> None:
+        """coverlet.msbuild is pinned and the >=90% bound lives here.
+
+        The csproj is the single home of the coverage threshold (the
+        Kover/JaCoCo manifest-owned precedent): scripts/test.sh and CI
+        only pass ``/p:CollectCoverage=true`` and never restate the
+        number. coverlet.msbuild hooks the dotnet test task itself, so
+        the gate fails the test invocation directly — there is no
+        standalone-goal/empty-report no-op path to guard against.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._csproj(tmpdir)
+            assert (
+                f'Include="coverlet.msbuild" Version="{COVERLET_MSBUILD_VERSION}"'
+                in content
+            )
+            assert "<Threshold>90</Threshold>" in content
+            assert "<ThresholdType>line</ThresholdType>" in content
+            assert "<ThresholdStat>total</ThresholdStat>" in content
+
+    def test_csproj_enables_roslyn_analyzers_as_errors(self) -> None:
+        """The Roslyn analyzer gate is build-borne and warnings fail it.
+
+        ``EnableNETAnalyzers``/``AnalysisLevel`` turn the SDK analyzers
+        on and ``TreatWarningsAsErrors`` makes every ``dotnet build``
+        (pre-commit hook, lint.sh, CI) a failing lint gate — the csproj
+        is the single home of that policy.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._csproj(tmpdir)
+            assert "<EnableNETAnalyzers>true</EnableNETAnalyzers>" in content
+            assert "<AnalysisLevel>latest</AnalysisLevel>" in content
+            assert "<TreatWarningsAsErrors>true</TreatWarningsAsErrors>" in content
+
+    def test_csproj_declares_the_code_metrics_config(self) -> None:
+        """CodeMetricsConfig.txt is wired as an AdditionalFiles item.
+
+        The .NET SDK's CA1502 complexity rule reads its threshold from
+        an AdditionalFiles entry named exactly CodeMetricsConfig.txt
+        (written by the scripts generator — the pmd-ruleset.xml split);
+        without this item the <=10 gate would silently use the default
+        threshold of 25.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._csproj(tmpdir)
+            assert '<AdditionalFiles Include="CodeMetricsConfig.txt" />' in content
+            # The numeric bound must NOT be duplicated here; its single
+            # home is CodeMetricsConfig.txt itself.
+            assert "CA1502: 10" not in content
+
+    def test_csproj_pins_netarchtest_for_the_architecture_template(self) -> None:
+        """NetArchTest.Rules backs plans/architecture/ArchitectureTest.cs.
+
+        Declared in the manifest (the ArchUnit/Konsist precedent) so the
+        parked template compiles as soon as it is copied into tests/.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._csproj(tmpdir)
+            assert (
+                f'Include="NetArchTest.Rules" Version="{NETARCHTEST_RULES_VERSION}"'
+                in content
+            )
+
+    def test_csproj_pins_security_code_scan_analyzer(self) -> None:
+        """SecurityCodeScan runs as a Roslyn analyzer in every build."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._csproj(tmpdir)
+            expected = (
+                'Include="SecurityCodeScan.VS2019" '
+                f'Version="{SECURITY_CODE_SCAN_VERSION}"'
+            )
+            assert expected in content
+
+    def test_csproj_documents_the_single_project_design(self) -> None:
+        """The csproj discloses that src/ and tests/ share one assembly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._csproj(tmpdir)
+            assert "Single-project layout" in content
+            assert "tests/" in content
 
 
 class TestCppDependencies:

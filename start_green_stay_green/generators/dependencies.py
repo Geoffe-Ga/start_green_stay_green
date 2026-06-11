@@ -18,6 +18,12 @@ from start_green_stay_green.utils.cpp import CATCH2_VERSION
 from start_green_stay_green.utils.cpp import CMAKE_MINIMUM_VERSION
 from start_green_stay_green.utils.cpp import CPP_STANDARD
 from start_green_stay_green.utils.cpp import cpp_identifier
+from start_green_stay_green.utils.csharp import COVERLET_MSBUILD_VERSION
+from start_green_stay_green.utils.csharp import NETARCHTEST_RULES_VERSION
+from start_green_stay_green.utils.csharp import SECURITY_CODE_SCAN_VERSION
+from start_green_stay_green.utils.csharp import TEST_SDK_VERSION
+from start_green_stay_green.utils.csharp import XUNIT_RUNNER_VERSION
+from start_green_stay_green.utils.csharp import XUNIT_VERSION
 from start_green_stay_green.utils.java import ARCHUNIT_VERSION
 from start_green_stay_green.utils.java import CHECKSTYLE_PLUGIN_VERSION
 from start_green_stay_green.utils.java import DEPENDENCY_CHECK_PLUGIN_VERSION
@@ -85,9 +91,10 @@ class DependenciesGenerator(BaseGenerator):
     All 10 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin, cpp) are available at the generator level. Note that
     the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
-    architecture, and metrics steps for csharp and ruby —
+    architecture, and metrics steps for ruby —
     the CI workflow step covers every language. Kotlin (#357/#358),
-    C/C++ (#362/#363), and Java (#366/#367) run the full pipeline.
+    C/C++ (#362/#363), Java (#366/#367), and C# (#370) run the full
+    pipeline.
 
     Attributes:
         output_dir: Directory where dependency files will be written
@@ -765,6 +772,15 @@ Wear OS app</description>
     def _generate_csharp_dependencies(self) -> dict[str, Path]:
         """Generate C# dependency files.
 
+        Emits the single SDK-style ``.csproj`` that owns the generated
+        project's quality policy (#370): the xUnit test stack, the
+        Coverlet coverage gate (the >=90% bound lives here — the
+        Kover/JaCoCo manifest-owned precedent), the Roslyn analyzer
+        configuration (warnings-as-errors), the ``CodeMetricsConfig.txt``
+        wiring behind the CA1502 complexity ceiling, the NetArchTest
+        dependency backing the architecture template, and the
+        SecurityCodeScan analyzer.
+
         Returns:
             Dictionary mapping file names to file paths
         """
@@ -783,23 +799,87 @@ Wear OS app</description>
         """Generate C# .csproj content.
 
         Returns:
-            Content for .csproj with project settings and dependencies
+            Content for .csproj with project settings, the quality
+            gates the manifest owns, and pinned NuGet dependencies
         """
-        return """<Project Sdk="Microsoft.NET.Sdk">
+        return f"""<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Single-project layout: src/ (the application) and tests/ (the
+    xUnit suite) compile into ONE assembly via the SDK's default
+    globbing, so the test packages below sit next to the app code and
+    `dotnet test` runs the whole project. The parked NetArchTest
+    template (plans/architecture/ArchitectureTest.cs) also compiles
+    into this assembly once copied into tests/.
+  -->
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <!-- Roslyn analyzer gate (#370): the SDK analyzers run in every
+         build and TreatWarningsAsErrors makes each `dotnet build`
+         (pre-commit hook, scripts/lint.sh, CI) a failing lint gate.
+         This PropertyGroup is the single home of that policy; nothing
+         restates the flag on a command line. -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- Coverlet coverage gate (#370): the >=90% line bound lives
+         HERE and only here. scripts/test.sh (coverage mode) and CI
+         pass /p:CollectCoverage=true to activate it and never restate
+         the number. coverlet.msbuild hooks the test task itself, so a
+         failing bound fails `dotnet test` directly. -->
+    <Threshold>90</Threshold>
+    <ThresholdType>line</ThresholdType>
+    <ThresholdStat>total</ThresholdStat>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="xunit" Version="2.6.0" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3">
+    <!-- Threshold home for the CA1502 cyclomatic-complexity ceiling
+         (<=10). The .NET SDK metrics analyzers only read the bound
+         from an AdditionalFiles entry named exactly
+         CodeMetricsConfig.txt; the file itself is written at the
+         project root by the scripts generator (the pmd-ruleset.xml
+         companion split), and .editorconfig switches CA1502 on. -->
+    <AdditionalFiles Include="CodeMetricsConfig.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit" Version="{XUNIT_VERSION}" />
+    <PackageReference Include="xunit.runner.visualstudio" \
+Version="{XUNIT_RUNNER_VERSION}">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="{TEST_SDK_VERSION}" />
+
+    <!-- Coverage engine behind the manifest-owned threshold above
+         (build-time assets only, never a runtime dependency). -->
+    <PackageReference Include="coverlet.msbuild" \
+Version="{COVERLET_MSBUILD_VERSION}">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; \
+buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+
+    <!-- Backs plans/architecture/ArchitectureTest.cs (the ArchUnit/
+         Konsist manifest-touch precedent): declared here so the
+         parked template compiles as soon as it is copied into
+         tests/. -->
+    <PackageReference Include="NetArchTest.Rules" \
+Version="{NETARCHTEST_RULES_VERSION}" />
+
+    <!-- Source-level security analysis as a Roslyn analyzer: SQL
+         injection, XSS, weak crypto, and friends fail the build via
+         TreatWarningsAsErrors. Dependency CVE scanning is separate
+         (scripts/security.sh runs the vulnerable-package listing). -->
+    <PackageReference Include="SecurityCodeScan.VS2019" \
+Version="{SECURITY_CODE_SCAN_VERSION}">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>

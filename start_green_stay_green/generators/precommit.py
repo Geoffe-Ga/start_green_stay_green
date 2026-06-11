@@ -26,7 +26,7 @@ class GenerationConfig:
     Attributes:
         project_name: Name of the project.
         language: Programming language (python, typescript, go, rust,
-            swift, kotlin, cpp, java).
+            swift, kotlin, cpp, java, csharp).
         language_config: Additional language-specific configuration.
     """
 
@@ -628,6 +628,104 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         ],
         "default_language_version": {},
     },
+    "csharp": {
+        "hooks": [
+            {
+                "repo": "https://github.com/pre-commit/pre-commit-hooks",
+                "rev": "v4.5.0",
+                "hooks": [
+                    {"id": "trailing-whitespace"},
+                    {"id": "end-of-file-fixer"},
+                    {"id": "check-yaml"},
+                    {"id": "check-json"},
+                    # identify tags .csproj files as xml, so the stock
+                    # check-xml hook gates the manifest's
+                    # well-formedness (the AndroidManifest.xml /
+                    # tizen-manifest.xml precedent).
+                    {"id": "check-xml"},
+                    {"id": "check-added-large-files", "args": ["--maxkb=500"]},
+                    {"id": "check-case-conflict"},
+                    {"id": "check-merge-conflict"},
+                    {"id": "check-symlinks"},
+                    {"id": "detect-private-key"},
+                    {"id": "fix-byte-order-marker"},
+                    {"id": "mixed-line-ending", "args": ["--fix=lf"]},
+                    {"id": "no-commit-to-branch", "args": ["--branch", "main"]},
+                ],
+            },
+            # Both C# hooks run the dotnet CLI as `repo: local` system
+            # hooks (the Swift/Kotlin/Java precedent: no official
+            # pre-commit mirror exists for the .NET toolchain). Install
+            # the .NET 8 SDK with: `brew install dotnet-sdk` (macOS) or
+            # `apt-get install dotnet-sdk-8.0` (Debian/Ubuntu) — both
+            # `dotnet format` and the Roslyn analyzers ship inside it,
+            # so there is nothing else to install.
+            #
+            # dotnet operates on the project (not a file list), so both
+            # hooks set pass_filenames: false and use the c# type
+            # filter only to decide WHETHER to run.
+            {
+                "repo": "local",
+                "hooks": [
+                    {
+                        "id": "dotnet-format",
+                        "name": "dotnet format (check mode)",
+                        # Check-mode: a bare `dotnet format` rewrites
+                        # files and exits 0 either way, so it could
+                        # never fail a commit. --verify-no-changes
+                        # exits non-zero on unformatted code;
+                        # scripts/format.sh keeps the fixing path.
+                        "entry": "dotnet format --verify-no-changes",
+                        "language": "system",
+                        "types": ["c#"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                    {
+                        "id": "roslyn-analyzers",
+                        "name": "Roslyn analyzers (dotnet build)",
+                        # The csproj is the single home of the lint
+                        # policy. It enables the SDK analyzers (with
+                        # the CA1502 <=10 complexity ceiling switched
+                        # on via .editorconfig and bounded by
+                        # CodeMetricsConfig.txt, plus the
+                        # SecurityCodeScan analyzer) and treats
+                        # warnings as errors, so this plain build
+                        # fails on findings — no -warnaserror restated
+                        # here.
+                        "entry": "dotnet build --nologo",
+                        "language": "system",
+                        "types": ["c#"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                ],
+            },
+            {
+                "repo": "https://github.com/gitleaks/gitleaks",
+                "rev": "v8.18.4",
+                "hooks": [
+                    {"id": "gitleaks"},
+                ],
+            },
+            {
+                "repo": "https://github.com/shellcheck-py/shellcheck-py",
+                "rev": "v0.9.0.6",
+                "hooks": [
+                    {"id": "shellcheck"},
+                ],
+            },
+            {
+                "repo": "https://github.com/Yelp/detect-secrets",
+                "rev": "v1.4.0",
+                "hooks": [
+                    {
+                        "id": "detect-secrets",
+                        "args": ["--baseline", ".secrets.baseline"],
+                    },
+                ],
+            },
+        ],
+        "default_language_version": {},
+    },
     "cpp": {
         "hooks": [
             {
@@ -753,7 +851,7 @@ class PreCommitGenerator(BaseGenerator):
     Includes formatting, linting, security, and general file quality checks.
 
     Supports: Python, TypeScript, Go, Rust, Swift, Kotlin, C/C++ (cpp),
-    Java, and other languages.
+    Java, C# (csharp), and other languages.
 
     Attributes:
         orchestrator: Optional AI orchestrator for enhanced generation.

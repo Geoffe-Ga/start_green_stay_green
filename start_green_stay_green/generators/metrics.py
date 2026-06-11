@@ -511,6 +511,24 @@ LANGUAGE_TOOLS: dict[str, dict[str, str]] = {
         "security": "SpotBugs (mvn spotbugs:check)",
         "dependency_check": "OWASP dependency-check (mvn dependency-check:check)",
     },
+    # C# (#370): coverage is Coverlet, activated by
+    # /p:CollectCoverage=true with the >=90% bound living in the
+    # generated csproj (the JaCoCo/Kover manifest-owned precedent).
+    # The Roslyn CA1502 rule owns the <=10 complexity gate (threshold
+    # in CodeMetricsConfig.txt, enabled via .editorconfig). Stryker.NET
+    # is a periodic mutation gate like pitest/mull/muter, not a
+    # per-commit hook. Each tool appears in exactly one category:
+    # SecurityCodeScan owns source-level security (it runs as a Roslyn
+    # analyzer inside every build) and the dotnet CLI's vulnerable-
+    # package listing owns dependency CVE scanning.
+    "csharp": {
+        "coverage": "Coverlet (dotnet test /p:CollectCoverage=true)",
+        "mutation": "Stryker.NET (dotnet stryker)",
+        "complexity": "Roslyn CA1502 (CodeMetricsConfig.txt)",
+        "documentation": "DocFX",
+        "security": "SecurityCodeScan (Roslyn analyzer)",
+        "dependency_check": "dotnet list package --vulnerable",
+    },
 }
 
 

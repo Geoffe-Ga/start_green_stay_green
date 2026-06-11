@@ -206,6 +206,7 @@ class ScriptsGenerator:
             "kotlin": self._generate_kotlin_scripts,
             "cpp": self._generate_cpp_scripts,
             "java": self._generate_java_scripts,
+            "csharp": self._generate_csharp_scripts,
         }
         # Fallback to Python scripts for unknown languages.
         builder = builders.get(self.config.language, self._generate_python_scripts)
@@ -525,6 +526,55 @@ class ScriptsGenerator:
         # Companion PMD ruleset — written at the project root, not
         # added to the scripts dict (it isn't an executable).
         self._write_companion_config("pmd-ruleset.xml", self._PMD_RULESET_TEMPLATE)
+
+        return scripts
+
+    def _generate_csharp_scripts(self) -> dict[str, Path]:
+        """Generate C#-specific quality control scripts (#370).
+
+        Emits check/format/lint/test/security scripts plus two
+        companions at the project root: ``.editorconfig`` (the switch
+        that enables the otherwise-off CA1502 complexity rule) and
+        ``CodeMetricsConfig.txt`` (the single home of its <=10 bound,
+        wired into the build via the csproj's AdditionalFiles entry —
+        the pmd-ruleset.xml companion split). Like the Java scripts,
+        these mostly invoke gates the manifest owns: the csproj
+        configures the Roslyn analyzers (warnings-as-errors) and the
+        Coverlet >=90% coverage threshold, so every script is a thin
+        ``dotnet`` CLI invocation that cannot version-drift from the
+        build.
+
+        Returns:
+            Dictionary mapping script names to file paths
+        """
+        scripts: dict[str, Path] = {}
+
+        scripts["check-all.sh"] = self._write_script(
+            "check-all.sh",
+            self._csharp_check_all_script(),
+        )
+        scripts["format.sh"] = self._write_script(
+            "format.sh",
+            self._csharp_format_script(),
+        )
+        scripts["lint.sh"] = self._write_script(
+            "lint.sh",
+            self._csharp_lint_script(),
+        )
+        scripts["test.sh"] = self._write_script(
+            "test.sh",
+            self._csharp_test_script(),
+        )
+        scripts["security.sh"] = self._write_script(
+            "security.sh",
+            self._csharp_security_script(),
+        )
+        # Companion analyzer configs — written at the project root, not
+        # added to the scripts dict (they aren't executables).
+        self._write_companion_config(".editorconfig", self._EDITORCONFIG_TEMPLATE)
+        self._write_companion_config(
+            "CodeMetricsConfig.txt", self._CODE_METRICS_CONFIG_TEMPLATE
+        )
 
         return scripts
 
@@ -4855,6 +4905,491 @@ exit 0
         </properties>
     </rule>
 </ruleset>
+"""
+
+    # C# script generators (#370)
+
+    def _csharp_check_all_script(self) -> str:
+        """Generate C# check-all.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/check-all.sh - Run all quality checks
+# Usage: ./scripts/check-all.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run all quality checks in sequence.
+
+Runs:
+  1. Format check (dotnet format --verify-no-changes)
+  2. Roslyn analyzers + complexity <=10 (dotnet build; the csproj
+     treats warnings as errors and CodeMetricsConfig.txt holds the
+     CA1502 bound)
+  3. Tests + coverage >=90% (dotnet test + Coverlet; the bound lives
+     in the csproj)
+  4. Security (vulnerable NuGet package scan)
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All checks passed
+    1           One or more checks failed
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+VERBOSE_FLAG=""
+if $VERBOSE; then
+    VERBOSE_FLAG="--verbose"
+fi
+
+echo "=== Running All Quality Checks ==="
+echo ""
+
+FAILED_CHECKS=()
+PASSED_CHECKS=()
+
+run_check() {
+    local check_name=$1
+    local script=$2
+    shift 2
+
+    echo "Running: $check_name"
+    # "${@}" is safe under set -u even when no extra args remain
+    # (unlike a named local array, which needs the
+    # ${args[@]+"${args[@]}"} guard the python template uses).
+    if "$SCRIPT_DIR/$script" "${@}" $VERBOSE_FLAG; then
+        PASSED_CHECKS+=("$check_name")
+        echo "✓ $check_name passed"
+    else
+        FAILED_CHECKS+=("$check_name")
+        echo "✗ $check_name failed" >&2
+    fi
+    echo ""
+}
+
+run_check "Format" "format.sh"
+run_check "Linting" "lint.sh"
+run_check "Tests" "test.sh" --coverage
+run_check "Security" "security.sh"
+
+echo "=== Quality Checks Summary ==="
+echo "Passed: ${#PASSED_CHECKS[@]}"
+echo "Failed: ${#FAILED_CHECKS[@]}"
+
+if [ ${#FAILED_CHECKS[@]} -gt 0 ]; then
+    exit 1
+else
+    echo "✓ All quality checks passed!"
+    exit 0
+fi
+"""
+
+    def _csharp_format_script(self) -> str:
+        """Generate C# format.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/format.sh - Format C# code
+# Usage: ./scripts/format.sh [--fix] [--check] [--verbose] [--help]
+# Default (no flags) writes formatting in place, same as --fix; use
+# --check for a non-mutating verification pass.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+FIX=false
+CHECK=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --fix)
+            FIX=true
+            shift
+            ;;
+        --check)
+            CHECK=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Format C# code using dotnet format — the same tool the pre-commit
+hook invokes, so the two can never disagree. It ships inside the
+.NET SDK and reads .editorconfig, so the style standard has one home.
+
+OPTIONS:
+    --fix       Apply formatting (default, writes in place)
+    --check     Check only, fail if formatting needed
+                (--verify-no-changes exits non-zero on unformatted
+                code; a bare 'dotnet format' exits 0 either way)
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           Code is properly formatted
+    1           Formatting issues found
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+if ! command -v dotnet &> /dev/null; then
+    echo "✗ dotnet not found" >&2
+    echo "  Install with: brew install dotnet-sdk (macOS)" >&2
+    echo "             or: apt-get install dotnet-sdk-8.0 (Debian/Ubuntu)" >&2
+    exit 1
+fi
+
+echo "=== Formatting (dotnet format) ==="
+
+# Fixing is the default; an explicit --fix overrides --check.
+if $CHECK && ! $FIX; then
+    dotnet format --verify-no-changes || \\
+        { echo "✗ Format check failed" >&2; exit 1; }
+    echo "✓ Code formatting check passed"
+else
+    dotnet format || \\
+        { echo "✗ Formatting failed" >&2; exit 1; }
+    echo "✓ Code formatted successfully"
+fi
+exit 0
+"""
+
+    def _csharp_lint_script(self) -> str:
+        """Generate C# lint.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/lint.sh - Static analysis: Roslyn analyzers (dotnet build)
+# Usage: ./scripts/lint.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run static analysis. All Roslyn analysis runs inside the compiler, so
+a plain 'dotnet build' IS the lint gate — the csproj is the single
+source of the policy (EnableNETAnalyzers, AnalysisLevel latest,
+TreatWarningsAsErrors) and this script restates none of it:
+  - .NET SDK code-quality (CA) rules
+  - Complexity <=10: the CA1502 rule, enabled in .editorconfig with
+    its bound in CodeMetricsConfig.txt (the single home; nothing else
+    restates the number)
+  - SecurityCodeScan (source-level security analysis; declared in the
+    csproj, runs in this same compiler pass — scripts/security.sh
+    covers dependency CVEs instead, so the two never double-report)
+
+Install: brew install dotnet-sdk (macOS) /
+         apt-get install dotnet-sdk-8.0 (Debian/Ubuntu)
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All checks passed
+    1           Analyzer or complexity findings (build failed)
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+if ! command -v dotnet &> /dev/null; then
+    echo "✗ dotnet not found - the analyzers run inside dotnet build" >&2
+    echo "  Install with: brew install dotnet-sdk (macOS)" >&2
+    echo "             or: apt-get install dotnet-sdk-8.0 (Debian/Ubuntu)" >&2
+    exit 1
+fi
+
+echo "=== Static Analysis (Roslyn analyzers via dotnet build) ==="
+
+dotnet build --nologo || \\
+    { echo "✗ Roslyn analyzers found issues" >&2; exit 1; }
+
+echo "✓ Linting checks passed"
+exit 0
+"""
+
+    def _csharp_test_script(self) -> str:
+        """Generate C# test.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/test.sh - Run C# tests via the dotnet CLI
+# Usage: ./scripts/test.sh [--coverage] [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+COVERAGE=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --coverage)
+            COVERAGE=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run the xUnit test suite (dotnet test). src/ and tests/ compile into
+one assembly (the single-project layout in the .csproj), so the whole
+project is the coverage denominator.
+
+OPTIONS:
+    --coverage  Enforce >=90% line coverage via Coverlet
+                (/p:CollectCoverage=true activates the gate; the bound
+                lives in the .csproj's Threshold properties — its
+                single home; this script never restates the number.
+                coverlet.msbuild hooks the test task itself, so a
+                missed bound fails this invocation directly.)
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All tests passed (and coverage met, with --coverage)
+    1           Test failures or coverage below threshold
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+if ! command -v dotnet &> /dev/null; then
+    echo "✗ dotnet not found - the test suite runs via the dotnet CLI" >&2
+    echo "  Install with: brew install dotnet-sdk (macOS)" >&2
+    echo "             or: apt-get install dotnet-sdk-8.0 (Debian/Ubuntu)" >&2
+    exit 1
+fi
+
+echo "=== Running Tests (dotnet test) ==="
+
+if $COVERAGE; then
+    dotnet test /p:CollectCoverage=true || \\
+        { echo "✗ Tests or coverage gate failed" >&2; exit 1; }
+else
+    dotnet test || { echo "✗ Tests failed" >&2; exit 1; }
+fi
+
+echo "✓ Tests passed"
+exit 0
+"""
+
+    def _csharp_security_script(self) -> str:
+        """Generate C# security.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/security.sh - Security checks for C#
+# Usage: ./scripts/security.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run security checks.
+
+Division of labor:
+  - Secret scanning (gitleaks + detect-secrets) runs in pre-commit.
+  - Source-level security analysis (SecurityCodeScan) is a Roslyn
+    analyzer declared in the csproj: it runs inside every
+    'dotnet build' (scripts/lint.sh, the pre-commit hook, CI), so this
+    script does not rebuild just to re-run it.
+  - This script owns dependency CVE scanning via
+    'dotnet list package --vulnerable'.
+
+The vulnerable-package listing needs a package restore and queries the
+NuGet vulnerability database over the network; when it cannot run
+(offline, no restore) the scan is skipped with a warning rather than
+failing a fresh clone.
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           No issues found (or the CVE scan skipped; see above)
+    1           Vulnerable NuGet packages reported
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+if ! command -v dotnet &> /dev/null; then
+    echo "✗ dotnet not found - the security checks run via the dotnet CLI" >&2
+    echo "  Install with: brew install dotnet-sdk (macOS)" >&2
+    echo "             or: apt-get install dotnet-sdk-8.0 (Debian/Ubuntu)" >&2
+    exit 1
+fi
+
+echo "=== Security (vulnerable NuGet packages) ==="
+
+# The exit code of 'dotnet list package --vulnerable' stayed 0 even
+# with findings across several SDK lines (dotnet/sdk#25091), so the
+# gate greps the report line instead of trusting the exit code — the
+# grep is SDK-version-proof.
+#
+# Pragmatic default: when the listing itself cannot run (offline, no
+# restore yet), warn and skip so a fresh clone passes check-all.sh out
+# of the box. Tighten by replacing the warning block with 'exit 1'
+# once network access is guaranteed everywhere (including CI).
+if VULN_REPORT=$(dotnet list package --vulnerable 2>&1); then
+    if echo "$VULN_REPORT" | grep -q "has the following vulnerable packages"; then
+        echo "$VULN_REPORT"
+        echo "✗ Vulnerable NuGet packages found" >&2
+        exit 1
+    fi
+    echo "✓ No vulnerable NuGet packages reported"
+else
+    echo "⚠ Could not run the vulnerable-package scan" >&2
+    echo "⚠ (it needs 'dotnet restore' and network access to the" >&2
+    echo "⚠ NuGet vulnerability database) - skipping" >&2
+fi
+
+echo "✓ Security checks passed"
+exit 0
+"""
+
+    # .editorconfig companion. Shared by every Roslyn-analyzer
+    # invocation (the pre-commit dotnet-format/roslyn-analyzers hooks,
+    # scripts/lint.sh, CI): the .NET SDK ships the CA1502 cyclomatic-
+    # complexity rule DISABLED by default, and this severity switch is
+    # the one place that turns it on. The numeric bound itself lives in
+    # CodeMetricsConfig.txt (the only home the metrics analyzers read).
+    _EDITORCONFIG_TEMPLATE = """\
+# .editorconfig generated by Start Green Stay Green.
+#
+# dotnet format and the Roslyn analyzers both read this file, so the
+# style/severity policy has one home for the pre-commit hooks,
+# scripts/lint.sh, and CI alike.
+root = true
+
+[*.cs]
+# CA1502 (avoid excessive cyclomatic complexity) ships with the .NET
+# SDK analyzers but is disabled by default; this is the single switch
+# that enables it. Its <=10 threshold lives in CodeMetricsConfig.txt,
+# declared as an AdditionalFiles item in the .csproj.
+dotnet_diagnostic.CA1502.severity = error
+"""
+
+    # CodeMetricsConfig.txt companion — the SINGLE home of the C#
+    # cyclomatic-complexity bound (mirroring the <=10 gate radon/eslint/
+    # gocyclo/clippy/SwiftLint/detekt/lizard/PMD apply for the other
+    # languages); neither the scripts nor the csproj restate the number.
+    # The .NET SDK metrics analyzers only read thresholds from an
+    # AdditionalFiles entry named exactly CodeMetricsConfig.txt.
+    _CODE_METRICS_CONFIG_TEMPLATE = """\
+# Code-metrics thresholds for the .NET SDK analyzers, generated by
+# Start Green Stay Green. Format: 'RuleId: Threshold'.
+#
+# CA1502 fires when a method's cyclomatic complexity EXCEEDS the
+# threshold, so 10 reports 11+ and enforces the <= 10 ceiling the
+# other supported languages gate on. This file is the single home of
+# that bound (.editorconfig only flips the rule's severity, and the
+# .csproj only wires this file in via AdditionalFiles).
+CA1502: 10
 """
 
     # Language-agnostic script generators

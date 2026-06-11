@@ -3,12 +3,13 @@
 Tests the complete sgsg init flow for supported languages, verifying
 that the CLI produces valid project structures end-to-end.
 
-Note: csharp and ruby are supported at the generator level, but the
-quality-tooling pipeline steps (PreCommitGenerator, scripts, metrics,
-architecture) skip them. Kotlin completed the pipeline with #357/#358,
-C/C++ followed with #362 (quality tooling) and #363 (CI workflow), and
-Java with #366 (Wear OS foundation + CI) and #367 (quality tooling), so
-all three join CLI_SUPPORTED_LANGUAGES below
+Note: ruby is supported at the generator level, but the quality-tooling
+pipeline steps (PreCommitGenerator, scripts, metrics, architecture)
+skip it. Kotlin completed the pipeline with #357/#358, C/C++ followed
+with #362 (quality tooling) and #363 (CI workflow), Java with #366
+(Wear OS foundation + CI) and #367 (quality tooling), and C# with #370
+(quality tooling on top of the foundation scaffold + CI), so all four
+join CLI_SUPPORTED_LANGUAGES below
 (test_language_generators.py covers the generator-only languages).
 
 All tests use an environment with API keys stripped and a null keyring
@@ -35,6 +36,7 @@ CLI_SUPPORTED_LANGUAGES = (
     "kotlin",
     "cpp",
     "java",
+    "csharp",
 )
 
 # Expected key files per language that sgsg init should create
@@ -110,6 +112,18 @@ EXPECTED_KEY_FILES: dict[str, list[str]] = {
         "app/src/main/java/com/example/test_project/MainActivity.java",
         ".pre-commit-config.yaml",
         "scripts/check-all.sh",
+        ".github/workflows/ci.yml",
+        "README.md",
+    ],
+    "csharp": [
+        "test-project.csproj",
+        "src/Program.cs",
+        "tests/MainTests.cs",
+        ".editorconfig",
+        "CodeMetricsConfig.txt",
+        ".pre-commit-config.yaml",
+        "scripts/check-all.sh",
+        "plans/architecture/ArchitectureTest.cs",
         ".github/workflows/ci.yml",
         "README.md",
     ],

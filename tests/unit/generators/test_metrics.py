@@ -186,8 +186,43 @@ class TestLanguageTools:
             "kotlin",
             "cpp",
             "java",
+            "csharp",
         }
         assert required_languages.issubset(set(LANGUAGE_TOOLS.keys()))
+
+    def test_csharp_tools(self) -> None:
+        """Test C# tool mappings (#370).
+
+        Each tool appears in exactly one category: Coverlet owns
+        coverage (the >=90% bound lives in the csproj), the Roslyn
+        CA1502 rule owns complexity (threshold in CodeMetricsConfig.txt),
+        SecurityCodeScan owns source-level security, the vulnerable-
+        package listing owns dependency CVEs, and Stryker.NET is a
+        periodic mutation gate like pitest/mull/muter.
+        """
+        tools = LANGUAGE_TOOLS["csharp"]
+        assert tools["coverage"] == "Coverlet (dotnet test /p:CollectCoverage=true)"
+        assert tools["mutation"] == "Stryker.NET (dotnet stryker)"
+        assert tools["complexity"] == "Roslyn CA1502 (CodeMetricsConfig.txt)"
+        assert tools["documentation"] == "DocFX"
+        assert tools["security"] == "SecurityCodeScan (Roslyn analyzer)"
+        assert tools["dependency_check"] == "dotnet list package --vulnerable"
+
+    def test_csharp_tools_do_not_double_list_across_categories(self) -> None:
+        """No C# tool is claimed by two metric categories."""
+        tools = LANGUAGE_TOOLS["csharp"]
+        names_per_category = {
+            "coverage": {"Coverlet"},
+            "complexity": {"CA1502"},
+            "security": {"SecurityCodeScan"},
+            "documentation": {"DocFX"},
+        }
+        for category, names in names_per_category.items():
+            for other_category, other_names in names_per_category.items():
+                if category != other_category:
+                    assert names.isdisjoint(other_names)
+            for name in names:
+                assert name in tools[category]
 
     def test_java_tools(self) -> None:
         """Test Java tool mappings (#367).

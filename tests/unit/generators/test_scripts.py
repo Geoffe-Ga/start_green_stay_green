@@ -1457,6 +1457,257 @@ class TestScriptsGeneratorJavaGeneration:
             assert existing.read_text() == "<ruleset />\n"
 
 
+class TestScriptsGeneratorCsharpGeneration:
+    """Test C# script generation (#370)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Generate csharp scripts into ``tmpdir`` and return the mapping."""
+        config = ScriptConfig(
+            language="csharp",
+            package_name="my_dotnet_app",
+        )
+        generator = ScriptsGenerator(Path(tmpdir), config)
+        return generator.generate()
+
+    def test_generate_csharp_scripts_creates_files(self) -> None:
+        """Test generate creates the full csharp script set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            assert "check-all.sh" in scripts
+            assert "format.sh" in scripts
+            assert "lint.sh" in scripts
+            assert "test.sh" in scripts
+            assert "security.sh" in scripts
+
+    def test_csharp_shell_scripts_pass_bash_syntax_check(self) -> None:
+        """Every generated csharp shell script parses under bash -n.
+
+        The #362 lesson: this literal syntax check caught a real
+        template-escaping bug in the cpp scripts, so every new language
+        gets it from day one.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            for name, path in scripts.items():
+                if not name.endswith(".sh"):
+                    continue
+                bash = shutil.which("bash")
+                assert bash is not None, "bash not found on PATH"
+                result = subprocess.run(  # noqa: S603  # Issue #370: bash -n on generated content, no untrusted input
+                    [bash, "-n", str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, f"{name}: {result.stderr}"
+
+    def test_csharp_shell_scripts_pass_shellcheck(self) -> None:
+        """Every generated csharp shell script is clean under shellcheck.
+
+        bash -n only catches parse errors; shellcheck catches the
+        quoting/expansion bugs that have bitten generated scripts
+        before (#425/SC2059), so the linter itself gates the templates.
+        Skips only when shellcheck is not installed (it ships on the
+        GitHub ubuntu runners and via shellcheck-py in pre-commit).
+        """
+        shellcheck = shutil.which("shellcheck")
+        if shellcheck is None:
+            pytest.skip("shellcheck not on PATH (covered in CI)")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            for name, path in scripts.items():
+                if not name.endswith(".sh"):
+                    continue
+                result = subprocess.run(  # noqa: S603  # Issue #370: shellcheck on generated content, no untrusted input
+                    [shellcheck, str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, f"{name}: {result.stdout}"
+
+    def test_csharp_format_script_uses_dotnet_format(self) -> None:
+        """format.sh fixes by default and verifies with --verify-no-changes."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "dotnet format" in content
+            assert "--verify-no-changes" in content
+
+    def test_csharp_format_script_requires_the_dotnet_cli(self) -> None:
+        """format.sh fails with install instructions when dotnet is absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "command -v dotnet" in content
+            assert "brew install dotnet-sdk" in content
+
+    def test_csharp_lint_script_builds_with_manifest_owned_policy(self) -> None:
+        """lint.sh is a plain dotnet build; the csproj owns the policy.
+
+        All Roslyn analysis (SDK CA rules, the CA1502 complexity
+        ceiling, SecurityCodeScan) runs inside the compiler and the
+        csproj's TreatWarningsAsErrors makes the build fail on
+        findings — the script must not restate any -warnaserror flag.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "dotnet build --nologo" in content
+            assert "warnaserror" not in content
+            assert "TreatWarningsAsErrors" in content
+
+    def test_csharp_lint_script_documents_ca1502_as_complexity_owner(self) -> None:
+        """The complexity ceiling lives once, in CodeMetricsConfig.txt.
+
+        The Roslyn CA1502 rule owns the <=10 gate; lint.sh points at
+        the companion config rather than duplicating a threshold.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "CA1502" in content
+            assert "CodeMetricsConfig.txt" in content
+            # No shell-side duplicate of the bound.
+            assert "MAX_CCN" not in content
+
+    def test_csharp_test_script_runs_dotnet_test(self) -> None:
+        """test.sh runs the xUnit suite via plain `dotnet test`.
+
+        The literal string `dotnet test` doubles as the language marker
+        cli._scripts_dir_has_other_language probes for csharp.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "dotnet test" in content
+            assert "command -v dotnet" in content
+
+    def test_csharp_test_script_enforces_coverage_via_csproj_gate(self) -> None:
+        """Coverage mode activates Coverlet; the bound stays in the csproj.
+
+        ``dotnet test /p:CollectCoverage=true`` lets coverlet.msbuild
+        hook the test task itself, so a missed bound fails the
+        invocation directly (no standalone-goal/empty-report no-op
+        path). The >=90% number lives only in the csproj's
+        Threshold/ThresholdType/ThresholdStat properties, so the script
+        must not restate it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "/p:CollectCoverage=true" in content
+            assert ".csproj" in content
+            assert "THRESHOLD=" not in content
+            assert "/p:Threshold=" not in content
+
+    def test_csharp_security_script_gates_on_vulnerable_packages(self) -> None:
+        """security.sh fails when the vulnerable-package listing reports hits.
+
+        ``dotnet list package --vulnerable`` kept exit code 0 even with
+        findings across several SDK lines (dotnet/sdk#25091), so the
+        gate greps the report line instead of trusting the exit code.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "dotnet list package --vulnerable" in content
+            assert "has the following vulnerable packages" in content
+
+    def test_csharp_security_script_warns_when_offline(self) -> None:
+        """The vulnerability scan needs the network; offline warns, not fails.
+
+        The listing queries the NuGet vulnerability database (and needs
+        a restore), so the pragmatic warn-first default skips with a
+        documented tighten-me path instead of failing a fresh offline
+        clone — the NVD_API_KEY precedent.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "network" in content
+            assert "Tighten" in content
+
+    def test_csharp_security_script_documents_division_of_labor(self) -> None:
+        """security.sh discloses where the other security passes live."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "gitleaks" in content
+            assert "detect-secrets" in content
+            assert "SecurityCodeScan" in content
+
+    def test_csharp_check_all_runs_full_toolchain(self) -> None:
+        """check-all.sh runs format, lint, tests (with coverage), security."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["check-all.sh"].read_text()
+            assert 'run_check "Format" "format.sh"' in content
+            assert 'run_check "Linting" "lint.sh"' in content
+            assert 'run_check "Tests" "test.sh" --coverage' in content
+            assert 'run_check "Security" "security.sh"' in content
+
+    def test_csharp_writes_editorconfig_companion(self) -> None:
+        """.editorconfig lands at the project root and enables CA1502.
+
+        CA1502 ships with the .NET SDK analyzers but is disabled by
+        default; the .editorconfig severity switch is what turns the
+        complexity gate on (the threshold itself lives in
+        CodeMetricsConfig.txt).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            config = Path(tmpdir) / ".editorconfig"
+            assert config.exists()
+            content = config.read_text()
+            assert "dotnet_diagnostic.CA1502.severity = error" in content
+
+    def test_csharp_writes_code_metrics_config_companion(self) -> None:
+        """CodeMetricsConfig.txt is the single home of the <=10 bound.
+
+        The .NET SDK metrics analyzers read 'CA1502: 10' from this
+        AdditionalFiles entry; CA1502 fires when complexity EXCEEDS the
+        threshold, so 10 reports 11+ — the same ceiling the other
+        languages gate on.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            config = Path(tmpdir) / "CodeMetricsConfig.txt"
+            assert config.exists()
+            content = config.read_text()
+            assert "CA1502: 10" in content
+            assert "<= 10" in content
+
+    def test_csharp_companions_preserve_existing_files(self) -> None:
+        """Existing user companion configs are never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing_editor = Path(tmpdir) / ".editorconfig"
+            existing_editor.write_text("root = true\n")
+            existing_metrics = Path(tmpdir) / "CodeMetricsConfig.txt"
+            existing_metrics.write_text("CA1502: 25\n")
+
+            self._generate(tmpdir)
+
+            assert existing_editor.read_text() == "root = true\n"
+            assert existing_metrics.read_text() == "CA1502: 25\n"
+
+
 class TestScriptsGeneratorLanguageFallback:
     """Test language fallback behavior."""
 
@@ -1761,6 +2012,20 @@ class TestMutationKillers:
             # Should generate java scripts with the pom-backed goals
             content = scripts["lint.sh"].read_text()
             assert "checkstyle:check" in content
+
+    def test_csharp_language_dispatches_to_csharp_generator(self) -> None:
+        """Test 'csharp' language dispatches to the C# generator (#370)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="csharp",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            # Should generate csharp scripts with the dotnet CLI gates
+            content = scripts["lint.sh"].read_text()
+            assert "dotnet build" in content
 
     def test_generated_scripts_exact_count_python(self) -> None:
         """Test Python generator creates EXACTLY 12 scripts.

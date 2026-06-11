@@ -633,6 +633,82 @@ class TestJavaReadme:
             assert "com.example.test_project" in content
 
 
+class TestCsharpReadme:
+    """Test the C# README content (#370)."""
+
+    @staticmethod
+    def _readme_content(tmpdir: str) -> str:
+        """Generate the csharp README and return its text.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            The rendered README.md content.
+        """
+        config = ReadmeConfig(
+            project_name="test-project",
+            language="csharp",
+            package_name="test_project",
+        )
+        files = ReadmeGenerator(Path(tmpdir), config).generate()
+        readme_path: Path = files["README.md"]
+        return readme_path.read_text()
+
+    def test_csharp_readme_advertises_the_wired_quality_tooling(self) -> None:
+        """README advertises the #370 quality tooling as real.
+
+        With the #370 toolchain (dotnet format + Roslyn-analyzer
+        pre-commit hooks, quality scripts, the CA1502 complexity gate,
+        the NetArchTest architecture template) and the foundation CI
+        pipeline both generated, every roadmap item is real — the
+        Kotlin (#360) / C/C++ (#365) / Java (#367) precedent.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Planned / coming soon" not in content
+            assert ".github/workflows/ci.yml" in content
+            assert "./scripts/check-all.sh" in content
+            assert "NetArchTest" in content
+            assert "plans/architecture" in content
+            assert "CodeMetricsConfig.txt" in content
+
+    def test_csharp_readme_documents_dotnet_usage(self) -> None:
+        """README documents the dotnet CLI quality commands."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "dotnet test" in content
+            assert "dotnet build" in content
+            assert "dotnet format --verify-no-changes" in content
+            assert "dotnet test /p:CollectCoverage=true" in content
+
+    def test_csharp_readme_documents_threshold_homes(self) -> None:
+        """README points at the single homes of the numeric gates.
+
+        The >=90% coverage bound lives in the csproj and the <=10
+        complexity bound in CodeMetricsConfig.txt; the README must
+        direct readers there rather than inventing a third home.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "test-project.csproj" in content
+            assert "CA1502" in content
+
+    def test_csharp_readme_structure_matches_generated_tree(self) -> None:
+        """README's structure block names only files init generates.
+
+        The truthfulness contract: no solution (.sln) file is generated
+        and the test scaffold is tests/MainTests.cs, so the README must
+        not claim otherwise.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert ".sln" not in content
+            assert "UnitTests.cs" not in content
+            assert "MainTests.cs" in content
+            assert "src/Program.cs" in content or "Program.cs" in content
+
+
 class TestCppReadme:
     """Test C/C++ Tizen-specific README content (#361/#362)."""
 

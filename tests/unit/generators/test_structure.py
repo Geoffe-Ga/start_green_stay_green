@@ -458,6 +458,46 @@ class TestMultiLanguageStructure:
             content = files["src/Program.cs"].read_text()
             assert "Hello from" in content
 
+    def test_csharp_program_uses_shared_pascal_case_namespace(self) -> None:
+        """Program.cs derives its namespace from the shared helper (#370).
+
+        The structure, tests, and architecture generators must all
+        agree on the PascalCase root namespace (the C# convention) or
+        the scaffolded xUnit test and the NetArchTest template cannot
+        resolve ``Program``.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="csharp",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["src/Program.cs"].read_text()
+            assert "namespace TestProject" in content
+            assert "namespace test_project" not in content
+
+    def test_csharp_program_main_is_public(self) -> None:
+        """Program.Main is public so the scaffolded xUnit test can call it.
+
+        The generated tests/MainTests.cs invokes ``Program.Main(...)``
+        directly; an implicitly private Main would be a guaranteed
+        compile error in the generated project (#370).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="csharp",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["src/Program.cs"].read_text()
+            assert "public static void Main" in content
+
     def test_ruby_creates_gemfile(self) -> None:
         """Test Ruby generates Gemfile."""
         with tempfile.TemporaryDirectory() as tmpdir:

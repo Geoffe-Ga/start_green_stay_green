@@ -413,6 +413,28 @@ class TestMultiLanguageTests:
             content = files["tests/MainTests.cs"].read_text()
             assert "[Fact]" in content
 
+    def test_csharp_test_namespace_nests_under_program_namespace(self) -> None:
+        """The xUnit test namespace derives from the shared helper (#370).
+
+        ``MainTests`` lives in ``<Namespace>.Tests`` so C#'s enclosing-
+        namespace lookup resolves ``Program`` (declared in
+        ``<Namespace>`` by the structure generator) without a using
+        directive — but only when both generators agree on the
+        PascalCase namespace.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="csharp",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["tests/MainTests.cs"].read_text()
+            assert "namespace TestProject.Tests" in content
+            assert "Program.Main(" in content
+
     def test_ruby_test_has_describe_block(self) -> None:
         """Test Ruby spec file has describe block."""
         with tempfile.TemporaryDirectory() as tmpdir:
