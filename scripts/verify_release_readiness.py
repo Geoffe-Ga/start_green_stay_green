@@ -38,6 +38,8 @@ import tempfile
 
 import yaml
 
+from start_green_stay_green.utils.fs import _is_windows
+
 # Minimum number of pre-commit hooks a generated Python project must declare.
 MIN_PRECOMMIT_HOOKS = 25
 
@@ -164,7 +166,7 @@ def _check_scripts_executable(project_dir: Path) -> list[str]:
         path = scripts_dir / name
         if not path.is_file():
             failures.append(f"missing quality script: scripts/{name}")
-        elif os.name != "nt" and not path.stat().st_mode & 0o111:
+        elif not _is_windows() and not path.stat().st_mode & 0o111:
             failures.append(f"quality script not executable: scripts/{name}")
     return failures
 

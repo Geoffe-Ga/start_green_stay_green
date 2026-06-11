@@ -9,7 +9,6 @@ by ``tests/e2e/test_release_readiness_e2e.py``.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import sys
 from typing import TYPE_CHECKING
@@ -122,7 +121,7 @@ class TestScriptsExecutable:
         """A non-executable quality script is reported (POSIX branch)."""
         # Pin the POSIX branch: Windows has no executable bit, so the
         # exec-bit half of the check is POSIX-only (#380).
-        monkeypatch.setattr(os, "name", "posix")
+        monkeypatch.setattr(vrr, "_is_windows", bool)
         project = _make_valid_project(tmp_path)
         (project / "scripts" / "lint.sh").chmod(0o644)
         failures = vrr._check_scripts_executable(project)
@@ -137,7 +136,7 @@ class TestScriptsExecutable:
         enforcing 0o111 there would flag every .sh script. The check
         degrades to existence-only.
         """
-        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr(vrr, "_is_windows", lambda: True)
         project = _make_valid_project(tmp_path)
         (project / "scripts" / "lint.sh").chmod(0o644)
         assert vrr._check_scripts_executable(project) == []
@@ -146,7 +145,7 @@ class TestScriptsExecutable:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Missing scripts are reported on Windows too (#380)."""
-        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr(vrr, "_is_windows", lambda: True)
         project = _make_valid_project(tmp_path)
         (project / "scripts" / "test.sh").unlink()
         failures = vrr._check_scripts_executable(project)

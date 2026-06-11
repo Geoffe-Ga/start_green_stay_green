@@ -19,6 +19,21 @@ if TYPE_CHECKING:
 EXECUTABLE_MODE = 0o755
 
 
+def _is_windows() -> bool:
+    """Return True on native Windows.
+
+    A patchable seam rather than an inline ``os.name`` read: tests must
+    never monkeypatch the real ``os.name``, because ``pathlib.Path``
+    dispatches on it at construction time — patching it to "posix" on a
+    Windows runner makes every ``Path()`` call (including ones inside
+    pytest plugins during report building) raise NotImplementedError.
+
+    Returns:
+        Whether the current platform is native Windows.
+    """
+    return os.name == "nt"
+
+
 def make_executable(path: Path) -> None:
     """Mark ``path`` executable (mode 0o755) on POSIX; no-op on Windows.
 
@@ -36,6 +51,6 @@ def make_executable(path: Path) -> None:
         OSError: If the file does not exist or permissions cannot be
             changed (POSIX only).
     """
-    if os.name == "nt":
+    if _is_windows():
         return
     path.chmod(EXECUTABLE_MODE)

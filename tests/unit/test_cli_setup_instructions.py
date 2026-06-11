@@ -108,42 +108,56 @@ class TestGetSetupInstructions:
     def test_python_includes_venv_activation(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Python setup should activate the virtualenv."""
-        # Pin the POSIX branch: on Windows os.name is "nt" and the
-        # activation command takes the Scripts\activate form (#380).
-        monkeypatch.setattr(os, "name", "posix")
+        """Python setup embeds the canonical activation command.
+
+        Platform-agnostic by construction: the expected string is
+        computed through the same helper the production code calls, for
+        the live platform plus a controlled environment. The exact
+        POSIX/Windows command strings are pinned hermetically in
+        TestVenvActivationCommand; the real os.name is never patched —
+        pathlib.Path dispatches on it at construction time, so patching
+        it crashes Path() on Windows runners (#380).
+        """
         monkeypatch.delenv("SHELL", raising=False)
+        expected = _venv_activation_command(os.name, {})
+
         instructions = _get_setup_instructions(
             ("python",), Path("/home/user/my-project")
         )
-        assert "source .venv/bin/activate" in instructions
 
-    def test_python_activation_respects_fish_shell(
+        assert expected in instructions
+
+    def test_python_activation_respects_shell_env(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Python setup should emit the fish activation script under fish."""
-        # Pin the POSIX branch: on Windows os.name is "nt" and SHELL is
-        # ignored entirely (#380).
-        monkeypatch.setattr(os, "name", "posix")
+        """Setup instructions follow the helper's SHELL-sensitive output.
+
+        Under fish on POSIX this is the activate.fish form; on Windows
+        SHELL is ignored and the Scripts form appears — either way the
+        instructions must embed exactly what the canonical helper
+        produces for the same inputs.
+        """
         monkeypatch.setenv("SHELL", "/usr/bin/fish")
+        expected = _venv_activation_command(os.name, {"SHELL": "/usr/bin/fish"})
+
         instructions = _get_setup_instructions(
             ("python",), Path("/home/user/my-project")
         )
-        assert "source .venv/bin/activate.fish" in instructions
-        assert "source .venv/bin/activate" not in instructions
+
+        assert expected in instructions
 
     def test_python_activation_defaults_without_shell_var(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Python setup should keep the bash/zsh form when SHELL is unset."""
-        # Pin the POSIX branch: on Windows os.name is "nt" and the
-        # bash/zsh fallback never applies (#380).
-        monkeypatch.setattr(os, "name", "posix")
+        """Unset SHELL yields the helper's platform default."""
         monkeypatch.delenv("SHELL", raising=False)
+        expected = _venv_activation_command(os.name, {})
+
         instructions = _get_setup_instructions(
             ("python",), Path("/home/user/my-project")
         )
-        assert "source .venv/bin/activate" in instructions
+
+        assert expected in instructions
 
     def test_python_includes_pip_install(self) -> None:
         """Python setup should install requirements."""

@@ -9,7 +9,6 @@ end state.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -25,7 +24,7 @@ class TestMakeExecutable:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """On POSIX the helper applies exactly mode 0o755."""
-        monkeypatch.setattr(os, "name", "posix")
+        monkeypatch.setattr(fs, "_is_windows", bool)
         target = tmp_path / "script.sh"
         target.write_text("#!/bin/sh\n", encoding="utf-8")
         recorded: list[int] = []
@@ -42,8 +41,8 @@ class TestMakeExecutable:
     def test_windows_is_a_noop(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """On Windows (os.name == "nt") the helper never calls chmod."""
-        monkeypatch.setattr(os, "name", "nt")
+        """On Windows the helper never calls chmod."""
+        monkeypatch.setattr(fs, "_is_windows", lambda: True)
         target = tmp_path / "script.sh"
         target.write_text("#!/bin/sh\n", encoding="utf-8")
 
@@ -72,7 +71,7 @@ class TestMakeExecutable:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """POSIX behavior is unchanged: chmod on a missing path raises."""
-        monkeypatch.setattr(os, "name", "posix")
+        monkeypatch.setattr(fs, "_is_windows", bool)
 
         with pytest.raises(OSError, match="does-not-exist"):
             fs.make_executable(tmp_path / "does-not-exist.sh")
