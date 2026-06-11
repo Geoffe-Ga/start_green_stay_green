@@ -138,7 +138,11 @@ if [ -f "$PROJECT_ROOT/.pip-audit-known-vulnerabilities" ]; then
 fi
 
 pip-audit "${PIP_AUDIT_ARGS[@]}" 2>"$TMP_PIP_AUDIT_STDERR" || {
-    echo "✗ pip-audit found issues" >&2
+    # Surface the captured stderr: without it a transient PyPI/OSV
+    # ServiceError is indistinguishable from a real vulnerability
+    # finding in CI logs.
+    echo "✗ pip-audit failed; stderr follows:" >&2
+    cat "$TMP_PIP_AUDIT_STDERR" >&2
     exit 1
 }
 
