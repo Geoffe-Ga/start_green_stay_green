@@ -133,6 +133,7 @@ Primary programming language for the project.
 - `kotlin` - Kotlin 2.0 with Gradle (Kotlin DSL) on JDK 17/21, Wear OS-ready
 - `cpp` - C/C++ (C++17 pinned, C++20-ready sources) with CMake ≥3.20 + Conan 2, Tizen-watch-ready
 - `java` - Java 17 with Maven (pure logic), Wear OS (legacy Android Wear)-ready
+- `csharp` - C# on .NET 8 (net8.0) with the dotnet CLI, xUnit, and NuGet
 
 **Examples**:
 ```bash
@@ -144,12 +145,13 @@ Primary programming language for the project.
 --language kotlin
 --language cpp
 --language java
+--language csharp
 ```
 
 **Interactive Fallback**:
 If not provided, will prompt with options:
 ```
-Primary language: [python/typescript/go/rust/swift/kotlin/cpp/java]
+Primary language: [python/typescript/go/rust/swift/kotlin/cpp/java/csharp]
 ```
 
 **Swift Toolchain**:
@@ -272,6 +274,41 @@ build the APK with Android tooling (Android Studio / Gradle), adding
 pom pins `maven.compiler.release` 17, within CI's 17/21 matrix), Maven,
 and `brew install google-java-format` for the generated pre-commit
 format hook.
+
+**C# Toolchain**:
+
+A `--language csharp` project is a general .NET 8 scaffold (a console
+app plus xUnit tests compiling into one assembly) wired with this
+quality toolchain. Every gate runs inside the dotnet CLI, and the
+generated `.csproj` is the single source of the quality policy — the
+analyzer configuration, the coverage bound, and the quality packages
+all live there, so the scripts, hooks, and CI cannot version-drift
+from the build:
+
+| Concern | Tool | Where it runs |
+|---------|------|---------------|
+| Formatting | dotnet format (a `repo: local` system hook in check mode — `--verify-no-changes`, because a bare `dotnet format` rewrites files and exits 0 either way; `scripts/format.sh` keeps the fixing path; reads `.editorconfig`) | `scripts/format.sh`, pre-commit, CI |
+| Lint + source security | Roslyn analyzers in every `dotnet build` — the csproj enables the .NET SDK analyzers and treats warnings as errors, and the SecurityCodeScan analyzer runs in the same compiler pass | `scripts/lint.sh`, pre-commit, CI |
+| Complexity (≤10) | The Roslyn CA1502 rule — enabled in `.editorconfig`, with the bound's single home in the companion `CodeMetricsConfig.txt` at the project root (wired in via the csproj's AdditionalFiles; 10 reports 11+) | every `dotnet build` |
+| Tests | xUnit (`dotnet test` — restore, analyzer-gated build, and tests in one invocation) | `scripts/test.sh`, CI |
+| Coverage (≥90%) | Coverlet (`dotnet test /p:CollectCoverage=true` — the line bound lives in the csproj's `Threshold` properties, its single home; coverlet.msbuild hooks the test task itself, so a missed bound fails the run directly) | `scripts/test.sh --coverage`, CI |
+| Secret scanning | gitleaks + detect-secrets | pre-commit |
+| Dependency CVE scan | `dotnet list package --vulnerable` (gated on the report output, not the exit code — the command's exit code unreliably stays 0 with findings across SDK lines; needs restore + network, so offline runs warn and skip) plus the SecurityCodeScan analyzer above for source-level findings | `scripts/security.sh` |
+| Mutation testing | Stryker.NET (`dotnet stryker`) | periodic quality gate (tracked by the opt-in metrics dashboard) |
+| Documentation | DocFX | tracked by the opt-in metrics dashboard |
+| Architecture rules | NetArchTest xUnit test (`plans/architecture/`; copy it **flat** into `tests/` to enforce — C# namespaces carry no directory-matching requirement, and NetArchTest.Rules is already declared in the csproj) | `plans/architecture/run-check.sh` |
+
+CI runs on ubuntu runners with a .NET 8 SDK quality job (the generated
+csproj targets net8.0, which older SDKs cannot build, so the matrix
+pins the 8.0 line — extend it together with the TargetFramework)
+running the same dotnet CLI gates as the local build — restore, the
+analyzer-gated build, the dotnet format check, tests with the
+csproj-backed Coverlet ≥90% gate, and a best-effort Codecov upload
+(informational only: the enforced gate is the Coverlet run), plus a
+build-and-publish job. Local prerequisites: the .NET 8 SDK
+(`brew install dotnet-sdk` on macOS, `apt-get install dotnet-sdk-8.0`
+on Debian/Ubuntu) — `dotnet format`, the Roslyn analyzers, and NuGet
+all ship inside the SDK, so there is nothing else to install.
 
 ##### `--output-dir` / `-o PATH` (Optional)
 
@@ -494,7 +531,7 @@ The `init` command validates:
 - Not a Windows reserved name
 
 **Language**:
-- Must be one of: python, typescript, go, rust, swift, kotlin, cpp, java
+- Must be one of: python, typescript, go, rust, swift, kotlin, cpp, java, csharp
 - Case-insensitive
 
 **Output Directory**:
@@ -791,6 +828,33 @@ with plain Maven.
 See the [Java Toolchain](#--language---l-text-optional) table above
 for the full tool list, and [examples/java/](../examples/java/) for
 real generated output.
+
+### Creating a C# Project
+
+```bash
+# Local prerequisites: the .NET 8 SDK - dotnet format, the Roslyn
+# analyzers, and NuGet all ship inside it, so nothing else to install
+# (Debian/Ubuntu: apt-get install dotnet-sdk-8.0)
+brew install dotnet-sdk
+
+start-green-stay-green init \
+  --project-name wrist-ledger \
+  --language csharp \
+  --no-interactive
+
+cd wrist-ledger
+dotnet test
+pre-commit install
+./scripts/check-all.sh
+```
+
+`dotnet test` restores, builds (with the Roslyn analyzers as errors),
+and runs the xUnit suite in one invocation — the generated csproj owns
+the whole quality policy, so the single command verifies the scaffold.
+
+See the [C# Toolchain](#--language---l-text-optional) table above
+for the full tool list, and [examples/csharp/](../examples/csharp/)
+for real generated output.
 
 ### Batch Creating Projects
 

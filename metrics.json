@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-11T01:04:24.628515+00:00",
+  "timestamp": "2026-06-11T04:54:25.540894+00:00",
   "project": "start-green-stay-green",
   "thresholds": {
     "coverage": 90,
@@ -47,7 +47,7 @@
       "passing_jobs": 0,
       "percentage": 0.0,
       "status": "unknown",
-      "run_url": "https://github.com/Geoffe-Ga/start_green_stay_green/actions/runs/27316701082"
+      "run_url": "https://github.com/Geoffe-Ga/start_green_stay_green/actions/runs/27324652896"
     }
   }
 }
