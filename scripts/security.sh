@@ -137,13 +137,15 @@ if [ -f "$PROJECT_ROOT/.pip-audit-known-vulnerabilities" ]; then
     done < "$PROJECT_ROOT/.pip-audit-known-vulnerabilities"
 fi
 
-# --skip-editable: the local package is not on PyPI and cannot be
-# audited; querying its nonexistent JSON endpoint is also the URL that
-# surfaced PyPI 503s in CI. One retry absorbs transient "Backend is
-# unhealthy" windows without weakening the gate — a retried audit is
+# --vulnerability-service osv: query osv.dev (which aggregates the same PyPA
+# advisory database) instead of PyPI's JSON API — five CI failures in
+# one day were all PyPI 503 "Backend is unhealthy" responses, an
+# endpoint osv.dev does not depend on. --skip-editable: the local
+# package is not on PyPI and cannot be audited. One retry absorbs
+# transient windows without weakening the gate — a retried audit is
 # still a full audit.
 run_pip_audit() {
-    pip-audit --skip-editable "${PIP_AUDIT_ARGS[@]}" \
+    pip-audit --vulnerability-service osv --skip-editable "${PIP_AUDIT_ARGS[@]}" \
         2>"$TMP_PIP_AUDIT_STDERR"
 }
 if ! run_pip_audit; then
