@@ -265,11 +265,41 @@ def _load_config_if_specified(
             raise typer.Exit(code=1) from e
 
 
+def _version_flag_callback(value: bool) -> None:  # noqa: FBT001
+    """Print the version and exit when ``--version`` is passed.
+
+    Eager Typer callback: runs before any command or option validation,
+    so ``sgsg --version`` works regardless of other arguments. Output
+    matches the ``version`` subcommand's simple form.
+
+    Args:
+        value: ``True`` when the flag was supplied on the command line.
+
+    Raises:
+        typer.Exit: Always, after printing (exit code 0).
+    """
+    if value:
+        console.print(f"[bold cyan]Start Green Stay Green v{get_version()}[/bold cyan]")
+        raise typer.Exit
+
+
+version_flag_option = Annotated[
+    bool,
+    typer.Option(
+        "--version",
+        help="Show the version and exit.",
+        callback=_version_flag_callback,
+        is_eager=True,
+    ),
+]
+
+
 @app.callback()
 def main(
     verbose: verbose_option = False,  # noqa: FBT002
     quiet: quiet_option = False,  # noqa: FBT002
     config: config_file_option = None,
+    version: version_flag_option = False,  # noqa: FBT002
 ) -> None:
     """Start Green Stay Green - Generate quality-controlled, AI-ready repositories.
 
@@ -280,7 +310,11 @@ def main(
         verbose: Enable verbose output.
         quiet: Suppress non-essential output.
         config: Path to configuration file.
+        version: Print the version and exit (handled eagerly).
     """
+    # The eager callback consumed --version before this body runs; the
+    # parameter exists only so Typer registers the option.
+    del version
     _validate_options(verbose, quiet)
     _load_config_if_specified(config, verbose)
 

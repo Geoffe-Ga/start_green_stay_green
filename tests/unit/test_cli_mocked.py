@@ -89,6 +89,33 @@ class TestVersionCommand:
         assert all(part.isdigit() for part in parts)
 
 
+class TestVersionFlag:
+    """Top-level ``--version`` eager flag (#401)."""
+
+    def test_version_flag_prints_version_and_exits_zero(self) -> None:
+        """``sgsg --version`` prints the version and exits 0."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["--version"])
+        assert result.exit_code == 0
+        assert cli.get_version() in result.output
+
+    def test_version_flag_matches_version_subcommand_output(self) -> None:
+        """``--version`` output matches the ``version`` subcommand."""
+        runner = CliRunner()
+        flag = runner.invoke(cli.app, ["--version"])
+        sub = runner.invoke(cli.app, ["version"])
+        assert flag.exit_code == 0
+        assert sub.exit_code == 0
+        assert flag.output == sub.output
+
+    def test_version_flag_is_eager(self) -> None:
+        """``--version`` wins even alongside an invalid option combo."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["--version", "--verbose", "--quiet"])
+        assert result.exit_code == 0
+        assert cli.get_version() in result.output
+
+
 class TestConfigLoading:
     """Test configuration file loading."""
 
