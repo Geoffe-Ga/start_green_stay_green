@@ -103,22 +103,38 @@ class ProviderSpec:
         class_name: Name of the provider class within ``module``.
         api_key_env_var: Environment variable the provider's API key
             is read from (kept stable for backward compatibility).
+        default_model: Model id used when no flag/env/config supplies
+            one. Per-provider because model ids are vendor-specific —
+            the Anthropic default would be rejected by an OpenAI
+            endpoint and vice versa.
     """
 
     module: str
     class_name: str
     api_key_env_var: str
+    default_model: str
 
 
-# Registry of every selectable provider. Tracer T2 ships only the
-# Anthropic entry (T3, #385, adds the second concrete provider). Keying
-# by the normalized provider name keeps lookup, validation, and the
-# "supported set" error message all driven by one source of truth.
+# Registry of every selectable provider: Anthropic from tracer T2
+# (#383) and the OpenAI-compatible provider from tracer T3 (#385).
+# Keying by the normalized provider name keeps lookup, validation, and
+# the "supported set" error message all driven by one source of truth.
 _PROVIDERS: Final[dict[str, ProviderSpec]] = {
     "anthropic": ProviderSpec(
         module="start_green_stay_green.ai.providers.anthropic_provider",
         class_name="AnthropicProvider",
         api_key_env_var="ANTHROPIC_API_KEY",  # pragma: allowlist secret
+        default_model=DEFAULT_MODEL,
+    ),
+    "openai": ProviderSpec(
+        module="start_green_stay_green.ai.providers.openai_provider",
+        class_name="OpenAIProvider",
+        api_key_env_var="OPENAI_API_KEY",  # pragma: allowlist secret
+        # Current flagship chat model; live-verified against
+        # developers.openai.com on 2026-06-11. Local/OSS servers ignore
+        # this default — pass --model (or GREEN_LLM_MODEL) with the
+        # hosted model's name instead.
+        default_model="gpt-5.5",
     ),
 }
 
@@ -259,7 +275,9 @@ def resolve_provider_selection(
     1. CLI flag (``provider_flag`` / ``model_flag``)
     2. Environment (``GREEN_LLM_PROVIDER`` / ``GREEN_LLM_MODEL``)
     3. Config-file keys (``llm_provider`` / ``llm_model``)
-    4. Built-in default (:data:`DEFAULT_PROVIDER` / :data:`DEFAULT_MODEL`)
+    4. Built-in default (:data:`DEFAULT_PROVIDER`; the model default
+       is the *selected provider's* default — :data:`DEFAULT_MODEL`
+       for Anthropic — because model ids are vendor-specific)
 
     Blank / whitespace-only values at any tier are treated as unset, so
     they fall through to the next tier rather than erroring.
@@ -283,23 +301,28 @@ def resolve_provider_selection(
     Raises:
         ValueError: If the resolved provider is not registered.
     """
-    # Provider names are case-insensitive registry keys → fold.
-    provider = _coalesce_with_default(
-        DEFAULT_PROVIDER,
-        provider_flag,
-        env.get(ENV_PROVIDER),
-        config.get(_CONFIG_PROVIDER_KEY),
+    # Provider names are case-insensitive registry keys → fold. The
+    # provider resolves first so the model's tier-4 default can follow
+    # it (an Anthropic model id would be rejected by an OpenAI
+    # endpoint and vice versa).
+    provider = _require_known(
+        _coalesce_with_default(
+            DEFAULT_PROVIDER,
+            provider_flag,
+            env.get(ENV_PROVIDER),
+            config.get(_CONFIG_PROVIDER_KEY),
+        )
     )
     # Model ids are case-sensitive API identifiers → preserve case
     # (trim only). ``--model GPT-4o`` must reach the API as ``GPT-4o``.
     model = _coalesce_with_default(
-        DEFAULT_MODEL,
+        _PROVIDERS[provider].default_model,
         model_flag,
         env.get(ENV_MODEL),
         config.get(_CONFIG_MODEL_KEY),
         fold=False,
     )
-    return ProviderSelection(provider=_require_known(provider), model=model)
+    return ProviderSelection(provider=provider, model=model)
 
 
 def resolve_api_key_env_var(provider: str) -> str:

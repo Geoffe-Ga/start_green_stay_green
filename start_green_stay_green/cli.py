@@ -162,7 +162,9 @@ provider_option = Annotated[
             "LLM provider for AI features. Precedence: this flag > "
             "GREEN_LLM_PROVIDER env > config file > default (anthropic). "
             "The provider's API key is read from its own env var "
-            "(ANTHROPIC_API_KEY for anthropic)."
+            "(ANTHROPIC_API_KEY for anthropic, OPENAI_API_KEY for openai). "
+            "For openai, OPENAI_BASE_URL points at any OpenAI-compatible "
+            "local server (a dummy key is fine there)."
         ),
     ),
 ]

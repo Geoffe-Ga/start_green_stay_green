@@ -36,9 +36,48 @@ if TYPE_CHECKING:
     from start_green_stay_green.ai.types import GenerationResult
     from start_green_stay_green.ai.types import ToolUseResult
 
-__all__ = ["LLMProvider"]
+__all__ = ["LLMProvider", "UnsupportedCapabilityError"]
 
 OutputFormat = Literal["yaml", "toml", "markdown", "bash"]
+
+
+class UnsupportedCapabilityError(NotImplementedError):
+    """A provider does not implement one of the optional capability groups.
+
+    Some capability groups are vendor-specific — the batch group maps
+    onto Anthropic's Message Batches API and has no equivalent on
+    OpenAI-compatible endpoints. A provider that cannot honestly
+    implement a group raises this typed error instead of emulating it
+    badly, so callers can catch it and fall back to a per-request
+    path. Full capability advertisement/negotiation arrives with
+    tracer T5 (#389); this minimal convention is what it will build
+    on.
+
+    Subclasses :class:`NotImplementedError` so generic handlers keep
+    working, while ``provider`` and ``capability`` stay machine-readable.
+
+    Attributes:
+        provider: Registry name of the provider lacking the capability.
+        capability: Human-readable name of the missing capability.
+    """
+
+    def __init__(self, *, provider: str, capability: str) -> None:
+        """Build the error message from the provider/capability pair.
+
+        Args:
+            provider: Registry name of the provider (e.g. ``"openai"``).
+            capability: Capability group being declined (e.g.
+                ``"batch tool-use"``).
+        """
+        msg = (
+            f"The {provider!r} provider does not support {capability}. "
+            f"Use a provider that implements this capability (for "
+            f"batch tool-use: 'anthropic'), or run the requests "
+            f"individually."
+        )
+        super().__init__(msg)
+        self.provider = provider
+        self.capability = capability
 
 
 class LLMProvider(ABC):
