@@ -2322,13 +2322,19 @@ class TestEnhanceCommand:
         assert "Configuration file not found" in self._flat(result.stdout)
 
     def test_help_lists_config_flag(self) -> None:
-        """``enhance --help`` advertises the ``--config`` flag (#396)."""
+        """``enhance --help`` advertises the ``--config`` flag (#396).
+
+        Rich styles and may hyphen-wrap option names depending on the
+        environment it detects, so strip ANSI sequences and collapse
+        box-drawing characters and whitespace before matching.
+        """
         runner = CliRunner()
         result = runner.invoke(cli.app, ["enhance", "--help"])
         assert result.exit_code == 0
-        flat = self._flat(result.stdout)
-        assert "--config" in flat
-        assert "--config-file" in flat
+        no_ansi = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+        plain = re.sub(r"[│╭╮╰╯─\s]+", "", no_ansi)
+        assert "--config" in plain
+        assert "--config-file" in plain
 
     @patch("start_green_stay_green.cli._enhance_subagents")
     @patch("start_green_stay_green.cli._enhance_claude_md")
