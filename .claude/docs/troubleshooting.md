@@ -413,7 +413,7 @@ different Black formatting output.
 versions. If `requirements-dev.txt` uses a version range (e.g.,
 `>=26.3.1,<27.0.0`), local venvs may have a different Black version than CI.
 
-**Fix**: Black is pinned to an exact version (`==26.3.1`) in
+**Fix**: Black is pinned to an exact version (`==26.5.1`) in
 `requirements-dev.txt`. After pulling changes that update the Black pin:
 
 ```bash
