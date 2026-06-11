@@ -5,8 +5,10 @@ and are properly structured for use by generators.
 """
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
+import yaml
 
 
 # Fixture for reference directory
@@ -50,6 +52,74 @@ class TestCIReferences:
             assert workflow_path.exists(), f"Missing CI workflow: {workflow}"
             assert workflow_path.is_file()
             assert workflow_path.stat().st_size > 0, f"Empty CI workflow: {workflow}"
+
+
+class TestCIMutationPosture:
+    """Mutation-testing CI steps mirror the python.yml posture (#398).
+
+    The python reference workflow runs mutation testing as a step in the
+    quality job gated to pushes on main (not per-PR). The TypeScript,
+    Go, and Rust workflows must carry the same enforcement posture; the
+    declined languages must not grow a half-wired step.
+    """
+
+    #: Language → command fragment its mutation step must run.
+    MUTATION_COMMANDS: ClassVar[dict[str, str]] = {
+        "python": "mutmut run",
+        "typescript": "npx stryker run",
+        "go": "gremlins unleash",
+        "rust": "scripts/mutation.sh",
+    }
+
+    @pytest.fixture
+    def ci_dir(self, reference_dir: Path) -> Path:
+        """Return path to CI directory."""
+        return reference_dir / "ci"
+
+    @staticmethod
+    def _mutation_steps(workflow_path: Path) -> list[dict]:
+        """Return quality-job steps whose name mentions mutation."""
+        workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["quality"]["steps"]
+        return [
+            step for step in steps if "mutation" in str(step.get("name", "")).lower()
+        ]
+
+    @pytest.mark.parametrize("language", sorted(MUTATION_COMMANDS))
+    def test_quality_job_has_one_mutation_step(
+        self, ci_dir: Path, language: str
+    ) -> None:
+        """Each implemented language has exactly one mutation step."""
+        steps = self._mutation_steps(ci_dir / f"{language}.yml")
+        assert len(steps) == 1
+
+    @pytest.mark.parametrize("language", sorted(MUTATION_COMMANDS))
+    def test_mutation_step_is_gated_to_main(self, ci_dir: Path, language: str) -> None:
+        """The step runs on main pushes only, mirroring python.yml."""
+        (step,) = self._mutation_steps(ci_dir / f"{language}.yml")
+        assert step["if"] == "github.ref == 'refs/heads/main'"
+
+    @pytest.mark.parametrize("language", sorted(MUTATION_COMMANDS))
+    def test_mutation_step_runs_the_language_tool(
+        self, ci_dir: Path, language: str
+    ) -> None:
+        """The step invokes the language's mutation tool."""
+        (step,) = self._mutation_steps(ci_dir / f"{language}.yml")
+        assert self.MUTATION_COMMANDS[language] in step["run"]
+
+    @pytest.mark.parametrize(
+        "language", ["swift", "kotlin", "cpp", "java", "csharp", "ruby", "php"]
+    )
+    def test_declined_languages_have_no_mutation_step(
+        self, ci_dir: Path, language: str
+    ) -> None:
+        """Declined ecosystems stay honest: no mutation step at all."""
+        workflow = yaml.safe_load(
+            (ci_dir / f"{language}.yml").read_text(encoding="utf-8")
+        )
+        for job in workflow["jobs"].values():
+            for step in job.get("steps", []):
+                assert "mutation" not in str(step.get("name", "")).lower()
 
 
 class TestScriptsReferences:

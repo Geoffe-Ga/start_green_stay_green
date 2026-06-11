@@ -87,16 +87,31 @@ _LANGUAGE_GATE_DOCS: dict[str, dict[str, GateDoc]] = {
         "lint.sh": GateDoc("npx eslint ."),
         "test.sh": GateDoc("npx jest"),
         "typecheck.sh": GateDoc("npx tsc --noEmit"),
+        "mutation.sh": GateDoc(
+            "npx stryker run",
+            note="the 80% break threshold lives in stryker.conf.json",
+        ),
     },
     "go": {
         "format.sh": GateDoc("go fmt ./..."),
         "lint.sh": GateDoc("golangci-lint run ./..."),
         "test.sh": GateDoc("go test -cover ./..."),
+        "mutation.sh": GateDoc(
+            "gremlins unleash",
+            note="the 80% efficacy threshold lives in .gremlins.yaml",
+        ),
     },
     "rust": {
         "format.sh": GateDoc("cargo fmt --all -- --check"),
         "lint.sh": GateDoc("cargo clippy --all -- -D warnings"),
         "test.sh": GateDoc("cargo test"),
+        "mutation.sh": GateDoc(
+            "cargo mutants",
+            note=(
+                "stricter than the script: bare cargo-mutants fails on any"
+                " missed mutant, while the script gates at an 80% score"
+            ),
+        ),
     },
     "swift": {
         "format.sh": GateDoc("swift-format lint --strict --recursive Sources Tests"),

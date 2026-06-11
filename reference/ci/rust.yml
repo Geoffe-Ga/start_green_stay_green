@@ -67,6 +67,18 @@ jobs:
         run: |
           cargo tarpaulin --ignore-tests --fail-under 90
 
+      # Mirrors the python.yml mutation posture: periodic (main-branch
+      # pushes only), not a per-PR gate. The step runs the generated
+      # scripts/mutation.sh rather than bare `cargo mutants` because
+      # cargo-mutants has no manifest threshold setting — the script is
+      # the single home of the 80% score gate (bare cargo-mutants would
+      # fail on any missed mutant).
+      - name: Run mutation testing (on main branch only)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cargo install --locked cargo-mutants
+          bash scripts/mutation.sh
+
   build:
     name: Build and Test
     runs-on: ubuntu-latest

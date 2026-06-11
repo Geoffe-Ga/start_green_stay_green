@@ -1,5 +1,6 @@
 """Unit tests for Dependencies Generator."""
 
+import json
 from pathlib import Path
 import tempfile
 import tomllib
@@ -327,6 +328,27 @@ class TestMultiLanguageDependencies:
             content = files["package.json"].read_text()
             assert "devDependencies" in content
             assert "typescript" in content
+
+    def test_typescript_package_json_includes_stryker_dev_dependencies(self) -> None:
+        """package.json carries StrykerJS so `npm ci` makes the mutation
+        gate runnable (parity with mutmut in requirements-dev.txt, #398).
+
+        Versions live-verified on the npm registry 2026-06-11
+        (@stryker-mutator/core latest 9.6.1).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = DependencyConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = DependenciesGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            parsed = json.loads(files["package.json"].read_text())
+            dev_deps = parsed["devDependencies"]
+            assert dev_deps["@stryker-mutator/core"] == "^9.6.0"
+            assert dev_deps["@stryker-mutator/jest-runner"] == "^9.6.0"
 
     def test_go_mod_has_module_name(self) -> None:
         """Test Go go.mod contains module declaration."""
