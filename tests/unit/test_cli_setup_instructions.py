@@ -651,6 +651,26 @@ class TestFinalizeInitWindowsNote:
         assert "Git Bash" in output
         assert "bash scripts/check-all.sh" in output
 
+    def test_windows_note_points_at_scripts_readme(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        """The note references the generated per-gate Windows docs (#386).
+
+        Generated projects now document every gate's Windows invocation
+        in scripts/README.md, so the note must direct users there and
+        must not claim Windows support is missing.
+        """
+        monkeypatch.setattr("start_green_stay_green.cli.is_windows", _always_windows)
+
+        _finalize_init(tmp_path, "proj", ("python",))
+
+        output = self._printed_output(capsys)
+        assert "scripts/README.md" in output
+        assert "not generated yet" not in output
+
     def test_posix_omits_git_bash_note(
         self,
         monkeypatch: pytest.MonkeyPatch,

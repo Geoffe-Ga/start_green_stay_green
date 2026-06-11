@@ -32,3 +32,28 @@ These are reference implementations that will be:
 - Ruby
 - PHP
 - Kotlin
+
+## Cross-Platform Usage (Windows)
+
+The reference gates are POSIX shell scripts. They run unchanged on
+Windows through Git Bash (bundled with Git for Windows), which needs no
+executable bit because bash receives the script path as an argument:
+
+```
+bash scripts/test.sh
+bash scripts/lint.sh
+```
+
+Each script wraps the language's own toolchain runner (`npm`/`npx`,
+`go`, `cargo`, `gradle`, `swift`, `mvn`, `dotnet`, `bundle`,
+`cmake`/`ctest`), which is cross-platform by design — so where bash is
+unavailable, the wrapped toolchain command can be invoked directly.
+The scripts remain the source of truth for option sets, ordering, and
+threshold enforcement (e.g. minimum coverage).
+
+Generated projects receive a `scripts/README.md` (see
+`start_green_stay_green/generators/gate_commands.py`, the single
+source of truth) documenting the POSIX, Git Bash, and toolchain-native
+invocation for every emitted gate, plus a `.gitattributes` rule pinning
+`*.sh` to LF so the gates survive `git clone` on `core.autocrlf=true`
+Windows checkouts.

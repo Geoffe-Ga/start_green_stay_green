@@ -3169,3 +3169,142 @@ class TestPrStatusScript:
 
             content = scripts["pr-status.sh"].read_text()
             assert "my_special_project" in content
+
+
+class TestScriptsGeneratorCrossPlatformDocs:
+    """Cross-platform gate documentation and Windows runnability (#386).
+
+    Generated projects must document a working Windows invocation for
+    every gate (Git Bash plus the toolchain-native command), pin LF
+    line endings so the bash gates survive Windows checkouts, and the
+    scripts themselves must execute under bash regardless of the
+    generating platform. These tests run unchanged on the Windows CI
+    leg (#380), where they exercise the real Git Bash path.
+    """
+
+    LANGUAGES = (
+        "python",
+        "typescript",
+        "go",
+        "rust",
+        "swift",
+        "kotlin",
+        "cpp",
+        "java",
+        "csharp",
+        "ruby",
+    )
+
+    @staticmethod
+    def _generate(tmpdir: str, language: str) -> dict[str, Path]:
+        """Generate scripts for ``language`` into ``tmpdir``/scripts."""
+        config = ScriptConfig(language=language, package_name="my_package")
+        generator = ScriptsGenerator(
+            Path(tmpdir) / "scripts",
+            config,
+            project_root=Path(tmpdir),
+        )
+        return generator.generate()
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_scripts_readme_documents_every_emitted_gate(self, language: str) -> None:
+        """scripts/README.md has one row per emitted .sh gate (no drift)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            readme = Path(tmpdir) / "scripts" / "README.md"
+            assert readme.exists()
+            content = readme.read_text(encoding="utf-8")
+            documented = {
+                line.split("`")[1]
+                for line in content.splitlines()
+                if line.startswith("| `")
+            }
+            emitted = {name for name in scripts if name.endswith(".sh")}
+            assert documented == emitted
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_scripts_readme_documents_git_bash_invocation(self, language: str) -> None:
+        """The documented Windows path runs each gate through Git Bash."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir, language)
+
+            content = (Path(tmpdir) / "scripts" / "README.md").read_text(
+                encoding="utf-8"
+            )
+            assert "bash scripts/check-all.sh" in content
+            assert "`bash scripts/test.sh`" in content
+            assert "`bash scripts/lint.sh`" in content
+            assert "Git Bash" in content
+
+    def test_scripts_readme_interpolates_package_name(self) -> None:
+        """Python toolchain commands name the real package."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir, "python")
+
+            content = (Path(tmpdir) / "scripts" / "README.md").read_text(
+                encoding="utf-8"
+            )
+            assert "mypy my_package/" in content
+            assert "__PACKAGE__" not in content
+
+    def test_gitattributes_pins_shell_scripts_to_lf(self) -> None:
+        """.gitattributes keeps *.sh LF so Git Bash can execute them."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir, "python")
+
+            gitattributes = Path(tmpdir) / ".gitattributes"
+            assert gitattributes.exists()
+            assert "*.sh text eol=lf" in gitattributes.read_text(encoding="utf-8")
+
+    def test_gitattributes_preserves_existing_file(self) -> None:
+        """User-owned .gitattributes is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / ".gitattributes"
+            existing.write_text("* text=auto\n", encoding="utf-8")
+
+            self._generate(tmpdir, "python")
+
+            assert existing.read_text(encoding="utf-8") == "* text=auto\n"
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_generated_artifacts_use_lf_only(self, language: str) -> None:
+        """No generated script or doc carries CR bytes.
+
+        On Windows, text-mode writes translate \\n to \\r\\n by default,
+        and bash cannot execute CRLF scripts — this is the regression
+        the Windows CI leg guards against.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            paths = [
+                *scripts.values(),
+                Path(tmpdir) / "scripts" / "README.md",
+                Path(tmpdir) / ".gitattributes",
+            ]
+            for path in paths:
+                assert b"\r" not in path.read_bytes(), path.name
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    @pytest.mark.parametrize("gate", ["check-all.sh", "test.sh", "lint.sh"])
+    def test_gates_execute_under_bash(self, language: str, gate: str) -> None:
+        """`bash scripts/<gate> --help` exits 0 with usage text.
+
+        Invoking via ``bash <path>`` (not the executable bit) is the
+        documented Windows form; on the Windows CI leg this exercises
+        the real Git Bash execution path end-to-end for every language.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            bash = shutil.which("bash")
+            assert bash is not None, "bash not found on PATH"
+            result = subprocess.run(  # noqa: S603  # Issue #386: bash on generated content, no untrusted input
+                [bash, str(scripts[gate]), "--help"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0, result.stderr
+            assert "Usage" in result.stdout
