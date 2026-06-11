@@ -2434,3 +2434,175 @@ class TestCsharpReferenceTemplate:
         run_commands = _all_run_commands(parsed)
         assert not any("GITHUB_ENV" in cmd for cmd in run_commands)
         assert not any("GITHUB_PATH" in cmd for cmd in run_commands)
+
+
+class TestRubyReferenceTemplate:
+    """Tests for the Ruby reference CI workflow (#373/#374).
+
+    The ruby scaffold is a plain-Ruby (non-Rails, non-gem) project
+    whose quality policy lives in two single homes: .rubocop.yml
+    (format/lint/complexity/security cops) and spec/spec_helper.rb
+    (the SimpleCov >=90% line-coverage bound). Every assertion here
+    checks that the workflow runs thin bundle invocations against that
+    policy and restates none of it — the same manifest-owned shape the
+    Kotlin/Java/C# workflows follow.
+    """
+
+    @pytest.fixture
+    def ruby_workflow(self) -> CIWorkflow:
+        """Render the deterministic Ruby reference workflow."""
+        return CIGenerator(language="ruby").generate_workflow_from_template()
+
+    def test_workflow_is_valid_yaml(self, ruby_workflow: CIWorkflow) -> None:
+        """Rendered workflow parses with yaml.safe_load and validates."""
+        parsed = yaml.safe_load(ruby_workflow.content)
+        assert ruby_workflow.is_valid
+        assert isinstance(parsed, dict)
+        assert parsed["name"] == "Ruby Quality Checks"
+
+    def test_workflow_has_only_the_quality_job(self, ruby_workflow: CIWorkflow) -> None:
+        """Workflow declares exactly the quality job — no packaging.
+
+        The generated scaffold is a plain-Ruby project without a
+        .gemspec, so a `gem build` job would be red on every push;
+        packaging arrives together with the gemspec.
+        """
+        parsed = yaml.safe_load(ruby_workflow.content)
+        assert set(parsed["jobs"]) == {"quality"}
+
+    def test_quality_job_runs_on_ubuntu(self, ruby_workflow: CIWorkflow) -> None:
+        """The quality job runs on ubuntu: MRI Ruby needs no macOS."""
+        parsed = yaml.safe_load(ruby_workflow.content)
+        assert parsed["jobs"]["quality"]["runs-on"] == "ubuntu-latest"
+
+    def test_ruby_matrix_runs_only_maintained_lines(
+        self, ruby_workflow: CIWorkflow
+    ) -> None:
+        """The quality job matrixes over exactly the 3.3/3.4 lines.
+
+        These are the Ruby lines still receiving upstream maintenance
+        (3.1/3.2 reached EOL; verified against ruby-lang.org's branch
+        table, 2026-06); the matrix bumps together with
+        LANGUAGE_CONFIGS["ruby"]["supported_versions"] and the
+        generated .rubocop.yml's TargetRubyVersion.
+        """
+        parsed = yaml.safe_load(ruby_workflow.content)
+        matrix = parsed["jobs"]["quality"]["strategy"]["matrix"]
+        assert matrix["ruby-version"] == ["3.3", "3.4"]
+
+    def test_setup_actions_are_pinned_to_majors(
+        self, ruby_workflow: CIWorkflow
+    ) -> None:
+        """checkout and setup-ruby are pinned to major versions."""
+        content = ruby_workflow.content
+        assert "actions/checkout@v4" in content
+        assert "ruby/setup-ruby@v1" in content
+
+    def test_setup_ruby_installs_gems_via_bundler_cache(
+        self, ruby_workflow: CIWorkflow
+    ) -> None:
+        """setup-ruby's bundler-cache owns the install — no extra step.
+
+        bundler-cache: true runs `bundle install` and caches the gems
+        inside the action, so a separate (and cache-blind) install run
+        command would only duplicate it.
+        """
+        parsed = yaml.safe_load(ruby_workflow.content)
+        setup_steps = [
+            step
+            for step in parsed["jobs"]["quality"]["steps"]
+            if "ruby/setup-ruby" in step.get("uses", "")
+        ]
+        assert len(setup_steps) == 1
+        assert setup_steps[0]["with"]["bundler-cache"] is True
+        run_commands = _all_run_commands(parsed)
+        assert not any("bundle install" in cmd for cmd in run_commands)
+
+    def test_rubocop_run_defers_the_policy_to_rubocop_yml(
+        self, ruby_workflow: CIWorkflow
+    ) -> None:
+        """CI runs RuboCop's full cop set against .rubocop.yml only.
+
+        Format (Layout), lint (Lint/Style), the
+        Metrics/CyclomaticComplexity <=10 ceiling, and the Security
+        department all live in .rubocop.yml — the same file the
+        pre-commit hook and scripts/lint.sh read — so the invocation
+        carries no --only/--except selection and no restated bound.
+        """
+        parsed = yaml.safe_load(ruby_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        rubocop_runs = [c for c in run_commands if "rubocop" in c]
+        assert rubocop_runs == ["bundle exec rubocop --force-exclusion"]
+
+    def test_security_gate_is_bundler_audit_not_brakeman(
+        self, ruby_workflow: CIWorkflow
+    ) -> None:
+        """Dependency CVEs gate via an updated bundler-audit run.
+
+        The advisory-db update precedes the check (CI runners have
+        network access, so a stale-db pass is not acceptable there).
+        Brakeman is deliberately absent: it is Rails-specific and
+        errors on plain-Ruby projects — parity with the generated
+        Gemfile, which does not pin it.
+        """
+        parsed = yaml.safe_load(ruby_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        audit_runs = [c for c in run_commands if "bundler-audit" in c]
+        assert len(audit_runs) == 1
+        assert "bundler-audit update" in audit_runs[0]
+        assert "bundler-audit check" in audit_runs[0]
+        assert audit_runs[0].index("update") < audit_runs[0].index("check")
+        assert not any("brakeman" in c for c in run_commands)
+
+    def test_coverage_step_defers_the_bound_to_spec_helper(
+        self, ruby_workflow: CIWorkflow
+    ) -> None:
+        """No run command restates the SimpleCov coverage threshold.
+
+        The >=90% bound lives in spec/spec_helper.rb (its single
+        home); COVERAGE=true activates the gate without duplicating
+        the number, and SimpleCov fails the rspec run directly when
+        the bound is missed — so the suite executes exactly once.
+        """
+        parsed = yaml.safe_load(ruby_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        rspec_runs = [c for c in run_commands if "rspec" in c]
+        assert len(rspec_runs) == 1
+        assert rspec_runs[0].startswith("COVERAGE=true bundle exec rspec")
+        assert not any("90" in cmd for cmd in run_commands)
+        assert not any("minimum" in cmd.lower() for cmd in run_commands)
+
+    def test_codecov_upload_cannot_fail_ci(self, ruby_workflow: CIWorkflow) -> None:
+        """The tokenless Codecov upload is best-effort, never a gate.
+
+        A fresh project has no CODECOV_TOKEN secret, so a failing
+        upload must not start the project red; the enforced coverage
+        gate is the spec_helper-backed SimpleCov run in the rspec
+        step.
+        """
+        parsed = yaml.safe_load(ruby_workflow.content)
+        codecov_steps = [
+            step
+            for job in parsed["jobs"].values()
+            for step in job["steps"]
+            if "codecov" in step.get("uses", "")
+        ]
+        assert len(codecov_steps) == 1
+        assert codecov_steps[0]["uses"] == "codecov/codecov-action@v6"
+        assert codecov_steps[0]["with"]["fail_ci_if_error"] is False
+
+    def test_workflow_writes_nothing_to_github_env(
+        self, ruby_workflow: CIWorkflow
+    ) -> None:
+        """Nothing discovered at runtime is exported to GITHUB_ENV.
+
+        The Swift PR #414 review flagged unvalidated GITHUB_ENV writes
+        as the documented Actions env-injection vector; like the
+        Kotlin, cpp, java, and csharp workflows, every value here is a
+        static literal, so there is no dynamic discovery and no
+        GITHUB_ENV/GITHUB_PATH write to guard.
+        """
+        parsed = yaml.safe_load(ruby_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert not any("GITHUB_ENV" in cmd for cmd in run_commands)
+        assert not any("GITHUB_PATH" in cmd for cmd in run_commands)

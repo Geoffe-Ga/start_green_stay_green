@@ -162,7 +162,7 @@ class TestMultiLanguageGeneration:
 
 class TestMultiLanguageArchitectureParity:
     """Go (#341), Rust (#342), Swift (#352), Kotlin (#357), cpp (#362),
-    java (#367), csharp (#370)."""
+    java (#367), csharp (#370), ruby (#373)."""
 
     def test_go_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
         """Go must emit an architecture-enforcement config like py/ts."""
@@ -213,6 +213,13 @@ class TestMultiLanguageArchitectureParity:
         config = tmp_path / "plans" / "architecture" / "ArchitectureTest.cs"
         assert config.exists(), "csharp init must emit the NetArchTest template"
 
+    def test_ruby_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
+        """ruby must emit an architecture-enforcement config like py/ts/go."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "ruby")
+
+        config = tmp_path / "plans" / "architecture" / "packwerk.yml"
+        assert config.exists(), "ruby init must emit a Packwerk config"
+
     @pytest.mark.parametrize(
         "language",
         [
@@ -225,6 +232,7 @@ class TestMultiLanguageArchitectureParity:
             "cpp",
             "java",
             "csharp",
+            "ruby",
         ],
     )
     def test_supported_languages_emit_architecture_config(
@@ -417,6 +425,14 @@ class TestGeneratorOnlyLanguagePipelineGates:
         ci_file = tmp_path / ".github" / "workflows" / "ci.yml"
         assert ci_file.exists()
         assert "Kotlin Quality Checks" in ci_file.read_text()
+
+    def test_ci_step_writes_ruby_workflow(self, tmp_path: Path) -> None:
+        """The ruby CI workflow is generated (ci.py has a ruby config)."""
+        cli_mod._generate_ci_step(tmp_path, "my-project", "ruby", None)
+
+        ci_file = tmp_path / ".github" / "workflows" / "ci.yml"
+        assert ci_file.exists()
+        assert "Ruby Quality Checks" in ci_file.read_text()
 
     def test_metrics_step_writes_kotlin_dashboard(self, tmp_path: Path) -> None:
         """The metrics dashboard is now generated for kotlin (#357)."""
