@@ -96,6 +96,7 @@ from start_green_stay_green.utils.enhance_state import hash_inputs
 from start_green_stay_green.utils.enhance_state import load_state
 from start_green_stay_green.utils.enhance_state import save_state
 from start_green_stay_green.utils.file_writer import FileWriter
+from start_green_stay_green.utils.fs import is_windows
 from start_green_stay_green.utils.timing import TimingReport
 from start_green_stay_green.utils.timing import set_active_report
 from start_green_stay_green.utils.timing import step_timer
@@ -1702,28 +1703,87 @@ def _venv_activation_command(os_name: str, env: Mapping[str, str]) -> str:
     return "source .venv/bin/activate"
 
 
-def _get_setup_instructions(languages: Sequence[str], project_path: Path) -> list[str]:
+def _quote_path_for_shell(os_name: str, path: Path) -> str:
+    r"""Quote ``path`` for copy-paste into the platform's shell.
+
+    ``shlex.quote`` emits POSIX single-quote syntax, which cmd.exe does
+    not understand at all (``cd 'C:\my project'`` fails) and which is
+    unnecessary in PowerShell. Both Windows shells accept double
+    quotes, and ``"`` cannot appear in Windows file names, so on
+    Windows the path is wrapped verbatim with no escaping needed.
+
+    Args:
+        os_name: Platform identifier, typically ``os.name`` ("nt" on
+            Windows, "posix" elsewhere).
+        path: Filesystem path to quote.
+
+    Returns:
+        The path quoted for safe copy-paste into the platform's shell.
+    """
+    if os_name == "nt":
+        return f'"{path}"'
+    return shlex.quote(str(path))
+
+
+def _check_all_command(os_name: str) -> str:
+    """Return the command that runs a generated project's check-all gate.
+
+    On POSIX the generated ``scripts/check-all.sh`` carries the
+    executable bit (see ``utils.fs.make_executable``) and is invoked
+    directly. Windows has no executable bit, and generated projects
+    have no native Windows gate runner yet (#386) — the honest
+    instruction is to run the POSIX script through Git Bash, which
+    needs no executable bit because bash receives the script path as
+    an argument.
+
+    Args:
+        os_name: Platform identifier, typically ``os.name``.
+
+    Returns:
+        The shell command that runs all quality checks in the
+        generated project.
+    """
+    if os_name == "nt":
+        return "bash scripts/check-all.sh"
+    return "./scripts/check-all.sh"
+
+
+def _get_setup_instructions(
+    languages: Sequence[str],
+    project_path: Path,
+    *,
+    os_name: str,
+    env: Mapping[str, str],
+) -> list[str]:
     """Return language-specific setup commands for a generated project.
 
     For multi-language projects, language-specific steps are concatenated
     in the order the languages appear. Shared steps (cd, pre-commit
-    install, check-all) are not duplicated. The Python venv activation
-    line is shell-aware (see :func:`_venv_activation_command`); the
-    detection is a heuristic based on ``os.name`` and the ``SHELL`` /
-    ``PSModulePath`` environment variables, and defaults to the bash/zsh
-    form when the shell cannot be identified.
+    install, check-all) are not duplicated. Every shell-sensitive line
+    is platform-aware via one canonical helper each: cd quoting
+    (:func:`_quote_path_for_shell`), venv activation
+    (:func:`_venv_activation_command`), and the check-all invocation
+    (:func:`_check_all_command`). Shell detection is a heuristic based
+    on ``os_name`` and the ``SHELL`` / ``PSModulePath`` environment
+    variables, defaulting to the bash/zsh form when the shell cannot
+    be identified.
 
     Args:
         languages: Ordered sequence of programming languages (python,
             typescript, go, rust, etc.). May be empty for a sensible
             default.
         project_path: Path to the generated project directory.
+        os_name: Platform identifier, typically ``os.name``. Passed
+            explicitly so tests never patch the real ``os.name``,
+            which breaks ``pathlib.Path`` construction (#380).
+        env: Environment mapping for shell detection, typically
+            ``os.environ``.
 
     Returns:
         Ordered list of shell commands to set up and verify the project.
     """
-    cd = f"cd {shlex.quote(str(project_path))}"
-    common_tail = ["pre-commit install", "./scripts/check-all.sh"]
+    cd = f"cd {_quote_path_for_shell(os_name, project_path)}"
+    common_tail = ["pre-commit install", _check_all_command(os_name)]
 
     middle: list[str] = []
     for lang in dict.fromkeys(languages):
@@ -1731,7 +1791,7 @@ def _get_setup_instructions(languages: Sequence[str], project_path: Path) -> lis
             middle.extend(
                 [
                     "python -m venv .venv",
-                    _venv_activation_command(os.name, os.environ),
+                    _venv_activation_command(os_name, env),
                     "pip install -r requirements.txt -r requirements-dev.txt",
                 ]
             )
@@ -1739,6 +1799,34 @@ def _get_setup_instructions(languages: Sequence[str], project_path: Path) -> lis
             middle.extend(_LANG_SETUP_STEPS.get(lang, []))
 
     return [cd, *middle, *common_tail]
+
+
+def _print_setup_instructions(languages: Sequence[str], project_path: Path) -> None:
+    """Print platform-appropriate setup commands for a generated project.
+
+    The command list comes from :func:`_get_setup_instructions` for the
+    live platform. On Windows (via the patchable ``is_windows`` seam,
+    #380) a note explains that the generated POSIX scripts run through
+    Git Bash, since no native Windows gate scripts exist yet (#386).
+
+    Args:
+        languages: Ordered sequence of programming languages for the
+            project.
+        project_path: Path to the generated project directory.
+    """
+    console.print("\nTo get started, run:")
+    for cmd in _get_setup_instructions(
+        languages, project_path, os_name=os.name, env=os.environ
+    ):
+        console.print(f"  {cmd}")
+    if is_windows():
+        console.print(
+            "\nNote: 'bash scripts/check-all.sh' runs the quality gate "
+            "through Git Bash (included with Git for Windows). The "
+            "generated scripts are POSIX shell; native Windows "
+            "equivalents are not generated yet."
+        )
+    console.print()
 
 
 def _finalize_init(
@@ -1765,10 +1853,7 @@ def _finalize_init(
     console.print(
         f"\n[green]✓[/green] Project generated successfully at: {project_path}"
     )
-    console.print("\nTo get started, run:")
-    for cmd in _get_setup_instructions(languages, project_path):
-        console.print(f"  {cmd}")
-    console.print()
+    _print_setup_instructions(languages, project_path)
     if enable_live_dashboard:
         console.print(
             "[green]✓[/green] Live metrics dashboard enabled "
