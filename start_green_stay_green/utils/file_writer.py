@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 from rich.console import Console
 from rich.prompt import Prompt
 
+from start_green_stay_green.utils.fs import make_executable
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -237,12 +239,12 @@ class FileWriter:
         if file_path.exists():
             result = self._handle_existing(file_path, content, rel)
             if result == WriteResult.CREATED:
-                file_path.chmod(0o755)
+                make_executable(file_path)
             return result
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
-        file_path.chmod(0o755)
+        make_executable(file_path)
         self.created += 1
         self._console.print(f"  [green]CREATE[/green] {rel}")
         return WriteResult.CREATED

@@ -15,6 +15,7 @@ from start_green_stay_green.generators.architecture import (
 )
 from start_green_stay_green.generators.architecture import _LANGUAGE_TOOLING
 from start_green_stay_green.generators.architecture import _LanguageTooling
+from tests.conftest import assert_executable
 
 
 class TestArchitectureEnforcementGeneratorInit:
@@ -133,8 +134,8 @@ class TestArchitectureEnforcementGeneratorGenerate:
         generator.generate(language="python", project_name="test-project")
 
         run_script = output_dir / "run-check.sh"
-        # Check file has executable bit
-        assert run_script.stat().st_mode & 0o111  # Any execute bit set
+        # Platform-aware: exact 0o755 on POSIX, existence on Windows (#380)
+        assert_executable(run_script)
 
 
 class TestArchitectureEnforcementGeneratorPython:

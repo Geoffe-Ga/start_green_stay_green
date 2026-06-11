@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import warnings
 
 from start_green_stay_green.utils.csharp import csharp_namespace
+from start_green_stay_green.utils.fs import make_executable
 from start_green_stay_green.utils.java import android_package
 from start_green_stay_green.utils.java import android_package_path
 
@@ -363,7 +364,7 @@ modules =
     {project_name.replace('-', '_')}
 """
 
-        importlinter_path.write_text(config_content)
+        importlinter_path.write_text(config_content, encoding="utf-8")
         return [importlinter_path]
 
     def _generate_typescript_config(
@@ -449,7 +450,7 @@ module.exports = {
 };
 """
 
-        dc_path.write_text(config_content)
+        dc_path.write_text(config_content, encoding="utf-8")
         return [dc_path]
 
     # ARG002: project_name is unused but kept for API parity with
@@ -512,7 +513,7 @@ commonComponents:
   - domain
 """
 
-        config_path.write_text(config_content)
+        config_path.write_text(config_content, encoding="utf-8")
         return [config_path]
 
     # Unlike the Python config, the Rust config is project-name agnostic:
@@ -602,7 +603,7 @@ unknown-registry = "deny"
 unknown-git = "deny"
 """
 
-        config_path.write_text(config_content)
+        config_path.write_text(config_content, encoding="utf-8")
         return [config_path]
 
     # Like the Rust config, the Swift config is project-name agnostic: the
@@ -689,7 +690,7 @@ custom_rules:
     severity: error
 """
 
-        config_path.write_text(config_content)
+        config_path.write_text(config_content, encoding="utf-8")
         return [config_path]
 
     def _generate_kotlin_config(self, project_name: str) -> list[Path]:
@@ -780,7 +781,7 @@ class ArchitectureTest {{
 }}
 """
 
-        config_path.write_text(config_content)
+        config_path.write_text(config_content, encoding="utf-8")
         return [config_path]
 
     # Like the Rust and Swift configs, the C/C++ checker is project-name
@@ -980,7 +981,7 @@ if __name__ == "__main__":
     sys.exit(main())
 '''
 
-        config_path.write_text(config_content)
+        config_path.write_text(config_content, encoding="utf-8")
         return [config_path]
 
     def _generate_java_config(self, project_name: str) -> list[Path]:
@@ -1098,7 +1099,7 @@ public class ArchitectureTest {{
 }}
 """
 
-        config_path.write_text(config_content)
+        config_path.write_text(config_content, encoding="utf-8")
         return [config_path]
 
     def _generate_csharp_config(self, project_name: str) -> list[Path]:
@@ -1245,7 +1246,7 @@ namespace {namespace}.Architecture
 }}
 """
 
-        config_path.write_text(config_content)
+        config_path.write_text(config_content, encoding="utf-8")
         return [config_path]
 
     def _generate_ruby_config(self, project_name: str) -> list[Path]:
@@ -1331,7 +1332,7 @@ package_paths: "**/"
 # Fork parsing out to subprocesses for speed.
 parallel: true
 """
-        packwerk_path.write_text(packwerk_content)
+        packwerk_path.write_text(packwerk_content, encoding="utf-8")
 
         package_path = self.output_dir / "package.yml"
         package_content = f"""\
@@ -1361,7 +1362,7 @@ enforce_dependencies: true
 # Packages this package may depend on (none: it is the root).
 dependencies: []
 """
-        package_path.write_text(package_content)
+        package_path.write_text(package_content, encoding="utf-8")
 
         return [packwerk_path, package_path]
 
@@ -1484,7 +1485,7 @@ Add to CI pipeline:
 - Domain-Driven Design (Eric Evans)
 """
 
-        readme_path.write_text(readme_content)
+        readme_path.write_text(readme_content, encoding="utf-8")
         return readme_path
 
     def _generate_run_script(self, language: str, project_name: str) -> Path:
@@ -1501,10 +1502,10 @@ Add to CI pipeline:
 
         script_content = self._build_run_script(language, project_name)
 
-        script_path.write_text(script_content)
+        script_path.write_text(script_content, encoding="utf-8")
 
-        # Make script executable
-        script_path.chmod(0o755)
+        # Make script executable (no-op on Windows, see utils.fs #380)
+        make_executable(script_path)
 
         return script_path
 

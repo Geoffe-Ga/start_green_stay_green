@@ -195,7 +195,7 @@ class SubagentsGenerator(BaseGenerator):
         """
         source_file = REQUIRED_AGENTS[agent_name]
         agent_path = self.reference_dir / source_file
-        return agent_path.read_text()
+        return agent_path.read_text(encoding="utf-8")
 
     def _parse_frontmatter(self, content: str) -> tuple[str, str]:
         """Parse YAML frontmatter from agent content.

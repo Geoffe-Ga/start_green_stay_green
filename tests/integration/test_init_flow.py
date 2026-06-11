@@ -19,6 +19,7 @@ import pytest
 from typer.testing import CliRunner
 
 from start_green_stay_green.cli import app
+from tests.conftest import assert_executable
 
 
 @pytest.fixture(autouse=True)
@@ -203,11 +204,8 @@ class TestInitFlowIntegration:
         for script_name in expected_scripts:
             script_path = scripts_dir / script_name
             assert script_path.exists(), f"Missing script: {script_name}"
-            # Check executable permissions (owner, group, or other can execute)
-            mode = script_path.stat().st_mode
-            assert (
-                mode & 0o111
-            ), f"Script {script_name} not executable: permissions={mode:#o}"
+            # Platform-aware: exact 0o755 on POSIX, existence on Windows (#380)
+            assert_executable(script_path)
 
     def test_init_generates_mutation_script_with_correct_content(
         self, tmp_path: Path

@@ -11,6 +11,7 @@ from rich.console import Console
 
 from start_green_stay_green.utils.file_writer import FileWriter
 from start_green_stay_green.utils.file_writer import WriteResult
+from tests.conftest import assert_executable
 
 
 class TestWriteResult:
@@ -106,7 +107,8 @@ class TestWriteScript:
 
         assert result == WriteResult.CREATED
         assert script_path.read_text() == "#!/bin/bash\necho hello"
-        assert script_path.stat().st_mode & 0o755 == 0o755
+        # Platform-aware: exact 0o755 on POSIX, existence on Windows (#380)
+        assert_executable(script_path)
 
     def test_skips_existing_script(self, tmp_path: Path) -> None:
         """Test write_script skips existing script file."""
