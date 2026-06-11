@@ -26,10 +26,13 @@ when a generation method first runs.
 
 Capability notes:
 
-* **Batch** is Anthropic-specific (Message Batches API); the three
-  batch methods honestly decline with a typed
+* **Batch** is Anthropic-specific (Message Batches API); the
+  provider advertises ``batch=False`` via
+  :meth:`~start_green_stay_green.ai.providers.base.LLMProvider.capabilities`,
+  and the three batch methods honestly decline with a typed
   :class:`~start_green_stay_green.ai.providers.base.UnsupportedCapabilityError`
-  (capability negotiation/fallback is tracer T5, #389).
+  derived from that advertisement. Orchestration consults the same
+  advertisement to fall back to sequential calls instead of crashing.
 * **Caching telemetry**: OpenAI prompt caching is automatic and only
   reports *read* hits (``usage.prompt_tokens_details.cached_tokens``);
   there is no cache-write count, so ``cache_creation_tokens`` is
@@ -56,7 +59,7 @@ from typing import cast
 
 from start_green_stay_green.ai.providers.base import LLMProvider
 from start_green_stay_green.ai.providers.base import OutputFormat
-from start_green_stay_green.ai.providers.base import UnsupportedCapabilityError
+from start_green_stay_green.ai.providers.base import ProviderCapabilities
 from start_green_stay_green.ai.types import GenerationError
 from start_green_stay_green.ai.types import GenerationResult
 from start_green_stay_green.ai.types import TokenUsage
@@ -87,6 +90,19 @@ _INSTALL_EXTRA: Final[str] = "openai"
 
 # Registry name of this provider, echoed in capability errors.
 _PROVIDER_NAME: Final[str] = "openai"
+
+# Capability advertisement (tracer T5, #389). Batch is declined:
+# Anthropic's Message Batches API has no OpenAI-compatible equivalent,
+# and emulating it would silently change cost/durability semantics.
+# This frozen record is the single source of truth — the batch stubs
+# below derive their typed declines from it via
+# ``LLMProvider._raise_unsupported_batch``.
+_CAPABILITIES: Final[ProviderCapabilities] = ProviderCapabilities(
+    provider=_PROVIDER_NAME,
+    batch=False,
+    tool_use=True,
+    token_accounting=True,
+)
 
 # Environment variable supplying the endpoint override for local/OSS
 # OpenAI-compatible servers (e.g. ``http://localhost:11434/v1`` for
@@ -290,6 +306,17 @@ class OpenAIProvider(LLMProvider):
     def model(self) -> str:
         """Return the model identifier this provider generates with."""
         return self._model
+
+    @classmethod
+    def capabilities(cls) -> ProviderCapabilities:
+        """Return the OpenAI capability advertisement.
+
+        Tool-use and token accounting are implemented; batch is not
+        (see the module-level ``_CAPABILITIES`` note). Callers — the
+        orchestrator's fallback decision and ``green providers`` —
+        consult this advertisement rather than probing for errors.
+        """
+        return _CAPABILITIES
 
     def _resolve_base_url(self) -> str | None:
         """Resolve the endpoint override: constructor arg, then env, then SDK.
@@ -898,9 +925,10 @@ class OpenAIProvider(LLMProvider):
         The batch capability group maps onto Anthropic's Message
         Batches API; emulating it with fan-out requests would silently
         change cost and durability semantics, so this provider
-        declines honestly (capability negotiation/fallback is tracer
-        T5, #389). The interface's input contract is still honored
-        first so callers get the most specific error.
+        declines honestly. The typed error derives from the
+        ``capabilities()`` advertisement (single source of truth), and
+        the interface's input contract is still honored first so
+        callers get the most specific error.
 
         Args:
             requests: Validated for emptiness, then declined.
@@ -912,10 +940,7 @@ class OpenAIProvider(LLMProvider):
         if not requests:
             msg = "submit_tool_use_batch requires at least one request"
             raise ValueError(msg)
-        raise UnsupportedCapabilityError(
-            provider=_PROVIDER_NAME,
-            capability="batch tool-use",
-        )
+        self._raise_unsupported_batch()
 
     async def poll_batch(self, batch_id: str) -> BatchPoll:
         """Decline batch polling; see :meth:`submit_tool_use_batch`.
@@ -930,10 +955,7 @@ class OpenAIProvider(LLMProvider):
         if not batch_id:
             msg = "poll_batch requires a non-empty batch_id"
             raise ValueError(msg)
-        raise UnsupportedCapabilityError(
-            provider=_PROVIDER_NAME,
-            capability="batch tool-use",
-        )
+        self._raise_unsupported_batch()
 
     async def fetch_batch_results(self, batch_id: str) -> BatchResultsBundle:
         """Decline batch fetching; see :meth:`submit_tool_use_batch`.
@@ -948,7 +970,4 @@ class OpenAIProvider(LLMProvider):
         if not batch_id:
             msg = "fetch_batch_results requires a non-empty batch_id"
             raise ValueError(msg)
-        raise UnsupportedCapabilityError(
-            provider=_PROVIDER_NAME,
-            capability="batch tool-use",
-        )
+        self._raise_unsupported_batch()

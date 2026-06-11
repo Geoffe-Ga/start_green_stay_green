@@ -6,6 +6,7 @@ Implements the command-line interface using Typer with rich output formatting.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import dataclasses
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
@@ -19,6 +20,7 @@ import shutil
 import sys
 from typing import Annotated
 from typing import Any
+from typing import Final
 from typing import TYPE_CHECKING
 from typing import TypeVar
 from typing import assert_never
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from collections.abc import Sequence
 
+    from start_green_stay_green.ai.providers.base import ProviderCapabilities
     from start_green_stay_green.generators.agent_context import AgentContextContent
     from start_green_stay_green.utils.enhance_state import EnhanceState
 
@@ -48,6 +51,7 @@ from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerati
 from start_green_stay_green.ai.provider_selection import ProviderSelection
 from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
 from start_green_stay_green.ai.provider_selection import build_provider
+from start_green_stay_green.ai.provider_selection import describe_providers
 from start_green_stay_green.ai.provider_selection import resolve_api_key_env_var
 from start_green_stay_green.ai.provider_selection import resolve_provider_selection
 from start_green_stay_green.generators.agent_context import AGENT_CONTEXT_TARGETS
@@ -309,6 +313,64 @@ def version(
     else:
         # Simple version output
         console.print(f"[bold cyan]Start Green Stay Green v{version_str}[/bold cyan]")
+
+
+# Display labels for ProviderCapabilities flag fields whose name alone
+# doesn't read well; every other bool field falls back to its field
+# name with underscores spaced.
+_CAPABILITY_FLAG_LABELS: Final[dict[str, str]] = {"tool_use": "tool-use"}
+
+
+def _format_capability_flags(capabilities: ProviderCapabilities) -> str:
+    """Render one provider's capability flags as a short yes/no line.
+
+    Derives the flag list from the dataclass's own bool fields so a new
+    capability added to :class:`ProviderCapabilities` shows up here
+    without a second edit point.
+
+    Args:
+        capabilities: The provider's frozen advertisement.
+
+    Returns:
+        A comma-separated ``flag: yes/no`` summary, e.g.
+        ``"batch: yes, tool-use: yes, token accounting: yes"``.
+    """
+    flags = (
+        (
+            _CAPABILITY_FLAG_LABELS.get(field.name, field.name.replace("_", " ")),
+            getattr(capabilities, field.name),
+        )
+        for field in dataclasses.fields(capabilities)
+        if isinstance(getattr(capabilities, field.name), bool)
+    )
+    return ", ".join(
+        f"{label}: {'yes' if supported else 'no'}" for label, supported in flags
+    )
+
+
+@app.command()
+def providers() -> None:
+    """List registered LLM providers and their capabilities.
+
+    Shows, for each provider the ``--provider`` flag accepts: the
+    default model, the environment variable its API key is read from,
+    and which capability groups it implements (batch, tool-use, token
+    accounting). The listing is read from each provider's capability
+    advertisement — no credentials, network access, or optional vendor
+    SDK required.
+    """
+    for listing in describe_providers():
+        flags = _format_capability_flags(listing.capabilities)
+        console.print(f"[bold]{listing.name}[/bold]")
+        console.print(f"  default model:   {listing.default_model}")
+        console.print(f"  API key env var: {listing.api_key_env_var}")
+        console.print(f"  capabilities:    {flags}")
+    console.print(
+        "\n[dim]Select with --provider/--model on `green init` / "
+        "`green enhance`, or via GREEN_LLM_PROVIDER / GREEN_LLM_MODEL. "
+        "Providers without batch support fall back to sequential API "
+        "calls (with a warning) when --batch is requested.[/dim]"
+    )
 
 
 def _validate_project_name(name: str) -> None:
@@ -3268,6 +3330,102 @@ def _validate_batch_targets(selected_targets: tuple[str, ...]) -> None:
     raise typer.Exit(code=1)
 
 
+def _validate_enhance_flags(
+    *,
+    batch: bool,
+    wait: bool,
+    selected_targets: tuple[str, ...],
+) -> None:
+    """Validate the ``--batch`` / ``--wait`` flag combination up front.
+
+    ``--batch`` only supports the batchable targets (see
+    :func:`_validate_batch_targets`), and ``--wait`` is meaningless
+    without ``--batch``. Both checks fail fast before any orchestrator
+    is constructed or API key resolved.
+
+    Args:
+        batch: Value of the ``--batch`` flag.
+        wait: Value of the ``--wait`` flag.
+        selected_targets: Resolved ``--targets`` selection.
+
+    Raises:
+        typer.Exit: With code 1 on an invalid combination.
+    """
+    if batch:
+        _validate_batch_targets(selected_targets)
+    if wait and not batch:
+        console.print("[red]Error:[/red] --wait only applies in --batch mode.")
+        raise typer.Exit(code=1)
+
+
+def _dispatch_enhance_batch(
+    *,
+    project: _EnhanceProjectContext,
+    orchestrator: AIOrchestrator,
+    file_writer: FileWriter,
+    dry_run: bool,
+    wait: bool,
+) -> bool:
+    """Run the batch path when the provider advertises batch support.
+
+    Capability negotiation (T5, #389): the decision derives from the
+    provider's capability advertisement, never from probing for the
+    typed batch decline. Batch-capable providers (Anthropic) take the
+    existing batch machinery unchanged; for everyone else this prints
+    the loud fallback warning and reports back so the caller runs the
+    same targets through the documented sequential pipeline instead —
+    no crash, no dropped work.
+
+    Args:
+        project: Project metadata for the enhance run.
+        orchestrator: Configured orchestrator wrapping the selected
+            provider.
+        file_writer: Conflict-resolution-aware writer.
+        dry_run: Skip API calls and writes (batch path only).
+        wait: Block in-process until the batch ends (resume calls).
+
+    Returns:
+        ``True`` when the batch path handled the run; ``False`` when
+        the provider lacks batch and the caller must fall back to the
+        sequential pipeline.
+    """
+    if not orchestrator.capabilities.batch:
+        _warn_batch_capability_fallback(orchestrator.capabilities)
+        return False
+    _run_enhance_batch(
+        project=project,
+        orchestrator=orchestrator,
+        file_writer=file_writer,
+        dry_run=dry_run,
+        wait=wait,
+    )
+    return True
+
+
+def _warn_batch_capability_fallback(capabilities: ProviderCapabilities) -> None:
+    """Print the loud fallback warning for ``--batch`` on a non-batch provider.
+
+    No work is dropped: the same subagent tunings run through the
+    documented sequential pipeline (:func:`_run_enhance_pipeline` —
+    the exact path the non-batch flow uses), producing the same
+    artifacts. What changes is the cost/latency semantics: no Batches
+    API discount, no submit/resume two-call flow — the calls run
+    in-process now.
+
+    Args:
+        capabilities: The selected provider's advertisement (its
+            ``batch`` flag is ``False`` when this fires).
+    """
+    console.print(
+        f"[yellow]Warning:[/yellow] provider {capabilities.provider!r} "
+        f"does not support batch processing — falling back to "
+        f"sequential API calls now (same results; no batch discount, "
+        f"no submit/resume flow). Run `green providers` to see "
+        f"per-provider capabilities.",
+        style="bold",
+    )
+
+
 def _run_enhance_batch(
     *,
     project: _EnhanceProjectContext,
@@ -3558,7 +3716,10 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
                 "Batches API (50% cheaper, ≤24 h SLA). Use with "
                 "``--targets subagents``. The first run submits and "
                 "exits; re-run to fetch results, or pass ``--wait`` "
-                "to block until done. See ADR-001 for the rationale."
+                "to block until done. See ADR-001 for the rationale. "
+                "Providers without batch support (see `green "
+                "providers`) fall back to sequential API calls with "
+                "a warning."
             ),
         ),
     ] = False,
@@ -3608,7 +3769,10 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         force: Overwrite files without prompting.
         batch: Submit subagent tunings via the Anthropic Message
             Batches API. Submit-then-resume two-call flow; pair
-            with ``--wait`` for in-process polling.
+            with ``--wait`` for in-process polling. If the selected
+            provider does not advertise batch support, the same
+            targets fall back to sequential API calls with a loud
+            warning (never a crash, never dropped work).
         wait: Block in-process when ``--batch`` is set; polls every
             30 s until the batch ends or the timeout elapses.
         provider: Optional LLM provider override (``--provider``).
@@ -3637,11 +3801,11 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
     )
 
     selected_targets = _resolve_enhance_targets(targets)
-    if batch:
-        _validate_batch_targets(selected_targets)
-    if wait and not batch:
-        console.print("[red]Error:[/red] --wait only applies in --batch mode.")
-        raise typer.Exit(code=1)
+    _validate_enhance_flags(
+        batch=batch,
+        wait=wait,
+        selected_targets=selected_targets,
+    )
     orchestrator = _require_enhance_orchestrator(
         api_key,
         no_interactive=no_interactive,
@@ -3668,14 +3832,16 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         language=resolved_language,
     )
 
-    if batch:
-        _run_enhance_batch(
-            project=project,
-            orchestrator=orchestrator,
-            file_writer=file_writer,
-            dry_run=dry_run,
-            wait=wait,
-        )
+    # A False return means the provider lacks batch support and a
+    # fallback warning was already printed — fall through to the
+    # sequential pipeline below instead of returning.
+    if batch and _dispatch_enhance_batch(
+        project=project,
+        orchestrator=orchestrator,
+        file_writer=file_writer,
+        dry_run=dry_run,
+        wait=wait,
+    ):
         return
 
     _run_enhance_pipeline(

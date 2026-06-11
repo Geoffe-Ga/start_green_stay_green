@@ -29,6 +29,7 @@ def test_something(mock_path: Mock) -> None:
 import asyncio
 import json
 from pathlib import Path
+import re
 from typing import cast
 from unittest import mock
 from unittest.mock import MagicMock
@@ -43,6 +44,7 @@ from start_green_stay_green import cli
 from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
+from start_green_stay_green.ai.provider_selection import DEFAULT_MODEL
 from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
@@ -2799,6 +2801,35 @@ class TestEnhanceDispatchAssertion:
             cli._assert_enhance_dispatch_intact()
 
 
+class TestValidateEnhanceFlags:
+    """Direct unit tests for the extracted ``_validate_enhance_flags``."""
+
+    def test_wait_without_batch_exits(self) -> None:
+        """``--wait`` without ``--batch`` fails fast with exit code 1."""
+        with pytest.raises(typer.Exit) as exc_info:
+            cli._validate_enhance_flags(
+                batch=False, wait=True, selected_targets=("subagents",)
+            )
+        assert exc_info.value.exit_code == 1
+
+    def test_batch_with_unsupported_target_exits(self) -> None:
+        """``--batch`` with a non-batchable target fails fast."""
+        with pytest.raises(typer.Exit) as exc_info:
+            cli._validate_enhance_flags(
+                batch=True, wait=False, selected_targets=("claude-md",)
+            )
+        assert exc_info.value.exit_code == 1
+
+    def test_valid_combinations_pass(self) -> None:
+        """Supported combinations return without raising."""
+        cli._validate_enhance_flags(
+            batch=False, wait=False, selected_targets=("claude-md", "subagents")
+        )
+        cli._validate_enhance_flags(
+            batch=True, wait=True, selected_targets=("subagents",)
+        )
+
+
 class TestEnhanceBatchCLI:
     """Phase 5b: ``green enhance --batch`` flag wiring."""
 
@@ -3033,3 +3064,185 @@ class TestEnhanceBatchCLI:
 
         with pytest.raises(AssertionError, match="unreachable"):
             cli._render_batch_resume_outcome(bad)
+
+    def test_batch_with_non_batch_provider_falls_back_to_sequential(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--batch`` on a non-batch provider warns and runs sequentially.
+
+        T5 (#389): the OpenAI provider advertises ``batch=False``, so
+        requesting batch must not crash with the typed capability
+        error — instead the same subagent tunings run through the
+        documented sequential pipeline (the very path the non-batch
+        flow uses), preceded by a loud warning. No work is dropped.
+        """
+        monkeypatch.delenv("GREEN_LLM_PROVIDER", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-local")
+        project = self._make_project(tmp_path)
+
+        with (
+            mock.patch("start_green_stay_green.cli._run_enhance_batch") as run_batch,
+            mock.patch(
+                "start_green_stay_green.cli._run_enhance_pipeline"
+            ) as run_pipeline,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                    "--provider",
+                    "openai",
+                ],
+            )
+
+        assert result.exit_code == 0
+        flat = self._flat(result.stdout)
+        assert "does not support batch processing" in flat
+        assert "sequential" in flat
+        # Points the user at the capability listing for discoverability.
+        assert "green providers" in flat
+        run_batch.assert_not_called()
+        run_pipeline.assert_called_once()
+        # The fallback runs the exact targets --batch was asked for.
+        assert run_pipeline.call_args.kwargs["selected_targets"] == ("subagents",)
+
+    def test_fallback_with_wait_flag_does_not_crash(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--batch --wait`` on a non-batch provider still falls back cleanly.
+
+        The sequential fallback completes in-process, so ``--wait`` is
+        trivially satisfied — it must not error or change the outcome.
+        """
+        monkeypatch.delenv("GREEN_LLM_PROVIDER", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-local")
+        project = self._make_project(tmp_path)
+
+        with (
+            mock.patch("start_green_stay_green.cli._run_enhance_batch") as run_batch,
+            mock.patch(
+                "start_green_stay_green.cli._run_enhance_pipeline"
+            ) as run_pipeline,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--wait",
+                    "--targets",
+                    "subagents",
+                    "--provider",
+                    "openai",
+                ],
+            )
+
+        assert result.exit_code == 0
+        run_batch.assert_not_called()
+        run_pipeline.assert_called_once()
+
+    def test_batch_with_anthropic_provider_takes_batch_path_unchanged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The Anthropic fast path is untouched by capability negotiation.
+
+        With a batch-capable provider, ``--batch`` routes straight into
+        the existing batch machinery — no fallback warning, no
+        sequential pipeline call.
+        """
+        monkeypatch.delenv("GREEN_LLM_PROVIDER", raising=False)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+
+        with (
+            mock.patch("start_green_stay_green.cli._run_enhance_batch") as run_batch,
+            mock.patch(
+                "start_green_stay_green.cli._run_enhance_pipeline"
+            ) as run_pipeline,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                ],
+            )
+
+        assert result.exit_code == 0
+        flat = self._flat(result.stdout)
+        assert "does not support batch processing" not in flat
+        run_batch.assert_called_once()
+        run_pipeline.assert_not_called()
+
+
+class TestProvidersCommand:
+    """``green providers``: user-facing capability discoverability (T5, #389)."""
+
+    @staticmethod
+    def _plain(text: str) -> str:
+        """Strip ANSI escapes and collapse whitespace for stable asserts."""
+        no_ansi = re.sub(r"\x1b\[[0-9;]*m", "", text)
+        return " ".join(no_ansi.split())
+
+    def test_lists_every_registered_provider(self) -> None:
+        """Both registry entries appear, with their key env vars."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["providers"])
+
+        assert result.exit_code == 0
+        plain = self._plain(result.output)
+        assert "anthropic" in plain
+        assert "openai" in plain
+        assert "ANTHROPIC_API_KEY" in plain
+        assert "OPENAI_API_KEY" in plain
+
+    def test_shows_capability_flags_per_provider(self) -> None:
+        """Anthropic shows batch yes; OpenAI shows batch no."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["providers"])
+
+        plain = self._plain(result.output)
+        assert "batch: yes, tool-use: yes, token accounting: yes" in plain
+        assert "batch: no, tool-use: yes, token accounting: yes" in plain
+        # Rows are sorted (anthropic first), so the batch-capable row
+        # precedes the batch-less one.
+        assert plain.index("batch: yes") < plain.index("batch: no")
+
+    def test_shows_per_provider_default_models(self) -> None:
+        """Each row names the model used when none is configured."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["providers"])
+
+        plain = self._plain(result.output)
+        assert DEFAULT_MODEL in plain
+        assert "gpt-5.5" in plain
+
+    def test_runs_without_api_keys_or_vendor_sdks(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The listing needs no credentials and performs no I/O."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["providers"])
+
+        assert result.exit_code == 0
+
+    def test_mentions_batch_fallback_behavior(self) -> None:
+        """The trailer documents the --batch fallback honestly."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["providers"])
+
+        plain = self._plain(result.output)
+        assert "fall back to sequential" in plain

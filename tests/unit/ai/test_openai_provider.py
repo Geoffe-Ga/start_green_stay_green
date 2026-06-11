@@ -732,6 +732,16 @@ class TestBatchUnsupported:
         """Callers catching ``NotImplementedError`` still catch it."""
         assert issubclass(UnsupportedCapabilityError, NotImplementedError)
 
+    def test_decline_aligns_with_capability_advertisement(self) -> None:
+        """The advertisement is the single source the stubs derive from.
+
+        The batch stubs raise via
+        :meth:`LLMProvider._raise_unsupported_batch`, which reads
+        ``capabilities()`` — so ``batch=False`` here and the typed
+        declines above cannot drift apart.
+        """
+        assert OpenAIProvider.capabilities().batch is False
+
     @pytest.mark.asyncio
     async def test_empty_batch_submission_raises_value_error(self) -> None:
         """The interface's input contract is honored before declining."""

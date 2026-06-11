@@ -13,6 +13,15 @@ multi-agent epic — can reason about exactly what a provider offers:
 * **batch** — :meth:`~LLMProvider.submit_tool_use_batch`,
   :meth:`~LLMProvider.poll_batch`, :meth:`~LLMProvider.fetch_batch_results`.
 
+Which optional groups a provider actually implements is advertised by
+:meth:`~LLMProvider.capabilities`, a frozen
+:class:`ProviderCapabilities` record readable from the class itself —
+no instance, no vendor SDK. The advertisement is the single source of
+truth for capability negotiation: providers that decline a group raise
+:class:`UnsupportedCapabilityError` *derived from* the advertisement
+(see :meth:`~LLMProvider._raise_unsupported_batch`), and orchestration
+code consults the same advertisement to fall back gracefully.
+
 Every request and response type referenced here lives in
 :mod:`start_green_stay_green.ai.types` or
 :mod:`start_green_stay_green.ai.batch` and is deliberately
@@ -23,7 +32,10 @@ from __future__ import annotations
 
 from abc import ABC
 from abc import abstractmethod
+from dataclasses import dataclass
+from typing import Final
 from typing import Literal
+from typing import Never
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -36,9 +48,43 @@ if TYPE_CHECKING:
     from start_green_stay_green.ai.types import GenerationResult
     from start_green_stay_green.ai.types import ToolUseResult
 
-__all__ = ["LLMProvider", "UnsupportedCapabilityError"]
+__all__ = ["LLMProvider", "ProviderCapabilities", "UnsupportedCapabilityError"]
 
 OutputFormat = Literal["yaml", "toml", "markdown", "bash"]
+
+# Human-readable name of the batch capability group, echoed in every
+# typed batch decline. Single-sourced here so the error text and the
+# ``capability`` attribute can never drift between providers.
+_BATCH_CAPABILITY: Final[str] = "batch tool-use"
+
+
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """Machine-readable advertisement of a provider's capability groups.
+
+    The single source of truth for capability negotiation (tracer T5,
+    #389): the batch-decline stubs
+    (:meth:`LLMProvider._raise_unsupported_batch`) and the
+    orchestrator/CLI batch-fallback decision both derive from this
+    structure, so flipping a flag here is the only change needed when
+    a provider gains or loses a capability.
+
+    Attributes:
+        provider: Registry name of the advertising provider (e.g.
+            ``"anthropic"``). Echoed into capability errors and the
+            ``green providers`` listing.
+        batch: Whether the batch group (submit / poll / fetch — the
+            shape of Anthropic's Message Batches API) is implemented.
+        tool_use: Whether forced tool-use (structured) generation is
+            implemented.
+        token_accounting: Whether token-usage telemetry is reported on
+            generation results.
+    """
+
+    provider: str
+    batch: bool
+    tool_use: bool
+    token_accounting: bool
 
 
 class UnsupportedCapabilityError(NotImplementedError):
@@ -49,9 +95,10 @@ class UnsupportedCapabilityError(NotImplementedError):
     OpenAI-compatible endpoints. A provider that cannot honestly
     implement a group raises this typed error instead of emulating it
     badly, so callers can catch it and fall back to a per-request
-    path. Full capability advertisement/negotiation arrives with
-    tracer T5 (#389); this minimal convention is what it will build
-    on.
+    path. The decision to decline derives from the provider's
+    :class:`ProviderCapabilities` advertisement (see
+    :meth:`LLMProvider._raise_unsupported_batch`), so the two cannot
+    drift apart.
 
     Subclasses :class:`NotImplementedError` so generic handlers keep
     working, while ``provider`` and ``capability`` stay machine-readable.
@@ -104,6 +151,50 @@ class LLMProvider(ABC):
             ``claude-...`` string). Stable for the provider's
             lifetime.
         """
+
+    @classmethod
+    @abstractmethod
+    def capabilities(cls) -> ProviderCapabilities:
+        """Return this provider's capability advertisement.
+
+        A classmethod (not a property) so callers — notably the
+        selection registry behind ``green providers`` — can read
+        capabilities without constructing a provider instance and
+        without the vendor SDK installed (provider modules import
+        their SDKs lazily).
+
+        Returns:
+            The frozen :class:`ProviderCapabilities` advertisement.
+            Stable for the lifetime of the class.
+        """
+
+    @classmethod
+    def _raise_unsupported_batch(cls) -> Never:
+        """Raise the typed batch decline derived from :meth:`capabilities`.
+
+        Providers advertising ``batch=False`` call this from their
+        batch-group method stubs, so both the decision to decline and
+        the provider name in the error come from the advertisement —
+        a single source of truth with no per-stub strings to drift.
+
+        Raises:
+            UnsupportedCapabilityError: Always, when the advertisement
+                says ``batch=False``.
+            RuntimeError: If called by a provider advertising batch
+                support — the advertisement and the implementation
+                disagree, which is a programming error.
+        """
+        caps = cls.capabilities()
+        if caps.batch:
+            msg = (
+                f"provider {caps.provider!r} advertises batch support; "
+                f"_raise_unsupported_batch must be unreachable"
+            )
+            raise RuntimeError(msg)
+        raise UnsupportedCapabilityError(
+            provider=caps.provider,
+            capability=_BATCH_CAPABILITY,
+        )
 
     @abstractmethod
     def generate(self, prompt: str, output_format: OutputFormat) -> GenerationResult:

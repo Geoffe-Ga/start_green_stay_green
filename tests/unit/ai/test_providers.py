@@ -16,6 +16,7 @@ network involvement.
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
@@ -33,6 +34,9 @@ from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import ModelConfig
 from start_green_stay_green.ai.providers import AnthropicProvider
 from start_green_stay_green.ai.providers import LLMProvider
+from start_green_stay_green.ai.providers import OpenAIProvider
+from start_green_stay_green.ai.providers import ProviderCapabilities
+from start_green_stay_green.ai.providers import UnsupportedCapabilityError
 from start_green_stay_green.ai.providers.outcomes import AttemptOutcome
 from start_green_stay_green.ai.providers.outcomes import ToolAttemptOutcome
 from start_green_stay_green.ai.types import GenerationError
@@ -162,6 +166,7 @@ class TestLLMProviderInterface:
         abstract = LLMProvider.__abstractmethods__
         assert abstract == {
             "model",
+            "capabilities",
             "generate",
             "generate_async",
             "generate_tool_use_async",
@@ -182,6 +187,77 @@ class TestLLMProviderInterface:
             "aclose",
         ):
             assert inspect.iscoroutinefunction(getattr(LLMProvider, name))
+
+
+class TestCapabilityAdvertisement:
+    """T5 (#389): providers advertise capabilities as one frozen structure.
+
+    The advertisement is the single source of truth for capability
+    negotiation: the batch-decline stubs and the orchestrator's
+    fallback decision both derive from it.
+    """
+
+    def test_anthropic_advertises_batch_supported(self) -> None:
+        """Anthropic implements every capability group, batch included."""
+        assert AnthropicProvider.capabilities() == ProviderCapabilities(
+            provider="anthropic",
+            batch=True,
+            tool_use=True,
+            token_accounting=True,
+        )
+
+    def test_openai_advertises_batch_unsupported(self) -> None:
+        """OpenAI declines batch but supports tool-use and token telemetry."""
+        assert OpenAIProvider.capabilities() == ProviderCapabilities(
+            provider="openai",
+            batch=False,
+            tool_use=True,
+            token_accounting=True,
+        )
+
+    def test_capabilities_readable_without_an_instance(self) -> None:
+        """The advertisement is a classmethod: no construction, no SDK.
+
+        ``green providers`` reads capabilities through the selection
+        registry, which must work without any vendor extra installed —
+        so the advertisement cannot live on a constructed instance.
+        """
+        assert OpenAIProvider.capabilities().batch is False
+        assert AnthropicProvider.capabilities().batch is True
+
+    def test_capabilities_structure_is_frozen(self) -> None:
+        """The advertisement is immutable — callers cannot flip flags."""
+        caps = AnthropicProvider.capabilities()
+        field_name = "batch"
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            setattr(caps, field_name, False)
+
+    def test_decline_helper_derives_error_from_advertisement(self) -> None:
+        """The typed decline carries the advertised provider name."""
+        with pytest.raises(UnsupportedCapabilityError) as exc:
+            OpenAIProvider._raise_unsupported_batch()
+        assert exc.value.provider == "openai"
+        assert exc.value.capability == "batch tool-use"
+
+    def test_decline_helper_refuses_batch_capable_provider(self) -> None:
+        """A batch-capable provider calling the decline helper is a bug."""
+        with pytest.raises(RuntimeError, match="advertises batch support"):
+            AnthropicProvider._raise_unsupported_batch()
+
+    def test_orchestrator_capabilities_delegates_to_provider(self) -> None:
+        """``AIOrchestrator.capabilities`` reads the injected provider's."""
+        provider = _spy_provider()
+        provider.capabilities = MagicMock(
+            return_value=OpenAIProvider.capabilities(),
+        )
+        orchestrator = AIOrchestrator(api_key="sk-test", provider=provider)
+        assert orchestrator.capabilities == OpenAIProvider.capabilities()
+        provider.capabilities.assert_called_once_with()
+
+    def test_default_orchestrator_advertises_batch(self) -> None:
+        """The zero-config (Anthropic) orchestrator advertises batch."""
+        orchestrator = AIOrchestrator(api_key="sk-test")
+        assert orchestrator.capabilities.batch is True
 
 
 class TestOrchestratorDefaultsToAnthropicProvider:

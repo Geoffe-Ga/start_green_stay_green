@@ -27,14 +27,18 @@ import pytest
 from start_green_stay_green.ai.orchestrator import ModelConfig
 from start_green_stay_green.ai.provider_selection import DEFAULT_MODEL
 from start_green_stay_green.ai.provider_selection import DEFAULT_PROVIDER
+from start_green_stay_green.ai.provider_selection import OPENAI_DEFAULT_MODEL
 from start_green_stay_green.ai.provider_selection import ProviderSelection
 from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
 from start_green_stay_green.ai.provider_selection import _coalesce
 from start_green_stay_green.ai.provider_selection import build_provider
+from start_green_stay_green.ai.provider_selection import describe_providers
+from start_green_stay_green.ai.provider_selection import provider_capabilities
 from start_green_stay_green.ai.provider_selection import resolve_api_key_env_var
 from start_green_stay_green.ai.provider_selection import resolve_provider_selection
 from start_green_stay_green.ai.provider_selection import supported_providers
 from start_green_stay_green.ai.providers.base import LLMProvider
+from start_green_stay_green.ai.providers.base import ProviderCapabilities
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -352,7 +356,7 @@ def test_openai_selection_uses_provider_default_model() -> None:
         env={},
     )
     assert selection.provider == "openai"
-    assert selection.model == "gpt-5.5"
+    assert selection.model == OPENAI_DEFAULT_MODEL
     assert selection.model != DEFAULT_MODEL
 
 
@@ -420,3 +424,76 @@ def test_missing_openai_extra_raises_actionable_error_on_use(
     assert "pip install" in message
     assert "[openai]" in message
     assert isinstance(exc.value.__cause__, ImportError)
+
+
+# ----------------------- capabilities (T5, #389) ---------------------------
+def test_provider_capabilities_anthropic_supports_batch() -> None:
+    """The registry surfaces Anthropic's full capability set."""
+    caps = provider_capabilities("anthropic")
+    assert caps == ProviderCapabilities(
+        provider="anthropic",
+        batch=True,
+        tool_use=True,
+        token_accounting=True,
+    )
+
+
+def test_provider_capabilities_openai_lacks_batch() -> None:
+    """The registry surfaces OpenAI's batch-unsupported advertisement."""
+    caps = provider_capabilities("openai")
+    assert not caps.batch
+    assert caps.tool_use
+    assert caps.token_accounting
+    assert caps.provider == "openai"
+
+
+def test_provider_capabilities_normalizes_name() -> None:
+    """Provider names are case-insensitive registry keys here too."""
+    assert provider_capabilities("  OpenAI ") == provider_capabilities("openai")
+
+
+def test_provider_capabilities_unknown_provider_raises() -> None:
+    """An unknown provider raises the standard registry ValueError."""
+    with pytest.raises(ValueError, match="Unknown LLM provider"):
+        provider_capabilities("does-not-exist")
+
+
+def test_provider_capabilities_readable_without_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Capabilities resolve with the vendor SDK absent (lazy-import seam).
+
+    ``green providers`` must list every provider's capabilities even
+    when an optional extra is not installed, so the advertisement is
+    read from the (import-clean) provider class, never from an SDK.
+    """
+    _block_openai_import(monkeypatch)
+    assert not provider_capabilities("openai").batch
+
+
+def test_describe_providers_lists_every_registered_provider() -> None:
+    """The listing covers the whole registry in sorted name order."""
+    listings = describe_providers()
+    assert tuple(entry.name for entry in listings) == ("anthropic", "openai")
+
+
+def test_describe_providers_carries_spec_and_capabilities() -> None:
+    """Each row pairs registry metadata with the advertisement."""
+    by_name = {entry.name: entry for entry in describe_providers()}
+    anthropic = by_name["anthropic"]
+    assert anthropic.default_model == DEFAULT_MODEL
+    assert anthropic.api_key_env_var == "ANTHROPIC_API_KEY"  # pragma: allowlist secret
+    assert anthropic.capabilities.batch
+    openai = by_name["openai"]
+    assert openai.default_model == OPENAI_DEFAULT_MODEL
+    assert openai.api_key_env_var == "OPENAI_API_KEY"  # pragma: allowlist secret
+    assert not openai.capabilities.batch
+
+
+def test_describe_providers_works_without_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The full listing also resolves with an optional extra absent."""
+    _block_openai_import(monkeypatch)
+    names = [entry.name for entry in describe_providers()]
+    assert "openai" in names
