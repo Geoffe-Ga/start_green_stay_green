@@ -155,6 +155,7 @@ artifacts = generator.write_all(Path("output"))
 - **Kotlin**: kover (./gradlew koverVerifyDebug), pitest, detekt, dokka, OWASP dependency-check
 - **C/C++**: lcov (cmake -DENABLE_COVERAGE=ON + ctest), mull, lizard (CCN), doxygen, cppcheck + flawfinder, conan audit
 - **Java**: JaCoCo (mvn jacoco:check), pitest, PMD (CyclomaticComplexity, pmd-ruleset.xml), javadoc, SpotBugs + OWASP dependency-check
+- **C#**: Coverlet (dotnet test /p:CollectCoverage=true), Stryker.NET (dotnet stryker), Roslyn CA1502 (CodeMetricsConfig.txt), DocFX, SecurityCodeScan + dotnet list package --vulnerable
 
 ## Configuration Options
 
@@ -367,7 +368,7 @@ config = MetricsGenerationConfig(
 )
 ```
 
-**Solution**: Use a supported language (python, typescript, javascript, go, rust, swift, kotlin, cpp, java)
+**Solution**: Use a supported language (python, typescript, javascript, go, rust, swift, kotlin, cpp, java, csharp)
 
 ### Invalid Threshold
 

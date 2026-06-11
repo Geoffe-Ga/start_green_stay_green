@@ -74,6 +74,22 @@ Phase 6 follow-ups in progress (issues #316–#319).
   documentation (#369). A real generated example lives in
   `examples/java/`.
 
+- **C# (.NET) language support** — `green init --language csharp`
+  generates a general .NET 8 scaffold (a console app plus xUnit tests
+  compiling into one assembly) where every quality gate runs inside
+  the dotnet CLI and the generated `.csproj` is the single source of
+  the quality policy: Roslyn analyzers with warnings-as-errors in
+  every build, dotnet format in check mode as a pre-commit hook, a
+  CA1502 cyclomatic-complexity gate (≤10, bound in
+  `CodeMetricsConfig.txt`), a ≥90% Coverlet line-coverage gate bound
+  in the csproj, gitleaks/detect-secrets secret scanning, the
+  SecurityCodeScan analyzer plus a `dotnet list package --vulnerable`
+  CVE scan, a NetArchTest architecture test, and an ubuntu CI pipeline
+  on the .NET 8 SDK running the same dotnet gates as the local build.
+  Quality tooling on the foundation scaffold + CI (#370), tests
+  (#371), documentation (#372). A real generated example lives in
+  `examples/csharp/`.
+
 ## [1.0.0] — 2026-05-10
 
 First tagged release. Bundles the entire claude-init optimization

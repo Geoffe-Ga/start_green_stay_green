@@ -622,6 +622,34 @@ generated output and the
 [CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
 the full Java toolchain table.
 
+### Example 9: C# (.NET) Project
+
+```bash
+# Prerequisites: the .NET 8 SDK - dotnet format, the Roslyn analyzers,
+# and NuGet all ship inside it, so nothing else to install
+# (Debian/Ubuntu: apt-get install dotnet-sdk-8.0):
+brew install dotnet-sdk
+
+start-green-stay-green init \
+  --project-name wrist-ledger \
+  --language csharp \
+  --no-interactive
+
+cd wrist-ledger
+dotnet test
+pre-commit install
+./scripts/check-all.sh  # dotnet format, Roslyn analyzers as errors (CA1502 complexity ≤10), dotnet test + ≥90% Coverlet coverage, vulnerable NuGet package scan
+```
+
+The generated CI pipeline runs on ubuntu runners with a .NET 8 SDK
+quality job (the generated csproj targets net8.0) running the same
+dotnet CLI gates as the local build — the csproj is the single home of
+the analyzer policy and the ≥90% Coverlet coverage bound, so the
+scripts, hooks, and CI cannot drift from it. See
+[examples/csharp/](examples/csharp/) for real generated output and the
+[CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
+the full C# toolchain table.
+
 ## Project Structure
 
 After running `start-green-stay-green init`, your project will have:
@@ -795,7 +823,7 @@ All contributions must:
 - ✅ Kotlin (Wear OS) language support — scaffold, quality tooling, CI, tests (#356, #357, #358, #359)
 - ✅ C/C++ (Tizen native) language support — scaffold, quality tooling, CI, tests (#361, #362, #363, #364)
 - ✅ Java (Wear OS legacy) language support — scaffold, quality tooling, CI, tests, docs (#366, #367, #368, #369)
-- ✅ C# (.NET) quality tooling on top of the foundation scaffold + CI (#370)
+- ✅ C# (.NET) language support — quality tooling on the foundation scaffold + CI, tests, docs (#370, #371, #372)
 
 ### Planned
 
