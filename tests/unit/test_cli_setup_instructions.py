@@ -76,6 +76,16 @@ ALL_LANGUAGES = (
 )
 
 
+def _always_posix() -> bool:
+    """Pin the POSIX branch of the is_windows seam."""
+    return False
+
+
+def _always_windows() -> bool:
+    """Pin the Windows branch of the is_windows seam."""
+    return True
+
+
 class TestVenvActivationCommand:
     """Tests for _venv_activation_command shell detection."""
 
@@ -633,7 +643,7 @@ class TestFinalizeInitWindowsNote:
         tmp_path: Path,
     ) -> None:
         """On Windows the success message explains the Git Bash gate."""
-        monkeypatch.setattr("start_green_stay_green.cli.is_windows", lambda: True)
+        monkeypatch.setattr("start_green_stay_green.cli.is_windows", _always_windows)
 
         _finalize_init(tmp_path, "proj", ("python",))
 
@@ -649,7 +659,7 @@ class TestFinalizeInitWindowsNote:
     ) -> None:
         """On POSIX no Windows-specific note clutters the output."""
         # bool() returns False — refurb's FURB111-preferred lambda: False.
-        monkeypatch.setattr("start_green_stay_green.cli.is_windows", bool)
+        monkeypatch.setattr("start_green_stay_green.cli.is_windows", _always_posix)
 
         _finalize_init(tmp_path, "proj", ("python",))
 
