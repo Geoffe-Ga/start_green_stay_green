@@ -156,6 +156,7 @@ artifacts = generator.write_all(Path("output"))
 - **C/C++**: lcov (cmake -DENABLE_COVERAGE=ON + ctest), mull, lizard (CCN), doxygen, cppcheck + flawfinder, conan audit
 - **Java**: JaCoCo (mvn jacoco:check), pitest, PMD (CyclomaticComplexity, pmd-ruleset.xml), javadoc, SpotBugs + OWASP dependency-check
 - **C#**: Coverlet (dotnet test /p:CollectCoverage=true), Stryker.NET (dotnet stryker), Roslyn CA1502 (CodeMetricsConfig.txt), DocFX, SecurityCodeScan + dotnet list package --vulnerable
+- **Ruby**: SimpleCov (COVERAGE=true bundle exec rspec), mutant (bundle exec mutant run), RuboCop Metrics/CyclomaticComplexity (.rubocop.yml), YARD, bundler-audit + bundle outdated
 
 ## Configuration Options
 
@@ -368,7 +369,7 @@ config = MetricsGenerationConfig(
 )
 ```
 
-**Solution**: Use a supported language (python, typescript, javascript, go, rust, swift, kotlin, cpp, java, csharp)
+**Solution**: Use a supported language (python, typescript, javascript, go, rust, swift, kotlin, cpp, java, csharp, ruby)
 
 ### Invalid Threshold
 

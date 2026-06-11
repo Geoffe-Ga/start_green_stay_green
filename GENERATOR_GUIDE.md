@@ -83,7 +83,7 @@ output_path.write_text(yaml_content)
 
 **Configuration Options**:
 - `project_name`: Name of the project
-- `language`: python, typescript, go, rust, swift, kotlin, cpp, java, csharp, ruby, or ruby
+- `language`: python, typescript, go, rust, swift, kotlin, cpp, java, csharp, or ruby
 - `language_config`: Language-specific settings (dict)
 
 **Output**: `.pre-commit-config.yaml` with hooks for:
