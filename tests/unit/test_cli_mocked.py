@@ -45,7 +45,10 @@ from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
 from start_green_stay_green.ai.provider_selection import DEFAULT_MODEL
+from start_green_stay_green.ai.provider_selection import OPENAI_DEFAULT_MODEL
+from start_green_stay_green.ai.provider_selection import ProviderSelection
 from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
+from start_green_stay_green.ai.provider_selection import resolve_provider_selection
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
 from start_green_stay_green.utils.enhance_state import BatchProgress
@@ -2222,20 +2225,70 @@ class TestEnhanceCommand:
     @patch("start_green_stay_green.cli._enhance_subagents")
     @patch("start_green_stay_green.cli._enhance_claude_md")
     @patch("start_green_stay_green.cli._initialize_orchestrator")
-    def test_omits_config_tier_by_design(
+    @patch("start_green_stay_green.cli.load_config_file")
+    def test_config_flag_threads_config_data_into_selection(
+        self,
+        mock_load: Mock,
+        mock_init: Mock,
+        mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """``enhance --config`` wires the parsed mapping into selection (#396).
+
+        ``enhance`` now mirrors ``green init``'s config-file tier: the
+        ``--config`` flag is loaded through the same
+        :func:`load_config_file` loader and the parsed mapping reaches
+        the ``_SelectionInputs`` bundle, so all four precedence tiers
+        apply consistently across both commands.
+        """
+        config_mapping = {"llm_provider": "anthropic", "llm_model": "config-model"}
+        mock_load.return_value = config_mapping.copy()
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path, name="with-config", language="python")
+        config_file = tmp_path / "green.yaml"
+        config_file.write_text(
+            "llm_provider: anthropic\nllm_model: config-model\n",
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--config",
+                str(config_file),
+                "--model",
+                "Flag-Model",
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        mock_load.assert_called_once_with(config_file)
+        selection_inputs = mock_init.call_args.kwargs["selection_inputs"]
+        # The parsed config mapping flows through to the resolver.
+        assert selection_inputs.config_data == config_mapping
+        # The CLI ``--model`` flag still flows through (case preserved).
+        assert selection_inputs.model_flag == "Flag-Model"
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_no_config_flag_threads_empty_config_data(
         self,
         mock_init: Mock,
         mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
         mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
         tmp_path: Path,
     ) -> None:
-        """``enhance`` intentionally has no config-file tier (see #396).
+        """Without ``--config`` the config tier is an empty mapping (#396).
 
-        Unlike ``green init`` (4 tiers), ``enhance`` has no ``--config``
-        flag and loads no config file, so it deliberately wires only
-        CLI flag > env > built-in default. The selection inputs it builds
-        must therefore carry ``config_data is None`` — the config tier is
-        a no-op here. Tracked for future wiring as issue #396.
+        Mirrors ``init``: ``_load_config_data(None)`` returns ``{}``, so
+        the config tier is a no-op and resolution falls through to the
+        built-in default — but the bundle is no longer ``None``-typed.
         """
         _make_orch_mock(mock_init)
         project = self._make_project(tmp_path, name="no-config", language="python")
@@ -2248,10 +2301,40 @@ class TestEnhanceCommand:
 
         assert result.exit_code == 0, result.stdout
         selection_inputs = mock_init.call_args.kwargs["selection_inputs"]
-        # The config tier is omitted by design: enhance has no config input.
-        assert selection_inputs.config_data is None
-        # The CLI ``--model`` flag still flows through (case preserved).
+        assert selection_inputs.config_data == {}
         assert selection_inputs.model_flag == "Flag-Model"
+
+    def test_missing_config_file_exits(self, tmp_path: Path) -> None:
+        """``--config`` pointing at a missing file exits 1, like ``init``."""
+        project = self._make_project(tmp_path, name="bad-config", language="python")
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--config",
+                str(tmp_path / "does-not-exist.yaml"),
+                "--no-interactive",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Configuration file not found" in self._flat(result.stdout)
+
+    def test_help_lists_config_flag(self) -> None:
+        """``enhance --help`` advertises the ``--config`` flag (#396).
+
+        Rich styles and may hyphen-wrap option names depending on the
+        environment it detects, so strip ANSI sequences and collapse
+        box-drawing characters and whitespace before matching.
+        """
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["enhance", "--help"])
+        assert result.exit_code == 0
+        no_ansi = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+        plain = re.sub(r"[│╭╮╰╯─\s]+", "", no_ansi)
+        assert "--config" in plain
+        assert "--config-file" in plain
 
     @patch("start_green_stay_green.cli._enhance_subagents")
     @patch("start_green_stay_green.cli._enhance_claude_md")
@@ -2394,6 +2477,222 @@ class TestEnhanceCommand:
         )
         assert result.exit_code == 1
         assert "Unsupported language" in self._flat(result.stdout)
+
+
+class TestEnhanceConfigTierPrecedence:
+    """Pin the four-tier precedence through ``green enhance`` (#396).
+
+    These tests run the real :func:`resolve_provider_selection` (only
+    the loader, key lookup, provider construction, and tuning helpers
+    are mocked) so they pin the end-to-end wiring: CLI flag > env
+    (``GREEN_LLM_PROVIDER`` / ``GREEN_LLM_MODEL``) > config-file key
+    (``llm_provider`` / ``llm_model``) > built-in default.
+    """
+
+    @staticmethod
+    def _invoke_enhance(
+        tmp_path: Path,
+        *,
+        config_mapping: dict[str, str],
+        env: dict[str, str],
+        extra_args: list[str],
+    ) -> tuple[mock.MagicMock, int, str]:
+        """Run ``enhance --config`` with a stubbed loader; return build call.
+
+        Returns:
+            ``(build_provider mock, exit code, stdout)`` so each test can
+            assert on the *resolved* provider/model that reached
+            :func:`build_provider`.
+        """
+        project = TestEnhanceCommand._make_project(
+            tmp_path, name="precedence", language="python"
+        )
+        with (
+            patch(
+                "start_green_stay_green.cli.load_config_file",
+                return_value=config_mapping.copy(),
+            ),
+            patch(
+                "start_green_stay_green.cli._get_api_key_with_source",
+                return_value=("test-key", "environment variable"),
+            ),
+            patch("start_green_stay_green.cli.build_provider") as mock_build,
+            patch("start_green_stay_green.cli.AIOrchestrator"),
+            patch("start_green_stay_green.cli._enhance_claude_md"),
+            patch("start_green_stay_green.cli._enhance_subagents"),
+            patch.dict("os.environ", env, clear=True),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--config",
+                    str(tmp_path / "green.yaml"),
+                    "--dry-run",
+                    "--no-interactive",
+                    *extra_args,
+                ],
+            )
+        return mock_build, result.exit_code, result.stdout
+
+    def test_flag_beats_config(self, tmp_path: Path) -> None:
+        """Tier 1 (CLI flag) wins over tier 3 (config-file key)."""
+        mock_build, exit_code, stdout = self._invoke_enhance(
+            tmp_path,
+            config_mapping={"llm_model": "config-model"},
+            env={},
+            extra_args=["--model", "Flag-Model"],
+        )
+        assert exit_code == 0, stdout
+        assert mock_build.call_args.kwargs["model"] == "Flag-Model"
+
+    def test_env_beats_config(self, tmp_path: Path) -> None:
+        """Tier 2 (env var) wins over tier 3 (config-file key)."""
+        mock_build, exit_code, stdout = self._invoke_enhance(
+            tmp_path,
+            config_mapping={"llm_model": "config-model"},
+            env={"GREEN_LLM_MODEL": "env-model"},
+            extra_args=[],
+        )
+        assert exit_code == 0, stdout
+        assert mock_build.call_args.kwargs["model"] == "env-model"
+
+    def test_config_beats_default(self, tmp_path: Path) -> None:
+        """Tier 3 (config-file key) wins over tier 4 (built-in default)."""
+        mock_build, exit_code, stdout = self._invoke_enhance(
+            tmp_path,
+            config_mapping={"llm_model": "config-model"},
+            env={},
+            extra_args=[],
+        )
+        assert exit_code == 0, stdout
+        assert mock_build.call_args.kwargs["model"] == "config-model"
+
+    def test_config_provider_key_selects_provider(self, tmp_path: Path) -> None:
+        """``llm_provider`` from the config file drives provider + default model.
+
+        The provider name is case-folded (registry key) and, with no
+        higher-tier model, the *selected provider's* default model is
+        used — pinning that the config tier feeds both fields.
+        """
+        mock_build, exit_code, stdout = self._invoke_enhance(
+            tmp_path,
+            config_mapping={"llm_provider": "OpenAI"},
+            env={},
+            extra_args=[],
+        )
+        assert exit_code == 0, stdout
+        assert mock_build.call_args.args[0] == "openai"
+        assert mock_build.call_args.kwargs["model"] == OPENAI_DEFAULT_MODEL
+
+
+class TestInitEnhanceConfigParity:
+    """Parity: the same config file resolves identically via init and enhance.
+
+    Acceptance criterion of #396 — ``green enhance`` resolves the
+    ``llm_provider`` / ``llm_model`` config-file keys exactly as
+    ``green init`` does: same loader (:func:`load_config_file`), same
+    keys, same precedence, same resolved selection.
+    """
+
+    @staticmethod
+    def _init_selection_inputs(
+        tmp_path: Path,
+        config_file: Path,
+        config_mapping: dict[str, str],
+    ) -> cli._SelectionInputs:
+        """Run ``green init --config`` and capture its selection bundle."""
+        with (
+            patch(
+                "start_green_stay_green.cli.load_config_file",
+                return_value=config_mapping.copy(),
+            ),
+            patch(
+                "start_green_stay_green.cli._resolve_pass2_orchestrator",
+                return_value=None,  # offline-style: no Pass 2 run.
+            ) as mock_pass2,
+            patch("start_green_stay_green.cli._generate_project_files"),
+            patch("start_green_stay_green.cli._finalize_init"),
+        ):
+            cli.init(
+                project_name="parity-proj",
+                language=["python"],
+                output_dir=tmp_path,
+                config=config_file,
+                api_key=None,
+                no_interactive=True,
+            )
+        inputs = mock_pass2.call_args.kwargs["selection_inputs"]
+        return cast("cli._SelectionInputs", inputs)
+
+    @staticmethod
+    def _enhance_selection_inputs(
+        tmp_path: Path,
+        config_file: Path,
+        config_mapping: dict[str, str],
+    ) -> cli._SelectionInputs:
+        """Run ``green enhance --config`` and capture its selection bundle."""
+        project = TestEnhanceCommand._make_project(
+            tmp_path, name="parity-enhance", language="python"
+        )
+        with (
+            patch(
+                "start_green_stay_green.cli.load_config_file",
+                return_value=config_mapping.copy(),
+            ),
+            patch(
+                "start_green_stay_green.cli._initialize_orchestrator"
+            ) as mock_init_orch,
+            patch("start_green_stay_green.cli._enhance_claude_md"),
+            patch("start_green_stay_green.cli._enhance_subagents"),
+        ):
+            _make_orch_mock(mock_init_orch)
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--config",
+                    str(config_file),
+                    "--no-interactive",
+                ],
+            )
+        assert result.exit_code == 0, result.stdout
+        inputs = mock_init_orch.call_args.kwargs["selection_inputs"]
+        return cast("cli._SelectionInputs", inputs)
+
+    def test_same_config_file_resolves_identically(self, tmp_path: Path) -> None:
+        """One config file → identical ``ProviderSelection`` in both commands."""
+        config_mapping = {"llm_provider": "ANTHROPIC", "llm_model": "Config-Model"}
+        config_file = tmp_path / "green.yaml"
+        config_file.write_text(
+            "llm_provider: ANTHROPIC\nllm_model: Config-Model\n",
+            encoding="utf-8",
+        )
+
+        init_inputs = self._init_selection_inputs(tmp_path, config_file, config_mapping)
+        enhance_inputs = self._enhance_selection_inputs(
+            tmp_path, config_file, config_mapping
+        )
+
+        # The same parsed mapping reaches both commands' selection bundle…
+        assert init_inputs.config_data == config_mapping
+        assert enhance_inputs.config_data == config_mapping
+        # …and resolves to the identical selection under identical env.
+        resolved = [
+            resolve_provider_selection(
+                provider_flag=inputs.provider_flag,
+                model_flag=inputs.model_flag,
+                config=inputs.config_data or {},
+                env={},
+            )
+            for inputs in (init_inputs, enhance_inputs)
+        ]
+        expected = ProviderSelection(provider="anthropic", model="Config-Model")
+        assert resolved == [expected, expected]
 
 
 class TestEnhanceSkipUnchanged:
