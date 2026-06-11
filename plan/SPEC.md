@@ -41,7 +41,7 @@ The core insight: Claude Code can produce excellent code **if given strict guard
 The tool generates quality infrastructure for projects in any of the following languages.
 **Implemented today**: Python, TypeScript, Go, Rust, Swift (watchOS),
 Kotlin (Wear OS), C/C++ (Tizen native), Java (Wear OS legacy
-Android Wear), and C# (.NET). The remaining rows are planned.
+Android Wear), C# (.NET), and Ruby. The remaining rows are planned.
 
 | Language | Package Manager | Test Framework | Linter | Formatter |
 |----------|----------------|----------------|--------|-----------|
@@ -54,7 +54,7 @@ Android Wear), and C# (.NET). The remaining rows are planned.
 | C/C++ (Tizen native) | CMake ≥3.20 + Conan 2 (C++17 pinned) | Catch2 (`ctest` + gcov/lcov ≥90% coverage) | clang-tidy + cppcheck + lizard | clang-format |
 | Java (Wear OS legacy) | Maven (pure logic; Java 17), watch APK via Android tooling | JUnit 4 (`mvn test` + JaCoCo ≥90% coverage) | Checkstyle (google_checks) + PMD (CCN ≤10) + SpotBugs | google-java-format |
 | C# (.NET) | NuGet via the dotnet CLI (.NET 8, net8.0) | xUnit (`dotnet test` + Coverlet ≥90% coverage) | Roslyn analyzers as errors (CA1502 CCN ≤10) + SecurityCodeScan | dotnet format |
-| Ruby | bundler | rspec | rubocop | rubocop |
+| Ruby | Bundler (Ruby 3.3/3.4, the maintained lines) | RSpec (`bundle exec rspec` + SimpleCov ≥90% coverage, bound in spec_helper.rb) | RuboCop full cop set (Lint/Style + Metrics CCN ≤10 + Security cops, policy in .rubocop.yml) + bundler-audit | RuboCop (Layout cops, `--autocorrect`) |
 | PHP | composer | phpunit | phpstan | php-cs-fixer |
 
 ---

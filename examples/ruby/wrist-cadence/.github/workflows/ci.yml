@@ -1,0 +1,71 @@
+name: Ruby Quality Checks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  quality:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # The Ruby lines still receiving upstream maintenance (3.1/3.2
+        # reached EOL); bump together with the generated .rubocop.yml's
+        # TargetRubyVersion.
+        ruby-version: ["3.3", "3.4"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby ${{ matrix.ruby-version }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby-version }}
+          # bundler-cache runs `bundle install` and caches the gems —
+          # no separate install step needed.
+          bundler-cache: true
+
+      # The full cop set: format (Layout), lint (Lint/Style), the
+      # Metrics/CyclomaticComplexity <=10 ceiling, and the Security cop
+      # department. .rubocop.yml is the single home of the policy —
+      # the same file the pre-commit hook and scripts/lint.sh read —
+      # so this invocation restates none of it.
+      - name: Run RuboCop
+        run: bundle exec rubocop --force-exclusion
+
+      # Dependency CVE scan against the ruby-advisory-db. CI runners
+      # have network access, so the update is a hard gate here (the
+      # generated scripts/security.sh warn-and-skips offline instead).
+      # Brakeman is deliberately absent: it is Rails-specific and
+      # errors on plain-Ruby projects — add it alongside Rails.
+      - name: Run bundler-audit security check
+        run: bundle exec bundler-audit update && bundle exec bundler-audit check
+
+      # COVERAGE=true activates the SimpleCov gate; the >=90% line
+      # bound lives in spec/spec_helper.rb — its single home — so this
+      # invocation enforces it without restating the number. SimpleCov
+      # fails the rspec run directly when the bound is missed.
+      - name: Run RSpec with SimpleCov (>=90% gate in spec_helper.rb)
+        run: COVERAGE=true bundle exec rspec --format documentation
+
+      # Best-effort: a fresh `green init` project ships no
+      # CODECOV_TOKEN secret, so a failing upload must not start the
+      # project red; the real coverage gate is the SimpleCov run above.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          files: ./coverage/.resultset.json
+          fail_ci_if_error: false
+
+  # No packaging job: the generated scaffold is a plain-Ruby project
+  # without a .gemspec, so a `gem build` job would be red on every
+  # push. Add a packaging job together with the gemspec when the
+  # project becomes a gem.

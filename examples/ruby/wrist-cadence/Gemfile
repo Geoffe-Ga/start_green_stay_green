@@ -1,0 +1,28 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gem "rake", "~> 13.4"
+
+group :development, :test do
+  # Test framework; SimpleCov hooks the suite and enforces the >=90%
+  # coverage bound declared in spec/spec_helper.rb (its single home).
+  gem "rspec", "~> 3.13"
+  gem "simplecov", "~> 0.22", require: false
+
+  # Formatter, linter, complexity (<=10 via Metrics cops), and
+  # source-level security cops in one tool; .rubocop.yml is the single
+  # home of the policy shared by pre-commit, scripts, and CI.
+  gem "rubocop", "~> 1.87", require: false
+
+  # Dependency CVE scanning against the ruby-advisory-db
+  # (scripts/security.sh). Brakeman is deliberately absent: it is a
+  # Rails-specific scanner that errors on plain-Ruby projects — add it
+  # here together with Rails if the project adopts the framework.
+  gem "bundler-audit", "~> 0.9", require: false
+
+  # Architecture boundary enforcement (plans/architecture). Packwerk
+  # targets Zeitwerk-style autoloaded codebases; see the generated
+  # packwerk.yml for its enforcement limits on this plain-Ruby layout.
+  gem "packwerk", "~> 3.3", require: false
+end
