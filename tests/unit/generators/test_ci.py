@@ -10,10 +10,12 @@ Comprehensive tests for CI pipeline generation covering:
 """
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 from jinja2 import UndefinedError
 import pytest
+import yaml
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError
@@ -23,6 +25,7 @@ from start_green_stay_green.ai.orchestrator import TokenUsage
 from start_green_stay_green.generators.ci import CIGenerator
 from start_green_stay_green.generators.ci import CIWorkflow
 from start_green_stay_green.generators.ci import LANGUAGE_CONFIGS
+from start_green_stay_green.utils.kotlin import GRADLE_WRAPPER_VERSION
 
 
 class TestCIWorkflowDataClass:
@@ -648,6 +651,7 @@ jobs:
             "java",
             "csharp",
             "ruby",
+            "swift",
         ],
     )
     def test_generate_workflow_all_languages(
@@ -1142,10 +1146,128 @@ jobs:
         """Test Ruby package_manager is exactly bundler."""
         assert LANGUAGE_CONFIGS["ruby"]["package_manager"] == "bundler"
 
+    # LANGUAGE_CONFIGS Exact Value Tests - Swift
+    def test_swift_test_framework_exact(self) -> None:
+        """Test Swift test_framework is exactly xctest."""
+        assert LANGUAGE_CONFIGS["swift"]["test_framework"] == "xctest"
+
+    def test_swift_linters_exact(self) -> None:
+        """Test Swift linters list is exact."""
+        assert LANGUAGE_CONFIGS["swift"]["linters"] == ["swiftlint"]
+
+    def test_swift_formatters_exact(self) -> None:
+        """Test Swift formatters list is exact."""
+        assert LANGUAGE_CONFIGS["swift"]["formatters"] == ["swift-format"]
+
+    def test_swift_security_tools_exact(self) -> None:
+        """Test Swift security_tools list is exact.
+
+        SwiftLint serves security duty too but is listed only under
+        linters so tool-install consumers don't double-install it.
+        """
+        expected = ["gitleaks", "periphery"]
+        assert LANGUAGE_CONFIGS["swift"]["security_tools"] == expected
+
+    def test_swift_supported_versions_exact(self) -> None:
+        """Test Swift supported_versions list is exact."""
+        assert LANGUAGE_CONFIGS["swift"]["supported_versions"] == ["5.9", "5.10", "6.0"]
+
+    def test_swift_package_manager_exact(self) -> None:
+        """Test Swift package_manager is exactly spm."""
+        assert LANGUAGE_CONFIGS["swift"]["package_manager"] == "spm"
+
+    # LANGUAGE_CONFIGS Exact Value Tests - Kotlin
+    def test_kotlin_test_framework_exact(self) -> None:
+        """Test Kotlin test_framework is exactly junit."""
+        assert LANGUAGE_CONFIGS["kotlin"]["test_framework"] == "junit"
+
+    def test_kotlin_linters_exact(self) -> None:
+        """Test Kotlin linters list is exact."""
+        assert LANGUAGE_CONFIGS["kotlin"]["linters"] == ["ktlint", "detekt"]
+
+    def test_kotlin_formatters_exact(self) -> None:
+        """Test Kotlin formatters list is exact.
+
+        ktlint genuinely is both a linter and a formatter (like ruff,
+        eslint, and rubocop in the other configs), so it appears in both
+        lists; that is established precedent, unlike double-listing a
+        tool under security_tools (the Swift PR #414 lesson).
+        """
+        assert LANGUAGE_CONFIGS["kotlin"]["formatters"] == ["ktlint"]
+
+    def test_kotlin_security_tools_exact(self) -> None:
+        """Test Kotlin security_tools list is exact.
+
+        detekt's potential-bugs rules serve security duty too but it is
+        listed only under linters so tool-install consumers don't
+        double-install it (the Swift PR #414 review lesson).
+        """
+        expected = ["gitleaks", "dependency-check"]
+        assert LANGUAGE_CONFIGS["kotlin"]["security_tools"] == expected
+
+    def test_kotlin_supported_versions_exact(self) -> None:
+        """Test Kotlin supported_versions are the JDK LTS releases.
+
+        The Kotlin version (2.0.21) is pinned by the generated root
+        build.gradle.kts — a project decision, not a CI input — so the
+        meaningful matrix axis is the JVM running Gradle/AGP.
+        """
+        assert LANGUAGE_CONFIGS["kotlin"]["supported_versions"] == ["17", "21"]
+
+    def test_kotlin_package_manager_exact(self) -> None:
+        """Test Kotlin package_manager is exactly gradle."""
+        assert LANGUAGE_CONFIGS["kotlin"]["package_manager"] == "gradle"
+
+    # LANGUAGE_CONFIGS Exact Value Tests - C/C++
+    def test_cpp_test_framework_exact(self) -> None:
+        """Test cpp test_framework is exactly catch2.
+
+        The epic text named GoogleTest, but the #361 foundation chose
+        Catch2 (conanfile.txt pins catch2/3.x and the scaffolded tests
+        use Catch2 macros), so CI stays consistent with what the
+        generated project actually builds.
+        """
+        assert LANGUAGE_CONFIGS["cpp"]["test_framework"] == "catch2"
+
+    def test_cpp_linters_exact(self) -> None:
+        """Test cpp linters list is exact."""
+        assert LANGUAGE_CONFIGS["cpp"]["linters"] == ["clang-tidy", "cppcheck"]
+
+    def test_cpp_formatters_exact(self) -> None:
+        """Test cpp formatters list is exact."""
+        assert LANGUAGE_CONFIGS["cpp"]["formatters"] == ["clang-format"]
+
+    def test_cpp_security_tools_exact(self) -> None:
+        """Test cpp security_tools list is exact.
+
+        cppcheck and clang-tidy's clang-analyzer-*/cert-* checks serve
+        security duty too but are listed only under linters so
+        tool-install consumers don't double-install them (the Swift
+        PR #414 lesson).
+        """
+        assert LANGUAGE_CONFIGS["cpp"]["security_tools"] == [
+            "gitleaks",
+            "flawfinder",
+        ]
+
+    def test_cpp_supported_versions_exact(self) -> None:
+        """Test cpp supported_versions are the matrix compilers.
+
+        The generated CMakeLists.txt pins CMAKE_CXX_STANDARD to 17
+        (utils.cpp.CPP_STANDARD — a project decision, not a CI input),
+        so the honest matrix axis is the compiler building that pinned
+        standard, not a language-standard matrix CI could never vary.
+        """
+        assert LANGUAGE_CONFIGS["cpp"]["supported_versions"] == ["gcc", "clang"]
+
+    def test_cpp_package_manager_exact(self) -> None:
+        """Test cpp package_manager is exactly cmake-conan."""
+        assert LANGUAGE_CONFIGS["cpp"]["package_manager"] == "cmake-conan"
+
     # Config Keys Exact Tests
-    def test_language_configs_has_exactly_7_languages(self) -> None:
-        """Test LANGUAGE_CONFIGS has exactly 7 supported languages."""
-        assert len(LANGUAGE_CONFIGS) == 7
+    def test_language_configs_has_exactly_10_languages(self) -> None:
+        """Test LANGUAGE_CONFIGS has exactly 10 supported languages."""
+        assert len(LANGUAGE_CONFIGS) == 10
 
     def test_language_configs_contains_python(self) -> None:
         """Test LANGUAGE_CONFIGS contains python key."""
@@ -1174,6 +1296,18 @@ jobs:
     def test_language_configs_contains_ruby(self) -> None:
         """Test LANGUAGE_CONFIGS contains ruby key."""
         assert "ruby" in LANGUAGE_CONFIGS
+
+    def test_language_configs_contains_swift(self) -> None:
+        """Test LANGUAGE_CONFIGS contains swift key."""
+        assert "swift" in LANGUAGE_CONFIGS
+
+    def test_language_configs_contains_kotlin(self) -> None:
+        """Test LANGUAGE_CONFIGS contains kotlin key."""
+        assert "kotlin" in LANGUAGE_CONFIGS
+
+    def test_language_configs_contains_cpp(self) -> None:
+        """Test LANGUAGE_CONFIGS contains cpp key."""
+        assert "cpp" in LANGUAGE_CONFIGS
 
     def test_all_configs_have_test_framework_key(self) -> None:
         """Test all language configs have test_framework key."""
@@ -1239,7 +1373,7 @@ class TestCIGeneratorTemplatePath:
 
     @pytest.mark.parametrize(
         "language",
-        ["python", "typescript", "go", "rust"],
+        ["python", "typescript", "go", "rust", "swift", "kotlin", "cpp", "java"],
     )
     def test_generate_from_template_for_supported_language(self, language: str) -> None:
         """Each canonical language renders without an orchestrator."""
@@ -1381,3 +1515,913 @@ class TestCIGeneratorTemplatePath:
         generator = CIGenerator(language="python", reference_dir=reference_dir)
         with pytest.raises(UndefinedError):
             generator.generate_workflow_from_template()
+
+
+class TestSwiftReferenceTemplate:
+    """Tests for the Swift reference CI workflow (Issue #353).
+
+    The Swift scaffold is a SwiftUI + WatchKit watchOS app package, so
+    every assertion here reflects what can actually run: SwiftUI only
+    ships in Apple SDKs (macOS runners), `swift test` covers the SPM
+    path, and xcodebuild covers the watchOS-simulator path.
+    """
+
+    @pytest.fixture
+    def swift_workflow(self) -> CIWorkflow:
+        """Render the deterministic Swift reference workflow."""
+        return CIGenerator(language="swift").generate_workflow_from_template()
+
+    def test_workflow_is_valid_yaml(self, swift_workflow: CIWorkflow) -> None:
+        """Rendered workflow parses with yaml.safe_load and validates."""
+        parsed = yaml.safe_load(swift_workflow.content)
+        assert swift_workflow.is_valid
+        assert isinstance(parsed, dict)
+        assert parsed["name"] == "Swift Quality Checks"
+
+    def test_workflow_has_quality_test_and_watchos_jobs(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """Workflow declares the quality, test, and watchos jobs."""
+        parsed = yaml.safe_load(swift_workflow.content)
+        assert set(parsed["jobs"]) == {"quality", "test", "watchos"}
+
+    def test_all_jobs_run_on_macos(self, swift_workflow: CIWorkflow) -> None:
+        """Every job runs on macOS: SwiftUI cannot compile on Linux."""
+        parsed = yaml.safe_load(swift_workflow.content)
+        for name, job in parsed["jobs"].items():
+            assert job["runs-on"] == "macos-latest", f"{name} must run on macOS"
+
+    def test_watchos_job_guards_against_null_discovery(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """Scheme/UDID discovery fails loudly instead of passing null on.
+
+        jq emits the string "null" when no Apple Watch simulator (or no
+        scheme) matches; without guards that value reaches
+        ``xcodebuild -destination id=null`` as a cryptic late failure,
+        and unvalidated writes to GITHUB_ENV are the documented Actions
+        env-injection vector. The UDID must look like a simulator UUID.
+        """
+        content = swift_workflow.content
+        assert "No Apple Watch simulator found" in content
+        assert "No xcodebuild scheme found" in content
+        assert "^[0-9A-Fa-f-]{36}$" in content
+        # The scheme is character-class validated like the UDID...
+        assert "^[A-Za-z0-9._ -]+$" in content
+        # ...and discovery accepts both xcodebuild -list -json shapes
+        # (.workspace for app packages, .project for plain projects).
+        assert ".workspace.schemes // .project.schemes" in content
+
+    def test_coverage_gate_does_not_rerun_swift_test(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """The coverage gate locates the codecov JSON without re-testing.
+
+        ``swift test --show-codecov-path`` re-runs the entire suite (it
+        is not a pure query), doubling CI time and decoupling measured
+        coverage from the displayed test results, so the gate must find
+        the export JSON from the single coverage run instead.
+        """
+        content = swift_workflow.content
+        assert "--show-codecov-path" not in content
+        assert "find .build" in content
+        assert "*/codecov/*" in content
+
+    def test_version_matrix_does_not_fail_fast(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """Matrix legs run to completion so every failing version is seen."""
+        parsed = yaml.safe_load(swift_workflow.content)
+        assert parsed["jobs"]["test"]["strategy"]["fail-fast"] is False
+
+    def test_version_matrix_covers_swift_59_510_60(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """The test job matrixes over Swift 5.9, 5.10, and 6.0."""
+        parsed = yaml.safe_load(swift_workflow.content)
+        matrix = parsed["jobs"]["test"]["strategy"]["matrix"]
+        assert matrix["swift-version"] == ["5.9", "5.10", "6.0"]
+
+    def test_version_matrix_uses_pinned_setup_swift_action(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """setup-swift is pinned to a major version like other setup actions."""
+        assert "swift-actions/setup-swift@v2" in swift_workflow.content
+
+    def test_quality_job_enforces_coverage_threshold(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """Coverage gate parses the same llvm-cov JSON as scripts/test.sh."""
+        assert "swift test --enable-code-coverage" in swift_workflow.content
+        # Same data source as the generated scripts/test.sh --coverage
+        # (the export JSON from the single coverage run)...
+        assert "*/codecov/*" in swift_workflow.content
+        # ...and the same 90% line-coverage threshold.
+        assert '["data"][0]["totals"]["lines"]["percent"]' in swift_workflow.content
+        assert 'python3 - "$CODECOV_JSON" 90' in swift_workflow.content
+
+    def test_quality_job_mirrors_precommit_lint_and_format_hooks(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """CI runs the same SwiftLint/swift-format checks as pre-commit."""
+        # Check-mode counterpart of the `swift-format format --in-place`
+        # pre-commit hook (identical to scripts/format.sh --check).
+        assert "swift-format lint --strict --recursive Sources Tests" in (
+            swift_workflow.content
+        )
+        # Same invocation as the SwiftLint pre-commit hook; reads the
+        # generated .swiftlint.yml (complexity <= 10 + security rules).
+        assert "swiftlint lint --strict" in swift_workflow.content
+
+    def test_quality_job_runs_gitleaks_secret_scan(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """CI runs the gitleaks secret scan listed in security_tools."""
+        assert "gitleaks detect" in swift_workflow.content
+
+    def test_watchos_job_builds_for_watchos_simulator(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """The watchos job builds via xcodebuild for the watchOS simulator."""
+        assert "generic/platform=watchOS Simulator" in swift_workflow.content
+
+    def test_watchos_job_runs_tests_on_watchos_simulator(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """The watchos job runs XCTest on a concrete simulator device."""
+        assert "xcodebuild test" in swift_workflow.content
+        # Devices are matched by UDID (simctl discovery): name/OS matching
+        # breaks when the runner image's runtimes drift from the Xcode SDK.
+        assert "xcrun simctl list devices available --json" in swift_workflow.content
+        assert "id=$UDID" in swift_workflow.content
+
+    def test_watchos_job_discovers_scheme_dynamically(
+        self, swift_workflow: CIWorkflow
+    ) -> None:
+        """The xcodebuild scheme is discovered, not hardcoded."""
+        assert "xcodebuild -list -json" in swift_workflow.content
+        # The old stub hardcoded a placeholder scheme that could never exist.
+        assert "YourScheme" not in swift_workflow.content
+
+
+def _all_run_commands(parsed_workflow: dict[str, Any]) -> list[str]:
+    """Collect every step ``run`` command across all workflow jobs.
+
+    Parsing (instead of scanning raw content) lets assertions target the
+    commands that actually execute while YAML comments stay free to
+    document decisions honestly — the PR #414 review noted raw string
+    assertions are brittle exactly because they cannot tell the two
+    apart.
+
+    Args:
+        parsed_workflow: ``yaml.safe_load`` result for a workflow.
+
+    Returns:
+        Every non-empty ``run`` value, in job/step order.
+    """
+    return [
+        step["run"]
+        for job in parsed_workflow["jobs"].values()
+        for step in job["steps"]
+        if step.get("run")
+    ]
+
+
+class TestKotlinReferenceTemplate:
+    """Tests for the Kotlin reference CI workflow (Issue #358).
+
+    The Kotlin scaffold is a Jetpack Compose for Wear OS Android app
+    built with Gradle (Kotlin DSL), so every assertion reflects what can
+    actually run: Android/JVM builds work on GitHub's ubuntu runners
+    (Android SDK and Temurin JDKs preinstalled, no macOS needed unlike
+    Swift), the scaffold deliberately ships no Gradle wrapper binary,
+    and the >=90% coverage bound lives in the generated
+    app/build.gradle.kts Kover block — not in the workflow.
+    """
+
+    @pytest.fixture
+    def kotlin_workflow(self) -> CIWorkflow:
+        """Render the deterministic Kotlin reference workflow."""
+        return CIGenerator(language="kotlin").generate_workflow_from_template()
+
+    def test_workflow_is_valid_yaml(self, kotlin_workflow: CIWorkflow) -> None:
+        """Rendered workflow parses with yaml.safe_load and validates."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        assert kotlin_workflow.is_valid
+        assert isinstance(parsed, dict)
+        assert parsed["name"] == "Kotlin Quality Checks"
+
+    def test_workflow_has_quality_test_and_wear_jobs(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """Workflow declares the quality, test, and wear jobs."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        assert set(parsed["jobs"]) == {"quality", "test", "wear"}
+
+    def test_all_jobs_run_on_ubuntu(self, kotlin_workflow: CIWorkflow) -> None:
+        """Every job runs on ubuntu: Android/JVM builds need no macOS."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        for name, job in parsed["jobs"].items():
+            assert job["runs-on"] == "ubuntu-latest", f"{name} must run on ubuntu"
+
+    def test_jdk_matrix_does_not_fail_fast(self, kotlin_workflow: CIWorkflow) -> None:
+        """Matrix legs run to completion so every failing JDK is seen."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        assert parsed["jobs"]["test"]["strategy"]["fail-fast"] is False
+
+    def test_jdk_matrix_matches_language_config_versions(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """The test job matrixes over the LANGUAGE_CONFIGS JDK versions."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        matrix = parsed["jobs"]["test"]["strategy"]["matrix"]
+        assert matrix["java-version"] == (
+            LANGUAGE_CONFIGS["kotlin"]["supported_versions"]
+        )
+
+    def test_setup_actions_are_pinned_to_majors(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """checkout, setup-java, and setup-gradle are pinned majors."""
+        content = kotlin_workflow.content
+        assert "actions/checkout@v4" in content
+        assert "actions/setup-java@v4" in content
+        assert "gradle/actions/setup-gradle@v4" in content
+
+    def test_workflow_provisions_gradle_instead_of_missing_wrapper(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """CI never invokes the wrapper the scaffold deliberately omits.
+
+        The generator never writes binary artifacts, so gradlew and
+        gradle-wrapper.jar do not exist in a fresh project; any
+        ``./gradlew`` (or ``chmod +x gradlew``) step would fail on the
+        first run. setup-gradle provisions a pinned Gradle matching
+        utils/kotlin.GRADLE_WRAPPER_VERSION (the version the scaffold
+        README tells users to materialise) and steps call ``gradle``.
+        Assertions parse the workflow so YAML comments may still
+        document the wrapper situation honestly.
+        """
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        # Covers both `./gradlew ...` invocations and the old stub's
+        # `chmod +x gradlew` step.
+        assert not any("gradlew" in cmd for cmd in run_commands)
+        assert parsed["env"]["GRADLE_VERSION"] == GRADLE_WRAPPER_VERSION
+        gradle_setups = [
+            step
+            for job in parsed["jobs"].values()
+            for step in job["steps"]
+            if "setup-gradle" in step.get("uses", "")
+        ]
+        assert gradle_setups
+        for step in gradle_setups:
+            assert step["with"]["gradle-version"] == "${{ env.GRADLE_VERSION }}"
+
+    def test_coverage_gate_runs_kover_once_without_duplicating_bound(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """One Gradle invocation gates coverage; the bound stays in Gradle.
+
+        koverXmlReportDebug and koverVerifyDebug share a single
+        testDebugUnitTest execution inside one task graph (the Swift
+        PR #414 no-double-test-run lesson), and the >=90% bound lives
+        only in app/build.gradle.kts (kover { ... minBound(90) }) so the
+        threshold can never drift between the manifest and the workflow.
+        Run commands are parsed so comments may reference the bound.
+        """
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert any(
+            cmd.strip() == "gradle koverXmlReportDebug koverVerifyDebug"
+            for cmd in run_commands
+        )
+        assert not any("minBound" in cmd for cmd in run_commands)
+        assert not any("90" in cmd for cmd in run_commands)
+
+    def test_quality_job_does_not_rerun_the_test_suite(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """No standalone test step duplicates the Kover coverage run."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        run_commands = [
+            step.get("run", "") for step in parsed["jobs"]["quality"]["steps"]
+        ]
+        kover_runs = [cmd for cmd in run_commands if "koverVerifyDebug" in cmd]
+        assert len(kover_runs) == 1
+        assert not any(cmd.strip() == "gradle test" for cmd in run_commands)
+
+    def test_quality_job_mirrors_precommit_lint_and_format_hooks(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """CI runs the same ktlint/detekt checks as pre-commit."""
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        run_commands = [
+            step.get("run", "") for step in parsed["jobs"]["quality"]["steps"]
+        ]
+        # Check-mode counterpart of the `ktlint --format` pre-commit hook
+        # (identical to scripts/format.sh without --fix).
+        assert any(cmd.strip() == "ktlint" for cmd in run_commands)
+        # Same invocation as the detekt pre-commit hook and scripts/lint.sh:
+        # the shared detekt.yml on top of detekt's default config.
+        assert (
+            "detekt --config detekt.yml --build-upon-default-config"
+            in kotlin_workflow.content
+        )
+        assert "--excludes '**/build/**'" in kotlin_workflow.content
+
+    def test_quality_job_runs_gitleaks_secret_scan(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """CI runs gitleaks at the same version pre-commit pins."""
+        content = kotlin_workflow.content
+        assert "gitleaks detect" in content
+        # Parity with the rev pinned in the generated .pre-commit-config
+        # (https://github.com/gitleaks/gitleaks rev v8.18.4).
+        assert 'GITLEAKS_VERSION: "8.18.4"' in content
+
+    def test_quality_tools_are_version_pinned_downloads(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """ktlint/detekt come from pinned GitHub release downloads.
+
+        Homebrew (the documented local install path) was removed from
+        GitHub's Ubuntu runner images, so the workflow fetches pinned
+        release binaries instead — deterministically, never "latest".
+        """
+        content = kotlin_workflow.content
+        assert "KTLINT_VERSION" in content
+        assert "DETEKT_VERSION" in content
+        assert "releases/download" in content
+        assert "releases/latest" not in content
+        assert "brew install" not in content
+
+    def test_wear_job_assembles_debug_apk_without_emulator(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """The wear job builds the Wear OS APK; no emulator steps exist.
+
+        The scaffold generates no androidTest source set, so an emulator
+        job would have nothing to execute; assembleDebug is the honest
+        deterministic proof the Wear OS target builds. The emulator
+        stance is documented in YAML comments, not dead steps.
+        """
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        wear_commands = [
+            step.get("run", "") for step in parsed["jobs"]["wear"]["steps"]
+        ]
+        assert any("gradle assembleDebug" in cmd for cmd in wear_commands)
+        uses = [
+            step.get("uses", "")
+            for job in parsed["jobs"].values()
+            for step in job["steps"]
+        ]
+        assert not any("emulator" in action for action in uses)
+
+    def test_workflow_writes_nothing_to_github_env(
+        self, kotlin_workflow: CIWorkflow
+    ) -> None:
+        """Nothing discovered at runtime is exported to GITHUB_ENV.
+
+        The Swift PR #414 review flagged unvalidated GITHUB_ENV writes
+        as the documented Actions env-injection vector. The Kotlin
+        workflow sidesteps the vector entirely: every value (versions,
+        tasks, paths) is a static literal, so there is no dynamic
+        discovery and no GITHUB_ENV/GITHUB_PATH write to guard. Run
+        commands are parsed so comments may explain that decision.
+        """
+        parsed = yaml.safe_load(kotlin_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert not any("GITHUB_ENV" in cmd for cmd in run_commands)
+        assert not any("GITHUB_PATH" in cmd for cmd in run_commands)
+
+
+class TestCppReferenceTemplate:
+    """Tests for the C/C++ reference CI workflow (Issue #363).
+
+    The cpp scaffold is a Tizen native watch app whose CMake/Conan build
+    deliberately covers ONLY the pure-logic library and its Catch2 tests
+    (the #361 two-build split): src/main.cpp needs the Tizen native SDK
+    and .tpk packaging is the Tizen Studio CLI's job — a manual,
+    login-gated GUI installer no GitHub-hosted runner can provision.
+    Every assertion therefore reflects what can actually run on a plain
+    ubuntu runner, and the packaging gap is documented in YAML comments
+    rather than emitted as steps that can never pass (the Kotlin
+    no-emulator / Swift Periphery precedent).
+    """
+
+    @pytest.fixture
+    def cpp_workflow(self) -> CIWorkflow:
+        """Render the deterministic C/C++ reference workflow."""
+        return CIGenerator(language="cpp").generate_workflow_from_template()
+
+    def test_workflow_is_valid_yaml(self, cpp_workflow: CIWorkflow) -> None:
+        """Rendered workflow parses with yaml.safe_load and validates."""
+        parsed = yaml.safe_load(cpp_workflow.content)
+        assert cpp_workflow.is_valid
+        assert isinstance(parsed, dict)
+        assert parsed["name"] == "C/C++ Quality Checks"
+
+    def test_workflow_has_quality_and_test_jobs(self, cpp_workflow: CIWorkflow) -> None:
+        """Workflow declares exactly the quality and test jobs."""
+        parsed = yaml.safe_load(cpp_workflow.content)
+        assert set(parsed["jobs"]) == {"quality", "test"}
+
+    def test_all_jobs_run_on_pinned_ubuntu(self, cpp_workflow: CIWorkflow) -> None:
+        """Every job pins ubuntu-24.04, not ubuntu-latest.
+
+        Noble's default apt clang tooling is LLVM 18, matching the
+        mirrors-clang-format v18.1.8 rev pinned in the generated
+        .pre-commit-config.yaml — a floating ubuntu-latest could silently
+        change the clang-format/clang-tidy major and break that parity.
+        """
+        parsed = yaml.safe_load(cpp_workflow.content)
+        for name, job in parsed["jobs"].items():
+            assert job["runs-on"] == "ubuntu-24.04", f"{name} must pin ubuntu-24.04"
+
+    def test_compiler_matrix_does_not_fail_fast(self, cpp_workflow: CIWorkflow) -> None:
+        """Matrix legs run to completion so every failing compiler is seen."""
+        parsed = yaml.safe_load(cpp_workflow.content)
+        assert parsed["jobs"]["test"]["strategy"]["fail-fast"] is False
+
+    def test_compiler_matrix_matches_language_config_versions(
+        self, cpp_workflow: CIWorkflow
+    ) -> None:
+        """The test job matrixes over the LANGUAGE_CONFIGS compilers."""
+        parsed = yaml.safe_load(cpp_workflow.content)
+        matrix = parsed["jobs"]["test"]["strategy"]["matrix"]
+        assert matrix["compiler"] == LANGUAGE_CONFIGS["cpp"]["supported_versions"]
+
+    def test_compiler_matrix_maps_cc_and_cxx_pairs(
+        self, cpp_workflow: CIWorkflow
+    ) -> None:
+        """Each matrix leg carries a consistent CC/CXX toolchain pair.
+
+        Both Conan (profile detect honors $CC/$CXX) and CMake read these,
+        so the whole leg — dependency build included — really uses the
+        matrix compiler instead of silently falling back to the default.
+        """
+        parsed = yaml.safe_load(cpp_workflow.content)
+        include = parsed["jobs"]["test"]["strategy"]["matrix"]["include"]
+        pairs = {entry["compiler"]: (entry["cc"], entry["cxx"]) for entry in include}
+        assert pairs == {"gcc": ("gcc", "g++"), "clang": ("clang", "clang++")}
+        env = parsed["jobs"]["test"]["env"]
+        assert env["CC"] == "${{ matrix.cc }}"
+        assert env["CXX"] == "${{ matrix.cxx }}"
+
+    def test_checkout_action_is_pinned_to_major(self, cpp_workflow: CIWorkflow) -> None:
+        """actions/checkout is pinned to a major version."""
+        assert "actions/checkout@v4" in cpp_workflow.content
+
+    def test_quality_job_runs_generated_scripts_for_parity(
+        self, cpp_workflow: CIWorkflow
+    ) -> None:
+        """CI runs the generated scripts instead of reimplementing them.
+
+        format.sh --check, lint.sh, test.sh --coverage, and security.sh
+        are the same gates check-all.sh chains locally — one source of
+        truth, so CI can never drift from the pre-commit/scripts parity
+        the #362 review demanded.
+        """
+        parsed = yaml.safe_load(cpp_workflow.content)
+        quality_commands = [
+            step.get("run", "") for step in parsed["jobs"]["quality"]["steps"]
+        ]
+        assert any(
+            cmd.strip() == "./scripts/format.sh --check" for cmd in quality_commands
+        )
+        assert any(cmd.strip() == "./scripts/lint.sh" for cmd in quality_commands)
+        assert any(cmd.strip() == "./scripts/security.sh" for cmd in quality_commands)
+
+    def test_coverage_gate_delegates_to_test_script_once(
+        self, cpp_workflow: CIWorkflow
+    ) -> None:
+        """One test.sh --coverage run gates coverage; the bound stays there.
+
+        scripts/test.sh is the single home of the >=90% line bound (CMake
+        has no canonical manifest slot for a coverage threshold), and it
+        runs ctest exactly once with instrumentation — no second
+        uninstrumented test step duplicates the suite in the quality job
+        (the Swift PR #414 no-double-test-run lesson). Run commands are
+        parsed so comments may reference the bound.
+        """
+        parsed = yaml.safe_load(cpp_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        coverage_runs = [
+            cmd for cmd in run_commands if "./scripts/test.sh --coverage" in cmd
+        ]
+        assert len(coverage_runs) == 1
+        quality_commands = [
+            step.get("run", "") for step in parsed["jobs"]["quality"]["steps"]
+        ]
+        assert not any("ctest" in cmd for cmd in quality_commands)
+        assert not any("90" in cmd for cmd in run_commands)
+
+    def test_quality_job_runs_gitleaks_at_precommit_pin(
+        self, cpp_workflow: CIWorkflow
+    ) -> None:
+        """CI runs gitleaks at the same version pre-commit pins."""
+        content = cpp_workflow.content
+        assert "gitleaks detect" in content
+        # Parity with the rev pinned in the generated .pre-commit-config
+        # (https://github.com/gitleaks/gitleaks rev v8.18.4).
+        assert 'GITLEAKS_VERSION: "8.18.4"' in content
+
+    def test_quality_tools_are_version_pinned(self, cpp_workflow: CIWorkflow) -> None:
+        """conan/lizard/flawfinder/gitleaks are pinned, never floating.
+
+        Homebrew was removed from GitHub's Ubuntu runner images (the
+        Kotlin #421 lesson), so Python CLI tools install via pipx at
+        pinned versions and gitleaks comes from a pinned GitHub release
+        artifact — deterministically, never "latest".
+        """
+        content = cpp_workflow.content
+        assert "CONAN_VERSION" in content
+        assert "LIZARD_VERSION" in content
+        assert "FLAWFINDER_VERSION" in content
+        assert "releases/download" in content
+        assert "releases/latest" not in content
+        assert "brew install" not in content
+
+    def test_test_job_builds_and_runs_ctest_without_coverage(
+        self, cpp_workflow: CIWorkflow
+    ) -> None:
+        """Matrix legs build and run plain ctest; coverage stays in quality.
+
+        The test job's axis is compiler compatibility — rerunning the
+        instrumented suite here would just duplicate the quality job's
+        single coverage measurement.
+        """
+        parsed = yaml.safe_load(cpp_workflow.content)
+        test_commands = [
+            step.get("run", "") for step in parsed["jobs"]["test"]["steps"]
+        ]
+        assert any("cmake --build build" in cmd for cmd in test_commands)
+        assert any(
+            "ctest --test-dir build --output-on-failure" in cmd for cmd in test_commands
+        )
+        assert not any("--coverage" in cmd for cmd in test_commands)
+        assert not any("lcov" in cmd for cmd in test_commands)
+
+    def test_configure_uses_documented_build_dir_convention(
+        self, cpp_workflow: CIWorkflow
+    ) -> None:
+        """Both jobs configure with the scaffold-wide `cmake -B build` flow.
+
+        The build/ directory name is load-bearing: the clang-tidy
+        pre-commit hook, scripts/lint.sh (-p build), and scripts/test.sh
+        all assume it, and the CMakeLists.txt header documents the exact
+        conan install + cmake configure invocation CI replays here.
+        """
+        parsed = yaml.safe_load(cpp_workflow.content)
+        for job_name in ("quality", "test"):
+            commands = [
+                step.get("run", "") for step in parsed["jobs"][job_name]["steps"]
+            ]
+            configure = [cmd for cmd in commands if "conan install" in cmd]
+            assert len(configure) == 1, f"{job_name} must configure exactly once"
+            assert "conan profile detect --force" in configure[0]
+            assert "conan install . --output-folder=build --build=missing" in (
+                configure[0]
+            )
+            assert "cmake -B build -S ." in configure[0]
+            assert "-DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake" in configure[0]
+
+    def test_tizen_packaging_documented_not_stubbed(
+        self, cpp_workflow: CIWorkflow
+    ) -> None:
+        """The .tpk packaging gap is YAML comments, not dead steps.
+
+        Tizen Studio is a manual, login-gated GUI installer with no
+        headless install path, so no runner can provision it — the
+        workflow documents that honestly instead of emitting `tizen
+        build-native` steps that can never pass.
+        """
+        content = cpp_workflow.content
+        assert "Tizen Studio" in content
+        parsed = yaml.safe_load(content)
+        run_commands = _all_run_commands(parsed)
+        assert not any("tizen" in cmd for cmd in run_commands)
+        assert not any(".tpk" in cmd for cmd in run_commands)
+
+    def test_workflow_writes_nothing_to_github_env(
+        self, cpp_workflow: CIWorkflow
+    ) -> None:
+        """Nothing discovered at runtime is exported to GITHUB_ENV.
+
+        The Swift PR #414 review flagged unvalidated GITHUB_ENV writes as
+        the documented Actions env-injection vector; like the Kotlin
+        workflow, this one sidesteps the vector entirely — every value is
+        a static literal, so there is no dynamic discovery and no
+        GITHUB_ENV/GITHUB_PATH write to guard.
+        """
+        parsed = yaml.safe_load(cpp_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert not any("GITHUB_ENV" in cmd for cmd in run_commands)
+        assert not any("GITHUB_PATH" in cmd for cmd in run_commands)
+
+
+class TestJavaReferenceTemplate:
+    """Tests for the Java reference CI workflow (#366/#368).
+
+    The java scaffold is a legacy Android Wear app whose Maven build
+    deliberately covers ONLY the pure-logic library and its JUnit 4
+    tests (the #366 two-builds split): the APK is Android tooling's job,
+    so every assertion reflects what `mvn` can actually run on a plain
+    ubuntu runner. The quality gates are the pom-backed Maven goals the
+    integration suite cross-checks against the generated pom.
+    """
+
+    @pytest.fixture
+    def java_workflow(self) -> CIWorkflow:
+        """Render the deterministic Java reference workflow."""
+        return CIGenerator(language="java").generate_workflow_from_template()
+
+    def test_workflow_is_valid_yaml(self, java_workflow: CIWorkflow) -> None:
+        """Rendered workflow parses with yaml.safe_load and validates."""
+        parsed = yaml.safe_load(java_workflow.content)
+        assert java_workflow.is_valid
+        assert isinstance(parsed, dict)
+        assert parsed["name"] == "Java Quality Checks"
+
+    def test_workflow_has_quality_and_build_jobs(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """Workflow declares exactly the quality and build jobs."""
+        parsed = yaml.safe_load(java_workflow.content)
+        assert set(parsed["jobs"]) == {"quality", "build"}
+
+    def test_all_jobs_run_on_ubuntu(self, java_workflow: CIWorkflow) -> None:
+        """Every job runs on ubuntu: Maven/JVM builds need no macOS."""
+        parsed = yaml.safe_load(java_workflow.content)
+        for name, job in parsed["jobs"].items():
+            assert job["runs-on"] == "ubuntu-latest", f"{name} must run on ubuntu"
+
+    def test_jdk_matrix_covers_the_lts_releases_above_the_pom_target(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """The quality job matrixes over JDK 17 and 21.
+
+        utils/java.JAVA_RELEASE pins the pom's --release to 17, so the
+        matrix runs the LTS JDKs that can build it (11 from
+        LANGUAGE_CONFIGS predates the target and is deliberately
+        absent).
+        """
+        parsed = yaml.safe_load(java_workflow.content)
+        matrix = parsed["jobs"]["quality"]["strategy"]["matrix"]
+        assert matrix["java-version"] == ["17", "21"]
+
+    def test_setup_actions_are_pinned_to_majors(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """checkout and setup-java are pinned majors with Maven caching."""
+        content = java_workflow.content
+        assert "actions/checkout@v4" in content
+        assert "actions/setup-java@v4" in content
+        assert "cache: 'maven'" in content
+
+    def test_quality_job_runs_every_pom_backed_gate(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """CI runs the checkstyle/pmd/spotbugs/jacoco goals the pom backs.
+
+        The generated pom declares each plugin precisely so these goals
+        resolve (test_java_init_integration cross-checks the pom side).
+        """
+        parsed = yaml.safe_load(java_workflow.content)
+        quality_commands = [
+            cmd.strip()
+            for step in parsed["jobs"]["quality"]["steps"]
+            if (cmd := step.get("run"))
+        ]
+        assert "mvn checkstyle:check" in quality_commands
+        assert "mvn pmd:check" in quality_commands
+        assert "mvn clean test jacoco:report" in quality_commands
+        assert "mvn jacoco:check" in quality_commands
+
+    def test_spotbugs_compiles_before_checking(self, java_workflow: CIWorkflow) -> None:
+        """The SpotBugs step compiles first so the scan is not a no-op.
+
+        SpotBugs reads bytecode: a bare `mvn spotbugs:check` silently
+        passes when target/classes is empty (the #367 report's gap, the
+        PR #430 review's carry-over). The compile must precede the check
+        within one invocation, matching the generated pre-commit hook
+        and scripts/security.sh.
+        """
+        parsed = yaml.safe_load(java_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        spotbugs_runs = [cmd for cmd in run_commands if "spotbugs:check" in cmd]
+        assert len(spotbugs_runs) == 1
+        command = spotbugs_runs[0]
+        assert "compile" in command
+        assert command.index("compile") < command.index("spotbugs:check")
+
+    def test_codecov_upload_cannot_fail_ci(self, java_workflow: CIWorkflow) -> None:
+        """The tokenless Codecov upload is best-effort, never a gate.
+
+        A fresh project has no CODECOV_TOKEN secret and tokenless
+        uploads are rate-limited, so `fail_ci_if_error: true` would make
+        generated projects start red (the #366 report's gap). The
+        enforced coverage gate is the pom-backed `mvn jacoco:check`
+        step instead.
+        """
+        parsed = yaml.safe_load(java_workflow.content)
+        codecov_steps = [
+            step
+            for job in parsed["jobs"].values()
+            for step in job["steps"]
+            if "codecov" in step.get("uses", "")
+        ]
+        assert len(codecov_steps) == 1
+        assert codecov_steps[0]["with"]["fail_ci_if_error"] is False
+
+    def test_build_job_packages_without_rerunning_tests(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """The build job packages the JAR; the suite ran once in quality.
+
+        -DskipTests keeps the single coverage-gated test execution in
+        the quality job (the Swift PR #414 no-double-test-run lesson),
+        and a single `mvn clean verify` invocation both builds and
+        verifies — verify runs the lifecycle through package, so a
+        separate package step would just build twice.
+        """
+        parsed = yaml.safe_load(java_workflow.content)
+        build_commands = [
+            step.get("run", "") for step in parsed["jobs"]["build"]["steps"]
+        ]
+        assert any("mvn clean verify -DskipTests" in cmd for cmd in build_commands)
+        assert not any("mvn clean package -DskipTests" in cmd for cmd in build_commands)
+
+    def test_android_packaging_documented_not_stubbed(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """No step pretends to build the APK Maven cannot produce."""
+        parsed = yaml.safe_load(java_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert not any("gradle" in cmd for cmd in run_commands)
+        assert not any("apk" in cmd.lower() for cmd in run_commands)
+
+    def test_workflow_writes_nothing_to_github_env(
+        self, java_workflow: CIWorkflow
+    ) -> None:
+        """Nothing discovered at runtime is exported to GITHUB_ENV.
+
+        The Swift PR #414 review flagged unvalidated GITHUB_ENV writes
+        as the documented Actions env-injection vector; like the Kotlin
+        and cpp workflows, every value here is a static literal, so
+        there is no dynamic discovery and no GITHUB_ENV/GITHUB_PATH
+        write to guard.
+        """
+        parsed = yaml.safe_load(java_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert not any("GITHUB_ENV" in cmd for cmd in run_commands)
+        assert not any("GITHUB_PATH" in cmd for cmd in run_commands)
+
+
+class TestCsharpReferenceTemplate:
+    """Tests for the C# reference CI workflow (#370/#371).
+
+    The csharp scaffold is a single-project net8.0 console app whose
+    csproj is the single home of the quality policy: Roslyn analyzers
+    as errors, the Coverlet >=90% line-coverage bound, and the CA1502
+    complexity ceiling. Every assertion here checks that the workflow
+    runs thin dotnet invocations against that policy and restates none
+    of it — the same manifest-owned shape the Kotlin/Java workflows
+    follow.
+    """
+
+    @pytest.fixture
+    def csharp_workflow(self) -> CIWorkflow:
+        """Render the deterministic C# reference workflow."""
+        return CIGenerator(language="csharp").generate_workflow_from_template()
+
+    def test_workflow_is_valid_yaml(self, csharp_workflow: CIWorkflow) -> None:
+        """Rendered workflow parses with yaml.safe_load and validates."""
+        parsed = yaml.safe_load(csharp_workflow.content)
+        assert csharp_workflow.is_valid
+        assert isinstance(parsed, dict)
+        assert parsed["name"] == "C# Quality Checks"
+
+    def test_workflow_has_quality_and_build_jobs(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """Workflow declares exactly the quality and build jobs."""
+        parsed = yaml.safe_load(csharp_workflow.content)
+        assert set(parsed["jobs"]) == {"quality", "build"}
+
+    def test_all_jobs_run_on_ubuntu(self, csharp_workflow: CIWorkflow) -> None:
+        """Every job runs on ubuntu: the .NET SDK needs no macOS."""
+        parsed = yaml.safe_load(csharp_workflow.content)
+        for name, job in parsed["jobs"].items():
+            assert job["runs-on"] == "ubuntu-latest", f"{name} must run on ubuntu"
+
+    def test_sdk_matrix_pins_the_line_that_builds_net8(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """The quality job matrixes over exactly the 8.0 SDK line.
+
+        The generated csproj targets net8.0, which older SDKs cannot
+        build (the 7.0 matrix entry was dropped for that reason); the
+        matrix extends together with the TargetFramework.
+        """
+        parsed = yaml.safe_load(csharp_workflow.content)
+        matrix = parsed["jobs"]["quality"]["strategy"]["matrix"]
+        assert matrix["dotnet-version"] == ["8.0"]
+
+    def test_setup_actions_are_pinned_to_majors(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """checkout and setup-dotnet are pinned to major versions."""
+        content = csharp_workflow.content
+        assert "actions/checkout@v4" in content
+        assert "actions/setup-dotnet@v4" in content
+
+    def test_quality_job_runs_every_csproj_backed_gate(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """CI runs the restore/build/format/test gates the csproj backs.
+
+        The plain build doubles as the lint gate (the csproj treats
+        analyzer warnings as errors), and the coverage-collecting test
+        run reuses its output via --no-build so the suite executes
+        exactly once (the Swift no-double-test-run lesson).
+        """
+        parsed = yaml.safe_load(csharp_workflow.content)
+        quality_commands = [
+            cmd.strip()
+            for step in parsed["jobs"]["quality"]["steps"]
+            if (cmd := step.get("run"))
+        ]
+        assert "dotnet restore" in quality_commands
+        assert "dotnet build --no-restore" in quality_commands
+        assert "dotnet format --verify-no-changes" in quality_commands
+        test_runs = [c for c in quality_commands if c.startswith("dotnet test")]
+        assert len(test_runs) == 1
+        assert "--no-build" in test_runs[0]
+        assert "/p:CollectCoverage=true" in test_runs[0]
+
+    def test_coverage_step_defers_the_bound_to_the_csproj(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """No run command restates the Coverlet coverage threshold.
+
+        The >=90% bound lives in the csproj
+        (Threshold/ThresholdType/ThresholdStat — its single home);
+        /p:CollectCoverage=true activates the gate without duplicating
+        the number, so the workflow cannot drift from the manifest.
+        """
+        parsed = yaml.safe_load(csharp_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert not any("Threshold" in cmd for cmd in run_commands)
+
+    def test_codecov_upload_cannot_fail_ci(self, csharp_workflow: CIWorkflow) -> None:
+        """The tokenless Codecov upload is best-effort, never a gate.
+
+        A fresh project has no CODECOV_TOKEN secret, so a failing
+        upload must not start the project red; the enforced coverage
+        gate is the csproj-backed Coverlet run in the test step.
+        """
+        parsed = yaml.safe_load(csharp_workflow.content)
+        codecov_steps = [
+            step
+            for job in parsed["jobs"].values()
+            for step in job["steps"]
+            if "codecov" in step.get("uses", "")
+        ]
+        assert len(codecov_steps) == 1
+        assert codecov_steps[0]["with"]["fail_ci_if_error"] is False
+
+    def test_build_job_packages_without_rerunning_tests(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """The build job publishes the app; the suite ran once in quality.
+
+        The Release build feeds dotnet publish via --no-build, and no
+        dotnet test invocation appears — the single coverage-gated test
+        execution lives in the quality job.
+        """
+        parsed = yaml.safe_load(csharp_workflow.content)
+        build_commands = [
+            step.get("run", "") for step in parsed["jobs"]["build"]["steps"]
+        ]
+        publish_runs = [c for c in build_commands if "dotnet publish" in c]
+        assert len(publish_runs) == 1
+        assert "--no-build" in publish_runs[0]
+        assert not any("dotnet test" in c for c in build_commands)
+
+    def test_workflow_writes_nothing_to_github_env(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """Nothing discovered at runtime is exported to GITHUB_ENV.
+
+        The Swift PR #414 review flagged unvalidated GITHUB_ENV writes
+        as the documented Actions env-injection vector; like the
+        Kotlin, cpp, and java workflows, every value here is a static
+        literal, so there is no dynamic discovery and no
+        GITHUB_ENV/GITHUB_PATH write to guard.
+        """
+        parsed = yaml.safe_load(csharp_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert not any("GITHUB_ENV" in cmd for cmd in run_commands)
+        assert not any("GITHUB_PATH" in cmd for cmd in run_commands)

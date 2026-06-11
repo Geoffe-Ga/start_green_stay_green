@@ -11,8 +11,68 @@ first tagged release.
 
 ## [Unreleased]
 
-Phase 6 follow-ups in progress (issues #316–#319). No user-facing
-changes shipped to this version yet.
+Phase 6 follow-ups in progress (issues #316–#319).
+
+### Added
+
+- **Swift (watchOS) language support** — `green init --language swift`
+  generates an SPM package (watchOS app scaffold, Swift 5.9/5.10/6.0)
+  with the full quality stack: swift-format + SwiftLint pre-commit hooks
+  and scripts (complexity ≤10), XCTest with a ≥90% llvm-cov coverage
+  gate, gitleaks/detect-secrets secret scanning, Periphery dead-code
+  analysis, SwiftLint custom-rule architecture enforcement, and a
+  macOS-runner CI pipeline with a Swift version matrix plus a
+  watchOS-simulator build-and-test job. Foundation (#351), quality
+  tooling (#352), CI pipeline (#353), tests (#354), documentation
+  (#355). A real generated example lives in `examples/swift/`.
+
+- **Kotlin (Wear OS) language support** — `green init --language kotlin`
+  generates a Gradle (Kotlin DSL) Wear OS app scaffold (Galaxy Watch 4+ /
+  Wear OS 3, Jetpack Compose for Wear OS, Kotlin 2.0 on JDK 17/21) with
+  the full quality stack: ktlint + detekt pre-commit hooks and scripts
+  (complexity ≤10), JUnit tests with a ≥90% Kover coverage gate,
+  gitleaks/detect-secrets secret scanning, OWASP dependency-check CVE
+  scanning, Konsist architecture enforcement, and an ubuntu-runner CI
+  pipeline with a JDK 17/21 test matrix plus a Wear OS debug-APK build.
+  Foundation (#356), quality tooling (#357), CI pipeline (#358), tests
+  (#359), documentation (#360). A real generated example lives in
+  `examples/kotlin/`.
+
+- **C/C++ (Tizen native) language support** — `green init --language cpp`
+  generates a Tizen native watch-app scaffold (Samsung Galaxy Watch,
+  appcore `watch_app` lifecycle + EFL UI) with a deliberate two-build
+  split: the pure-logic library and its Catch2 tests build with plain
+  CMake ≥3.20 + Conan 2 (C++17 pinned) on any host, while `.tpk`
+  packaging stays a local Tizen Studio CLI step. Full quality stack:
+  clang-format + clang-tidy + cppcheck pre-commit hooks and scripts,
+  lizard complexity gate (≤10), a ≥90% gcov/lcov coverage gate,
+  gitleaks/detect-secrets secret scanning, flawfinder CWE-mapped
+  dangerous-API scanning, a stdlib-Python include-boundary architecture
+  checker, and an ubuntu-24.04 CI pipeline that runs the generated
+  scripts themselves with a gcc/clang build-and-test matrix. Foundation
+  (#361), quality tooling (#362), CI pipeline (#363), tests (#364),
+  documentation (#365). A real generated example lives in
+  `examples/cpp/`. Also fixed with #365: the generated Swift README now
+  advertises its real CI pipeline (generated since #353) instead of
+  listing CI/CD as planned.
+
+- **Java (Wear OS legacy Android Wear) language support** —
+  `green init --language java` generates a legacy Android Wear
+  watch-app scaffold — the maintenance path for existing Java watch
+  apps — with a deliberate two-build split: the pure-logic sources and
+  their JUnit 4 tests build with plain Maven (Java 17) on any host,
+  while the watch APK stays an Android-tooling (Android Studio /
+  Gradle) build the generator does not scaffold. Full quality stack:
+  google-java-format plus Checkstyle/PMD/SpotBugs pre-commit hooks as
+  Maven goals, a PMD cyclomatic-complexity gate (≤10,
+  `pmd-ruleset.xml`), a ≥90% JaCoCo line-coverage gate bound in
+  `pom.xml`, gitleaks/detect-secrets secret scanning, OWASP
+  dependency-check CVE scanning (NVD_API_KEY-gated), an ArchUnit
+  architecture test, and an ubuntu CI pipeline with a JDK 17/21
+  (Temurin) matrix running the same Maven goals as the local build.
+  Foundation (#366), quality tooling (#367), tests (#368),
+  documentation (#369). A real generated example lives in
+  `examples/java/`.
 
 ## [1.0.0] — 2026-05-10
 

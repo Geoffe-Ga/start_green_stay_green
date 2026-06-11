@@ -31,14 +31,22 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Generate metrics.json via script mode
+        env:
+          # Enables the CI Status card's GitHub API path (Issue #159);
+          # without it, collection degrades to a static job count.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Script mode sources every metric from scripts/*.sh (Issue #217):
+        # - Documentation Coverage runs metrics-docs.sh (ruff D rules)
+        # - Mutation Score reads .mutmut-cache; absent in CI (mutmut is a
+        #   periodic gate), so it degrades to null and the dashboard
+        #   renders a gray N/A tile instead of failing.
         run: |
           . .venv/bin/activate
           python scripts/collect_metrics.py \
             --project-name start-green-stay-green \
             --output docs/metrics.json \
             --metrics-mode script \
-            --scripts-dir scripts/ \
-            --docs-file docs-report.txt
+            --scripts-dir scripts/
 
       - name: Regenerate dashboard.html from template
         run: |

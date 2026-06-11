@@ -30,7 +30,7 @@ class TestCIReferences:
         assert ci_dir.is_dir()
 
     def test_all_language_ci_workflows_exist(self, ci_dir: Path) -> None:
-        """Test that CI workflows exist for all 10 supported languages."""
+        """Test that CI workflows exist for all 11 supported languages."""
         required_workflows = [
             "python.yml",
             "typescript.yml",
@@ -42,6 +42,7 @@ class TestCIReferences:
             "ruby.yml",
             "php.yml",
             "kotlin.yml",
+            "cpp.yml",
         ]
 
         for workflow in required_workflows:
@@ -94,6 +95,64 @@ class TestScriptsReferences:
             assert script_path.exists(), f"Missing Python script: {script}"
             assert script_path.is_file()
             assert script_path.stat().st_size > 0, f"Empty Python script: {script}"
+
+    def test_java_lint_script_compiles_before_spotbugs(self, scripts_dir: Path) -> None:
+        """The java reference lint script's SpotBugs run is no no-op (#368).
+
+        SpotBugs reads bytecode: a bare ``mvn spotbugs:check`` silently
+        passes when target/classes is empty, so the reference script must
+        compile within the same invocation — parity with the generated
+        scripts/security.sh and reference/ci/java.yml.
+        """
+        content = (scripts_dir / "java" / "lint.sh").read_text()
+        commands = [
+            line
+            for line in content.splitlines()
+            if "spotbugs:check" in line and not line.lstrip().startswith("#")
+        ]
+        assert commands, "lint.sh must run the SpotBugs gate"
+        for command in commands:
+            assert "compile" in command
+            assert command.index("compile") < command.index("spotbugs:check")
+
+    def test_csharp_lint_script_runs_the_roslyn_analyzers(
+        self, scripts_dir: Path
+    ) -> None:
+        """The csharp reference lint script is more than a format check (#371).
+
+        All Roslyn analysis (CA rules, the CA1502 complexity ceiling,
+        SecurityCodeScan) runs inside the compiler, so without a
+        ``dotnet build`` the lint gate could never see an analyzer
+        finding — parity with the generated scripts/lint.sh and
+        reference/ci/csharp.yml, where the build IS the lint gate.
+        """
+        content = (scripts_dir / "csharp" / "lint.sh").read_text()
+        commands = [
+            line for line in content.splitlines() if not line.lstrip().startswith("#")
+        ]
+        assert any("dotnet format --verify-no-changes" in c for c in commands)
+        assert any("dotnet build" in c for c in commands)
+
+    def test_csharp_test_script_defers_the_coverage_bound_to_the_csproj(
+        self, scripts_dir: Path
+    ) -> None:
+        """The csharp reference test script never restates the threshold (#371).
+
+        The >=90% Coverlet bound lives in the generated csproj
+        (Threshold/ThresholdType/ThresholdStat — its single home);
+        ``/p:CollectCoverage=true`` activates the gate without
+        duplicating the number, matching reference/ci/csharp.yml and
+        the generated scripts/test.sh.
+        """
+        content = (scripts_dir / "csharp" / "test.sh").read_text()
+        commands = [
+            line for line in content.splitlines() if not line.lstrip().startswith("#")
+        ]
+        test_runs = [c for c in commands if "dotnet test" in c]
+        assert test_runs, "test.sh must run dotnet test"
+        for command in test_runs:
+            assert "/p:CollectCoverage=true" in command
+            assert "Threshold" not in command
 
 
 class TestSkillsReferences:

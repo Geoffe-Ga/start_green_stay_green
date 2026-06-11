@@ -9,13 +9,21 @@ import sqlite3
 # Import the module we're testing
 import sys
 from tempfile import TemporaryDirectory
+from unittest.mock import Mock
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+import collect_metrics
 from collect_metrics import MetricsCollector
 from collect_metrics import main as collect_main
+
+from start_green_stay_green.generators.metrics import ci_status
+from start_green_stay_green.generators.metrics import count_ci_jobs
+from start_green_stay_green.generators.metrics import count_precommit_hooks
+from start_green_stay_green.generators.metrics import precommit_status
 
 
 class TestMetricsCollector:
@@ -742,6 +750,835 @@ class TestNewMetricMethods:
         assert collector.metrics["maintainability_status"] == "unknown"
 
 
+class TestCollectDocsMetrics:
+    """Issue #217: docs coverage in script mode via metrics-docs.sh."""
+
+    def test_collect_docs_metrics_success(self) -> None:
+        """Docs coverage from the script payload computes a pass status."""
+        collector = MetricsCollector("test", {"docs_coverage": 95})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"docs_coverage_pct": 96.5},
+        ) as mock_script:
+            collector.collect_docs_metrics(Path("/scripts"), Path("/missing.txt"))
+
+        mock_script.assert_called_once_with("metrics-docs.sh", Path("/scripts"))
+        assert collector.metrics["docs_coverage"] == 96.5
+        assert collector.metrics["docs_status"] == "pass"
+
+    def test_collect_docs_metrics_below_threshold(self) -> None:
+        """Docs coverage below the threshold computes a fail status."""
+        collector = MetricsCollector("test", {"docs_coverage": 95})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"docs_coverage_pct": 92.0},
+        ):
+            collector.collect_docs_metrics(Path("/scripts"), Path("/missing.txt"))
+
+        assert collector.metrics["docs_coverage"] == 92.0
+        assert collector.metrics["docs_status"] == "fail"
+
+    def test_collect_docs_metrics_script_failure_no_file(self) -> None:
+        """Script failure with no report file degrades to unknown."""
+        collector = MetricsCollector("test", {"docs_coverage": 95})
+
+        with patch.object(collector, "collect_from_script", return_value=None):
+            collector.collect_docs_metrics(Path("/scripts"), Path("/missing.txt"))
+
+        assert collector.metrics["docs_coverage"] is None
+        assert collector.metrics["docs_status"] == "unknown"
+
+    def test_collect_docs_metrics_missing_pct_key_is_unknown(self) -> None:
+        """A payload without docs_coverage_pct yields unknown, not pass."""
+        collector = MetricsCollector("test", {"docs_coverage": 95})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"status": "pass"},
+        ):
+            collector.collect_docs_metrics(Path("/scripts"), Path("/missing.txt"))
+
+        assert collector.metrics["docs_coverage"] is None
+        assert collector.metrics["docs_status"] == "unknown"
+
+    def test_collect_docs_metrics_falls_back_to_report_file(self) -> None:
+        """Script failure falls back to a pre-generated docs report file."""
+        with TemporaryDirectory() as tmpdir:
+            docs_file = Path(tmpdir) / "docs-report.txt"
+            docs_file.write_text("RESULT: 97.5%")
+            collector = MetricsCollector("test", {"docs_coverage": 95})
+
+            with patch.object(collector, "collect_from_script", return_value=None):
+                collector.collect_docs_metrics(Path("/scripts"), docs_file)
+
+            assert collector.metrics["docs_coverage"] == 97.5
+            assert collector.metrics["docs_status"] == "pass"
+
+    def test_collect_docs_metrics_fallback_unparseable_file_is_unknown(self) -> None:
+        """Script failure plus an unparseable report file yields unknown."""
+        with TemporaryDirectory() as tmpdir:
+            docs_file = Path(tmpdir) / "docs-report.txt"
+            docs_file.write_text("no coverage data here")
+            collector = MetricsCollector("test", {"docs_coverage": 95})
+
+            with patch.object(collector, "collect_from_script", return_value=None):
+                collector.collect_docs_metrics(Path("/scripts"), docs_file)
+
+            assert collector.metrics["docs_coverage"] is None
+            assert collector.metrics["docs_status"] == "unknown"
+
+    def test_collect_docs_metrics_threshold_boundary(self) -> None:
+        """Coverage exactly at the threshold passes (>= comparison)."""
+        collector = MetricsCollector("test", {"docs_coverage": 95})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"docs_coverage_pct": 95.0},
+        ):
+            collector.collect_docs_metrics(Path("/scripts"), Path("/missing.txt"))
+
+        assert collector.metrics["docs_coverage"] == 95.0
+        assert collector.metrics["docs_status"] == "pass"
+
+
+class TestUnifiedThresholdConvention:
+    """Issue #206: Python owns status computation via the thresholds dict.
+
+    Shell scripts emit raw numbers (and a legacy ``status`` field); the
+    collector must ignore any script-provided status and recompute pass/fail
+    from ``self.thresholds`` so threshold changes propagate everywhere.
+    """
+
+    def test_lint_status_ignores_script_status_field(self) -> None:
+        """Lint status comes from the threshold, not the script's status."""
+        collector = MetricsCollector("test", {"lint_violations": 5})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"violations": 3, "status": "fail"},
+        ):
+            collector.collect_lint_metrics(Path("/scripts"))
+
+        assert collector.metrics["lint_violations"] == 3
+        assert collector.metrics["lint_status"] == "pass"
+
+    @pytest.mark.parametrize(
+        ("threshold", "expected"),
+        [(0, "fail"), (2, "fail"), (3, "pass"), (10, "pass")],
+    )
+    def test_lint_threshold_change_flips_status(
+        self, threshold: int, expected: str
+    ) -> None:
+        """Changing the lint threshold changes the computed status."""
+        collector = MetricsCollector("test", {"lint_violations": threshold})
+
+        with patch.object(
+            collector, "collect_from_script", return_value={"violations": 3}
+        ):
+            collector.collect_lint_metrics(Path("/scripts"))
+
+        assert collector.metrics["lint_status"] == expected
+
+    def test_lint_missing_raw_value_is_unknown(self) -> None:
+        """A payload without a raw count yields unknown, not a trusted pass."""
+        collector = MetricsCollector("test", {"lint_violations": 0})
+
+        with patch.object(
+            collector, "collect_from_script", return_value={"status": "pass"}
+        ):
+            collector.collect_lint_metrics(Path("/scripts"))
+
+        assert collector.metrics["lint_violations"] is None
+        assert collector.metrics["lint_status"] == "unknown"
+
+    def test_typecheck_status_ignores_script_status_field(self) -> None:
+        """Typecheck status comes from the threshold, not the script."""
+        collector = MetricsCollector("test", {"type_errors": 10})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"errors": 5, "status": "fail"},
+        ):
+            collector.collect_typecheck_metrics(Path("/scripts"))
+
+        assert collector.metrics["type_errors"] == 5
+        assert collector.metrics["typecheck_status"] == "pass"
+
+    @pytest.mark.parametrize(
+        ("threshold", "expected"),
+        [(0, "fail"), (5, "pass")],
+    )
+    def test_typecheck_threshold_change_flips_status(
+        self, threshold: int, expected: str
+    ) -> None:
+        """Changing the type-error threshold changes the computed status."""
+        collector = MetricsCollector("test", {"type_errors": threshold})
+
+        with patch.object(collector, "collect_from_script", return_value={"errors": 5}):
+            collector.collect_typecheck_metrics(Path("/scripts"))
+
+        assert collector.metrics["typecheck_status"] == expected
+
+    def test_typecheck_missing_raw_value_is_unknown(self) -> None:
+        """A payload without a raw count yields unknown, not a trusted pass."""
+        collector = MetricsCollector("test", {"type_errors": 0})
+
+        with patch.object(
+            collector, "collect_from_script", return_value={"status": "pass"}
+        ):
+            collector.collect_typecheck_metrics(Path("/scripts"))
+
+        assert collector.metrics["type_errors"] is None
+        assert collector.metrics["typecheck_status"] == "unknown"
+
+    def test_security_metrics_ignores_script_status_field(self) -> None:
+        """Security status comes from the threshold, not the script."""
+        collector = MetricsCollector("test", {"security_issues": 5})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"bandit_issues": 3, "status": "fail"},
+        ):
+            collector.collect_security_metrics(Path("/scripts"))
+
+        assert collector.metrics["security_issues"] == 3
+        assert collector.metrics["security_status"] == "pass"
+
+    @pytest.mark.parametrize(
+        ("threshold", "expected"),
+        [(0, "fail"), (2, "pass")],
+    )
+    def test_security_threshold_change_flips_status(
+        self, threshold: int, expected: str
+    ) -> None:
+        """Changing the security threshold changes the computed status."""
+        collector = MetricsCollector("test", {"security_issues": threshold})
+
+        with patch.object(
+            collector, "collect_from_script", return_value={"bandit_issues": 2}
+        ):
+            collector.collect_security_metrics(Path("/scripts"))
+
+        assert collector.metrics["security_status"] == expected
+
+    def test_security_metrics_null_issues_is_unknown(self) -> None:
+        """A null bandit_issues payload (scan failed) yields unknown."""
+        collector = MetricsCollector("test", {"security_issues": 0})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"bandit_issues": None, "status": "unknown"},
+        ):
+            collector.collect_security_metrics(Path("/scripts"))
+
+        assert collector.metrics["security_issues"] is None
+        assert collector.metrics["security_status"] == "unknown"
+
+    def test_security_metrics_script_failure_is_unknown(self) -> None:
+        """A failed security script run yields unknown status."""
+        collector = MetricsCollector("test", {"security_issues": 0})
+
+        with patch.object(collector, "collect_from_script", return_value=None):
+            collector.collect_security_metrics(Path("/scripts"))
+
+        assert collector.metrics["security_issues"] is None
+        assert collector.metrics["security_status"] == "unknown"
+
+    def test_file_mode_security_threshold_propagates(self) -> None:
+        """File-mode security uses <= threshold, so raising it passes."""
+        with TemporaryDirectory() as tmpdir:
+            sec_file = Path(tmpdir) / "security.json"
+            sec_file.write_text(
+                json.dumps({"results": [{"issue": "a"}, {"issue": "b"}]})
+            )
+
+            collector = MetricsCollector("test", {"security_issues": 5})
+            collector.collect_security(sec_file)
+
+            assert collector.metrics["security_issues"] == 2
+            assert collector.metrics["security_status"] == "pass"
+
+    def test_tests_status_ignores_script_status_field(self) -> None:
+        """Test status is recomputed from raw counts, not trusted."""
+        collector = MetricsCollector("test", {})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={
+                "tests_total": 100,
+                "tests_passed": 97,
+                "tests_failed": 3,
+                "tests_skipped": 0,
+                "status": "pass",
+            },
+        ):
+            collector.collect_test_metrics(Path("/scripts"))
+
+        assert collector.metrics["tests_status"] == "fail"
+
+    def test_tests_zero_collected_is_unknown(self) -> None:
+        """Zero collected tests (broken suite) yields unknown, not pass."""
+        collector = MetricsCollector("test", {})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={
+                "tests_total": 0,
+                "tests_passed": 0,
+                "tests_failed": 0,
+                "tests_skipped": 0,
+            },
+        ):
+            collector.collect_test_metrics(Path("/scripts"))
+
+        assert collector.metrics["tests_status"] == "unknown"
+
+    def test_tests_missing_raw_counts_is_unknown(self) -> None:
+        """A payload without raw counts yields unknown status."""
+        collector = MetricsCollector("test", {})
+
+        with patch.object(
+            collector, "collect_from_script", return_value={"status": "pass"}
+        ):
+            collector.collect_test_metrics(Path("/scripts"))
+
+        assert collector.metrics["tests_total"] is None
+        assert collector.metrics["tests_status"] == "unknown"
+
+    def test_coverage_metrics_threshold_propagates(self) -> None:
+        """Script-mode coverage status follows the thresholds dict."""
+        collector = MetricsCollector("test", {"coverage": 80, "branch_coverage": 95})
+
+        with patch.object(
+            collector,
+            "collect_from_script",
+            return_value={"coverage_pct": 85.0, "branch_coverage_pct": 90.0},
+        ):
+            collector.collect_coverage_metrics(Path("/scripts"))
+
+        assert collector.metrics["coverage"] == 85.0
+        assert collector.metrics["coverage_status"] == "pass"
+        assert collector.metrics["branch_coverage"] == 90.0
+        assert collector.metrics["branch_coverage_status"] == "fail"
+
+    def test_coverage_metrics_null_values_are_unknown(self) -> None:
+        """Missing coverage numbers yield unknown statuses."""
+        collector = MetricsCollector("test", {"coverage": 90, "branch_coverage": 85})
+
+        with patch.object(collector, "collect_from_script", return_value={}):
+            collector.collect_coverage_metrics(Path("/scripts"))
+
+        assert collector.metrics["coverage"] is None
+        assert collector.metrics["coverage_status"] == "unknown"
+        assert collector.metrics["branch_coverage"] is None
+        assert collector.metrics["branch_coverage_status"] == "unknown"
+
+    def test_coverage_metrics_script_failure_is_unknown(self) -> None:
+        """A failed coverage script run yields unknown statuses."""
+        collector = MetricsCollector("test", {"coverage": 90, "branch_coverage": 85})
+
+        with patch.object(collector, "collect_from_script", return_value=None):
+            collector.collect_coverage_metrics(Path("/scripts"))
+
+        assert collector.metrics["coverage"] is None
+        assert collector.metrics["coverage_status"] == "unknown"
+
+    def test_default_thresholds_contains_only_active_keys(self) -> None:
+        """Every default threshold key drives at least one status."""
+        thresholds = collect_metrics._default_thresholds()
+
+        assert set(thresholds) == {
+            "coverage",
+            "branch_coverage",
+            "mutation_score",
+            "complexity",
+            "docs_coverage",
+            "security_issues",
+            "maintainability",
+            "lint_violations",
+            "type_errors",
+        }
+
+
+class TestCollectPrecommitStatus:
+    """Tests for pre-commit status collection (Issue #154)."""
+
+    def _write_config(self, path: Path, hook_count: int) -> Path:
+        """Write a .pre-commit-config.yaml with ``hook_count`` hooks."""
+        config_path = path / ".pre-commit-config.yaml"
+        config_path.write_text(
+            yaml.dump(
+                {
+                    "repos": [
+                        {
+                            "repo": "local",
+                            "hooks": [{"id": f"hook-{i}"} for i in range(hook_count)],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return config_path
+
+    def test_collect_precommit_status_counts_hooks(self) -> None:
+        """Pre-commit status records total/passing/percentage from config."""
+        with TemporaryDirectory() as tmpdir:
+            config_path = self._write_config(Path(tmpdir), 32)
+            collector = MetricsCollector("test", {})
+
+            collector.collect_precommit_status(config_path)
+
+            status = collector.metrics["precommit_status"]
+            assert status["total_hooks"] == 32
+            assert status["passing_hooks"] == 32
+            assert status["percentage"] == 100.0
+            assert status["status"] == "passing"
+
+    def test_collect_precommit_status_missing_config(self) -> None:
+        """Missing config degrades to zero hooks and unknown status."""
+        collector = MetricsCollector("test", {})
+
+        collector.collect_precommit_status(Path("/nonexistent/.pre-commit-config.yaml"))
+
+        status = collector.metrics["precommit_status"]
+        assert status["total_hooks"] == 0
+        assert status["passing_hooks"] == 0
+        assert status["percentage"] == 0.0
+        assert status["status"] == "unknown"
+
+    def test_collect_precommit_status_malformed_yaml(self) -> None:
+        """Malformed YAML degrades to unknown status without raising."""
+        with TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".pre-commit-config.yaml"
+            config_path.write_text("repos: [unterminated", encoding="utf-8")
+            collector = MetricsCollector("test", {})
+
+            collector.collect_precommit_status(config_path)
+
+            status = collector.metrics["precommit_status"]
+            assert status["total_hooks"] == 0
+            assert status["status"] == "unknown"
+
+    def test_collect_precommit_status_ignores_malformed_repos(self) -> None:
+        """Non-dict repos and hookless repos contribute zero hooks."""
+        with TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".pre-commit-config.yaml"
+            config_path.write_text(
+                yaml.dump(
+                    {
+                        "repos": [
+                            "not-a-mapping",
+                            {"repo": "no-hooks"},
+                            {"repo": "valid", "hooks": [{"id": "a"}, {"id": "b"}]},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            collector = MetricsCollector("test", {})
+
+            collector.collect_precommit_status(config_path)
+
+            status = collector.metrics["precommit_status"]
+            assert status["total_hooks"] == 2
+            assert status["status"] == "passing"
+
+    def test_collect_precommit_status_non_mapping_top_level(self) -> None:
+        """A top-level YAML list yields zero hooks and unknown status."""
+        with TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".pre-commit-config.yaml"
+            config_path.write_text("- a\n- b\n", encoding="utf-8")
+            collector = MetricsCollector("test", {})
+
+            collector.collect_precommit_status(config_path)
+
+            assert collector.metrics["precommit_status"]["total_hooks"] == 0
+
+    def test_uses_canonical_package_hook_counter(self) -> None:
+        """collect_metrics imports the canonical hook counter (no duplication).
+
+        Issue #154 DRY consolidation: the hook-counting helpers must live only
+        in ``start_green_stay_green.generators.metrics``. ``collect_metrics``
+        must import and reuse that canonical ``count_precommit_hooks`` rather
+        than redefining its own ``_load_precommit_repos`` / ``_repo_hook_count``
+        / ``_count_precommit_hooks`` copies.
+        """
+        # The duplicated private helpers must be gone from the script module.
+        assert not hasattr(collect_metrics, "_load_precommit_repos")
+        assert not hasattr(collect_metrics, "_repo_hook_count")
+        assert not hasattr(collect_metrics, "_count_precommit_hooks")
+        # The script re-exports the canonical helper (same object), so
+        # collected status matches the canonical count for the same config.
+        assert collect_metrics.__dict__["count_precommit_hooks"] is (
+            count_precommit_hooks
+        )
+        with TemporaryDirectory() as tmpdir:
+            config_path = self._write_config(Path(tmpdir), 7)
+            collector = MetricsCollector("test", {})
+
+            collector.collect_precommit_status(config_path)
+
+            assert collector.metrics["precommit_status"]["total_hooks"] == (
+                count_precommit_hooks(config_path)
+            )
+
+    def test_collect_precommit_status_delegates_to_shared_builder(self) -> None:
+        """The status dict is built by the canonical ``precommit_status`` helper.
+
+        Issue #154 DRY consolidation: ``collect_precommit_status`` must not
+        re-derive ``has_hooks``/``passing_hooks``/``percentage``/``status``;
+        it must delegate dict construction to the shared
+        ``precommit_status`` builder in the metrics generator module.
+        """
+        with TemporaryDirectory() as tmpdir:
+            config_path = self._write_config(Path(tmpdir), 13)
+            collector = MetricsCollector("test", {})
+
+            with patch.object(
+                collect_metrics,
+                "precommit_status",
+                wraps=precommit_status,
+            ) as spy:
+                collector.collect_precommit_status(config_path)
+
+            spy.assert_called_once_with(13)
+            assert collector.metrics["precommit_status"] == precommit_status(13)
+
+
+class TestCollectCIStatus:
+    """Tests for ``collect_ci_status`` on MetricsCollector (Issue #159)."""
+
+    def _write_workflow(self, path: Path, name: str, job_ids: list[str]) -> Path:
+        """Write a workflow file declaring the given job ids.
+
+        Args:
+            path: Directory to write the workflow into.
+            name: Workflow filename (e.g., ``ci.yml``).
+            job_ids: Job identifiers for the ``jobs`` mapping.
+
+        Returns:
+            Path to the written workflow file.
+        """
+        workflow_path = path / name
+        workflow_path.write_text(
+            yaml.dump({"jobs": {job_id: {} for job_id in job_ids}}),
+            encoding="utf-8",
+        )
+        return workflow_path
+
+    def _clear_github_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Remove GitHub Actions env vars so the static fallback is used.
+
+        Args:
+            monkeypatch: Pytest monkeypatch fixture.
+        """
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+
+    def test_static_fallback_counts_jobs_with_unknown_status(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without API env vars, jobs are counted statically as unknown."""
+        self._clear_github_env(monkeypatch)
+        with TemporaryDirectory() as tmpdir:
+            workflows = Path(tmpdir)
+            self._write_workflow(workflows, "ci.yml", ["lint", "test"])
+            self._write_workflow(workflows, "release.yml", ["publish"])
+            collector = MetricsCollector("test", {})
+
+            collector.collect_ci_status(workflows)
+
+            status = collector.metrics["ci_status"]
+            assert status["total_jobs"] == 3
+            assert status["passing_jobs"] == 0
+            assert status["percentage"] == 0.0
+            assert status["status"] == "unknown"
+            assert "run_url" not in status
+
+    def test_missing_workflows_dir_degrades_to_unknown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A missing workflows directory yields total 0 and unknown status."""
+        self._clear_github_env(monkeypatch)
+        collector = MetricsCollector("test", {})
+
+        collector.collect_ci_status(Path("/nonexistent/.github/workflows"))
+
+        status = collector.metrics["ci_status"]
+        assert status["total_jobs"] == 0
+        assert status["status"] == "unknown"
+
+    def test_malformed_workflow_yaml_never_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Malformed workflow YAML degrades gracefully instead of raising."""
+        self._clear_github_env(monkeypatch)
+        with TemporaryDirectory() as tmpdir:
+            workflows = Path(tmpdir)
+            (workflows / "broken.yml").write_text(
+                "jobs: [unterminated", encoding="utf-8"
+            )
+            collector = MetricsCollector("test", {})
+
+            collector.collect_ci_status(workflows)
+
+            status = collector.metrics["ci_status"]
+            assert status["total_jobs"] == 0
+            assert status["status"] == "unknown"
+
+    def test_api_path_counts_job_conclusions(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With API env vars, job conclusions from the latest run are counted."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        payloads = {
+            "/repos/owner/repo/actions/runs"
+            "?branch=main&status=completed&per_page=1": {
+                "workflow_runs": [
+                    {
+                        "id": 42,
+                        "html_url": "https://github.com/owner/repo/actions/runs/42",
+                    }
+                ]
+            },
+            "/repos/owner/repo/actions/runs/42/jobs?per_page=100": {
+                "jobs": [
+                    {"conclusion": "success"},
+                    {"conclusion": "success"},
+                    {"conclusion": "failure"},
+                ]
+            },
+        }
+
+        with patch.object(
+            collect_metrics,
+            "_github_api_json",
+            side_effect=lambda path, _token: payloads[path],
+        ):
+            collector = MetricsCollector("test", {})
+            collector.collect_ci_status(Path("/nonexistent"))
+
+        status = collector.metrics["ci_status"]
+        assert status["total_jobs"] == 3
+        assert status["passing_jobs"] == 2
+        assert status["percentage"] == pytest.approx(66.67, abs=0.01)
+        assert status["status"] == "failing"
+        assert status["run_url"] == "https://github.com/owner/repo/actions/runs/42"
+
+    def test_api_all_passing_yields_passing_status(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """All-success job conclusions yield a 100% passing status."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        def fake_api(path: str, _token: str) -> dict[str, object]:
+            if "/jobs" in path:
+                return {"jobs": [{"conclusion": "success"}] * 7}
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 7,
+                        "html_url": "https://github.com/owner/repo/actions/runs/7",
+                    }
+                ]
+            }
+
+        with patch.object(collect_metrics, "_github_api_json", side_effect=fake_api):
+            collector = MetricsCollector("test", {})
+            collector.collect_ci_status(Path("/nonexistent"))
+
+        status = collector.metrics["ci_status"]
+        assert status["total_jobs"] == 7
+        assert status["passing_jobs"] == 7
+        assert status["percentage"] == 100.0
+        assert status["status"] == "passing"
+
+    def test_api_skipped_jobs_excluded_from_denominator(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Skipped jobs do not count against the passing percentage.
+
+        A conditionally-skipped job (e.g. a deploy gated on a branch
+        condition) must not drag an otherwise all-green run below 100%.
+        """
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        def fake_api(path: str, _token: str) -> dict[str, object]:
+            if "/jobs" in path:
+                return {
+                    "jobs": [
+                        {"conclusion": "success"},
+                        {"conclusion": "success"},
+                        {"conclusion": "skipped"},
+                    ]
+                }
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 9,
+                        "html_url": "https://github.com/owner/repo/actions/runs/9",
+                    }
+                ]
+            }
+
+        with patch.object(collect_metrics, "_github_api_json", side_effect=fake_api):
+            collector = MetricsCollector("test", {})
+            collector.collect_ci_status(Path("/nonexistent"))
+
+        status = collector.metrics["ci_status"]
+        assert status["total_jobs"] == 2
+        assert status["passing_jobs"] == 2
+        assert status["percentage"] == 100.0
+        assert status["status"] == "passing"
+
+    def test_api_all_jobs_skipped_degrades_to_unknown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A run where every job was skipped yields an unknown status."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        def fake_api(path: str, _token: str) -> dict[str, object]:
+            if "/jobs" in path:
+                return {"jobs": [{"conclusion": "skipped"}] * 2}
+            return {"workflow_runs": [{"id": 9}]}
+
+        with patch.object(collect_metrics, "_github_api_json", side_effect=fake_api):
+            collector = MetricsCollector("test", {})
+            collector.collect_ci_status(Path("/nonexistent"))
+
+        status = collector.metrics["ci_status"]
+        assert status["total_jobs"] == 0
+        assert status["status"] == "unknown"
+
+    def test_token_with_embedded_whitespace_is_rejected(self) -> None:
+        """A token containing whitespace never reaches the HTTP layer.
+
+        ``http.client`` does not sanitize header values; rejecting
+        whitespace-bearing tokens closes the header-injection path.
+        """
+        with patch("http.client.HTTPSConnection") as mock_connection:
+            result = collect_metrics._github_api_json(
+                "/repos/owner/repo/actions/runs", "bad\ntoken: injected"
+            )
+
+        assert result is None
+        mock_connection.assert_not_called()
+
+    def test_token_surrounding_whitespace_is_stripped(self) -> None:
+        """Leading/trailing whitespace on the token is stripped, not fatal."""
+        response = Mock()
+        response.status = 200
+        response.read.return_value = b'{"ok": true}'
+        connection = Mock()
+        connection.getresponse.return_value = response
+
+        with patch("http.client.HTTPSConnection", return_value=connection):
+            result = collect_metrics._github_api_json("/path", "  good-token\n")
+
+        assert result == {"ok": True}
+        headers = connection.request.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Bearer good-token"
+
+    def test_api_failure_falls_back_to_static_count(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An API error falls back to the static workflow count, never raising."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        with TemporaryDirectory() as tmpdir:
+            workflows = Path(tmpdir)
+            self._write_workflow(workflows, "ci.yml", ["lint", "test"])
+
+            with patch.object(collect_metrics, "_github_api_json", return_value=None):
+                collector = MetricsCollector("test", {})
+                collector.collect_ci_status(workflows)
+
+            status = collector.metrics["ci_status"]
+            assert status["total_jobs"] == 2
+            assert status["status"] == "unknown"
+
+    def test_api_empty_runs_falls_back_to_static_count(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No completed runs on main falls back to the static count."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        with TemporaryDirectory() as tmpdir:
+            workflows = Path(tmpdir)
+            self._write_workflow(workflows, "ci.yml", ["lint"])
+
+            with patch.object(
+                collect_metrics,
+                "_github_api_json",
+                return_value={"workflow_runs": []},
+            ):
+                collector = MetricsCollector("test", {})
+                collector.collect_ci_status(workflows)
+
+            status = collector.metrics["ci_status"]
+            assert status["total_jobs"] == 1
+            assert status["status"] == "unknown"
+
+    def test_invalid_repository_env_falls_back_to_static(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A malformed GITHUB_REPOSITORY skips the API path entirely."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "not a repo slug!")
+
+        with patch.object(collect_metrics, "_github_api_json") as mock_api:
+            collector = MetricsCollector("test", {})
+            collector.collect_ci_status(Path("/nonexistent"))
+
+        mock_api.assert_not_called()
+        assert collector.metrics["ci_status"]["status"] == "unknown"
+
+    def test_uses_canonical_package_job_counter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """collect_metrics imports the canonical CI helpers (no duplication).
+
+        Issue #159 DRY: the job-counting and status-building helpers live
+        only in ``start_green_stay_green.generators.metrics``;
+        ``collect_metrics`` reuses the same objects instead of redefining
+        them.
+        """
+        assert collect_metrics.__dict__["count_ci_jobs"] is count_ci_jobs
+        assert collect_metrics.__dict__["ci_status"] is ci_status
+
+        self._clear_github_env(monkeypatch)
+        with TemporaryDirectory() as tmpdir:
+            workflows = Path(tmpdir)
+            self._write_workflow(workflows, "ci.yml", ["a", "b", "c"])
+            collector = MetricsCollector("test", {})
+
+            collector.collect_ci_status(workflows)
+
+            assert collector.metrics["ci_status"]["total_jobs"] == (
+                count_ci_jobs(workflows)
+            )
+
+
 class TestMainScriptMode:
     """Tests for main() with --metrics-mode script."""
 
@@ -783,6 +1620,10 @@ class TestMainScriptMode:
             # Security failure should report "unknown", not "pass"
             assert data["metrics"]["security_status"] == "unknown"
             assert data["metrics"]["security_issues"] is None
+            # Docs coverage falls back to the report file when the
+            # metrics-docs.sh script yields no data (Issue #217)
+            assert data["metrics"]["docs_coverage"] == 96.5
+            assert data["metrics"]["docs_status"] == "pass"
 
     def test_main_file_mode_backward_compat(self) -> None:
         """Test that file mode remains backward compatible."""

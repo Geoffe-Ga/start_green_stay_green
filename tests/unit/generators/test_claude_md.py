@@ -8,6 +8,7 @@ import pytest
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationResult
 from start_green_stay_green.ai.orchestrator import TokenUsage
+from start_green_stay_green.generators.claude_md import CLAUDE_DOC_NAMES
 from start_green_stay_green.generators.claude_md import ClaudeMdGenerationResult
 from start_green_stay_green.generators.claude_md import ClaudeMdGenerator
 
@@ -445,3 +446,139 @@ class TestClaudeMdGeneratorBaseline:
         # Reference template doesn't currently use {{SCRIPTS}}/{{SKILLS}}
         # tokens, so we just assert the baseline renders without error.
         assert "# Claude Code Project Context: demo" in result.content
+
+
+class TestClaudeMdGeneratorModular:
+    """Tests for the modular ``.claude/`` tree emission (#397)."""
+
+    @staticmethod
+    def _config() -> dict[str, object]:
+        """Return a representative project config for modular tests."""
+        return {
+            "project_name": "modular-demo",
+            "language": "python",
+            "scripts": ["check-all.sh", "test.sh"],
+            "skills": ["testing", "security"],
+        }
+
+    def test_doc_names_constant_lists_six_docs(self) -> None:
+        """The public doc-name constant enumerates the six split docs."""
+        assert CLAUDE_DOC_NAMES == (
+            "principles",
+            "quality-standards",
+            "workflow",
+            "testing",
+            "tools",
+            "troubleshooting",
+        )
+
+    def test_write_modular_creates_index_and_docs(self, tmp_path: Path) -> None:
+        """write_modular writes the root index plus all six split docs."""
+        generator = ClaudeMdGenerator()  # No orchestrator -> baseline index.
+        config = self._config()
+
+        result = generator.write_modular(tmp_path, config)
+
+        index = tmp_path / "CLAUDE.md"
+        assert index.exists()
+        # Substitution happened in the index H1.
+        index_text = index.read_text(encoding="utf-8")
+        assert "modular-demo" in index_text
+
+        docs_dir = tmp_path / ".claude" / "docs"
+        for name in CLAUDE_DOC_NAMES:
+            doc = docs_dir / f"{name}.md"
+            assert doc.exists(), f"Missing split doc: {name}.md"
+            assert doc.read_text(encoding="utf-8").strip(), f"Empty doc: {name}.md"
+
+        # Result reports zero token usage in baseline mode.
+        assert result.token_usage_input == 0
+
+    def test_write_modular_index_links_to_each_doc(self, tmp_path: Path) -> None:
+        """The index references every split doc (DRY: links, not duplication)."""
+        generator = ClaudeMdGenerator()
+
+        generator.write_modular(tmp_path, self._config())
+
+        index_text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+        for name in CLAUDE_DOC_NAMES:
+            assert (
+                f".claude/docs/{name}.md" in index_text
+            ), f"Index missing link to {name}.md"
+
+    def test_write_modular_substitutes_tokens_in_docs(self, tmp_path: Path) -> None:
+        """Token substitution applies to the split docs, not just the index."""
+        generator = ClaudeMdGenerator()
+
+        generator.write_modular(tmp_path, self._config())
+
+        docs_dir = tmp_path / ".claude" / "docs"
+        # No known token should leak through into any emitted doc.
+        for name in CLAUDE_DOC_NAMES:
+            text = (docs_dir / f"{name}.md").read_text(encoding="utf-8")
+            assert "{{PROJECT_NAME}}" not in text, f"Unsubstituted token in {name}.md"
+
+    def test_write_modular_quality_doc_keeps_required_content(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """No content is dropped: quality doc retains the coverage threshold."""
+        generator = ClaudeMdGenerator()
+
+        generator.write_modular(tmp_path, self._config())
+
+        quality = (tmp_path / ".claude" / "docs" / "quality-standards.md").read_text(
+            encoding="utf-8"
+        )
+        assert "90%" in quality
+        troubleshooting = (
+            tmp_path / ".claude" / "docs" / "troubleshooting.md"
+        ).read_text(encoding="utf-8")
+        assert "No Shortcuts" in troubleshooting
+
+    def test_write_modular_uses_orchestrator_for_index(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """With an orchestrator, the index is AI-tuned but docs still emitted."""
+        orchestrator = create_autospec(AIOrchestrator)
+        orchestrator.generate.return_value = GenerationResult(
+            content="# Claude Code Project Context: modular-demo\n\nTuned index",
+            format="markdown",
+            token_usage=TokenUsage(input_tokens=1200, output_tokens=300),
+            model="claude-opus-4-5-20251101",
+            message_id="msg_modular",
+        )
+        generator = ClaudeMdGenerator(orchestrator)
+
+        result = generator.write_modular(tmp_path, self._config())
+
+        index_text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "Tuned index" in index_text
+        assert result.token_usage_input == 1200
+        # Docs are still written deterministically alongside the tuned index.
+        docs_dir = tmp_path / ".claude" / "docs"
+        assert (docs_dir / "principles.md").exists()
+
+    def test_validate_reference_dir_missing_docs(self, tmp_path: Path) -> None:
+        """Validation fails when the docs subdirectory is absent."""
+        ref_dir = tmp_path / "claude"
+        ref_dir.mkdir()
+        (ref_dir / "CLAUDE.md").write_text("# Index\n")
+        generator = ClaudeMdGenerator(reference_dir=ref_dir)
+
+        with pytest.raises(ValueError, match="docs"):
+            generator.write_modular(tmp_path / "out", self._config())
+
+    def test_validate_reference_dir_partial_docs(self, tmp_path: Path) -> None:
+        """Validation lists the specific split doc(s) that are missing."""
+        ref_dir = tmp_path / "claude"
+        (ref_dir / "docs").mkdir(parents=True)
+        (ref_dir / "CLAUDE.md").write_text("# Index\n")
+        # Provide all but one required doc to exercise the partial-missing path.
+        for name in CLAUDE_DOC_NAMES[:-1]:
+            (ref_dir / "docs" / f"{name}.md").write_text(f"# {name}\n")
+        generator = ClaudeMdGenerator(reference_dir=ref_dir)
+
+        with pytest.raises(ValueError, match=r"troubleshooting\.md"):
+            generator.write_modular(tmp_path / "out", self._config())

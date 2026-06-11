@@ -25,7 +25,8 @@ class GenerationConfig:
 
     Attributes:
         project_name: Name of the project.
-        language: Programming language (python, typescript, go, rust).
+        language: Programming language (python, typescript, go, rust,
+            swift, kotlin, cpp, java, csharp).
         language_config: Additional language-specific configuration.
     """
 
@@ -350,6 +351,496 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         ],
         "default_language_version": {},
     },
+    "swift": {
+        "hooks": [
+            {
+                "repo": "https://github.com/pre-commit/pre-commit-hooks",
+                "rev": "v4.5.0",
+                "hooks": [
+                    {"id": "trailing-whitespace"},
+                    {"id": "end-of-file-fixer"},
+                    {"id": "check-yaml"},
+                    {"id": "check-json"},
+                    {"id": "check-added-large-files", "args": ["--maxkb=500"]},
+                    {"id": "check-case-conflict"},
+                    {"id": "check-merge-conflict"},
+                    {"id": "check-symlinks"},
+                    {"id": "detect-private-key"},
+                    {"id": "fix-byte-order-marker"},
+                    {"id": "mixed-line-ending", "args": ["--fix=lf"]},
+                    {"id": "no-commit-to-branch", "args": ["--branch", "main"]},
+                ],
+            },
+            # swift-format and SwiftLint run as `repo: local` system hooks
+            # (mirroring how the Rust hooks invoke the cargo toolchain):
+            # apple/swift-format ships no .pre-commit-hooks.yaml, and
+            # realm/SwiftLint's remote hook builds SwiftLint from source via
+            # SPM on first run (a multi-minute build). Install both with:
+            # `brew install swift-format swiftlint`.
+            {
+                "repo": "local",
+                "hooks": [
+                    {
+                        "id": "swift-format",
+                        "name": "swift-format",
+                        "entry": "swift-format format --in-place",
+                        "language": "system",
+                        "types": ["swift"],
+                    },
+                    {
+                        "id": "swiftlint",
+                        "name": "SwiftLint",
+                        # --strict promotes warnings to errors; reads the
+                        # generated .swiftlint.yml (cyclomatic_complexity
+                        # <=10 plus the crash-safety/security opt-in rules).
+                        "entry": "swiftlint lint --strict",
+                        "language": "system",
+                        "types": ["swift"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                ],
+            },
+            {
+                "repo": "https://github.com/gitleaks/gitleaks",
+                "rev": "v8.18.4",
+                "hooks": [
+                    {"id": "gitleaks"},
+                ],
+            },
+            {
+                "repo": "https://github.com/shellcheck-py/shellcheck-py",
+                "rev": "v0.9.0.6",
+                "hooks": [
+                    {"id": "shellcheck"},
+                ],
+            },
+            {
+                "repo": "https://github.com/Yelp/detect-secrets",
+                "rev": "v1.4.0",
+                "hooks": [
+                    {
+                        "id": "detect-secrets",
+                        "args": ["--baseline", ".secrets.baseline"],
+                    },
+                ],
+            },
+        ],
+        "default_language_version": {},
+    },
+    "kotlin": {
+        "hooks": [
+            {
+                "repo": "https://github.com/pre-commit/pre-commit-hooks",
+                "rev": "v4.5.0",
+                "hooks": [
+                    {"id": "trailing-whitespace"},
+                    {"id": "end-of-file-fixer"},
+                    {"id": "check-yaml"},
+                    {"id": "check-json"},
+                    {"id": "check-added-large-files", "args": ["--maxkb=500"]},
+                    {"id": "check-case-conflict"},
+                    {"id": "check-merge-conflict"},
+                    {"id": "check-symlinks"},
+                    {"id": "detect-private-key"},
+                    {"id": "fix-byte-order-marker"},
+                    {"id": "mixed-line-ending", "args": ["--fix=lf"]},
+                    {"id": "no-commit-to-branch", "args": ["--branch", "main"]},
+                ],
+            },
+            # ktlint and detekt run as `repo: local` system hooks
+            # (mirroring the Swift swift-format/SwiftLint hooks): neither
+            # pinterest/ktlint nor detekt/detekt ships an official
+            # .pre-commit-hooks.yaml manifest, so a remote hook repo would
+            # have to point at an unofficial mirror. Install both with:
+            # `brew install ktlint detekt`.
+            {
+                "repo": "local",
+                "hooks": [
+                    {
+                        "id": "ktlint",
+                        "name": "ktlint",
+                        # --format fixes what it can and still fails on
+                        # the violations it cannot fix.
+                        "entry": "ktlint --format",
+                        "language": "system",
+                        "types": ["kotlin"],
+                    },
+                    {
+                        "id": "detekt",
+                        "name": "detekt",
+                        # Reads the generated detekt.yml (complexity <=10
+                        # gate + potential-bugs rules) on top of detekt's
+                        # default config, the same file lint.sh uses.
+                        "entry": (
+                            "detekt --config detekt.yml "
+                            "--build-upon-default-config "
+                            "--excludes **/build/**"
+                        ),
+                        "language": "system",
+                        "types": ["kotlin"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                ],
+            },
+            {
+                "repo": "https://github.com/gitleaks/gitleaks",
+                "rev": "v8.18.4",
+                "hooks": [
+                    {"id": "gitleaks"},
+                ],
+            },
+            {
+                "repo": "https://github.com/shellcheck-py/shellcheck-py",
+                "rev": "v0.9.0.6",
+                "hooks": [
+                    {"id": "shellcheck"},
+                ],
+            },
+            {
+                "repo": "https://github.com/Yelp/detect-secrets",
+                "rev": "v1.4.0",
+                "hooks": [
+                    {
+                        "id": "detect-secrets",
+                        "args": ["--baseline", ".secrets.baseline"],
+                    },
+                ],
+            },
+        ],
+        "default_language_version": {},
+    },
+    "java": {
+        "hooks": [
+            {
+                "repo": "https://github.com/pre-commit/pre-commit-hooks",
+                "rev": "v4.5.0",
+                "hooks": [
+                    {"id": "trailing-whitespace"},
+                    {"id": "end-of-file-fixer"},
+                    {"id": "check-yaml"},
+                    {"id": "check-json"},
+                    # AndroidManifest.xml and the res/layout XML are the
+                    # scaffold's Android surface, so XML well-formedness
+                    # is gated here (the tizen-manifest.xml precedent).
+                    {"id": "check-xml"},
+                    {"id": "check-added-large-files", "args": ["--maxkb=500"]},
+                    {"id": "check-case-conflict"},
+                    {"id": "check-merge-conflict"},
+                    {"id": "check-symlinks"},
+                    {"id": "detect-private-key"},
+                    {"id": "fix-byte-order-marker"},
+                    {"id": "mixed-line-ending", "args": ["--fix=lf"]},
+                    {"id": "no-commit-to-branch", "args": ["--branch", "main"]},
+                ],
+            },
+            # google-java-format runs as a `repo: local` system hook
+            # (the Swift/Kotlin precedent): unlike clang-format there is
+            # no official pre-commit mirror — the only hook repos are
+            # unofficial wrappers that download release jars at runtime.
+            # Install with: `brew install google-java-format` (macOS) or
+            # grab the all-deps release jar from
+            # https://github.com/google/google-java-format/releases and
+            # wrap it in a `google-java-format` launcher script.
+            #
+            # checkstyle/pmd/spotbugs invoke the Maven goals the #366 pom
+            # already pins and configures (google_checks, the
+            # pmd-ruleset.xml CCN companion, SpotBugs). Maven-goal hooks
+            # are slower than native binaries but zero-install and
+            # cannot version-drift from the build: pom.xml is the single
+            # source of tool truth, locally, in pre-commit, and in CI.
+            {
+                "repo": "local",
+                "hooks": [
+                    {
+                        "id": "google-java-format",
+                        "name": "google-java-format",
+                        # Check-mode: --replace exits 0 whether or not it
+                        # changed files, so it can never fail a commit.
+                        # --dry-run --set-exit-if-changed fails the hook
+                        # on unformatted files; scripts/format.sh keeps
+                        # --replace for the fixing path.
+                        "entry": (
+                            "google-java-format --dry-run" " --set-exit-if-changed"
+                        ),
+                        "language": "system",
+                        "types": ["java"],
+                    },
+                    {
+                        "id": "checkstyle",
+                        "name": "Checkstyle (mvn)",
+                        # Reads the google_checks configLocation pinned
+                        # in pom.xml.
+                        "entry": "mvn -q checkstyle:check",
+                        "language": "system",
+                        "types": ["java"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                    {
+                        "id": "pmd",
+                        "name": "PMD (mvn)",
+                        # Reads the pom's rulesets: the maven-pmd-plugin
+                        # defaults plus the pmd-ruleset.xml companion
+                        # (cyclomatic complexity <=10 gate) that
+                        # scripts/lint.sh shares.
+                        "entry": "mvn -q pmd:check",
+                        "language": "system",
+                        "types": ["java"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                    {
+                        "id": "spotbugs",
+                        "name": "SpotBugs (mvn)",
+                        # SpotBugs reads bytecode and `mvn spotbugs:check`
+                        # silently skips when target/classes is empty, so
+                        # the compile phase runs first or the gate would
+                        # be a no-op.
+                        "entry": "mvn -q compile spotbugs:check",
+                        "language": "system",
+                        "types": ["java"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                ],
+            },
+            {
+                "repo": "https://github.com/gitleaks/gitleaks",
+                "rev": "v8.18.4",
+                "hooks": [
+                    {"id": "gitleaks"},
+                ],
+            },
+            {
+                "repo": "https://github.com/shellcheck-py/shellcheck-py",
+                "rev": "v0.9.0.6",
+                "hooks": [
+                    {"id": "shellcheck"},
+                ],
+            },
+            {
+                "repo": "https://github.com/Yelp/detect-secrets",
+                "rev": "v1.4.0",
+                "hooks": [
+                    {
+                        "id": "detect-secrets",
+                        "args": ["--baseline", ".secrets.baseline"],
+                    },
+                ],
+            },
+        ],
+        "default_language_version": {},
+    },
+    "csharp": {
+        "hooks": [
+            {
+                "repo": "https://github.com/pre-commit/pre-commit-hooks",
+                "rev": "v4.5.0",
+                "hooks": [
+                    {"id": "trailing-whitespace"},
+                    {"id": "end-of-file-fixer"},
+                    {"id": "check-yaml"},
+                    {"id": "check-json"},
+                    # identify tags .csproj files as xml, so the stock
+                    # check-xml hook gates the manifest's
+                    # well-formedness (the AndroidManifest.xml /
+                    # tizen-manifest.xml precedent).
+                    {"id": "check-xml"},
+                    {"id": "check-added-large-files", "args": ["--maxkb=500"]},
+                    {"id": "check-case-conflict"},
+                    {"id": "check-merge-conflict"},
+                    {"id": "check-symlinks"},
+                    {"id": "detect-private-key"},
+                    {"id": "fix-byte-order-marker"},
+                    {"id": "mixed-line-ending", "args": ["--fix=lf"]},
+                    {"id": "no-commit-to-branch", "args": ["--branch", "main"]},
+                ],
+            },
+            # Both C# hooks run the dotnet CLI as `repo: local` system
+            # hooks (the Swift/Kotlin/Java precedent: no official
+            # pre-commit mirror exists for the .NET toolchain). Install
+            # the .NET 8 SDK with: `brew install dotnet-sdk` (macOS) or
+            # `apt-get install dotnet-sdk-8.0` (Debian/Ubuntu) — both
+            # `dotnet format` and the Roslyn analyzers ship inside it,
+            # so there is nothing else to install.
+            #
+            # dotnet operates on the project (not a file list), so both
+            # hooks set pass_filenames: false and use the c# type
+            # filter only to decide WHETHER to run.
+            {
+                "repo": "local",
+                "hooks": [
+                    {
+                        "id": "dotnet-format",
+                        "name": "dotnet format (check mode)",
+                        # Check-mode: a bare `dotnet format` rewrites
+                        # files and exits 0 either way, so it could
+                        # never fail a commit. --verify-no-changes
+                        # exits non-zero on unformatted code;
+                        # scripts/format.sh keeps the fixing path.
+                        "entry": "dotnet format --verify-no-changes",
+                        "language": "system",
+                        "types": ["c#"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                    {
+                        "id": "roslyn-analyzers",
+                        "name": "Roslyn analyzers (dotnet build)",
+                        # The csproj is the single home of the lint
+                        # policy. It enables the SDK analyzers (with
+                        # the CA1502 <=10 complexity ceiling switched
+                        # on via .editorconfig and bounded by
+                        # CodeMetricsConfig.txt, plus the
+                        # SecurityCodeScan analyzer) and treats
+                        # warnings as errors, so this plain build
+                        # fails on findings — no -warnaserror restated
+                        # here.
+                        "entry": "dotnet build --nologo",
+                        "language": "system",
+                        "types": ["c#"],
+                        "pass_filenames": False,  # nosec B105  # Boolean config, not password
+                    },
+                ],
+            },
+            {
+                "repo": "https://github.com/gitleaks/gitleaks",
+                "rev": "v8.18.4",
+                "hooks": [
+                    {"id": "gitleaks"},
+                ],
+            },
+            {
+                "repo": "https://github.com/shellcheck-py/shellcheck-py",
+                "rev": "v0.9.0.6",
+                "hooks": [
+                    {"id": "shellcheck"},
+                ],
+            },
+            {
+                "repo": "https://github.com/Yelp/detect-secrets",
+                "rev": "v1.4.0",
+                "hooks": [
+                    {
+                        "id": "detect-secrets",
+                        "args": ["--baseline", ".secrets.baseline"],
+                    },
+                ],
+            },
+        ],
+        "default_language_version": {},
+    },
+    "cpp": {
+        "hooks": [
+            {
+                "repo": "https://github.com/pre-commit/pre-commit-hooks",
+                "rev": "v4.5.0",
+                "hooks": [
+                    {"id": "trailing-whitespace"},
+                    {"id": "end-of-file-fixer"},
+                    {"id": "check-yaml"},
+                    {"id": "check-json"},
+                    # tizen-manifest.xml is the scaffold's central
+                    # manifest, so XML well-formedness is gated here.
+                    {"id": "check-xml"},
+                    {"id": "check-added-large-files", "args": ["--maxkb=500"]},
+                    {"id": "check-case-conflict"},
+                    {"id": "check-merge-conflict"},
+                    {"id": "check-symlinks"},
+                    {"id": "detect-private-key"},
+                    {"id": "fix-byte-order-marker"},
+                    {"id": "mixed-line-ending", "args": ["--fix=lf"]},
+                    {"id": "no-commit-to-branch", "args": ["--branch", "main"]},
+                ],
+            },
+            # clang-format runs from its official pre-commit mirror
+            # (pre-commit/mirrors-clang-format), which installs a pinned
+            # clang-format wheel from PyPI — no local LLVM install needed
+            # for formatting. It reads the .clang-format companion config
+            # at the project root (args: -style=file is the mirror's
+            # default), the same file scripts/format.sh uses. The rev pins
+            # LLVM 18 to match current distro toolchains (Ubuntu 24.04
+            # ships clang-format-18); bump it together with your local
+            # clang-format so the hook and format.sh agree byte-for-byte.
+            {
+                "repo": "https://github.com/pre-commit/mirrors-clang-format",
+                "rev": "v18.1.8",
+                "hooks": [
+                    {"id": "clang-format", "types_or": ["c", "c++"]},
+                ],
+            },
+            # clang-tidy and cppcheck run as `repo: local` system hooks
+            # (mirroring the Swift/Kotlin lint hooks): neither ships an
+            # official .pre-commit-hooks.yaml manifest. Install with:
+            # `brew install llvm cppcheck` (macOS) or
+            # `apt-get install clang-tidy cppcheck` (Debian/Ubuntu).
+            {
+                "repo": "local",
+                "hooks": [
+                    {
+                        "id": "clang-tidy",
+                        "name": "clang-tidy",
+                        # Reads the generated .clang-tidy companion config
+                        # (bugprone/cert/clang-analyzer/... checks promoted
+                        # to errors), the same file lint.sh uses. Requires
+                        # build/compile_commands.json, exported by the
+                        # documented cmake configure step
+                        # (CMAKE_EXPORT_COMPILE_COMMANDS is ON in the
+                        # generated CMakeLists.txt). Runs on .cpp files
+                        # only: headers have no compile command of their
+                        # own and are covered via HeaderFilterRegex, and
+                        # pure-C sources are deliberately left to
+                        # cppcheck below (types_or covers c and c++) —
+                        # clang-tidy's check set here is C++-oriented and
+                        # would need a separate -std=cNN profile to add
+                        # value for C. The -p path assumes the documented
+                        # `cmake -B build` configure step; a different
+                        # build dir must be mirrored here and in lint.sh
+                        # or clang-tidy silently runs without compile
+                        # commands.
+                        "entry": "clang-tidy -p build",
+                        "language": "system",
+                        "types": ["c++"],
+                    },
+                    {
+                        "id": "cppcheck",
+                        "name": "cppcheck",
+                        # warning/performance/portability only: style and
+                        # readability are clang-tidy's job, so the two
+                        # linters do not double-report the same findings.
+                        "entry": (
+                            "cppcheck --enable=warning,performance,portability "
+                            "--error-exitcode=1 --inline-suppr "
+                            "--suppress=missingIncludeSystem"
+                        ),
+                        "language": "system",
+                        "types_or": ["c", "c++"],
+                    },
+                ],
+            },
+            {
+                "repo": "https://github.com/gitleaks/gitleaks",
+                "rev": "v8.18.4",
+                "hooks": [
+                    {"id": "gitleaks"},
+                ],
+            },
+            {
+                "repo": "https://github.com/shellcheck-py/shellcheck-py",
+                "rev": "v0.9.0.6",
+                "hooks": [
+                    {"id": "shellcheck"},
+                ],
+            },
+            {
+                "repo": "https://github.com/Yelp/detect-secrets",
+                "rev": "v1.4.0",
+                "hooks": [
+                    {
+                        "id": "detect-secrets",
+                        "args": ["--baseline", ".secrets.baseline"],
+                    },
+                ],
+            },
+        ],
+        "default_language_version": {},
+    },
 }
 
 
@@ -359,7 +850,8 @@ class PreCommitGenerator(BaseGenerator):
     Customizes pre-commit hooks based on project language and requirements.
     Includes formatting, linting, security, and general file quality checks.
 
-    Supports: Python, TypeScript, Go, Rust, and other languages.
+    Supports: Python, TypeScript, Go, Rust, Swift, Kotlin, C/C++ (cpp),
+    Java, C# (csharp), and other languages.
 
     Attributes:
         orchestrator: Optional AI orchestrator for enhanced generation.
@@ -579,12 +1071,7 @@ class PreCommitGenerator(BaseGenerator):
             >>> len(hooks) > 0
             True
         """
-        if language not in LANGUAGE_CONFIGS:
-            msg = (
-                f"Unsupported language: {language}. "
-                f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
-            )
-            raise ValueError(msg)
+        self._validate_language_supported(language)
         # Cast to satisfy mypy strict mode - dict access returns Any
         return cast("list[dict[str, Any]]", LANGUAGE_CONFIGS[language]["hooks"])
 
@@ -617,12 +1104,7 @@ class PreCommitGenerator(BaseGenerator):
             >>> count > 20
             True
         """
-        if language not in LANGUAGE_CONFIGS:
-            msg = (
-                f"Unsupported language: {language}. "
-                f"Supported languages: {', '.join(LANGUAGE_CONFIGS.keys())}"
-            )
-            raise ValueError(msg)
+        self._validate_language_supported(language)
 
         hooks_config = LANGUAGE_CONFIGS[language]["hooks"]
         return self._sum_hooks_in_repos(hooks_config)

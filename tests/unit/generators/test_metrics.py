@@ -17,6 +17,10 @@ from start_green_stay_green.generators.metrics import MetricConfig
 from start_green_stay_green.generators.metrics import MetricsGenerationConfig
 from start_green_stay_green.generators.metrics import MetricsGenerator
 from start_green_stay_green.generators.metrics import STANDARD_METRICS
+from start_green_stay_green.generators.metrics import ci_status
+from start_green_stay_green.generators.metrics import count_ci_jobs
+from start_green_stay_green.generators.metrics import count_precommit_hooks
+from start_green_stay_green.generators.metrics import precommit_status
 
 
 class TestMetricConfig:
@@ -172,8 +176,147 @@ class TestLanguageTools:
 
     def test_supports_required_languages(self) -> None:
         """Test that all required languages are supported."""
-        required_languages = {"python", "typescript", "javascript", "go", "rust"}
+        required_languages = {
+            "python",
+            "typescript",
+            "javascript",
+            "go",
+            "rust",
+            "swift",
+            "kotlin",
+            "cpp",
+            "java",
+            "csharp",
+        }
         assert required_languages.issubset(set(LANGUAGE_TOOLS.keys()))
+
+    def test_csharp_tools(self) -> None:
+        """Test C# tool mappings (#370).
+
+        Each tool appears in exactly one category: Coverlet owns
+        coverage (the >=90% bound lives in the csproj), the Roslyn
+        CA1502 rule owns complexity (threshold in CodeMetricsConfig.txt),
+        SecurityCodeScan owns source-level security, the vulnerable-
+        package listing owns dependency CVEs, and Stryker.NET is a
+        periodic mutation gate like pitest/mull/muter.
+        """
+        tools = LANGUAGE_TOOLS["csharp"]
+        assert tools["coverage"] == "Coverlet (dotnet test /p:CollectCoverage=true)"
+        assert tools["mutation"] == "Stryker.NET (dotnet stryker)"
+        assert tools["complexity"] == "Roslyn CA1502 (CodeMetricsConfig.txt)"
+        assert tools["documentation"] == "DocFX"
+        assert tools["security"] == "SecurityCodeScan (Roslyn analyzer)"
+        assert tools["dependency_check"] == "dotnet list package --vulnerable"
+
+    def test_csharp_tools_do_not_double_list_across_categories(self) -> None:
+        """No C# tool is claimed by two metric categories."""
+        tools = LANGUAGE_TOOLS["csharp"]
+        names_per_category = {
+            "coverage": {"Coverlet"},
+            "complexity": {"CA1502"},
+            "security": {"SecurityCodeScan"},
+            "documentation": {"DocFX"},
+        }
+        for category, names in names_per_category.items():
+            for other_category, other_names in names_per_category.items():
+                if category != other_category:
+                    assert names.isdisjoint(other_names)
+            for name in names:
+                assert name in tools[category]
+
+    def test_java_tools(self) -> None:
+        """Test Java tool mappings (#367).
+
+        Each tool appears in exactly one category: the pom's JaCoCo
+        plugin owns coverage (the >=90% bound lives in pom.xml), PMD's
+        CyclomaticComplexity rule owns complexity, SpotBugs owns
+        security, and pitest is a periodic mutation gate like mull/muter.
+        """
+        tools = LANGUAGE_TOOLS["java"]
+        assert tools["coverage"] == "JaCoCo (mvn jacoco:check)"
+        assert tools["mutation"] == "pitest"
+        assert tools["complexity"] == "PMD (CyclomaticComplexity, pmd-ruleset.xml)"
+        assert tools["documentation"] == "javadoc"
+        assert tools["security"] == "SpotBugs (mvn spotbugs:check)"
+        assert tools["dependency_check"] == (
+            "OWASP dependency-check (mvn dependency-check:check)"
+        )
+
+    def test_java_tools_do_not_double_list_across_categories(self) -> None:
+        """No Java tool is claimed by two metric categories.
+
+        The review lesson from the CI generator: listing one tool under
+        two categories overstates the toolchain. Coverage/complexity/
+        security/docs must each name disjoint tools.
+        """
+        tools = LANGUAGE_TOOLS["java"]
+        names_per_category = {
+            "coverage": {"JaCoCo"},
+            "complexity": {"PMD"},
+            "security": {"SpotBugs"},
+            "documentation": {"javadoc"},
+        }
+        for category, names in names_per_category.items():
+            for other_category, other_names in names_per_category.items():
+                if category != other_category:
+                    assert names.isdisjoint(other_names)
+            for name in names:
+                assert name in tools[category]
+
+    def test_cpp_tools(self) -> None:
+        """Test C/C++ tool mappings (#362).
+
+        Each tool appears in exactly one category: lizard owns
+        complexity, cppcheck + flawfinder own security, and mutation
+        (mull) is a periodic gate like pitest/muter.
+        """
+        tools = LANGUAGE_TOOLS["cpp"]
+        assert tools["coverage"] == "lcov (cmake -DENABLE_COVERAGE=ON + ctest)"
+        assert tools["mutation"] == "mull"
+        assert tools["complexity"] == "lizard (CCN)"
+        assert tools["documentation"] == "doxygen"
+        assert tools["security"] == "cppcheck + flawfinder"
+        assert tools["dependency_check"] == "conan audit"
+
+    def test_cpp_tools_do_not_double_list_across_categories(self) -> None:
+        """No C/C++ tool is claimed by two metric categories.
+
+        The review lesson from the CI generator: listing one tool under
+        two categories overstates the toolchain. Coverage/complexity/
+        security/docs must each name disjoint tools.
+        """
+        tools = LANGUAGE_TOOLS["cpp"]
+        names_per_category = {
+            "coverage": {"lcov"},
+            "complexity": {"lizard"},
+            "security": {"cppcheck", "flawfinder"},
+            "documentation": {"doxygen"},
+        }
+        for category, names in names_per_category.items():
+            for other_category, other_names in names_per_category.items():
+                if category != other_category:
+                    assert names.isdisjoint(other_names)
+            for name in names:
+                assert name in tools[category]
+
+    def test_kotlin_tools(self) -> None:
+        """Test Kotlin tool mappings (#357)."""
+        tools = LANGUAGE_TOOLS["kotlin"]
+        assert tools["coverage"] == "kover (./gradlew koverVerifyDebug)"
+        assert tools["mutation"] == "pitest"
+        assert tools["complexity"] == "detekt (CyclomaticComplexMethod)"
+        assert tools["documentation"] == "dokka"
+        assert tools["security"] == "detekt (potential-bugs) + gitleaks"
+        assert tools["dependency_check"] == "OWASP dependency-check"
+
+    def test_swift_tools(self) -> None:
+        """Test Swift tool mappings (#352)."""
+        tools = LANGUAGE_TOOLS["swift"]
+        assert tools["coverage"] == "swift test --enable-code-coverage + llvm-cov"
+        assert tools["mutation"] == "muter"
+        assert tools["complexity"] == "swiftlint (cyclomatic_complexity)"
+        assert tools["documentation"] == "swift-docc"
+        assert tools["security"] == "swiftlint + periphery"
 
     def test_python_tools(self) -> None:
         """Test Python tool mappings."""
@@ -702,6 +845,89 @@ class TestMetricsConfigGeneration:
         assert metrics["code_coverage"]["tool"] == "jest"
         assert metrics["mutation_score"]["tool"] == "stryker"
 
+    def test_generate_metrics_config_swift_tools(self) -> None:
+        """Swift metric config reports llvm-cov coverage and SwiftLint (#352)."""
+        config = MetricsGenerationConfig(
+            language="swift",
+            project_name="watch-app",
+        )
+        generator = MetricsGenerator(None, config)
+
+        metrics_config = generator._generate_metrics_config()
+        metrics = metrics_config["metrics"]
+
+        assert metrics_config["language"] == "swift"
+        assert (
+            metrics["code_coverage"]["tool"]
+            == "swift test --enable-code-coverage + llvm-cov"
+        )
+        assert (
+            metrics["cyclomatic_complexity"]["tool"]
+            == "swiftlint (cyclomatic_complexity)"
+        )
+        assert metrics["code_coverage"]["threshold"] == 90
+        assert metrics["cyclomatic_complexity"]["threshold"] == 10
+
+    def test_generate_metrics_config_kotlin_tools(self) -> None:
+        """Kotlin metric config reports Kover coverage and detekt (#357)."""
+        config = MetricsGenerationConfig(
+            language="kotlin",
+            project_name="wear-app",
+        )
+        generator = MetricsGenerator(None, config)
+
+        metrics_config = generator._generate_metrics_config()
+        metrics = metrics_config["metrics"]
+
+        assert metrics_config["language"] == "kotlin"
+        assert metrics["code_coverage"]["tool"] == "kover (./gradlew koverVerifyDebug)"
+        assert (
+            metrics["cyclomatic_complexity"]["tool"]
+            == "detekt (CyclomaticComplexMethod)"
+        )
+        assert metrics["code_coverage"]["threshold"] == 90
+        assert metrics["cyclomatic_complexity"]["threshold"] == 10
+
+    def test_generate_metrics_config_cpp_tools(self) -> None:
+        """C/C++ metric config reports lcov coverage and lizard (#362)."""
+        config = MetricsGenerationConfig(
+            language="cpp",
+            project_name="watch-app",
+        )
+        generator = MetricsGenerator(None, config)
+
+        metrics_config = generator._generate_metrics_config()
+        metrics = metrics_config["metrics"]
+
+        assert metrics_config["language"] == "cpp"
+        assert (
+            metrics["code_coverage"]["tool"]
+            == "lcov (cmake -DENABLE_COVERAGE=ON + ctest)"
+        )
+        assert metrics["cyclomatic_complexity"]["tool"] == "lizard (CCN)"
+        assert metrics["code_coverage"]["threshold"] == 90
+        assert metrics["cyclomatic_complexity"]["threshold"] == 10
+
+    def test_generate_metrics_config_java_tools(self) -> None:
+        """Java metric config reports JaCoCo coverage and PMD CCN (#367)."""
+        config = MetricsGenerationConfig(
+            language="java",
+            project_name="wrist-timer",
+        )
+        generator = MetricsGenerator(None, config)
+
+        metrics_config = generator._generate_metrics_config()
+        metrics = metrics_config["metrics"]
+
+        assert metrics_config["language"] == "java"
+        assert metrics["code_coverage"]["tool"] == "JaCoCo (mvn jacoco:check)"
+        assert (
+            metrics["cyclomatic_complexity"]["tool"]
+            == "PMD (CyclomaticComplexity, pmd-ruleset.xml)"
+        )
+        assert metrics["code_coverage"]["threshold"] == 90
+        assert metrics["cyclomatic_complexity"]["threshold"] == 10
+
 
 class TestSonarQubeGeneration:
     """Test SonarQube configuration generation."""
@@ -938,6 +1164,7 @@ class TestDashboardGeneration:
         assert dashboard is not None
         assert "≥85%" in dashboard  # coverage
         assert "≥80%" in dashboard  # branch coverage
+        assert "≥75%" in dashboard  # mutation (re-added in #217)
 
     def test_dashboard_has_metric_cards(self) -> None:
         """Test that dashboard has metric card structure."""
@@ -971,6 +1198,521 @@ class TestDashboardGeneration:
         assert "<style>" in dashboard
         assert "</style>" in dashboard
         assert "grid" in dashboard  # CSS grid layout
+
+
+class TestPrecommitStatusCard:
+    """Test the Pre-Commit Status metric card (Issue #154)."""
+
+    def _write_config(self, path: Path, *, hook_count: int) -> Path:
+        """Write a minimal .pre-commit-config.yaml with ``hook_count`` hooks."""
+        repos = [
+            {
+                "repo": "local",
+                "hooks": [{"id": f"hook-{i}"} for i in range(hook_count)],
+            }
+        ]
+        config_path = path / ".pre-commit-config.yaml"
+        config_path.write_text(yaml.dump({"repos": repos}), encoding="utf-8")
+        return config_path
+
+    def test_count_precommit_hooks_counts_all_hooks(self) -> None:
+        """Hook count is the sum of hooks across every repo entry."""
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = tmp_path / ".pre-commit-config.yaml"
+            config_path.write_text(
+                yaml.dump(
+                    {
+                        "repos": [
+                            {"repo": "a", "hooks": [{"id": "x"}, {"id": "y"}]},
+                            {"repo": "b", "hooks": [{"id": "z"}]},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            assert MetricsGenerator.count_precommit_hooks(config_path) == 3
+
+    def test_count_precommit_hooks_missing_file_returns_zero(self) -> None:
+        """A missing config file yields zero hooks (graceful degradation)."""
+        with TemporaryDirectory() as tmp:
+            missing = Path(tmp) / ".pre-commit-config.yaml"
+
+            assert MetricsGenerator.count_precommit_hooks(missing) == 0
+
+    def test_count_precommit_hooks_empty_config_returns_zero(self) -> None:
+        """An empty or repo-less config yields zero hooks."""
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / ".pre-commit-config.yaml"
+            config_path.write_text("", encoding="utf-8")
+
+            assert MetricsGenerator.count_precommit_hooks(config_path) == 0
+
+    def test_count_precommit_hooks_malformed_yaml_returns_zero(self) -> None:
+        """Malformed YAML degrades to zero hooks rather than raising."""
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / ".pre-commit-config.yaml"
+            config_path.write_text("repos: [unterminated", encoding="utf-8")
+
+            assert MetricsGenerator.count_precommit_hooks(config_path) == 0
+
+    def test_count_precommit_hooks_non_mapping_top_level_returns_zero(self) -> None:
+        """A top-level list (not a mapping) yields zero hooks."""
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / ".pre-commit-config.yaml"
+            config_path.write_text("- just\n- a\n- list\n", encoding="utf-8")
+
+            assert MetricsGenerator.count_precommit_hooks(config_path) == 0
+
+    def test_count_precommit_hooks_ignores_malformed_repo_entries(self) -> None:
+        """Non-dict repo entries and hookless repos contribute zero hooks."""
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / ".pre-commit-config.yaml"
+            config_path.write_text(
+                yaml.dump(
+                    {
+                        "repos": [
+                            "not-a-mapping",
+                            {"repo": "no-hooks-key"},
+                            {"repo": "string-hooks", "hooks": "oops"},
+                            {"repo": "valid", "hooks": [{"id": "a"}, {"id": "b"}]},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            assert MetricsGenerator.count_precommit_hooks(config_path) == 2
+
+    def test_module_level_count_precommit_hooks_is_canonical(self) -> None:
+        """The public module-level helper counts hooks and the staticmethod delegates.
+
+        ``count_precommit_hooks`` is the single canonical implementation
+        (Issue #154 DRY consolidation); ``scripts/collect_metrics.py`` imports
+        it instead of duplicating the logic. The generator staticmethod must
+        return the same result for the same config.
+        """
+        with TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / ".pre-commit-config.yaml"
+            config_path.write_text(
+                yaml.dump(
+                    {
+                        "repos": [
+                            {"repo": "a", "hooks": [{"id": "x"}, {"id": "y"}]},
+                            {"repo": "b", "hooks": [{"id": "z"}]},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            assert count_precommit_hooks(config_path) == 3
+            assert count_precommit_hooks(config_path) == (
+                MetricsGenerator.count_precommit_hooks(config_path)
+            )
+
+    def test_precommit_card_is_first_card(self) -> None:
+        """Pre-Commit Status card renders before the Code Coverage card."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            precommit_hooks_total=32,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "Pre-Commit Status" in dashboard
+        assert dashboard.index("Pre-Commit Status") < dashboard.index("Code Coverage")
+
+    def test_precommit_card_shows_total_hooks_threshold(self) -> None:
+        """Threshold shows ``X/Y Hooks`` using the configured total."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            precommit_hooks_total=32,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "32/32 Hooks" in dashboard
+
+    def test_precommit_card_has_value_and_status_ids(self) -> None:
+        """Card exposes the DOM ids the JS uses to populate it."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            precommit_hooks_total=10,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert 'id="precommit-value"' in dashboard
+        assert 'id="precommit-threshold"' in dashboard
+        assert 'id="precommit-status"' in dashboard
+
+    def test_precommit_js_color_codes_by_percentage(self) -> None:
+        """JS applies green/yellow/red classes per the issue thresholds."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            precommit_hooks_total=32,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        # 100% -> pass (green); 90-99% -> warn (yellow); <90% -> fail (red)
+        assert "precommit_status" in dashboard
+        assert ">= 100" in dashboard
+        assert ">= 90" in dashboard
+
+    def test_precommit_card_renders_with_zero_total(self) -> None:
+        """A zero hook total renders ``0/0 Hooks`` without crashing."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            precommit_hooks_total=0,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "0/0 Hooks" in dashboard
+
+    def test_precommit_js_grays_unknown_status_before_percentage(self) -> None:
+        """Zero-hooks/``unknown`` status maps to gray, not red FAILING.
+
+        Regression for the no-data UX bug (Issue #154): a
+        ``status: 'unknown'`` precommit card has ``percentage: 0.0`` which
+        would fall through the ``>= 100``/``>= 90`` guards and render red
+        FAILING. ``updatePrecommitStatus`` must branch on the ``status``
+        field (and missing data) BEFORE the percentage thresholds and apply
+        the gray ``status-unknown`` treatment, mirroring the other cards.
+        """
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            precommit_hooks_total=32,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        # The unknown/no-data guard must short-circuit before the percentage
+        # colour thresholds and use the gray status-unknown class.
+        assert "precommit.status === 'unknown'" in dashboard
+        assert "status-unknown" in dashboard
+        guard = dashboard.index("precommit.status === 'unknown'")
+        threshold = dashboard.index("if (percentage >= 100)")
+        assert guard < threshold
+
+    def test_dashboard_defines_status_unknown_css(self) -> None:
+        """The gray ``status-unknown`` badge class is defined in the CSS."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert ".status-unknown {" in dashboard
+
+
+class TestPrecommitStatusHelper:
+    """Tests for the canonical ``precommit_status`` dict-builder (Issue #154)."""
+
+    def test_passing_status_for_configured_hooks(self) -> None:
+        """A positive hook count yields a 100% passing status."""
+        assert precommit_status(32) == {
+            "total_hooks": 32,
+            "passing_hooks": 32,
+            "percentage": 100.0,
+            "status": "passing",
+        }
+
+    def test_unknown_status_for_zero_hooks(self) -> None:
+        """Zero hooks (no config) yields the unknown/no-data status."""
+        assert precommit_status(0) == {
+            "total_hooks": 0,
+            "passing_hooks": 0,
+            "percentage": 0.0,
+            "status": "unknown",
+        }
+
+    def test_passing_hooks_defaults_to_total(self) -> None:
+        """``passing_hooks`` defaults to ``total_hooks`` when omitted."""
+        result = precommit_status(10)
+        assert result["passing_hooks"] == 10
+
+    def test_partial_passing_yields_proportional_percentage(self) -> None:
+        """An explicit passing count below total yields a partial percentage."""
+        result = precommit_status(10, passing_hooks=9)
+        assert result["passing_hooks"] == 9
+        assert result["percentage"] == 90.0
+        assert result["status"] == "passing"
+
+
+class TestCountCIJobs:
+    """Tests for the canonical ``count_ci_jobs`` helper (Issue #159)."""
+
+    def test_counts_jobs_across_workflow_files(self) -> None:
+        """Job count is the sum of jobs across every workflow file."""
+        with TemporaryDirectory() as tmp:
+            workflows = Path(tmp)
+            (workflows / "ci.yml").write_text(
+                yaml.dump({"jobs": {"lint": {}, "test": {}, "build": {}}}),
+                encoding="utf-8",
+            )
+            (workflows / "deploy.yml").write_text(
+                yaml.dump({"jobs": {"deploy": {}}}),
+                encoding="utf-8",
+            )
+
+            assert count_ci_jobs(workflows) == 4
+
+    def test_counts_yaml_extension_workflows(self) -> None:
+        """Workflows using the ``.yaml`` extension are counted too."""
+        with TemporaryDirectory() as tmp:
+            workflows = Path(tmp)
+            (workflows / "ci.yaml").write_text(
+                yaml.dump({"jobs": {"test": {}}}),
+                encoding="utf-8",
+            )
+
+            assert count_ci_jobs(workflows) == 1
+
+    def test_missing_directory_returns_zero(self) -> None:
+        """A missing workflows directory yields zero jobs (graceful)."""
+        with TemporaryDirectory() as tmp:
+            missing = Path(tmp) / ".github" / "workflows"
+
+            assert count_ci_jobs(missing) == 0
+
+    def test_malformed_yaml_contributes_zero(self) -> None:
+        """Malformed workflow YAML degrades to zero rather than raising."""
+        with TemporaryDirectory() as tmp:
+            workflows = Path(tmp)
+            (workflows / "broken.yml").write_text(
+                "jobs: [unterminated", encoding="utf-8"
+            )
+            (workflows / "ok.yml").write_text(
+                yaml.dump({"jobs": {"test": {}}}),
+                encoding="utf-8",
+            )
+
+            assert count_ci_jobs(workflows) == 1
+
+    def test_non_mapping_jobs_contributes_zero(self) -> None:
+        """A workflow whose ``jobs`` is not a mapping contributes zero."""
+        with TemporaryDirectory() as tmp:
+            workflows = Path(tmp)
+            (workflows / "list-jobs.yml").write_text(
+                yaml.dump({"jobs": ["not", "a", "mapping"]}),
+                encoding="utf-8",
+            )
+            (workflows / "no-jobs.yml").write_text(
+                yaml.dump({"name": "no jobs key"}),
+                encoding="utf-8",
+            )
+            (workflows / "scalar.yml").write_text("just a string", encoding="utf-8")
+
+            assert count_ci_jobs(workflows) == 0
+
+    def test_empty_directory_returns_zero(self) -> None:
+        """An empty workflows directory yields zero jobs."""
+        with TemporaryDirectory() as tmp:
+            assert count_ci_jobs(Path(tmp)) == 0
+
+
+class TestCIStatusHelper:
+    """Tests for the canonical ``ci_status`` dict-builder (Issue #159)."""
+
+    def test_all_jobs_passing_yields_passing_status(self) -> None:
+        """All jobs succeeding yields a 100% passing status."""
+        assert ci_status(7, 7) == {
+            "total_jobs": 7,
+            "passing_jobs": 7,
+            "percentage": 100.0,
+            "status": "passing",
+        }
+
+    def test_partial_passing_yields_failing_status(self) -> None:
+        """Any failing job yields a failing status with a partial percentage."""
+        result = ci_status(8, 6)
+        assert result["total_jobs"] == 8
+        assert result["passing_jobs"] == 6
+        assert result["percentage"] == 75.0
+        assert result["status"] == "failing"
+
+    def test_unknown_status_when_passing_jobs_omitted(self) -> None:
+        """Static counting (no pass/fail data) yields the unknown status."""
+        assert ci_status(7) == {
+            "total_jobs": 7,
+            "passing_jobs": 0,
+            "percentage": 0.0,
+            "status": "unknown",
+        }
+
+    def test_unknown_status_for_zero_jobs(self) -> None:
+        """Zero jobs (no workflows) yields the unknown/no-data status."""
+        assert ci_status(0, 0) == {
+            "total_jobs": 0,
+            "passing_jobs": 0,
+            "percentage": 0.0,
+            "status": "unknown",
+        }
+
+    def test_run_url_included_when_provided(self) -> None:
+        """``run_url`` is included in the dict when the API supplies one."""
+        result = ci_status(7, 7, run_url="https://github.com/o/r/actions/runs/1")
+        assert result["run_url"] == "https://github.com/o/r/actions/runs/1"
+
+    def test_run_url_omitted_when_not_provided(self) -> None:
+        """``run_url`` is absent when no workflow run URL is available."""
+        assert "run_url" not in ci_status(7, 7)
+
+
+class TestCIStatusCard:
+    """Test the CI Status metric card (Issue #159)."""
+
+    def test_ci_card_renders_between_precommit_and_coverage(self) -> None:
+        """CI Status card renders at index 1: after Pre-Commit, before Coverage."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            ci_jobs_total=7,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "CI Status" in dashboard
+        assert dashboard.index("Pre-Commit Status") < dashboard.index("CI Status")
+        assert dashboard.index("CI Status") < dashboard.index("Code Coverage")
+
+    def test_ci_card_shows_total_jobs_threshold(self) -> None:
+        """Threshold shows ``X/Y Jobs`` using the configured total."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            ci_jobs_total=7,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "7/7 Jobs" in dashboard
+
+    def test_ci_card_has_value_and_status_ids(self) -> None:
+        """Card exposes the DOM ids the JS uses to populate it."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            ci_jobs_total=5,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert 'id="ci-value"' in dashboard
+        assert 'id="ci-threshold"' in dashboard
+        assert 'id="ci-status"' in dashboard
+        assert 'id="ci-status-badge"' in dashboard
+
+    def test_ci_js_color_codes_by_percentage(self) -> None:
+        """JS applies green/yellow/red classes per the issue thresholds."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            ci_jobs_total=7,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        # 100% -> pass (green); 85-99% -> warn (yellow); <85% -> fail (red)
+        assert "metrics.ci_status" in dashboard
+        assert ">= 100" in dashboard
+        assert ">= 85" in dashboard
+
+    def test_ci_card_renders_with_zero_total(self) -> None:
+        """A zero job total renders ``0/0 Jobs`` without crashing."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            ci_jobs_total=0,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "0/0 Jobs" in dashboard
+
+    def test_ci_js_grays_unknown_status_before_percentage(self) -> None:
+        """Unknown CI status maps to gray N/A, not red FAILING.
+
+        Mirrors the Issue #154 no-data guard: a ``status: 'unknown'``
+        ci_status entry (static fallback or no workflow data) has
+        ``percentage: 0.0`` which would fall through the percentage
+        thresholds and render red FAILING. ``updateCIStatus`` must branch on
+        the ``status`` field (and missing data) BEFORE the percentage
+        thresholds and apply the gray ``status-unknown`` treatment.
+        """
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            enable_dashboard=True,
+            ci_jobs_total=7,
+        )
+        generator = MetricsGenerator(None, config)
+
+        dashboard = generator._generate_dashboard_template()
+
+        assert dashboard is not None
+        assert "ci.status === 'unknown'" in dashboard
+        guard = dashboard.index("ci.status === 'unknown'")
+        threshold = dashboard.index("if (percentage >= 85)")
+        assert guard < threshold
+
+    def test_negative_ci_jobs_total_rejected(self) -> None:
+        """A negative ``ci_jobs_total`` fails config validation."""
+        config = MetricsGenerationConfig(
+            language="python",
+            project_name="test",
+            ci_jobs_total=-1,
+        )
+
+        with pytest.raises(ValueError, match="CI jobs total"):
+            MetricsGenerator(None, config)
 
 
 class TestCIIntegration:
@@ -1489,14 +2231,16 @@ class TestDashboardNewCards:
         assert dashboard is not None
         return dashboard
 
-    def test_all_eight_card_ids_exist(self) -> None:
-        """Test that all 8 metric card IDs exist in generated HTML."""
+    def test_all_ten_card_ids_exist(self) -> None:
+        """Test that all 10 metric card IDs exist in generated HTML."""
         dashboard = self._get_dashboard()
 
         expected_ids = [
             "coverage-value",
             "branch-value",
+            "mutation-value",
             "complexity-value",
+            "docs-value",
             "security-value",
             "maintainability-value",
             "lint-value",
@@ -1506,14 +2250,16 @@ class TestDashboardNewCards:
         for card_id in expected_ids:
             assert card_id in dashboard, f"Missing card ID: {card_id}"
 
-    def test_all_eight_status_ids_exist(self) -> None:
-        """Test that all 8 status element IDs exist in generated HTML."""
+    def test_all_ten_status_ids_exist(self) -> None:
+        """Test that all 10 status element IDs exist in generated HTML."""
         dashboard = self._get_dashboard()
 
         expected_ids = [
             "coverage-status",
             "branch-status",
+            "mutation-status",
             "complexity-status",
+            "docs-status",
             "security-status",
             "maintainability-status",
             "lint-status",
@@ -1558,13 +2304,33 @@ class TestDashboardNewCards:
         assert "Test Count" in dashboard
         assert "tests-value" in dashboard
 
-    def test_dashboard_has_eight_metric_cards(self) -> None:
-        """Test dashboard has exactly 8 metric cards."""
+    def test_mutation_card_exists(self) -> None:
+        """Test mutation score card exists in dashboard (Issue #217)."""
+        dashboard = self._get_dashboard()
+
+        assert "Mutation Score" in dashboard
+        assert "mutation-value" in dashboard
+
+    def test_docs_card_exists(self) -> None:
+        """Test documentation coverage card exists in dashboard (Issue #217)."""
+        dashboard = self._get_dashboard()
+
+        assert "Documentation Coverage" in dashboard
+        assert "docs-value" in dashboard
+
+    def test_dashboard_has_twelve_metric_cards(self) -> None:
+        """Test dashboard has exactly 12 metric cards.
+
+        Eight original quality cards plus the Pre-Commit Status card added
+        at index 0 (Issue #154), the CI Status card added at index 1
+        (Issue #159), and the re-added Mutation Score and Documentation
+        Coverage cards (Issue #217).
+        """
         dashboard = self._get_dashboard()
 
         # Count metric-card div occurrences
         card_count = dashboard.count('class="metric-card"')
-        assert card_count == 8
+        assert card_count == 12
 
 
 class TestDashboardJavaScript:
@@ -1620,6 +2386,26 @@ class TestDashboardJavaScript:
         """Test JavaScript has null check for branch coverage (#212)."""
         dashboard = self._get_dashboard()
         assert "metrics.branch_coverage === null" in dashboard
+
+    def test_js_handles_null_mutation_score(self) -> None:
+        """Test JavaScript has null check for mutation score (#217).
+
+        The null branch must pass 'N/A' (not 'NO DATA') so updateStatus
+        maps it to the gray status-unknown state instead of red.
+        """
+        dashboard = self._get_dashboard()
+        assert "metrics.mutation_score === null" in dashboard
+        assert "updateStatus('mutation', 'N/A', false)" in dashboard
+
+    def test_js_handles_null_docs_coverage(self) -> None:
+        """Test JavaScript has null check for docs coverage (#217).
+
+        The null branch must pass 'N/A' (not 'NO DATA') so updateStatus
+        maps it to the gray status-unknown state instead of red.
+        """
+        dashboard = self._get_dashboard()
+        assert "metrics.docs_coverage === null" in dashboard
+        assert "updateStatus('docs', 'N/A', false)" in dashboard
 
     def test_js_handles_null_security_issues(self) -> None:
         """Test JavaScript has null check for security issues (#212)."""

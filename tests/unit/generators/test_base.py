@@ -224,18 +224,41 @@ class TestTemplateBasedGenerator:
 class TestSupportedLanguages:
     """Test SUPPORTED_LANGUAGES constant."""
 
-    def test_contains_all_seven_languages(self) -> None:
-        """Test SUPPORTED_LANGUAGES contains all 7 expected languages."""
-        expected = {"python", "typescript", "go", "rust", "java", "csharp", "ruby"}
+    def test_contains_all_ten_languages(self) -> None:
+        """Test SUPPORTED_LANGUAGES contains all 10 expected languages."""
+        expected = {
+            "python",
+            "typescript",
+            "go",
+            "rust",
+            "java",
+            "csharp",
+            "ruby",
+            "swift",
+            "kotlin",
+            "cpp",
+        }
         assert set(SUPPORTED_LANGUAGES) == expected
 
     def test_is_tuple(self) -> None:
         """Test SUPPORTED_LANGUAGES is an immutable tuple."""
         assert isinstance(SUPPORTED_LANGUAGES, tuple)
 
-    def test_has_seven_entries(self) -> None:
-        """Test SUPPORTED_LANGUAGES has exactly 7 entries."""
-        assert len(SUPPORTED_LANGUAGES) == 7
+    def test_has_ten_entries(self) -> None:
+        """Test SUPPORTED_LANGUAGES has exactly 10 entries."""
+        assert len(SUPPORTED_LANGUAGES) == 10
+
+    def test_swift_is_supported(self) -> None:
+        """Test Swift is a supported language."""
+        assert "swift" in SUPPORTED_LANGUAGES
+
+    def test_kotlin_is_supported(self) -> None:
+        """Test Kotlin is a supported language (#356)."""
+        assert "kotlin" in SUPPORTED_LANGUAGES
+
+    def test_cpp_is_supported(self) -> None:
+        """Test C/C++ is a supported language (#361)."""
+        assert "cpp" in SUPPORTED_LANGUAGES
 
     def test_python_is_first(self) -> None:
         """Test Python is the first language (default)."""

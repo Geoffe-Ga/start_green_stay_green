@@ -71,6 +71,72 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         "supported_versions": ["1.70", "1.75"],
         "package_manager": "cargo",
     },
+    "swift": {
+        # XCTest via `swift test`; Swift 6 toolchains also run any
+        # swift-testing suites through the same command.
+        "test_framework": "xctest",
+        "linters": ["swiftlint"],
+        "formatters": ["swift-format"],
+        # SwiftLint's crash-safety/randomness rules also serve security
+        # duty, but it is listed once (under linters) so tool-install
+        # consumers don't double-install it. gitleaks covers secret
+        # scanning (shared with pre-commit) and Periphery covers
+        # dead-code analysis (scripts/security.sh).
+        "security_tools": ["gitleaks", "periphery"],
+        "supported_versions": ["5.9", "5.10", "6.0"],
+        "package_manager": "spm",
+    },
+    "kotlin": {
+        # JUnit on the plain JVM via Gradle; coverage is measured and
+        # gated by Kover (koverVerifyDebug), whose >=90% bound lives in
+        # the generated app/build.gradle.kts — the single source of
+        # truth, deliberately not duplicated in the workflow.
+        "test_framework": "junit",
+        # ktlint genuinely is both a linter and a formatter (like ruff,
+        # eslint, and rubocop), so it appears in both lists. detekt's
+        # potential-bugs rules serve security duty too, but it is listed
+        # once (here) so tool-install consumers don't double-install it.
+        "linters": ["ktlint", "detekt"],
+        "formatters": ["ktlint"],
+        # gitleaks covers secret scanning (shared with pre-commit) and
+        # OWASP dependency-check covers dependency CVE scanning
+        # (scripts/security.sh).
+        "security_tools": ["gitleaks", "dependency-check"],
+        # JDK LTS releases the CI matrix runs Gradle/AGP on. The Kotlin
+        # version (2.0.21) is pinned by the generated root
+        # build.gradle.kts — a project decision, not a CI input — and
+        # bytecode always targets 17 via jvmToolchain(17), so the JVM
+        # executing the build is the meaningful matrix axis.
+        "supported_versions": ["17", "21"],
+        "package_manager": "gradle",
+    },
+    "cpp": {
+        # Catch2, not GoogleTest (the epic text named gtest): the #361
+        # foundation chose Catch2 — conanfile.txt pins catch2/3.x and
+        # the scaffolded tests use Catch2 macros — so CI stays
+        # consistent with what the generated project actually builds.
+        "test_framework": "catch2",
+        "linters": ["clang-tidy", "cppcheck"],
+        "formatters": ["clang-format"],
+        # cppcheck and clang-tidy's clang-analyzer-*/cert-* checks serve
+        # security duty too, but each is listed once (under linters) so
+        # tool-install consumers don't double-install them. gitleaks
+        # covers secret scanning (shared with pre-commit) and flawfinder
+        # the CWE-mapped dangerous-API scan (scripts/security.sh).
+        "security_tools": ["gitleaks", "flawfinder"],
+        # Compilers, not language standards: the generated CMakeLists.txt
+        # pins CMAKE_CXX_STANDARD to 17 (utils.cpp.CPP_STANDARD — a
+        # project decision, not a CI input; a -DCMAKE_CXX_STANDARD cache
+        # entry would be shadowed by the project's plain set()), so the
+        # honest matrix axis is the toolchain building that pinned
+        # standard: both major compilers on the ubuntu runner image.
+        "supported_versions": ["gcc", "clang"],
+        # CMake drives the build; Conan 2 provisions Catch2 and the
+        # CMake toolchain file. The Tizen native SDK comes from Tizen
+        # Studio, not from the package manager (see reference/ci/cpp.yml
+        # for the .tpk packaging stance).
+        "package_manager": "cmake-conan",
+    },
     "java": {
         "test_framework": "junit",
         "linters": ["checkstyle"],
@@ -148,8 +214,8 @@ class CIGenerator(BaseGenerator):
                 Claude-generated path. Default :data:`None` selects the
                 deterministic template-based path
                 (``generate_workflow_from_template``).
-            language: Target language (python, typescript, go, rust, java,
-                csharp, ruby).
+            language: Target language (python, typescript, go, rust, swift,
+                kotlin, java, csharp, ruby).
             framework: Optional framework (e.g., FastAPI, Express, Gin).
             reference_dir: Directory containing ``<language>.yml``
                 reference templates. Defaults to ``reference/ci/`` shipped

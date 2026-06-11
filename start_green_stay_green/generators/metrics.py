@@ -54,6 +54,212 @@ DANGEROUS_PATHS = {
 }
 
 
+def _load_precommit_repos(config_path: Path) -> list[object]:
+    """Load the ``repos`` list from a pre-commit config, degrading to ``[]``.
+
+    Args:
+        config_path: Path to a ``.pre-commit-config.yaml`` file.
+
+    Returns:
+        The ``repos`` list, or an empty list when the file is absent,
+        unreadable, or malformed.
+    """
+    if not config_path.is_file():
+        return []
+
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return []
+
+    repos = data.get("repos") if isinstance(data, dict) else None
+    return repos if isinstance(repos, list) else []
+
+
+def _repo_hook_count(repo: object) -> int:
+    """Return the number of hooks declared by a single pre-commit repo entry.
+
+    Args:
+        repo: A single entry from the pre-commit ``repos`` list.
+
+    Returns:
+        Hook count for the entry, or ``0`` when it is malformed.
+    """
+    if not isinstance(repo, dict):
+        return 0
+    hooks = repo.get("hooks")
+    return len(hooks) if isinstance(hooks, list) else 0
+
+
+def count_precommit_hooks(config_path: Path) -> int:
+    """Count the total number of hooks in a pre-commit config file.
+
+    Canonical, public hook-counting helper. Sums the ``hooks`` entries
+    across every ``repos`` entry in a ``.pre-commit-config.yaml``. Missing,
+    empty, or malformed configs degrade gracefully to ``0`` so callers (the
+    dashboard generator and ``scripts/collect_metrics.py``) can still render
+    a meaningful Pre-Commit Status card without duplicating this logic.
+
+    Args:
+        config_path: Path to a ``.pre-commit-config.yaml`` file.
+
+    Returns:
+        Total hook count, or ``0`` when the file is absent or has no hooks.
+    """
+    repos = _load_precommit_repos(config_path)
+    return sum(_repo_hook_count(repo) for repo in repos)
+
+
+def precommit_status(
+    total_hooks: int, passing_hooks: int | None = None
+) -> dict[str, object]:
+    """Build the canonical Pre-Commit Status dict for the metrics dashboard.
+
+    Single source of truth (Issue #154 DRY consolidation) for the
+    ``precommit_status`` mapping consumed by the dashboard's Pre-Commit
+    Status card. Both ``start_green_stay_green.cli._initial_precommit_status``
+    and ``scripts/collect_metrics.py`` delegate here instead of rebuilding the
+    ``total_hooks``/``passing_hooks``/``percentage``/``status`` fields
+    themselves.
+
+    When ``total_hooks`` is ``0`` (no ``.pre-commit-config.yaml`` found) the
+    status is ``"unknown"`` so the dashboard renders the gray "N/A" no-data
+    treatment instead of a red FAILING card. Otherwise the status is
+    ``"passing"`` and the percentage reflects ``passing_hooks / total_hooks``.
+
+    Args:
+        total_hooks: Total hooks counted from ``.pre-commit-config.yaml``.
+        passing_hooks: Hooks treated as passing. Defaults to ``total_hooks``
+            (configured hooks are assumed passing for the snapshot).
+
+    Returns:
+        A ``precommit_status`` mapping with ``total_hooks``,
+        ``passing_hooks``, ``percentage`` and ``status`` keys.
+    """
+    if passing_hooks is None:
+        passing_hooks = total_hooks
+    has_hooks = total_hooks > 0
+    percentage = (passing_hooks / total_hooks * 100) if has_hooks else 0.0
+    return {
+        "total_hooks": total_hooks,
+        "passing_hooks": passing_hooks,
+        "percentage": percentage,
+        "status": "passing" if has_hooks else "unknown",
+    }
+
+
+def _workflow_job_count(workflow_path: Path) -> int:
+    """Return the number of jobs declared in a single workflow file.
+
+    Args:
+        workflow_path: Path to a GitHub Actions workflow YAML file.
+
+    Returns:
+        Number of entries in the workflow's ``jobs`` mapping, or ``0``
+        when the file is unreadable, malformed, or has no ``jobs`` mapping.
+    """
+    try:
+        data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return 0
+
+    jobs = data.get("jobs") if isinstance(data, dict) else None
+    return len(jobs) if isinstance(jobs, dict) else 0
+
+
+def count_ci_jobs(workflows_dir: Path) -> int:
+    """Count GitHub Actions jobs across all workflow files in a directory.
+
+    Canonical, public job-counting helper (Issue #159). Sums the ``jobs``
+    entries across every ``*.yml``/``*.yaml`` file in
+    ``.github/workflows/``. A missing directory, malformed YAML, or a
+    workflow without a ``jobs`` mapping degrades gracefully to ``0`` so
+    callers (the dashboard generator, ``start_green_stay_green.cli`` and
+    ``scripts/collect_metrics.py``) can still render a meaningful CI Status
+    card without duplicating this logic.
+
+    Args:
+        workflows_dir: Path to a ``.github/workflows`` directory.
+
+    Returns:
+        Total job count, or ``0`` when the directory is absent or contains
+        no parseable workflow jobs.
+    """
+    if not workflows_dir.is_dir():
+        return 0
+
+    workflow_files = sorted(
+        [*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")]
+    )
+    return sum(_workflow_job_count(path) for path in workflow_files)
+
+
+def _ci_status_label(total_jobs: int, passing_jobs: int | None) -> str:
+    """Derive the CI status label from job counts.
+
+    Args:
+        total_jobs: Total CI jobs counted.
+        passing_jobs: Successful jobs, or ``None`` when pass/fail data is
+            unavailable (static workflow counting).
+
+    Returns:
+        ``"unknown"`` when there is no pass/fail data or no jobs,
+        ``"passing"`` when every job succeeded, ``"failing"`` otherwise.
+    """
+    if passing_jobs is None or total_jobs <= 0:
+        return "unknown"
+    return "passing" if passing_jobs >= total_jobs else "failing"
+
+
+def ci_status(
+    total_jobs: int,
+    passing_jobs: int | None = None,
+    *,
+    run_url: str | None = None,
+) -> dict[str, object]:
+    """Build the canonical CI Status dict for the metrics dashboard.
+
+    Single source of truth (Issue #159) for the ``ci_status`` mapping
+    consumed by the dashboard's CI Status card. Both
+    ``start_green_stay_green.cli`` and ``scripts/collect_metrics.py``
+    delegate here instead of rebuilding the
+    ``total_jobs``/``passing_jobs``/``percentage``/``status`` fields.
+
+    When ``passing_jobs`` is ``None`` (jobs were counted statically from
+    workflow files, so pass/fail data is unavailable) or ``total_jobs`` is
+    ``0`` (no workflows found, or the GitHub API was unreachable), the
+    status is ``"unknown"`` so the dashboard renders the gray "N/A" no-data
+    treatment instead of a red FAILING card. Otherwise the status is
+    ``"passing"`` when every job succeeded and ``"failing"`` when any job
+    did not.
+
+    Args:
+        total_jobs: Total CI jobs counted (statically or from the API).
+        passing_jobs: Jobs whose conclusion was ``success``, or ``None``
+            when pass/fail data is unavailable (static counting).
+        run_url: HTML URL of the workflow run the counts came from, when
+            the GitHub API supplied one. Omitted from the result if
+            ``None``.
+
+    Returns:
+        A ``ci_status`` mapping with ``total_jobs``, ``passing_jobs``,
+        ``percentage`` and ``status`` keys, plus ``run_url`` when provided.
+    """
+    status = _ci_status_label(total_jobs, passing_jobs)
+    resolved_passing = passing_jobs if passing_jobs is not None else 0
+    percentage = (resolved_passing / total_jobs * 100) if total_jobs > 0 else 0.0
+
+    result: dict[str, object] = {
+        "total_jobs": total_jobs,
+        "passing_jobs": resolved_passing,
+        "percentage": percentage,
+        "status": status,
+    }
+    if run_url is not None:
+        result["run_url"] = run_url
+    return result
+
+
 @dataclass(frozen=True)
 class MetricConfig:
     """Configuration for a single quality metric.
@@ -91,6 +297,14 @@ class MetricsGenerationConfig:
         debt_ratio_threshold: Max technical debt ratio (0-100).
         doc_coverage_threshold: Documentation coverage threshold (0-100).
         dependency_freshness_days: Max dependency age in days.
+        precommit_hooks_total: Total number of pre-commit hooks configured
+            (derived from ``.pre-commit-config.yaml``). Rendered as the
+            denominator of the Pre-Commit Status card's ``X/Y Hooks``
+            threshold. Defaults to 0 when no config is available.
+        ci_jobs_total: Total number of CI jobs configured (derived from
+            ``.github/workflows/*.yml``). Rendered as the denominator of
+            the CI Status card's ``X/Y Jobs`` threshold. Defaults to 0
+            when no workflows are available.
         enable_sonarqube: Whether to generate SonarQube config.
         enable_badges: Whether to generate GitHub badges.
         enable_dashboard: Whether to generate dashboard template.
@@ -107,6 +321,8 @@ class MetricsGenerationConfig:
     debt_ratio_threshold: int = 5
     doc_coverage_threshold: int = 95
     dependency_freshness_days: int = 30
+    precommit_hooks_total: int = 0
+    ci_jobs_total: int = 0
     enable_sonarqube: bool = False
     enable_badges: bool = True
     enable_dashboard: bool = True
@@ -247,6 +463,71 @@ LANGUAGE_TOOLS: dict[str, dict[str, str]] = {
         "documentation": "rustdoc",
         "security": "cargo-audit",
         "dependency_check": "cargo-outdated",
+    },
+    "swift": {
+        "coverage": "swift test --enable-code-coverage + llvm-cov",
+        "mutation": "muter",
+        "complexity": "swiftlint (cyclomatic_complexity)",
+        "documentation": "swift-docc",
+        "security": "swiftlint + periphery",
+        "dependency_check": "swift package update --dry-run",
+    },
+    "kotlin": {
+        "coverage": "kover (./gradlew koverVerifyDebug)",
+        "mutation": "pitest",
+        "complexity": "detekt (CyclomaticComplexMethod)",
+        "documentation": "dokka",
+        "security": "detekt (potential-bugs) + gitleaks",
+        "dependency_check": "OWASP dependency-check",
+    },
+    # C/C++ (#362): coverage is the gcov/lcov pipeline wired through the
+    # generated CMakeLists.txt ENABLE_COVERAGE option and gated by
+    # scripts/test.sh --coverage. Mutation testing (mull, the maintained
+    # LLVM-based mutator) is a periodic gate like pitest/muter, not a
+    # per-commit hook. Each tool appears in exactly one category:
+    # complexity is lizard's (clang-tidy does not duplicate the gate) and
+    # security is cppcheck + flawfinder per the issue's tooling list.
+    "cpp": {
+        "coverage": "lcov (cmake -DENABLE_COVERAGE=ON + ctest)",
+        "mutation": "mull",
+        "complexity": "lizard (CCN)",
+        "documentation": "doxygen",
+        "security": "cppcheck + flawfinder",
+        "dependency_check": "conan audit",
+    },
+    # Java (#367): every gate is a Maven goal backed by the #366 pom.
+    # Coverage is the pom's JaCoCo plugin (the >=90% bound lives at
+    # plugin level in pom.xml); PMD's CyclomaticComplexity rule (via the
+    # pmd-ruleset.xml companion) owns the <=10 complexity gate, so
+    # Checkstyle does not duplicate it. pitest is a periodic mutation
+    # gate like mull/muter, not a per-commit hook. Each tool appears in
+    # exactly one category: SpotBugs owns security (scripts/security.sh)
+    # and OWASP dependency-check owns dependency CVE scanning.
+    "java": {
+        "coverage": "JaCoCo (mvn jacoco:check)",
+        "mutation": "pitest",
+        "complexity": "PMD (CyclomaticComplexity, pmd-ruleset.xml)",
+        "documentation": "javadoc",
+        "security": "SpotBugs (mvn spotbugs:check)",
+        "dependency_check": "OWASP dependency-check (mvn dependency-check:check)",
+    },
+    # C# (#370): coverage is Coverlet, activated by
+    # /p:CollectCoverage=true with the >=90% bound living in the
+    # generated csproj (the JaCoCo/Kover manifest-owned precedent).
+    # The Roslyn CA1502 rule owns the <=10 complexity gate (threshold
+    # in CodeMetricsConfig.txt, enabled via .editorconfig). Stryker.NET
+    # is a periodic mutation gate like pitest/mull/muter, not a
+    # per-commit hook. Each tool appears in exactly one category:
+    # SecurityCodeScan owns source-level security (it runs as a Roslyn
+    # analyzer inside every build) and the dotnet CLI's vulnerable-
+    # package listing owns dependency CVE scanning.
+    "csharp": {
+        "coverage": "Coverlet (dotnet test /p:CollectCoverage=true)",
+        "mutation": "Stryker.NET (dotnet stryker)",
+        "complexity": "Roslyn CA1502 (CodeMetricsConfig.txt)",
+        "documentation": "DocFX",
+        "security": "SecurityCodeScan (Roslyn analyzer)",
+        "dependency_check": "dotnet list package --vulnerable",
     },
 }
 
@@ -421,6 +702,27 @@ class MetricsGenerator(BaseGenerator):
         self._validate_non_negative(
             self.config.dependency_freshness_days, "Dependency freshness days"
         )
+        self._validate_non_negative(
+            self.config.precommit_hooks_total, "Pre-commit hooks total"
+        )
+        self._validate_non_negative(self.config.ci_jobs_total, "CI jobs total")
+
+    @staticmethod
+    def count_precommit_hooks(config_path: Path) -> int:
+        """Count the total number of hooks in a pre-commit config file.
+
+        Thin wrapper around the canonical module-level
+        :func:`count_precommit_hooks`, retained for callers that reach the
+        helper through the generator class. See that function for behavior.
+
+        Args:
+            config_path: Path to a ``.pre-commit-config.yaml`` file.
+
+        Returns:
+            Total hook count, or ``0`` when the file is absent or has no
+            hooks.
+        """
+        return count_precommit_hooks(config_path)
 
     def _get_tool_for_language(self, metric_type: str) -> str:
         """Get appropriate tool for language and metric type.
@@ -613,6 +915,17 @@ class MetricsGenerator(BaseGenerator):
         # Security: HTML-escape project name to prevent XSS
         safe_project_name = html.escape(self.config.project_name)
 
+        # Pre-Commit Status baseline: render all configured hooks as passing
+        # (``X/Y Hooks``). The JS later overrides this from metrics.json.
+        precommit_total = self.config.precommit_hooks_total
+        precommit_threshold = f"{precommit_total}/{precommit_total} Hooks"
+
+        # CI Status baseline (Issue #159): render all configured jobs as the
+        # ``X/Y Jobs`` denominator. The JS later overrides this from
+        # metrics.json (or grays the card out when status is unknown).
+        ci_total = self.config.ci_jobs_total
+        ci_threshold = f"{ci_total}/{ci_total} Jobs"
+
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -699,6 +1012,10 @@ class MetricsGenerator(BaseGenerator):
             background: #da3633;
             color: #fff;
         }}
+        .status-unknown {{
+            background: #30363d;
+            color: #8b949e;
+        }}
         .footer {{
             text-align: center;
             margin-top: 3rem;
@@ -714,6 +1031,30 @@ class MetricsGenerator(BaseGenerator):
         <p class="subtitle">Quality Metrics Dashboard</p>
 
         <div class="metrics-grid">
+            <div class="metric-card" id="precommit-status">
+                <div class="metric-name">Pre-Commit Status</div>
+                <div class="metric-value" id="precommit-value">--</div>
+                <div class="metric-threshold">
+                    Threshold:
+                    <span id="precommit-threshold">{precommit_threshold}</span>
+                </div>
+                <div class="metric-status status-pass" id="precommit-status-badge">
+                    PASSING
+                </div>
+            </div>
+
+            <div class="metric-card" id="ci-status">
+                <div class="metric-name">CI Status</div>
+                <div class="metric-value" id="ci-value">--</div>
+                <div class="metric-threshold">
+                    Threshold:
+                    <span id="ci-threshold">{ci_threshold}</span>
+                </div>
+                <div class="metric-status status-pass" id="ci-status-badge">
+                    PASSING
+                </div>
+            </div>
+
             <div class="metric-card">
                 <div class="metric-name">Code Coverage</div>
                 <div class="metric-value" id="coverage-value">--</div>
@@ -735,6 +1076,17 @@ class MetricsGenerator(BaseGenerator):
             </div>
 
             <div class="metric-card">
+                <div class="metric-name">Mutation Score</div>
+                <div class="metric-value" id="mutation-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≥{self.config.mutation_threshold}%
+                </div>
+                <div class="metric-status status-pass" id="mutation-status">
+                    PASSING
+                </div>
+            </div>
+
+            <div class="metric-card">
                 <div class="metric-name">Cyclomatic Complexity</div>
                 <div class="metric-value" id="complexity-value">--</div>
                 <div class="metric-threshold">
@@ -743,6 +1095,15 @@ class MetricsGenerator(BaseGenerator):
                 <div class="metric-status status-pass" id="complexity-status">
                     PASSING
                 </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Documentation Coverage</div>
+                <div class="metric-value" id="docs-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≥{self.config.doc_coverage_threshold}%
+                </div>
+                <div class="metric-status status-pass" id="docs-status">PASSING</div>
             </div>
 
             <div class="metric-card">
@@ -828,11 +1189,17 @@ class MetricsGenerator(BaseGenerator):
             document.getElementById('last-updated').textContent =
                 new Date(data.timestamp).toLocaleString();
 
+            // Pre-Commit Status (index 0): green 100%, yellow 90-99%, red <90%
+            updatePrecommitStatus(metrics.precommit_status);
+
+            // CI Status (index 1): green 100%, yellow 85-99%, red <85%
+            updateCIStatus(metrics.ci_status);
+
             // Coverage
             if (metrics.coverage !== undefined) {{
                 if (metrics.coverage === null) {{
                     document.getElementById('coverage-value').textContent = 'N/A';
-                    updateStatus('coverage', 'NO DATA', false);
+                    updateStatus('coverage', 'N/A', false);
                 }} else {{
                     updateMetric('coverage', metrics.coverage, '%',
                         metrics.coverage >= thresholds.coverage);
@@ -843,10 +1210,22 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.branch_coverage !== undefined) {{
                 if (metrics.branch_coverage === null) {{
                     document.getElementById('branch-value').textContent = 'N/A';
-                    updateStatus('branch', 'NO DATA', false);
+                    updateStatus('branch', 'N/A', false);
                 }} else {{
                     updateMetric('branch', metrics.branch_coverage, '%',
                         metrics.branch_coverage >= thresholds.branch_coverage);
+                }}
+            }}
+
+            // Mutation Score (Issue #217): null (no .mutmut-cache in CI)
+            // renders the gray N/A treatment via updateStatus, never red.
+            if (metrics.mutation_score !== undefined) {{
+                if (metrics.mutation_score === null) {{
+                    document.getElementById('mutation-value').textContent = 'N/A';
+                    updateStatus('mutation', 'N/A', false);
+                }} else {{
+                    updateMetric('mutation', metrics.mutation_score, '%',
+                        metrics.mutation_score >= thresholds.mutation_score);
                 }}
             }}
 
@@ -854,10 +1233,22 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.complexity_avg !== undefined) {{
                 if (metrics.complexity_avg === null) {{
                     document.getElementById('complexity-value').textContent = 'N/A';
-                    updateStatus('complexity', 'NO DATA', false);
+                    updateStatus('complexity', 'N/A', false);
                 }} else {{
                     updateMetric('complexity', metrics.complexity_avg, '',
                         metrics.complexity_avg <= thresholds.complexity);
+                }}
+            }}
+
+            // Documentation Coverage (Issue #217): sourced from
+            // metrics-docs.sh (ruff D rules); null renders gray N/A.
+            if (metrics.docs_coverage !== undefined) {{
+                if (metrics.docs_coverage === null) {{
+                    document.getElementById('docs-value').textContent = 'N/A';
+                    updateStatus('docs', 'N/A', false);
+                }} else {{
+                    updateMetric('docs', metrics.docs_coverage, '%',
+                        metrics.docs_coverage >= thresholds.docs_coverage);
                 }}
             }}
 
@@ -865,7 +1256,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.security_issues !== undefined) {{
                 if (metrics.security_issues === null) {{
                     document.getElementById('security-value').textContent = 'N/A';
-                    updateStatus('security', 'NO DATA', false);
+                    updateStatus('security', 'N/A', false);
                 }} else {{
                     const elem = document.getElementById('security-value');
                     elem.textContent = metrics.security_issues;
@@ -880,7 +1271,7 @@ class MetricsGenerator(BaseGenerator):
                 if (metrics.maintainability_avg === null) {{
                     const mv = document.getElementById('maintainability-value');
                     mv.textContent = 'N/A';
-                    updateStatus('maintainability', 'NO DATA', false);
+                    updateStatus('maintainability', 'N/A', false);
                 }} else {{
                     const t = thresholds.maintainability || 20;
                     updateMetric('maintainability',
@@ -893,7 +1284,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.lint_violations !== undefined) {{
                 if (metrics.lint_violations === null) {{
                     document.getElementById('lint-value').textContent = 'N/A';
-                    updateStatus('lint', 'NO DATA', false);
+                    updateStatus('lint', 'N/A', false);
                 }} else {{
                     const elem = document.getElementById('lint-value');
                     elem.textContent = metrics.lint_violations;
@@ -907,7 +1298,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.type_errors !== undefined) {{
                 if (metrics.type_errors === null) {{
                     document.getElementById('typecheck-value').textContent = 'N/A';
-                    updateStatus('typecheck', 'NO DATA', false);
+                    updateStatus('typecheck', 'N/A', false);
                 }} else {{
                     const elem = document.getElementById('typecheck-value');
                     elem.textContent = metrics.type_errors;
@@ -921,7 +1312,7 @@ class MetricsGenerator(BaseGenerator):
             if (metrics.tests_total !== undefined) {{
                 if (metrics.tests_total === null) {{
                     document.getElementById('tests-value').textContent = 'N/A';
-                    updateStatus('tests', 'NO DATA', false);
+                    updateStatus('tests', 'N/A', false);
                 }} else {{
                     const elem = document.getElementById('tests-value');
                     const failed = metrics.tests_failed || 0;
@@ -934,6 +1325,98 @@ class MetricsGenerator(BaseGenerator):
             }}
         }}
 
+        function updatePrecommitStatus(precommit) {{
+            const valueElem = document.getElementById('precommit-value');
+            const thresholdElem = document.getElementById('precommit-threshold');
+            const badgeElem =
+                document.getElementById('precommit-status-badge');
+
+            // No-data guard (Issue #154): when there is no precommit data, or
+            // the status is 'unknown' (no .pre-commit-config.yaml), render the
+            // gray N/A treatment BEFORE the percentage thresholds so a 0%
+            // unknown card does not fall through to red FAILING.
+            if (!precommit || precommit.status === 'unknown') {{
+                valueElem.textContent = 'N/A';
+                thresholdElem.textContent = 'No data';
+                badgeElem.textContent = 'N/A';
+                badgeElem.className = 'metric-status status-unknown';
+                return;
+            }}
+
+            const total = precommit.total_hooks || 0;
+            const passing = precommit.passing_hooks || 0;
+            const percentage = (precommit.percentage !== undefined &&
+                precommit.percentage !== null)
+                ? precommit.percentage
+                : (total > 0 ? (passing / total) * 100 : 0);
+
+            valueElem.textContent = percentage.toFixed(0) + '%';
+            thresholdElem.textContent = passing + '/' + total + ' Hooks';
+
+            // Color coding per Issue #154:
+            // green (100%), yellow (90-99%), red (<90%)
+            let statusClass;
+            let statusText;
+            if (percentage >= 100) {{
+                statusClass = 'status-pass';
+                statusText = 'PASSING';
+            }} else if (percentage >= 90) {{
+                statusClass = 'status-warn';
+                statusText = 'WARNING';
+            }} else {{
+                statusClass = 'status-fail';
+                statusText = 'FAILING';
+            }}
+            badgeElem.textContent = statusText;
+            badgeElem.className = 'metric-status ' + statusClass;
+        }}
+
+        function updateCIStatus(ci) {{
+            const valueElem = document.getElementById('ci-value');
+            const thresholdElem = document.getElementById('ci-threshold');
+            const badgeElem = document.getElementById('ci-status-badge');
+
+            // No-data guard (Issue #159): when there is no CI data, or the
+            // status is 'unknown' (static workflow count or API failure),
+            // render the gray N/A treatment BEFORE the percentage
+            // thresholds so a 0% unknown card does not fall through to red
+            // FAILING.
+            if (!ci || ci.status === 'unknown') {{
+                valueElem.textContent = 'N/A';
+                thresholdElem.textContent = 'No data';
+                badgeElem.textContent = 'N/A';
+                badgeElem.className = 'metric-status status-unknown';
+                return;
+            }}
+
+            const total = ci.total_jobs || 0;
+            const passing = ci.passing_jobs || 0;
+            const percentage = (ci.percentage !== undefined &&
+                ci.percentage !== null)
+                ? ci.percentage
+                : (total > 0 ? (passing / total) * 100 : 0);
+
+            valueElem.textContent = percentage.toFixed(0) + '%';
+            thresholdElem.textContent = passing + '/' + total + ' Jobs';
+
+            // Color coding per Issue #159:
+            // green (100%), yellow (85-99%), red (<85%)
+            let statusClass;
+            let statusText;
+            if (percentage >= 100) {{
+                statusClass = 'status-pass';
+                statusText = 'PASSING';
+            }} else if (percentage >= 85) {{
+                statusClass = 'status-warn';
+                statusText = 'WARNING';
+            }} else {{
+                statusClass = 'status-fail';
+                statusText = 'FAILING';
+            }}
+            badgeElem.textContent = statusText;
+            badgeElem.className = 'metric-status ' + statusClass;
+        }}
+
         function updateMetric(name, value, suffix, passing) {{
             const elem = document.getElementById(`${{name}}-value`);
             elem.textContent = value.toFixed(2) + suffix;
@@ -942,8 +1425,17 @@ class MetricsGenerator(BaseGenerator):
 
         function updateStatus(name, text, passing) {{
             const elem = document.getElementById(`${{name}}-status`);
+            if (!elem) return;
             elem.textContent = text;
-            const statusClass = passing ? 'status-pass' : 'status-fail';
+            // No-data cards pass 'N/A' (Issue #154): map to the gray
+            // status-unknown state so a fresh project does not surface
+            // alarming red "no data" badges.
+            let statusClass;
+            if (text === 'N/A') {{
+                statusClass = 'status-unknown';
+            }} else {{
+                statusClass = passing ? 'status-pass' : 'status-fail';
+            }}
             elem.className = 'metric-status ' + statusClass;
         }}
 

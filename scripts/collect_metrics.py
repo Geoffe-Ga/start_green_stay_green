@@ -8,6 +8,11 @@ This script aggregates metrics from:
 - bandit security scanning (security-report.json)
 - quality scripts via --metrics flag (script mode)
 
+Threshold convention (Issue #206): pass/fail status is ALWAYS recomputed in
+Python from the thresholds dict (see ``_default_thresholds``). Quality
+scripts emit raw numbers; any ``status`` field they include is ignored so
+threshold ownership lives in exactly one place.
+
 Output: metrics.json in the specified output directory
 """
 
@@ -16,7 +21,10 @@ from __future__ import annotations
 import argparse
 from datetime import UTC
 from datetime import datetime
+from http import HTTPStatus
+import http.client
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -25,8 +33,159 @@ import sys
 from typing import Any
 from typing import TYPE_CHECKING
 
+from start_green_stay_green.generators.metrics import ci_status
+from start_green_stay_green.generators.metrics import count_ci_jobs
+from start_green_stay_green.generators.metrics import count_precommit_hooks
+from start_green_stay_green.generators.metrics import precommit_status
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+# GitHub REST API endpoint used by the hybrid CI Status collection
+# (Issue #159). HTTPS is enforced by construction via HTTPSConnection.
+GITHUB_API_HOST = "api.github.com"
+GITHUB_API_TIMEOUT_SECONDS = 10
+
+# ``owner/repo`` slug as provided by the GITHUB_REPOSITORY env var.
+GITHUB_REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def _github_api_json(path: str, token: str) -> object | None:
+    """Fetch a JSON payload from the GitHub REST API over HTTPS.
+
+    Args:
+        path: Request path (e.g., ``/repos/owner/repo/actions/runs``).
+        token: GitHub token used as a Bearer credential.
+
+    Returns:
+        The decoded JSON payload, or ``None`` on any network, HTTP, or
+        decoding failure (callers fall back to static counting). Tokens
+        containing interior whitespace are rejected outright —
+        ``http.client`` does not sanitize header values, so this closes
+        the header-injection path.
+    """
+    token = token.strip()
+    if not token or re.search(r"\s", token):
+        return None
+    connection = http.client.HTTPSConnection(
+        GITHUB_API_HOST, timeout=GITHUB_API_TIMEOUT_SECONDS
+    )
+    try:
+        connection.request(
+            "GET",
+            path,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "start-green-stay-green-metrics",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        response = connection.getresponse()
+        if response.status != HTTPStatus.OK:
+            return None
+        payload: object = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError, http.client.HTTPException):
+        return None
+    else:
+        return payload
+    finally:
+        connection.close()
+
+
+def _latest_main_run(runs_payload: object) -> dict[str, Any] | None:
+    """Extract the latest workflow run from a runs API payload.
+
+    Args:
+        runs_payload: Decoded JSON from the workflow-runs endpoint.
+
+    Returns:
+        The first (most recent) run mapping with an ``id``, or ``None``
+        when the payload is malformed or contains no runs.
+    """
+    if not isinstance(runs_payload, dict):
+        return None
+    runs = runs_payload.get("workflow_runs")
+    if not isinstance(runs, list) or not runs:
+        return None
+    run = runs[0]
+    if isinstance(run, dict) and "id" in run:
+        return run
+    return None
+
+
+def _job_conclusion_counts(jobs_payload: object) -> tuple[int, int] | None:
+    """Count total and successful jobs from a jobs API payload.
+
+    Conditionally-skipped jobs (``conclusion: "skipped"``) are excluded
+    from the denominator: a deploy job gated on a branch condition must
+    not drag an otherwise all-green run below 100%.
+
+    Args:
+        jobs_payload: Decoded JSON from the run-jobs endpoint.
+
+    Returns:
+        A ``(total_jobs, passing_jobs)`` tuple counting only jobs that
+        actually ran, or ``None`` when the payload is malformed.
+    """
+    if not isinstance(jobs_payload, dict):
+        return None
+    jobs = jobs_payload.get("jobs")
+    if not isinstance(jobs, list):
+        return None
+    ran_jobs = [
+        job
+        for job in jobs
+        if isinstance(job, dict) and job.get("conclusion") != "skipped"
+    ]
+    passing = sum(1 for job in ran_jobs if job.get("conclusion") == "success")
+    return (len(ran_jobs), passing)
+
+
+def _fetch_ci_status_from_api(repo: str, token: str) -> dict[str, object] | None:
+    """Fetch CI job pass/fail counts for the latest main run via GitHub API.
+
+    Queries the most recent completed workflow run on ``main`` and counts
+    job conclusions (``success`` counts as passing). Any failure — invalid
+    repo slug, network error, non-200 response, malformed payload, or no
+    completed runs — returns ``None`` so the caller falls back to static
+    workflow counting. Never raises.
+
+    Args:
+        repo: ``owner/repo`` slug (from the GITHUB_REPOSITORY env var).
+        token: GitHub token (from the GITHUB_TOKEN env var).
+
+    Returns:
+        A ``ci_status`` mapping built by the canonical helper (including
+        ``run_url``), or ``None`` when the API path is unavailable.
+    """
+    if not GITHUB_REPOSITORY_PATTERN.match(repo):
+        return None
+
+    runs_payload = _github_api_json(
+        f"/repos/{repo}/actions/runs?branch=main&status=completed&per_page=1",
+        token,
+    )
+    run = _latest_main_run(runs_payload)
+    if run is None:
+        return None
+
+    # GitHub paginates this endpoint at 100 jobs per page; runs with more
+    # jobs than that would be silently under-counted here.
+    jobs_payload = _github_api_json(
+        f"/repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100", token
+    )
+    counts = _job_conclusion_counts(jobs_payload)
+    if counts is None:
+        return None
+
+    total_jobs, passing_jobs = counts
+    run_url = run.get("html_url")
+    return ci_status(
+        total_jobs,
+        passing_jobs,
+        run_url=run_url if isinstance(run_url, str) else None,
+    )
 
 
 class MetricsCollector:
@@ -65,8 +224,8 @@ class MetricsCollector:
         cov_data = json.loads(coverage_file.read_text())
         total_cov = cov_data["totals"]["percent_covered"]
         self.metrics["coverage"] = round(total_cov, 2)
-        self.metrics["coverage_status"] = (
-            "pass" if total_cov >= self.thresholds["coverage"] else "fail"
+        self.metrics["coverage_status"] = self._compute_status(
+            total_cov, self.thresholds["coverage"]
         )
 
         # Branch coverage
@@ -75,8 +234,8 @@ class MetricsCollector:
         if num_branches > 0:
             branch_cov = (covered_branches / num_branches) * 100
             self.metrics["branch_coverage"] = round(branch_cov, 2)
-            self.metrics["branch_coverage_status"] = (
-                "pass" if branch_cov >= self.thresholds["branch_coverage"] else "fail"
+            self.metrics["branch_coverage_status"] = self._compute_status(
+                branch_cov, self.thresholds["branch_coverage"]
             )
 
     def collect_complexity(self, complexity_file: Path) -> None:
@@ -112,8 +271,8 @@ class MetricsCollector:
             raise ValueError(msg)
 
         self.metrics["complexity_avg"] = round(comp, 2)
-        self.metrics["complexity_status"] = (
-            "pass" if comp <= self.thresholds["complexity"] else "fail"
+        self.metrics["complexity_status"] = self._compute_status(
+            comp, self.thresholds["complexity"], higher_is_better=False
         )
 
     def collect_docs_coverage(self, docs_file: Path) -> None:
@@ -150,8 +309,8 @@ class MetricsCollector:
             raise ValueError(msg)
 
         self.metrics["docs_coverage"] = round(docs, 2)
-        self.metrics["docs_status"] = (
-            "pass" if docs >= self.thresholds["docs_coverage"] else "fail"
+        self.metrics["docs_status"] = self._compute_status(
+            docs, self.thresholds["docs_coverage"]
         )
 
     def collect_security(self, security_file: Path) -> None:
@@ -172,9 +331,50 @@ class MetricsCollector:
         security_data = json.loads(security_file.read_text())
         issues = len(security_data["results"])
         self.metrics["security_issues"] = issues
-        self.metrics["security_status"] = (
-            "pass" if issues == self.thresholds["security_issues"] else "fail"
+        self.metrics["security_status"] = self._compute_status(
+            issues, self.thresholds["security_issues"], higher_is_better=False
         )
+
+    def collect_precommit_status(self, config_path: Path) -> None:
+        """Collect pre-commit hooks status from the config file (Issue #154).
+
+        Counts the total hooks configured in ``.pre-commit-config.yaml`` and
+        records a ``precommit_status`` entry with ``total_hooks``,
+        ``passing_hooks``, ``percentage`` and ``status``. Because running
+        ``pre-commit run --all-files`` is expensive and CI already gates on
+        it, this treats configured hooks as passing; a missing or empty
+        config degrades gracefully to zero hooks with ``unknown`` status.
+
+        Args:
+            config_path: Path to the ``.pre-commit-config.yaml`` file.
+        """
+        total = count_precommit_hooks(config_path)
+        self.metrics["precommit_status"] = precommit_status(total)
+
+    def collect_ci_status(self, workflows_dir: Path) -> None:
+        """Collect CI job status using the hybrid API/static strategy (#159).
+
+        When ``GITHUB_TOKEN`` and ``GITHUB_REPOSITORY`` are available
+        (GitHub Actions), the latest completed workflow run on ``main`` is
+        queried via the GitHub API and job conclusions are counted
+        (``success`` counts as passing), including the run URL. On any API
+        failure — or outside CI — this degrades to statically counting jobs
+        across ``.github/workflows/*.yml`` with ``unknown`` status (pass or
+        fail cannot be known statically). Never raises.
+
+        Args:
+            workflows_dir: Path to the ``.github/workflows`` directory used
+                for the static fallback count.
+        """
+        token = os.environ.get("GITHUB_TOKEN")
+        repo = os.environ.get("GITHUB_REPOSITORY")
+
+        status: dict[str, object] | None = None
+        if token and repo:
+            status = _fetch_ci_status_from_api(repo, token)
+        if status is None:
+            status = ci_status(count_ci_jobs(workflows_dir))
+        self.metrics["ci_status"] = status
 
     def add_mutation_score(self, score: float) -> None:
         """Add mutation testing score.
@@ -183,8 +383,8 @@ class MetricsCollector:
             score: Mutation score (0-100)
         """
         self.metrics["mutation_score"] = score
-        self.metrics["mutation_status"] = (
-            "pass" if score >= self.thresholds["mutation_score"] else "fail"
+        self.metrics["mutation_status"] = self._compute_status(
+            score, self.thresholds["mutation_score"]
         )
 
     def _set_mutation_unknown(self) -> None:
@@ -263,8 +463,8 @@ class MetricsCollector:
         if total > 0:
             score = round((killed / total) * 100, 1)
             self.metrics["mutation_score"] = score
-            self.metrics["mutation_status"] = (
-                "pass" if score >= self.thresholds["mutation_score"] else "fail"
+            self.metrics["mutation_status"] = self._compute_status(
+                score, self.thresholds["mutation_score"]
             )
         else:
             self._set_mutation_unknown()
@@ -306,52 +506,125 @@ class MetricsCollector:
     def collect_lint_metrics(self, scripts_dir: Path) -> None:
         """Collect lint metrics via lint.sh --metrics.
 
+        Status is recomputed from the ``lint_violations`` threshold; any
+        ``status`` field emitted by the script is ignored (Issue #206).
+
         Args:
             scripts_dir: Directory containing quality scripts
         """
         data = self.collect_from_script("lint.sh", scripts_dir)
-        if data is not None:
-            self.metrics["lint_violations"] = data.get("violations", 0)
-            self.metrics["lint_status"] = data.get("status", "unknown")
-        else:
-            self.metrics["lint_violations"] = None
-            self.metrics["lint_status"] = "unknown"
+        violations = data.get("violations") if data is not None else None
+        self.metrics["lint_violations"] = violations
+        self.metrics["lint_status"] = self._compute_status(
+            violations, self.thresholds["lint_violations"], higher_is_better=False
+        )
 
     def collect_typecheck_metrics(self, scripts_dir: Path) -> None:
         """Collect type checking metrics via typecheck.sh --metrics.
+
+        Status is recomputed from the ``type_errors`` threshold; any
+        ``status`` field emitted by the script is ignored (Issue #206).
 
         Args:
             scripts_dir: Directory containing quality scripts
         """
         data = self.collect_from_script("typecheck.sh", scripts_dir)
-        if data is not None:
-            self.metrics["type_errors"] = data.get("errors", 0)
-            self.metrics["typecheck_status"] = data.get("status", "unknown")
-        else:
-            self.metrics["type_errors"] = None
-            self.metrics["typecheck_status"] = "unknown"
+        errors = data.get("errors") if data is not None else None
+        self.metrics["type_errors"] = errors
+        self.metrics["typecheck_status"] = self._compute_status(
+            errors, self.thresholds["type_errors"], higher_is_better=False
+        )
+
+    def collect_security_metrics(self, scripts_dir: Path) -> None:
+        """Collect security metrics via security.sh --metrics.
+
+        Status is recomputed from the ``security_issues`` threshold; any
+        ``status`` field emitted by the script is ignored (Issue #206). A
+        null ``bandit_issues`` value (scan failed) yields ``unknown``.
+
+        Args:
+            scripts_dir: Directory containing quality scripts
+        """
+        data = self.collect_from_script("security.sh", scripts_dir)
+        issues = data.get("bandit_issues") if data is not None else None
+        self.metrics["security_issues"] = issues
+        self.metrics["security_status"] = self._compute_status(
+            issues, self.thresholds["security_issues"], higher_is_better=False
+        )
+
+    def collect_docs_metrics(self, scripts_dir: Path, docs_file: Path) -> None:
+        """Collect documentation coverage via metrics-docs.sh --metrics (#217).
+
+        Runs the canonical docstring-coverage script (ruff D rules over an
+        AST item count) and recomputes status from the ``docs_coverage``
+        threshold (Issue #206). When the script yields no usable payload,
+        falls back to parsing a pre-generated report file; if that also
+        fails, the metric degrades to ``None``/``unknown``.
+
+        Args:
+            scripts_dir: Directory containing quality scripts
+            docs_file: Fallback docs report file (e.g., docs-report.txt)
+        """
+        data = self.collect_from_script("metrics-docs.sh", scripts_dir)
+        pct = data.get("docs_coverage_pct") if data is not None else None
+        if pct is None and docs_file.exists():
+            try:
+                self.collect_docs_coverage(docs_file)
+            except ValueError:
+                pct = None
+            else:
+                return
+        self.metrics["docs_coverage"] = pct
+        self.metrics["docs_status"] = self._compute_status(
+            pct, self.thresholds["docs_coverage"]
+        )
+
+    def collect_coverage_metrics(self, scripts_dir: Path) -> None:
+        """Collect coverage metrics via coverage.sh --metrics.
+
+        Status is recomputed from the ``coverage`` and ``branch_coverage``
+        thresholds; any ``status`` field emitted by the script is ignored
+        (Issue #206). Missing raw percentages yield ``unknown``.
+
+        Args:
+            scripts_dir: Directory containing quality scripts
+        """
+        data = self.collect_from_script("coverage.sh", scripts_dir)
+        cov_pct = data.get("coverage_pct") if data is not None else None
+        branch_pct = data.get("branch_coverage_pct") if data is not None else None
+        self.metrics["coverage"] = cov_pct
+        self.metrics["coverage_status"] = self._compute_status(
+            cov_pct, self.thresholds["coverage"]
+        )
+        self.metrics["branch_coverage"] = branch_pct
+        self.metrics["branch_coverage_status"] = self._compute_status(
+            branch_pct, self.thresholds["branch_coverage"]
+        )
 
     def collect_test_metrics(self, scripts_dir: Path) -> None:
         """Collect test count metrics via test.sh --metrics.
+
+        Status is recomputed from raw counts; any ``status`` field emitted
+        by the script is ignored (Issue #206). Tests have no tunable
+        threshold: any failed test is a failure, and zero collected tests
+        (a broken suite) or missing counts yield ``unknown``.
 
         Args:
             scripts_dir: Directory containing quality scripts
         """
         data = self.collect_from_script("test.sh", scripts_dir)
-        if data is not None:
-            self.metrics["tests_total"] = data.get("tests_total", 0)
-            self.metrics["tests_passed"] = data.get("tests_passed", 0)
-            self.metrics["tests_failed"] = data.get("tests_failed", 0)
-            self.metrics["tests_skipped"] = data.get("tests_skipped", 0)
-            self.metrics["tests_status"] = data.get(
-                "status", "pass" if data.get("tests_failed", 0) == 0 else "fail"
-            )
-        else:
-            self.metrics["tests_total"] = None
-            self.metrics["tests_passed"] = None
-            self.metrics["tests_failed"] = None
-            self.metrics["tests_skipped"] = None
+        if data is None:
+            data = {}
+        total = data.get("tests_total")
+        failed = data.get("tests_failed")
+        self.metrics["tests_total"] = total
+        self.metrics["tests_passed"] = data.get("tests_passed")
+        self.metrics["tests_failed"] = failed
+        self.metrics["tests_skipped"] = data.get("tests_skipped")
+        if not total or failed is None:
             self.metrics["tests_status"] = "unknown"
+        else:
+            self.metrics["tests_status"] = "pass" if failed == 0 else "fail"
 
     def collect_complexity_from_script(self, scripts_dir: Path) -> None:
         """Collect complexity metrics via complexity.sh --metrics.
@@ -370,7 +643,7 @@ class MetricsCollector:
             )
             self.metrics["maintainability_avg"] = mi_avg
             self.metrics["maintainability_status"] = self._compute_status(
-                mi_avg, self.thresholds.get("maintainability", 20)
+                mi_avg, self.thresholds["maintainability"]
             )
         else:
             self.metrics["complexity_avg"] = None
@@ -397,7 +670,15 @@ class MetricsCollector:
 
 
 def _default_thresholds() -> dict[str, int | float]:
-    """Return default quality thresholds aligned with SGSG standards."""
+    """Return default quality thresholds aligned with SGSG standards.
+
+    This is the single source of truth for pass/fail thresholds
+    (Issue #206): every status in metrics.json is computed from these
+    values, never from a quality script's own hardcoded threshold.
+
+    Returns:
+        Mapping of metric name to its pass/fail threshold.
+    """
     return {
         "coverage": 90,
         "branch_coverage": 85,
@@ -408,70 +689,32 @@ def _default_thresholds() -> dict[str, int | float]:
         "maintainability": 20,
         "lint_violations": 0,
         "type_errors": 0,
-        "tests_total": 0,
     }
 
 
 def _collect_script_mode(
     collector: MetricsCollector,
     args: argparse.Namespace,
-    thresholds: dict[str, int | float],
 ) -> None:
     """Collect metrics using script mode (--metrics flag on each script).
 
     Args:
         collector: MetricsCollector instance
         args: Parsed CLI arguments
-        thresholds: Quality thresholds
     """
     scripts_dir = args.scripts_dir
 
     # Coverage via script
-    cov_data = collector.collect_from_script("coverage.sh", scripts_dir)
-    if cov_data is not None:
-        cov_pct = cov_data.get("coverage_pct")
-        if cov_pct is not None:
-            collector.metrics["coverage"] = cov_pct
-            collector.metrics["coverage_status"] = (
-                "pass" if cov_pct >= thresholds["coverage"] else "fail"
-            )
-        else:
-            collector.metrics["coverage"] = None
-            collector.metrics["coverage_status"] = "unknown"
-        branch_pct = cov_data.get("branch_coverage_pct")
-        if branch_pct is not None:
-            collector.metrics["branch_coverage"] = branch_pct
-            collector.metrics["branch_coverage_status"] = (
-                "pass" if branch_pct >= thresholds["branch_coverage"] else "fail"
-            )
-        else:
-            collector.metrics["branch_coverage"] = None
-            collector.metrics["branch_coverage_status"] = "unknown"
-    else:
-        collector.metrics["coverage"] = None
-        collector.metrics["coverage_status"] = "unknown"
-        collector.metrics["branch_coverage"] = None
-        collector.metrics["branch_coverage_status"] = "unknown"
+    collector.collect_coverage_metrics(scripts_dir)
 
     # Complexity + Maintainability via script
     collector.collect_complexity_from_script(scripts_dir)
 
-    # Docs coverage via file
-    try:
-        collector.collect_docs_coverage(args.docs_file)
-    except (FileNotFoundError, ValueError) as e:
-        print(f"Warning: Could not parse docs coverage ({type(e).__name__}): {e}")
-        collector.metrics["docs_coverage"] = None
-        collector.metrics["docs_status"] = "unknown"
+    # Docs coverage via script (Issue #217), report-file fallback
+    collector.collect_docs_metrics(scripts_dir, args.docs_file)
 
     # Security via script
-    sec_data = collector.collect_from_script("security.sh", scripts_dir)
-    if sec_data is not None:
-        collector.metrics["security_issues"] = sec_data.get("bandit_issues", 0)
-        collector.metrics["security_status"] = sec_data.get("status", "unknown")
-    else:
-        collector.metrics["security_issues"] = None
-        collector.metrics["security_status"] = "unknown"
+    collector.collect_security_metrics(scripts_dir)
 
     # Mutation score: read SQLite cache directly (not mutation.sh --metrics)
     # because running mutmut is expensive; the cache already has results.
@@ -481,6 +724,12 @@ def _collect_script_mode(
     collector.collect_lint_metrics(scripts_dir)
     collector.collect_typecheck_metrics(scripts_dir)
     collector.collect_test_metrics(scripts_dir)
+
+    # Pre-Commit Status (Issue #154): derived from .pre-commit-config.yaml
+    collector.collect_precommit_status(Path(".pre-commit-config.yaml"))
+
+    # CI Status (Issue #159): GitHub API when available, static otherwise
+    collector.collect_ci_status(Path(".github/workflows"))
 
 
 def _collect_file_mode(
@@ -518,6 +767,12 @@ def _collect_file_mode(
         print(f"Warning: Could not parse security ({type(e).__name__}): {e}")
         collector.metrics["security_issues"] = None
         collector.metrics["security_status"] = "unknown"
+
+    # Pre-Commit Status (Issue #154): derived from .pre-commit-config.yaml
+    collector.collect_precommit_status(Path(".pre-commit-config.yaml"))
+
+    # CI Status (Issue #159): GitHub API when available, static otherwise
+    collector.collect_ci_status(Path(".github/workflows"))
 
     _collect_mutation(collector, args)
 
@@ -609,7 +864,7 @@ def main() -> int:
     collector = MetricsCollector(args.project_name, thresholds)
 
     if args.metrics_mode == "script":
-        _collect_script_mode(collector, args, thresholds)
+        _collect_script_mode(collector, args)
     else:
         _collect_file_mode(collector, args)
 

@@ -360,6 +360,48 @@ class TestInitFlowIntegration:
         assert "test-claude-md-project" in content
         assert len(content) > 50
 
+    def test_init_generates_modular_claude_docs(self, tmp_path: Path) -> None:
+        """Test init creates the modular ``.claude/docs`` tree (#397).
+
+        The real (no-orchestrator) generator runs here so the split docs
+        are emitted alongside the root index.
+        """
+        runner = CliRunner()
+        runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-modular-claude",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-interactive",
+            ],
+        )
+
+        project_path = tmp_path / "test-modular-claude"
+        index = project_path / "CLAUDE.md"
+        assert index.exists()
+        index_text = index.read_text()
+        assert "test-modular-claude" in index_text
+
+        docs_dir = project_path / ".claude" / "docs"
+        expected_docs = (
+            "principles",
+            "quality-standards",
+            "workflow",
+            "testing",
+            "tools",
+            "troubleshooting",
+        )
+        for name in expected_docs:
+            doc = docs_dir / f"{name}.md"
+            assert doc.exists(), f"Missing split doc: {name}.md"
+            # Index links to each split doc (DRY).
+            assert f".claude/docs/{name}.md" in index_text
+
     def test_init_generates_skills_directory(self, tmp_path: Path) -> None:
         """Test init creates .claude/skills directory with skill files.
 

@@ -14,6 +14,14 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.cpp import TIZEN_API_VERSION
+from start_green_stay_green.utils.cpp import cpp_identifier
+from start_green_stay_green.utils.cpp import tizen_app_id
+from start_green_stay_green.utils.csharp import csharp_namespace
+from start_green_stay_green.utils.java import android_package
+from start_green_stay_green.utils.java import android_package_path
+from start_green_stay_green.utils.naming import pascal_case
+from start_green_stay_green.utils.swift import package_swift
 
 if TYPE_CHECKING:
     from start_green_stay_green.utils.file_writer import FileWriter
@@ -56,10 +64,13 @@ class StructureGenerator(BaseGenerator):
     This generator creates the source code directory structure (package directory,
     __init__.py, Hello World starter code) for the target project's language.
 
-    All 7 supported languages (python, typescript, go, rust, java, csharp, ruby)
-    are available at the generator level. Note that java, csharp, and ruby are
-    not yet supported by the full CLI pipeline (``sgsg init``) because
-    PreCommitGenerator does not yet handle those languages.
+    All 10 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift, kotlin, cpp) are available at the generator level. Note that
+    the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
+    architecture, and metrics steps for ruby —
+    the CI workflow step covers every language. Kotlin (#357/#358),
+    C/C++ (#362/#363), Java (#366/#367), and C# (#370) run the full
+    pipeline.
 
     Attributes:
         output_dir: Directory where structure will be created
@@ -132,6 +143,9 @@ class StructureGenerator(BaseGenerator):
             "java": self._generate_java_structure,
             "csharp": self._generate_csharp_structure,
             "ruby": self._generate_ruby_structure,
+            "swift": self._generate_swift_structure,
+            "kotlin": self._generate_kotlin_structure,
+            "cpp": self._generate_cpp_structure,
         }
         return generators[self.config.language]()
 
@@ -542,71 +556,217 @@ edition = "2021"
 """
 
     def _generate_java_structure(self) -> dict[str, Path]:
-        """Generate Java project structure.
+        """Generate the Java legacy Android Wear project structure (#366).
+
+        Creates the two-build split layout proven by the C/C++ Tizen
+        scaffold (#361): the pure-logic ``Greeting`` class under
+        ``src/main/java/`` is compiled and unit-tested by the Maven build
+        (``pom.xml``, owned by
+        :class:`~start_green_stay_green.generators.dependencies.DependenciesGenerator`),
+        while the watch-app module under ``app/src/main/`` — the
+        ``AndroidManifest.xml`` with the watch ``uses-feature`` and
+        standalone metadata, a ``MainActivity`` rendered through an
+        ``androidx.wear.widget.BoxInsetLayout`` layout, and the layout
+        XML itself — needs the Android SDK and is built with Android
+        tooling (Android Studio / Gradle) the generator does not scaffold.
 
         Returns:
             Dictionary mapping file names to file paths
         """
         files: dict[str, Path] = {}
 
-        # Create src/main/java/{package_name} directory
-        java_dir = self.output_dir / "src" / "main" / "java" / self.config.package_name
-        java_dir.mkdir(parents=True, exist_ok=True)
+        package_path = android_package_path(self.config.package_name)
 
-        # Generate Main.java
-        main_key = f"src/main/java/{self.config.package_name}/Main.java"
-        files[main_key] = self._write_file(
-            java_dir / "Main.java",
-            self._java_main_java(),
+        # Pure logic: compiled and tested by the Maven build (pom.xml).
+        logic_dir = self.output_dir / "src" / "main" / "java" / package_path
+        logic_dir.mkdir(parents=True, exist_ok=True)
+        files[f"src/main/java/{package_path}/Greeting.java"] = self._write_file(
+            logic_dir / "Greeting.java",
+            self._java_greeting_java(),
         )
 
-        # Generate pom.xml
-        pom_key = "pom.xml"
-        files[pom_key] = self._write_file(
-            self.output_dir / "pom.xml",
-            self._java_pom_xml(),
+        # Wear OS app module: built with Android tooling, not Maven.
+        main_dir = self.output_dir / "app" / "src" / "main"
+        source_dir = main_dir / "java" / package_path
+        layout_dir = main_dir / "res" / "layout"
+        source_dir.mkdir(parents=True, exist_ok=True)
+        layout_dir.mkdir(parents=True, exist_ok=True)
+
+        files["app/src/main/AndroidManifest.xml"] = self._write_file(
+            main_dir / "AndroidManifest.xml",
+            self._java_android_manifest(),
+        )
+        files[f"app/src/main/java/{package_path}/MainActivity.java"] = self._write_file(
+            source_dir / "MainActivity.java",
+            self._java_main_activity(),
+        )
+        files["app/src/main/res/layout/activity_main.xml"] = self._write_file(
+            layout_dir / "activity_main.xml",
+            self._java_activity_layout(),
         )
 
         return files
 
-    def _java_main_java(self) -> str:
-        """Generate Java Main.java content.
+    def _java_greeting_java(self) -> str:
+        """Generate the pure-logic ``Greeting.java``.
 
         Returns:
-            Content for Main.java with Hello World
+            Content for the greeting assembly class. It has no Android
+            imports, so the Maven build (``pom.xml``) compiles and
+            unit-tests it on any host — including the generated CI
+            pipeline's runners — without the Android SDK.
         """
-        return f"""package {self.config.package_name};
+        package = android_package(self.config.package_name)
+        return f"""package {package};
 
-public class Main {{
-    public static void main(String[] args) {{
-        System.out.println("Hello from {self.config.project_name}!");
+/**
+ * Assembles the greeting shown on the watch face.
+ *
+ * <p>Pure logic with no Android imports: the Maven build (pom.xml)
+ * compiles and unit-tests this class on any host without the Android
+ * SDK. The Wear OS app module under app/ consumes it too — see the
+ * README section "The two builds".</p>
+ */
+public final class Greeting {{
+
+    private Greeting() {{
+        // Static utility class: not instantiable.
+    }}
+
+    /**
+     * Returns the greeting assembled from the project name.
+     *
+     * @param projectName the name to greet from
+     * @return the assembled greeting, e.g. {{@code "Hello from wear!"}}
+     */
+    public static String greet(final String projectName) {{
+        return "Hello from " + projectName + "!";
     }}
 }}
 """
 
-    def _java_pom_xml(self) -> str:
-        """Generate Java pom.xml content.
+    def _java_android_manifest(self) -> str:
+        """Generate the legacy Android Wear ``AndroidManifest.xml``.
 
         Returns:
-            Content for pom.xml
+            Manifest content declaring the watch hardware feature (the
+            ``wear`` device profile), the wearable shared library, the
+            standalone-app metadata (installable without a phone
+            companion), and the launcher ``MainActivity``. Unlike the
+            Kotlin scaffold (#356) the ``package`` attribute is declared
+            here: no Gradle manifests are generated for the Java app
+            module (see the two-builds split), so the manifest is the
+            single home of the application ID.
         """
-        return f"""<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
-                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
+        package = android_package(self.config.package_name)
+        return f"""<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy Android Wear manifest. The package attribute doubles as the
+     application ID: the generator scaffolds no Gradle build for the app
+     module (see the README section "The two builds"), so there is no
+     build.gradle namespace to declare it in. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="{package}">
 
-    <groupId>{self.config.package_name}</groupId>
-    <artifactId>{self.config.package_name}</artifactId>
-    <version>0.1.0</version>
+    <!-- Wear device profile: this app installs only on watches. -->
+    <uses-feature android:name="android.hardware.type.watch" />
 
-    <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    </properties>
-</project>
+    <application
+        android:label="{self.config.project_name}"
+        android:theme="@android:style/Theme.DeviceDefault">
+
+        <!-- Wearable shared library (legacy Android Wear). -->
+        <uses-library
+            android:name="com.google.android.wearable"
+            android:required="true" />
+
+        <!-- Standalone Wear OS app: installable without a phone companion. -->
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+"""
+
+    def _java_main_activity(self) -> str:
+        """Generate the legacy Android Wear ``MainActivity.java``.
+
+        Uses a plain :class:`android.app.Activity` rendering the
+        ``androidx.wear.widget.BoxInsetLayout`` layout — the maintained
+        view-based path for legacy Java watch apps, since
+        ``WearableActivity`` is deprecated. The greeting is assembled by
+        the pure-logic ``Greeting`` class so the generated JUnit 4
+        scaffold exercises real logic on the JVM without an emulator.
+
+        Returns:
+            Content for the Wear OS entry-point activity source file.
+        """
+        package = android_package(self.config.package_name)
+        return f"""package {package};
+
+import android.app.Activity;
+import android.os.Bundle;
+import android.widget.TextView;
+
+/**
+ * Wear OS entry point for {self.config.project_name} (legacy Android Wear).
+ *
+ * <p>Renders res/layout/activity_main.xml, whose root is an
+ * androidx.wear.widget.BoxInsetLayout — the maintained view-based
+ * layout for round watch faces (WearableActivity is deprecated).</p>
+ *
+ * <p>THE TWO BUILDS: this file needs the Android SDK and the
+ * androidx.wear AAR, so it is built with Android tooling
+ * (Android Studio / Gradle) — NOT by the Maven build, which covers
+ * only the pure logic in src/main/java/. When assembling the Android
+ * build, add src/main/java/ as a source root so this activity can
+ * resolve {{@link Greeting}}. See the README section "The two builds".</p>
+ */
+public class MainActivity extends Activity {{
+
+    @Override
+    protected void onCreate(final Bundle savedInstanceState) {{
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        final TextView greetingView = findViewById(R.id.greeting);
+        greetingView.setText(Greeting.greet("{self.config.project_name}"));
+    }}
+}}
+"""
+
+    def _java_activity_layout(self) -> str:
+        """Generate ``res/layout/activity_main.xml`` for the Wear app.
+
+        Returns:
+            Layout XML rooted at ``androidx.wear.widget.BoxInsetLayout``,
+            which keeps the greeting ``TextView`` inside the visible
+            square of round watch faces (``boxedEdges="all"``).
+        """
+        return """<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy Android Wear layout: BoxInsetLayout (androidx.wear.widget)
+     keeps content inside the visible square of round watch faces. -->
+<androidx.wear.widget.BoxInsetLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <TextView
+        android:id="@+id/greeting"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:textAppearance="@android:style/TextAppearance.DeviceDefault"
+        app:boxedEdges="all" />
+</androidx.wear.widget.BoxInsetLayout>
 """
 
     def _generate_csharp_structure(self) -> dict[str, Path]:
@@ -633,16 +793,25 @@ public class Main {{
     def _csharp_program_cs(self) -> str:
         """Generate C# Program.cs content.
 
+        The namespace comes from the shared
+        :func:`~start_green_stay_green.utils.csharp.csharp_namespace`
+        helper so the structure, tests, and architecture generators can
+        never disagree on it, and ``Main`` is public because the
+        scaffolded xUnit test (``tests/MainTests.cs``) invokes it
+        directly — an implicitly private ``Main`` would be a guaranteed
+        compile error in the generated project (#370).
+
         Returns:
             Content for Program.cs with Hello World
         """
+        namespace = csharp_namespace(self.config.package_name)
         return f"""using System;
 
-namespace {self.config.package_name}
+namespace {namespace}
 {{
     class Program
     {{
-        static void Main(string[] args)
+        public static void Main(string[] args)
         {{
             Console.WriteLine("Hello from {self.config.project_name}!");
         }}
@@ -716,4 +885,497 @@ source "https://rubygems.org"
 gem "rake", "~> 13.0"
 gem "rspec", "~> 3.0"
 gem "rubocop", "~> 1.0"
+"""
+
+    def _generate_swift_structure(self) -> dict[str, Path]:
+        """Generate Swift watchOS project structure.
+
+        Creates a Swift Package Manager layout with a SwiftUI + WatchKit
+        watchOS app target: an ``@main`` App entry point and a ``ContentView``
+        under ``Sources/{package_name}/``, plus the ``Package.swift`` manifest.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        # Create Sources/{package_name} directory for the watchOS app target
+        source_dir = self.output_dir / "Sources" / self.config.package_name
+        source_dir.mkdir(parents=True, exist_ok=True)
+
+        type_name = pascal_case(self.config.package_name)
+
+        # Generate the SwiftUI @main App entry point
+        app_key = f"Sources/{self.config.package_name}/{type_name}App.swift"
+        files[app_key] = self._write_file(
+            source_dir / f"{type_name}App.swift",
+            self._swift_app_swift(type_name),
+        )
+
+        # Generate the SwiftUI ContentView
+        view_key = f"Sources/{self.config.package_name}/ContentView.swift"
+        files[view_key] = self._write_file(
+            source_dir / "ContentView.swift",
+            self._swift_content_view_swift(),
+        )
+
+        # Generate the SPM manifest
+        package_key = "Package.swift"
+        files[package_key] = self._write_file(
+            self.output_dir / "Package.swift",
+            self._swift_package_swift(),
+        )
+
+        return files
+
+    def _swift_app_swift(self, type_name: str) -> str:
+        """Generate the SwiftUI watchOS App entry point.
+
+        Args:
+            type_name: PascalCase prefix used for the App struct name.
+
+        Returns:
+            Content for the ``@main`` SwiftUI App source file. The
+            ``@main`` attribute is gated behind ``#if os(watchOS)``:
+            ``swift test`` links the package's test runner *executable*
+            on the host platform, and a second entry point in the app
+            target collides with the runner's ``main`` symbol (duplicate
+            ``_main`` link error). On watchOS the entry point is intact;
+            on the macOS test host the type compiles as plain,
+            testable code.
+        """
+        return f"""import SwiftUI
+
+// watchOS entry point: shows "Hello from {self.config.project_name}!"
+// @main only applies on watchOS: the macOS host build that `swift test`
+// performs links SwiftPM's test runner executable, and a second entry
+// point would collide with the runner's own `main` symbol.
+#if os(watchOS)
+@main
+#endif
+struct {type_name}App: App {{
+    @SceneBuilder var body: some Scene {{
+        WindowGroup {{
+            ContentView()
+        }}
+    }}
+}}
+"""
+
+    def _swift_content_view_swift(self) -> str:
+        """Generate the SwiftUI ContentView for the watchOS app.
+
+        Returns:
+            Content for the ``ContentView`` SwiftUI source file.
+        """
+        return f"""import SwiftUI
+
+struct ContentView: View {{
+    var body: some View {{
+        Text("Hello from {self.config.project_name}!")
+            .padding()
+    }}
+}}
+
+#Preview {{
+    ContentView()
+}}
+"""
+
+    def _swift_package_swift(self) -> str:
+        """Generate the Swift Package Manager manifest for watchOS.
+
+        Delegates to the shared :func:`~start_green_stay_green.utils.swift.\
+package_swift` helper so the structure and dependency generators emit an
+        identical manifest from one source of truth.
+
+        Returns:
+            Content for ``Package.swift`` declaring a watchOS app target.
+        """
+        return package_swift(self.config.package_name)
+
+    def _generate_kotlin_structure(self) -> dict[str, Path]:
+        """Generate the Kotlin Wear OS project structure (#356).
+
+        Creates the Android app module source tree: an ``AndroidManifest.xml``
+        declaring the ``wear`` device profile (watch hardware feature plus the
+        standalone-app metadata) and a ``MainActivity`` built with Jetpack
+        Compose for Wear OS under ``app/src/main/kotlin/``. The Gradle
+        (Kotlin DSL) manifests are owned by
+        :class:`~start_green_stay_green.generators.dependencies.DependenciesGenerator`.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        package_path = android_package_path(self.config.package_name)
+
+        # Create app/src/main/kotlin/<package>/ for the Wear OS app module
+        main_dir = self.output_dir / "app" / "src" / "main"
+        source_dir = main_dir / "kotlin" / package_path
+        source_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate the Wear OS AndroidManifest.xml
+        manifest_key = "app/src/main/AndroidManifest.xml"
+        files[manifest_key] = self._write_file(
+            main_dir / "AndroidManifest.xml",
+            self._kotlin_android_manifest(),
+        )
+
+        # Generate the Compose-for-Wear-OS MainActivity
+        activity_key = f"app/src/main/kotlin/{package_path}/MainActivity.kt"
+        files[activity_key] = self._write_file(
+            source_dir / "MainActivity.kt",
+            self._kotlin_main_activity(),
+        )
+
+        return files
+
+    def _kotlin_android_manifest(self) -> str:
+        """Generate the Wear OS ``AndroidManifest.xml``.
+
+        Returns:
+            Manifest content declaring the watch hardware feature (the
+            ``wear`` device profile), the wearable shared library, the
+            standalone-app metadata (installable without a phone
+            companion), and the launcher ``MainActivity``. The package
+            namespace is declared in ``app/build.gradle.kts`` (AGP 8+
+            convention), not here.
+        """
+        return f"""<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Wear device profile: this app installs only on watches. -->
+    <uses-feature android:name="android.hardware.type.watch" />
+
+    <application
+        android:label="{self.config.project_name}"
+        android:theme="@android:style/Theme.DeviceDefault">
+
+        <uses-library
+            android:name="com.google.android.wearable"
+            android:required="true" />
+
+        <!-- Standalone Wear OS app: installable without a phone companion. -->
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.DeviceDefault">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+"""
+
+    def _kotlin_main_activity(self) -> str:
+        """Generate the Compose-for-Wear-OS ``MainActivity.kt``.
+
+        The greeting is assembled by a top-level ``greeting`` function so
+        the generated JUnit scaffold can exercise real interpolation logic
+        on the JVM without Robolectric or an emulator.
+
+        Returns:
+            Content for the Wear OS entry-point activity source file.
+        """
+        package = android_package(self.config.package_name)
+        return f"""package {package}
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.wear.compose.material.MaterialTheme
+import androidx.wear.compose.material.Text
+
+/** Returns the greeting assembled from the project name. */
+fun greeting(projectName: String): String = "Hello from $projectName!"
+
+/** Wear OS entry point hosting the Compose UI. */
+class MainActivity : ComponentActivity() {{
+    override fun onCreate(savedInstanceState: Bundle?) {{
+        super.onCreate(savedInstanceState)
+        setContent {{ WearApp() }}
+    }}
+}}
+
+/** Root composable: centers the greeting on the round watch face. */
+@Composable
+fun WearApp() {{
+    MaterialTheme {{
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {{
+            Text(text = greeting("{self.config.project_name}"))
+        }}
+    }}
+}}
+"""
+
+    def _generate_cpp_structure(self) -> dict[str, Path]:
+        """Generate the C/C++ Tizen native watch-app structure (#361).
+
+        Creates the Tizen native source tree: a watch-app entry point
+        (``src/main.cpp``, appcore ``watch_app`` lifecycle + EFL UI), a
+        pure-logic translation unit (``src/greeting.cpp`` with its header
+        ``inc/greeting.h``) that the Catch2 scaffold unit-tests without
+        Tizen Studio, the ``tizen-manifest.xml`` watch-application
+        manifest (wearable profile), and resource-placeholder notes under
+        ``res/`` and ``shared/res/``. The CMake/Conan build manifests are
+        owned by
+        :class:`~start_green_stay_green.generators.dependencies.DependenciesGenerator`.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        src_dir = self.output_dir / "src"
+        inc_dir = self.output_dir / "inc"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        inc_dir.mkdir(parents=True, exist_ok=True)
+
+        files["src/main.cpp"] = self._write_file(
+            src_dir / "main.cpp", self._cpp_main_cpp()
+        )
+        files["src/greeting.cpp"] = self._write_file(
+            src_dir / "greeting.cpp", self._cpp_greeting_cpp()
+        )
+        files["inc/greeting.h"] = self._write_file(
+            inc_dir / "greeting.h", self._cpp_greeting_h()
+        )
+        files["tizen-manifest.xml"] = self._write_file(
+            self.output_dir / "tizen-manifest.xml", self._cpp_tizen_manifest()
+        )
+
+        # Resource placeholders: the directories matter to Tizen Studio's
+        # project layout, but icons are binary artifacts the generator
+        # never writes, so a note documents them instead.
+        res_dir = self.output_dir / "res"
+        shared_res_dir = self.output_dir / "shared" / "res"
+        res_dir.mkdir(parents=True, exist_ok=True)
+        shared_res_dir.mkdir(parents=True, exist_ok=True)
+        files["res/README.md"] = self._write_file(
+            res_dir / "README.md", self._cpp_res_note()
+        )
+        files["shared/res/README.md"] = self._write_file(
+            shared_res_dir / "README.md", self._cpp_shared_res_note()
+        )
+
+        return files
+
+    def _cpp_main_cpp(self) -> str:
+        """Generate the Tizen native watch-app entry point ``src/main.cpp``.
+
+        The greeting text is assembled by ``format_greeting()`` in its own
+        translation unit (``src/greeting.cpp``) so the generated Catch2
+        scaffold can exercise real logic with plain CMake + Conan, without
+        the Tizen SDK headers this file needs.
+
+        Returns:
+            Content for the watch-app (appcore) + EFL entry-point source.
+        """
+        namespace = cpp_identifier(self.config.package_name)
+        return f"""// Tizen native watch-app entry point for {self.config.project_name}.
+//
+// NOTE: this file needs the Tizen native SDK headers (watch_app.h, EFL)
+// and is built by Tizen Studio, NOT by the plain CMake build — see
+// CMakeLists.txt and the README for the build split.
+#include <watch_app.h>
+#include <watch_app_efl.h>
+#include <Elementary.h>
+
+#include <cstdio>
+
+#include "greeting.h"
+
+namespace {{
+
+struct appdata_s {{
+    Evas_Object *win = nullptr;
+    Evas_Object *conform = nullptr;
+    Evas_Object *label = nullptr;
+}};
+
+// Renders the greeting and the current time onto the watch face label.
+void update_watch_label(appdata_s *ad, watch_time_h watch_time) {{
+    if (ad->label == nullptr || watch_time == nullptr) {{
+        return;
+    }}
+
+    int hour24 = 0;
+    int minute = 0;
+    watch_time_get_hour24(watch_time, &hour24);
+    watch_time_get_minute(watch_time, &minute);
+
+    const std::string greeting =
+        {namespace}::format_greeting("{self.config.project_name}");
+    char text[256];
+    std::snprintf(text, sizeof(text),
+                  "<align=center>%s<br/>%02d:%02d</align>",
+                  greeting.c_str(), hour24, minute);
+    elm_object_text_set(ad->label, text);
+}}
+
+// Builds the base EFL UI: window, conformant, and the greeting label.
+void create_base_gui(appdata_s *ad, int width, int height) {{
+    watch_app_get_elm_win(&ad->win);
+    evas_object_resize(ad->win, width, height);
+
+    ad->conform = elm_conformant_add(ad->win);
+    evas_object_size_hint_weight_set(ad->conform, EVAS_HINT_EXPAND,
+                                     EVAS_HINT_EXPAND);
+    elm_win_resize_object_add(ad->win, ad->conform);
+    evas_object_show(ad->conform);
+
+    ad->label = elm_label_add(ad->conform);
+    evas_object_resize(ad->label, width, height / 3);
+    evas_object_move(ad->label, 0, height / 3);
+    evas_object_show(ad->label);
+
+    evas_object_show(ad->win);
+}}
+
+bool app_create(int width, int height, void *data) {{
+    auto *ad = static_cast<appdata_s *>(data);
+    create_base_gui(ad, width, height);
+    return true;
+}}
+
+void app_terminate(void * /*data*/) {{
+    // Release any resources acquired in app_create here.
+}}
+
+void app_time_tick(watch_time_h watch_time, void *data) {{
+    auto *ad = static_cast<appdata_s *>(data);
+    update_watch_label(ad, watch_time);
+}}
+
+}}  // namespace
+
+int main(int argc, char *argv[]) {{
+    appdata_s ad;
+    watch_app_lifecycle_callback_s callbacks = {{}};
+    callbacks.create = app_create;
+    callbacks.terminate = app_terminate;
+    callbacks.time_tick = app_time_tick;
+
+    return watch_app_main(argc, argv, &callbacks, &ad);
+}}
+"""
+
+    def _cpp_greeting_h(self) -> str:
+        """Generate the pure-logic header ``inc/greeting.h``.
+
+        Returns:
+            Header declaring ``format_greeting`` in the project namespace.
+            This translation unit has no Tizen dependencies, which is what
+            lets the Catch2 scaffold build with plain CMake + Conan.
+        """
+        namespace = cpp_identifier(self.config.package_name)
+        return f"""// Pure greeting logic for {self.config.project_name}: no Tizen
+// dependencies, so the unit tests build with plain CMake + Conan.
+#pragma once
+
+#include <string>
+
+namespace {namespace} {{
+
+// Returns the greeting assembled from the project name.
+std::string format_greeting(const std::string &project_name);
+
+}}  // namespace {namespace}
+"""
+
+    def _cpp_greeting_cpp(self) -> str:
+        """Generate the pure-logic translation unit ``src/greeting.cpp``.
+
+        Returns:
+            Implementation of ``format_greeting`` (string assembly the
+            Catch2 scaffold exercises).
+        """
+        namespace = cpp_identifier(self.config.package_name)
+        return f"""#include "greeting.h"
+
+namespace {namespace} {{
+
+std::string format_greeting(const std::string &project_name) {{
+    return "Hello from " + project_name + "!";
+}}
+
+}}  // namespace {namespace}
+"""
+
+    def _cpp_tizen_manifest(self) -> str:
+        """Generate the Tizen watch-application ``tizen-manifest.xml``.
+
+        Returns:
+            Well-formed manifest XML declaring the wearable profile, the
+            ``watch-application`` element (app ID from the shared
+            :func:`~start_green_stay_green.utils.cpp.tizen_app_id`
+            helper), and the ``watch_app`` feature. The icon PNG is a
+            binary artifact the generator never writes; an XML comment
+            and ``shared/res/README.md`` document adding it via Tizen
+            Studio.
+        """
+        app_id = tizen_app_id(self.config.package_name)
+        exec_name = cpp_identifier(self.config.package_name)
+        return f"""<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns="http://tizen.org/ns/packages" api-version="{TIZEN_API_VERSION}" \
+package="{app_id}" version="0.1.0">
+    <profile name="wearable" />
+    <watch-application appid="{app_id}" exec="{exec_name}" ambient-support="false">
+        <label>{self.config.project_name}</label>
+        <!-- The icon PNG is a binary artifact and is NOT generated; add
+             shared/res/{exec_name}.png via Tizen Studio before packaging
+             (see shared/res/README.md). -->
+        <icon>{exec_name}.png</icon>
+    </watch-application>
+    <feature name="http://tizen.org/feature/watch_app">true</feature>
+</manifest>
+"""
+
+    def _cpp_res_note(self) -> str:
+        """Generate the ``res/README.md`` resource-placeholder note.
+
+        Returns:
+            Note explaining what belongs in ``res/`` and why it starts
+            empty (binary assets are never generated).
+        """
+        return f"""# res/
+
+Private resources for the {self.config.project_name} Tizen watch app
+(EDC layouts, images, sounds). The directory starts empty because the
+scaffold never generates binary assets; add resources here via Tizen
+Studio as the app grows.
+"""
+
+    def _cpp_shared_res_note(self) -> str:
+        """Generate the ``shared/res/README.md`` icon-placeholder note.
+
+        Returns:
+            Note explaining that the launcher icon referenced by
+            ``tizen-manifest.xml`` is a binary the user must supply.
+        """
+        exec_name = cpp_identifier(self.config.package_name)
+        return f"""# shared/res/
+
+Shared resources for the {self.config.project_name} Tizen watch app.
+
+`tizen-manifest.xml` references the launcher icon `{exec_name}.png`,
+which must live in this directory. Icons are binary artifacts and are
+NOT generated by the scaffold — add one via Tizen Studio (or copy a
+512x512 PNG here) before packaging the `.tpk`.
 """

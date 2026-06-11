@@ -11,8 +11,16 @@ interface instead of on ``anthropic`` directly.
 
 This is a pure relocation: the behavior, model identifiers, retry
 schedule, and telemetry are byte-for-byte the same as before the
-split. ``anthropic`` remains a hard dependency here (made optional in
-a later tracer, not now).
+split.
+
+As of tracer T2 (#383) ``anthropic`` is an *optional* install extra
+(``pip install 'start-green-stay-green[anthropic]'``). Every reference
+to the SDK is therefore imported lazily inside the methods that need
+it — never at module import time — so ``import start_green_stay_green``
+and ``green --help`` work without the extra installed. The selection
+layer (:mod:`start_green_stay_green.ai.provider_selection`) imports
+this module lazily and translates the resulting :class:`ImportError`
+into an actionable install hint.
 """
 
 from __future__ import annotations
@@ -21,15 +29,13 @@ import asyncio
 from collections.abc import AsyncIterable
 from datetime import UTC
 from datetime import datetime
+import sys
 import time
 from typing import Final
+from typing import Never
 from typing import TYPE_CHECKING
+from typing import TypeGuard
 from typing import cast
-
-from anthropic import Anthropic
-from anthropic import AsyncAnthropic
-from anthropic.types import TextBlock
-from anthropic.types import ToolUseBlock
 
 from start_green_stay_green.ai.batch import BatchError
 from start_green_stay_green.ai.batch import BatchPoll
@@ -53,6 +59,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from collections.abc import Sequence
 
+    from anthropic import Anthropic
+    from anthropic import AsyncAnthropic
+    from anthropic.types import TextBlock
+    from anthropic.types import ToolUseBlock
     from anthropic.types.messages.batch_create_params import (
         Request as BatchCreateRequest,
     )
@@ -61,6 +71,117 @@ if TYPE_CHECKING:
     from start_green_stay_green.utils.timing import TimingReport
 
 __all__ = ["AnthropicProvider"]
+
+# ``pip`` extra that installs the SDK; named in the missing-dependency
+# hint so users can copy/paste the fix.
+_INSTALL_EXTRA: Final[str] = "anthropic"
+
+# Names this module exposes lazily from the ``anthropic`` SDK via
+# :func:`__getattr__`. Resolved on first *attribute* access
+# (``anthropic_provider.Anthropic``) rather than at import time, so the
+# module imports without the optional extra. ``unittest.mock.patch``
+# targets these exact attribute paths, so the lazy seam is also the
+# test seam — existing patches keep working unchanged.
+_SDK_EXPORTS: Final[dict[str, tuple[str, str]]] = {
+    "Anthropic": ("anthropic", "Anthropic"),
+    "AsyncAnthropic": ("anthropic", "AsyncAnthropic"),
+    "TextBlock": ("anthropic.types", "TextBlock"),
+    "ToolUseBlock": ("anthropic.types", "ToolUseBlock"),
+}
+
+
+def _raise_missing_sdk(exc: ImportError) -> Never:
+    """Re-raise an SDK ``ImportError`` as an actionable error.
+
+    The ``anthropic`` SDK is an optional install extra (#383). When a
+    provider method needs it but it is absent, surface a
+    :class:`~start_green_stay_green.ai.provider_selection.ProviderUnavailableError`
+    carrying a ``pip install`` hint instead of a bare "No module named
+    'anthropic'". The triggering :class:`ImportError` is chained.
+
+    Args:
+        exc: The original import failure.
+
+    Raises:
+        ProviderUnavailableError: Always.
+    """
+    from start_green_stay_green.ai.provider_selection import (  # noqa: PLC0415 — lazy to avoid an import cycle
+        ProviderUnavailableError,
+    )
+
+    msg = (
+        f"The {_INSTALL_EXTRA!r} provider requires an optional dependency "
+        f"that is not installed. Install it with: "
+        f"pip install 'start-green-stay-green[{_INSTALL_EXTRA}]'"
+    )
+    raise ProviderUnavailableError(msg) from exc
+
+
+def __getattr__(name: str) -> object:
+    """Lazily resolve SDK names off the optional ``anthropic`` extra.
+
+    Implements PEP 562 module-level attribute access so
+    ``anthropic_provider.Anthropic`` (and the other entries in
+    :data:`_SDK_EXPORTS`) import the SDK on first use rather than at
+    module import time. A missing extra is reported as an actionable
+    :class:`ProviderUnavailableError`, never a raw :class:`ImportError`.
+
+    Args:
+        name: The attribute being accessed on the module.
+
+    Returns:
+        The requested SDK object.
+
+    Raises:
+        AttributeError: If ``name`` is not a known SDK export.
+        ProviderUnavailableError: If the SDK extra is not installed.
+    """
+    target = _SDK_EXPORTS.get(name)
+    if target is None:
+        msg = f"module {__name__!r} has no attribute {name!r}"
+        raise AttributeError(msg)
+    module_name, attr = target
+    from importlib import (  # noqa: PLC0415 — lazy, keeps import cost off hot path
+        import_module,
+    )
+
+    try:
+        module = import_module(module_name)
+    except ImportError as exc:
+        _raise_missing_sdk(exc)
+    return getattr(module, attr)
+
+
+def _sdk_attr(name: str) -> object:
+    """Fetch an SDK export off *this module*, honoring any test patch.
+
+    Reading through ``sys.modules[__name__]`` means a
+    ``unittest.mock.patch("...anthropic_provider.Anthropic")`` (which
+    sets the attribute in the module ``__dict__``) is found first, and
+    otherwise :func:`__getattr__` resolves the real SDK lazily. This is
+    what keeps the lazy-import seam and the existing test seam one and
+    the same.
+    """
+    return getattr(sys.modules[__name__], name)
+
+
+def _is_text_block(block: object) -> TypeGuard[TextBlock]:
+    """Return whether ``block`` is an Anthropic ``TextBlock``.
+
+    The SDK type is resolved lazily via :func:`__getattr__` so the
+    module stays import-clean without the extra. Returning
+    :class:`~typing.TypeGuard` preserves the type narrowing callers
+    relied on before the SDK import was made lazy, so accessing
+    ``block.text`` afterwards stays type-safe.
+    """
+    text_block_cls = cast("type[TextBlock]", _sdk_attr("TextBlock"))
+    return isinstance(block, text_block_cls)
+
+
+def _is_tool_use_block(block: object) -> TypeGuard[ToolUseBlock]:
+    """Return whether ``block`` is an Anthropic ``ToolUseBlock``."""
+    tool_use_block_cls = cast("type[ToolUseBlock]", _sdk_attr("ToolUseBlock"))
+    return isinstance(block, tool_use_block_cls)
 
 
 # Per-call max_tokens for every Claude request the provider issues —
@@ -203,7 +324,7 @@ class AnthropicProvider(LLMProvider):
 
         # Extract content from response
         first_block = response.content[0]
-        if not isinstance(first_block, TextBlock):
+        if not _is_text_block(first_block):
             msg = "Expected TextBlock in response"
             raise GenerationError(msg)
 
@@ -339,8 +460,14 @@ class AnthropicProvider(LLMProvider):
         Raises:
             GenerationError: If API call fails or response invalid.
         """
-        # Use context manager to ensure httpx client is properly closed
-        with Anthropic(api_key=self._api_key) as client:
+        # Resolve the SDK client lazily through the module's __getattr__
+        # seam so the module imports without the optional ``anthropic``
+        # extra (#383); a missing extra becomes an actionable
+        # ProviderUnavailableError, not a raw ImportError.
+        client_cls = cast("type[Anthropic]", _sdk_attr("Anthropic"))
+
+        # Use context manager to ensure httpx client is properly closed.
+        with client_cls(api_key=self._api_key) as client:
             return self._retry_with_backoff(client, prompt, output_format)
 
     def _get_async_client(self) -> AsyncAnthropic:
@@ -355,7 +482,11 @@ class AnthropicProvider(LLMProvider):
         *not* call this from ``ThreadPoolExecutor``.
         """
         if self._async_client is None:
-            self._async_client = AsyncAnthropic(api_key=self._api_key)
+            # Resolve lazily through the module __getattr__ seam so the
+            # optional ``anthropic`` extra stays optional (#383); a
+            # missing extra becomes an actionable ProviderUnavailableError.
+            async_cls = cast("type[AsyncAnthropic]", _sdk_attr("AsyncAnthropic"))
+            self._async_client = async_cls(api_key=self._api_key)
         return self._async_client
 
     async def _call_api_async(
@@ -381,7 +512,7 @@ class AnthropicProvider(LLMProvider):
         )
 
         first_block = response.content[0]
-        if not isinstance(first_block, TextBlock):
+        if not _is_text_block(first_block):
             msg = "Expected TextBlock in response"
             raise GenerationError(msg)
 
@@ -487,7 +618,7 @@ class AnthropicProvider(LLMProvider):
         response = await client.messages.create(**params)  # type: ignore[call-overload]
 
         tool_block = next(
-            (b for b in response.content if isinstance(b, ToolUseBlock)),
+            (b for b in response.content if _is_tool_use_block(b)),
             None,
         )
         if tool_block is None:

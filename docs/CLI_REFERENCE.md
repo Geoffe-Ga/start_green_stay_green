@@ -129,6 +129,10 @@ Primary programming language for the project.
 - `typescript` - TypeScript with Node.js
 - `go` - Go 1.21+
 - `rust` - Rust 1.70+
+- `swift` - Swift 5.9/5.10/6.0 with Swift Package Manager (SPM), watchOS-ready
+- `kotlin` - Kotlin 2.0 with Gradle (Kotlin DSL) on JDK 17/21, Wear OS-ready
+- `cpp` - C/C++ (C++17 pinned, C++20-ready sources) with CMake ≥3.20 + Conan 2, Tizen-watch-ready
+- `java` - Java 17 with Maven (pure logic), Wear OS (legacy Android Wear)-ready
 
 **Examples**:
 ```bash
@@ -136,13 +140,138 @@ Primary programming language for the project.
 --language typescript
 --language go
 --language rust
+--language swift
+--language kotlin
+--language cpp
+--language java
 ```
 
 **Interactive Fallback**:
 If not provided, will prompt with options:
 ```
-Primary language: [python/typescript/go/rust]
+Primary language: [python/typescript/go/rust/swift/kotlin/cpp/java]
 ```
+
+**Swift Toolchain**:
+
+A `--language swift` project is an SPM package (watchOS app scaffold)
+wired with this quality toolchain:
+
+| Concern | Tool | Where it runs |
+|---------|------|---------------|
+| Formatting | swift-format | `scripts/format.sh`, pre-commit, CI |
+| Linting + complexity (≤10) | SwiftLint (`.swiftlint.yml`) | `scripts/lint.sh`, pre-commit, CI |
+| Tests | XCTest via `swift test` | `scripts/test.sh`, CI |
+| Coverage (≥90%) | llvm-cov export from `swift test --enable-code-coverage` | `scripts/test.sh --coverage`, CI |
+| Secret scanning | gitleaks + detect-secrets | pre-commit, CI |
+| Dead-code analysis | Periphery | `scripts/security.sh` |
+| Mutation testing | muter | periodic quality gate (tracked by the opt-in metrics dashboard) |
+
+CI runs on macOS runners with a Swift 5.9/5.10/6.0 version matrix plus a
+watchOS-simulator build-and-test job. Local prerequisites: a Swift
+5.9/5.10/6.0 toolchain with SPM, and
+`brew install swiftlint swift-format gitleaks` for the generated
+pre-commit hooks (`brew install periphery` for dead-code scans).
+
+**Kotlin Toolchain**:
+
+A `--language kotlin` project is a Gradle (Kotlin DSL) Wear OS app
+scaffold (Galaxy Watch 4+ / Wear OS 3, Jetpack Compose for Wear OS)
+wired with this quality toolchain:
+
+| Concern | Tool | Where it runs |
+|---------|------|---------------|
+| Formatting | ktlint (`ktlint --format`) | `scripts/format.sh`, pre-commit, CI |
+| Static analysis + complexity (≤10) | detekt (`detekt.yml`) | `scripts/lint.sh`, pre-commit, CI |
+| Tests | JUnit 4 via `./gradlew test` | `scripts/test.sh`, CI |
+| Coverage (≥90%) | Kover (`koverVerifyDebug` — the bound lives in `app/build.gradle.kts`) | `scripts/test.sh --coverage`, CI |
+| Secret scanning | gitleaks + detect-secrets | pre-commit, CI |
+| Dependency CVE scan | OWASP dependency-check | `scripts/security.sh` |
+| Mutation testing | pitest | periodic quality gate (tracked by the opt-in metrics dashboard) |
+| Architecture rules | Konsist test (`plans/architecture/`) | `plans/architecture/run-check.sh` |
+
+CI runs on ubuntu runners with a JDK 17/21 (Temurin) test matrix, a
+quality job enforcing the Kover ≥90% coverage gate, and a Wear OS
+debug-APK build. The Gradle wrapper is **not generated** (binary
+artifacts are never scaffolded): run `gradle wrapper` once locally; CI
+provisions its own pinned Gradle and stays green either way. Local
+prerequisites: JDK 17+, a local Gradle install, and
+`brew install ktlint detekt` (or your platform's SDK manager) for the
+generated pre-commit hooks.
+
+**C/C++ Toolchain**:
+
+A `--language cpp` project is a Tizen native watch-app scaffold (Samsung
+Galaxy Watch, appcore `watch_app` lifecycle + EFL UI) wired with this
+quality toolchain:
+
+| Concern | Tool | Where it runs |
+|---------|------|---------------|
+| Formatting | clang-format (`.clang-format`; pre-commit uses the mirrors-clang-format v18.1.8 pinned wheel) | `scripts/format.sh`, pre-commit, CI |
+| Static analysis | clang-tidy (`.clang-tidy`, bugprone/cert/clang-analyzer promoted to errors) + cppcheck | `scripts/lint.sh`, pre-commit, CI |
+| Complexity (≤10) | lizard (the CCN bound lives in `scripts/lint.sh`) | `scripts/lint.sh`, CI |
+| Tests | Catch2 via CMake + Conan (`ctest --test-dir build`) | `scripts/test.sh`, CI |
+| Coverage (≥90%) | gcov/lcov (the bound lives in `scripts/test.sh` — CMake has no manifest home for a coverage threshold) | `scripts/test.sh --coverage`, CI |
+| Secret scanning | gitleaks + detect-secrets | pre-commit, CI |
+| Security scan | flawfinder (CWE-mapped dangerous-API scan) | `scripts/security.sh`, CI |
+| Dependency CVE scan | conan audit | periodic quality gate (tracked by the opt-in metrics dashboard) |
+| Mutation testing | mull | periodic quality gate (tracked by the opt-in metrics dashboard) |
+| Documentation | doxygen | tracked by the opt-in metrics dashboard |
+| Architecture rules | include-boundary checker (stdlib-only Python, `plans/architecture/`) | `plans/architecture/run-check.sh` |
+
+CI runs on pinned ubuntu-24.04 runners (apt's LLVM 18 matches the
+pre-commit clang-format pin) with a quality job that invokes the
+generated scripts themselves, plus a build-and-test matrix on both gcc
+and clang. The scaffold deliberately splits into **two builds**: the
+pure-logic library and its Catch2 tests build with plain CMake + Conan
+on any host, while `src/main.cpp` (the watch app) and the installable
+`.tpk` package require the Tizen Studio CLI (`tizen build-native` /
+`tizen package`) — a manual install that neither the scaffold nor a CI
+runner can provision, needed **only** for packaging. The scaffold pins
+C++17 (`CMAKE_CXX_STANDARD`) with C++20-ready sources; C11/C17 sources
+are linted by cppcheck. Local prerequisites: CMake ≥3.20, Conan 2,
+`brew install clang-format llvm cppcheck lcov` (clang-tidy ships in the
+keg-only `llvm` formula; Debian/Ubuntu:
+`apt-get install clang-format clang-tidy cppcheck lcov`), and
+`pip install lizard flawfinder`.
+
+**Java Toolchain**:
+
+A `--language java` project is a legacy Android Wear (Wear OS)
+watch-app scaffold — the maintenance path for existing Java watch apps —
+wired with this quality toolchain. Most of the tooling runs as Maven
+goals pinned in the generated `pom.xml`, so the only extra install is
+the formatter:
+
+| Concern | Tool | Where it runs |
+|---------|------|---------------|
+| Formatting | google-java-format (a `repo: local` system hook — `brew install google-java-format`; Google style, no config file by design) | `scripts/format.sh`, pre-commit |
+| Code style | Checkstyle (`mvn checkstyle:check`, google_checks) | `scripts/lint.sh`, pre-commit, CI |
+| Source analysis + complexity (≤10) | PMD (`mvn pmd:check` — the CCN bound lives in the companion `pmd-ruleset.xml` at the project root, shared by the script, the pre-commit hook, and CI) | `scripts/lint.sh`, pre-commit, CI |
+| Tests | JUnit 4 via Maven Surefire (`mvn test`) | `scripts/test.sh`, CI |
+| Coverage (≥90%) | JaCoCo (`mvn jacoco:check` — the bound lives in `pom.xml`) | `scripts/test.sh --coverage`, CI |
+| Secret scanning | gitleaks + detect-secrets | pre-commit |
+| Security scan | SpotBugs static bytecode analysis (compile-first: `mvn compile spotbugs:check` — the goal silently passes on an empty `target/classes`) | `scripts/security.sh`, pre-commit, CI |
+| Dependency CVE scan | OWASP dependency-check (`mvn dependency-check:check`, CVSS ≥7 bound in `pom.xml`; needs a free NVD API key exported as `NVD_API_KEY`, otherwise skipped with a warning) | `scripts/security.sh` |
+| Mutation testing | pitest | periodic quality gate (tracked by the opt-in metrics dashboard) |
+| Documentation | javadoc | tracked by the opt-in metrics dashboard |
+| Architecture rules | ArchUnit test (`plans/architecture/`; copy it into the package-matched `src/test/java/<package>/architecture/` path to enforce — ArchUnit is already test-scoped in the pom) | `plans/architecture/run-check.sh` |
+
+CI runs on ubuntu runners with a JDK 17/21 (Temurin) quality matrix
+running the same Maven goals as the local build — Checkstyle, PMD, the
+compile-first SpotBugs step, tests with JaCoCo, a best-effort Codecov
+upload (informational only: the enforced ≥90% gate is the pom-backed
+`mvn jacoco:check` step), plus a build-and-package job. The scaffold
+deliberately splits into **two builds**: `pom.xml` builds only the
+pure-logic sources (`src/main/java` + `src/test/java`), so `mvn test`
+and every quality goal run on any host, while the watch app under
+`app/` needs the Android SDK and the androidx.wear AAR, which plain
+Maven cannot consume (the android-maven-plugin is unmaintained) —
+build the APK with Android tooling (Android Studio / Gradle), adding
+`src/main/java/` as a source root. Local prerequisites: JDK 17+ (the
+pom pins `maven.compiler.release` 17, within CI's 17/21 matrix), Maven,
+and `brew install google-java-format` for the generated pre-commit
+format hook.
 
 ##### `--output-dir` / `-o PATH` (Optional)
 
@@ -365,7 +494,7 @@ The `init` command validates:
 - Not a Windows reserved name
 
 **Language**:
-- Must be one of: python, typescript, go, rust
+- Must be one of: python, typescript, go, rust, swift, kotlin, cpp, java
 - Case-insensitive
 
 **Output Directory**:
@@ -558,6 +687,110 @@ start-green-stay-green init \
   --project-name my-service \
   --language python
 ```
+
+### Creating a Swift (watchOS) Project
+
+```bash
+# Local prerequisites for the generated pre-commit hooks
+brew install swiftlint swift-format gitleaks
+
+start-green-stay-green init \
+  --project-name wrist-timer \
+  --language swift \
+  --no-interactive
+
+cd wrist-timer
+swift package resolve
+swift build
+pre-commit install
+./scripts/check-all.sh
+```
+
+See the [Swift Toolchain](#--language---l-text-optional) table above for
+the full tool list, and [examples/swift/](../examples/swift/) for real
+generated output.
+
+### Creating a Kotlin (Wear OS) Project
+
+```bash
+# Local prerequisites for the generated pre-commit hooks
+# (JDK 17+ and a local Gradle install are also required)
+brew install gradle ktlint detekt
+
+start-green-stay-green init \
+  --project-name wrist-counter \
+  --language kotlin \
+  --no-interactive
+
+cd wrist-counter
+gradle wrapper   # the wrapper is not generated; materialize it once
+./gradlew build
+pre-commit install
+./scripts/check-all.sh
+```
+
+See the [Kotlin Toolchain](#--language---l-text-optional) table above
+for the full tool list, and [examples/kotlin/](../examples/kotlin/) for
+real generated output.
+
+### Creating a C/C++ (Tizen) Project
+
+```bash
+# Local prerequisites for the generated pre-commit hooks
+# (CMake ≥3.20 and Conan 2 are also required; on Debian/Ubuntu:
+# apt-get install clang-format clang-tidy cppcheck lcov)
+brew install clang-format llvm cppcheck lcov
+pip install lizard flawfinder
+
+start-green-stay-green init \
+  --project-name wrist-pulse \
+  --language cpp \
+  --no-interactive
+
+cd wrist-pulse
+conan install . --output-folder=build --build=missing
+cmake -B build -S . \
+    -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build
+pre-commit install
+./scripts/check-all.sh
+```
+
+Packaging the installable `.tpk` watch app additionally requires the
+Tizen Studio CLI — only for packaging; everything above runs without it.
+
+See the [C/C++ Toolchain](#--language---l-text-optional) table above
+for the full tool list, and [examples/cpp/](../examples/cpp/) for real
+generated output.
+
+### Creating a Java (Wear OS legacy) Project
+
+```bash
+# Local prerequisites: JDK 17+ and Maven, plus the formatter for the
+# generated pre-commit hooks (the linters are Maven plugins pinned in
+# the generated pom.xml - no extra installs)
+brew install google-java-format
+
+start-green-stay-green init \
+  --project-name wrist-tempo \
+  --language java \
+  --no-interactive
+
+cd wrist-tempo
+mvn test
+pre-commit install
+./scripts/check-all.sh
+```
+
+Building the watch APK additionally requires Android tooling (Android
+Studio / Gradle) — only for the `app/` module; everything above runs
+with plain Maven.
+
+See the [Java Toolchain](#--language---l-text-optional) table above
+for the full tool list, and [examples/java/](../examples/java/) for
+real generated output.
 
 ### Batch Creating Projects
 

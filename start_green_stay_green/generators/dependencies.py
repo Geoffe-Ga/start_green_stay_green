@@ -14,6 +14,37 @@ from typing import TYPE_CHECKING
 from start_green_stay_green.generators.base import BaseGenerator
 from start_green_stay_green.generators.base import GenerationError
 from start_green_stay_green.generators.base import validate_language
+from start_green_stay_green.utils.cpp import CATCH2_VERSION
+from start_green_stay_green.utils.cpp import CMAKE_MINIMUM_VERSION
+from start_green_stay_green.utils.cpp import CPP_STANDARD
+from start_green_stay_green.utils.cpp import cpp_identifier
+from start_green_stay_green.utils.csharp import COVERLET_MSBUILD_VERSION
+from start_green_stay_green.utils.csharp import NETARCHTEST_RULES_VERSION
+from start_green_stay_green.utils.csharp import SECURITY_CODE_SCAN_VERSION
+from start_green_stay_green.utils.csharp import TEST_SDK_VERSION
+from start_green_stay_green.utils.csharp import XUNIT_RUNNER_VERSION
+from start_green_stay_green.utils.csharp import XUNIT_VERSION
+from start_green_stay_green.utils.java import ARCHUNIT_VERSION
+from start_green_stay_green.utils.java import CHECKSTYLE_PLUGIN_VERSION
+from start_green_stay_green.utils.java import DEPENDENCY_CHECK_PLUGIN_VERSION
+from start_green_stay_green.utils.java import JACOCO_VERSION
+from start_green_stay_green.utils.java import JAVA_RELEASE
+from start_green_stay_green.utils.java import JUNIT4_VERSION
+from start_green_stay_green.utils.java import MAVEN_COMPILER_PLUGIN_VERSION
+from start_green_stay_green.utils.java import PMD_PLUGIN_VERSION
+from start_green_stay_green.utils.java import SPOTBUGS_PLUGIN_VERSION
+from start_green_stay_green.utils.java import SUREFIRE_VERSION
+from start_green_stay_green.utils.java import android_package
+from start_green_stay_green.utils.kotlin import ACTIVITY_COMPOSE_VERSION
+from start_green_stay_green.utils.kotlin import AGP_VERSION
+from start_green_stay_green.utils.kotlin import COMPOSE_BOM_VERSION
+from start_green_stay_green.utils.kotlin import GRADLE_WRAPPER_VERSION
+from start_green_stay_green.utils.kotlin import JUNIT_VERSION
+from start_green_stay_green.utils.kotlin import KONSIST_VERSION
+from start_green_stay_green.utils.kotlin import KOTLIN_VERSION
+from start_green_stay_green.utils.kotlin import KOVER_VERSION
+from start_green_stay_green.utils.kotlin import WEAR_COMPOSE_VERSION
+from start_green_stay_green.utils.swift import package_swift
 
 if TYPE_CHECKING:
     from start_green_stay_green.utils.file_writer import FileWriter
@@ -57,10 +88,13 @@ class DependenciesGenerator(BaseGenerator):
     pyproject.toml) with appropriate dependencies and tool configurations for the
     target project's language and tooling.
 
-    All 7 supported languages (python, typescript, go, rust, java, csharp, ruby)
-    are available at the generator level. Note that java, csharp, and ruby are
-    not yet supported by the full CLI pipeline (``sgsg init``) because
-    PreCommitGenerator does not yet handle those languages.
+    All 10 supported languages (python, typescript, go, rust, java, csharp,
+    ruby, swift, kotlin, cpp) are available at the generator level. Note that
+    the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
+    architecture, and metrics steps for ruby —
+    the CI workflow step covers every language. Kotlin (#357/#358),
+    C/C++ (#362/#363), Java (#366/#367), and C# (#370) run the full
+    pipeline.
 
     Attributes:
         output_dir: Directory where dependency files will be written
@@ -133,6 +167,9 @@ class DependenciesGenerator(BaseGenerator):
             "java": self._generate_java_dependencies,
             "csharp": self._generate_csharp_dependencies,
             "ruby": self._generate_ruby_dependencies,
+            "swift": self._generate_swift_dependencies,
+            "kotlin": self._generate_kotlin_dependencies,
+            "cpp": self._generate_cpp_dependencies,
         }
         return generators[self.config.language]()
 
@@ -525,14 +562,24 @@ nursery = "warn"
 """
 
     def _generate_java_dependencies(self) -> dict[str, Path]:
-        """Generate Java dependency files.
+        """Generate the Maven manifest for the legacy Wear scaffold (#366).
+
+        Emits ``pom.xml``, the build for the PURE-LOGIC half of the
+        two-build split (``src/main/java`` + ``src/test/java``): JUnit 4
+        tests via Surefire, the JaCoCo coverage gate, and the
+        Checkstyle/PMD/SpotBugs plugins the generated CI workflow
+        (``reference/ci/java.yml``) invokes. The Wear OS app module under
+        ``app/`` needs the Android SDK and the androidx.wear AAR, which
+        plain Maven cannot consume (the android-maven-plugin is
+        unmaintained), so the APK build is deliberately NOT scaffolded —
+        the pom comment and the README disclose it, mirroring the Tizen
+        Studio precedent (#361).
 
         Returns:
             Dictionary mapping file names to file paths
         """
         files: dict[str, Path] = {}
 
-        # Generate pom.xml for Maven projects
         files["pom.xml"] = self._write_file(
             "pom.xml",
             self._java_pom_xml(),
@@ -541,12 +588,33 @@ nursery = "warn"
         return files
 
     def _java_pom_xml(self) -> str:
-        """Generate Java pom.xml content.
+        """Generate Java ``pom.xml`` content.
 
         Returns:
-            Content for pom.xml with project info and dependencies
+            Content for the pure-logic Maven build: JUnit 4 + Surefire,
+            the JaCoCo agent/report executions with a >=90% line-coverage
+            rule (configured at plugin level so the CI's standalone
+            ``mvn jacoco:check`` invocation picks it up too), the
+            Checkstyle (google_checks), PMD (stock rules plus the
+            pmd-ruleset.xml complexity companion), SpotBugs, and OWASP
+            dependency-check plugins matching the generated CI workflow
+            and quality scripts' ``mvn`` commands, and the test-scoped
+            ArchUnit dependency backing the architecture test template
+            (#367).
         """
         return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maven build for the PURE-LOGIC half of this project: src/main/java
+  and src/test/java only. It backs every mvn command in the generated
+  CI workflow (.github/workflows/ci.yml): test, jacoco:report,
+  jacoco:check, checkstyle:check, pmd:check, spotbugs:check.
+
+  THE TWO BUILDS: the Wear OS app module under app/ needs the Android
+  SDK and the androidx.wear AAR, which plain Maven cannot consume (the
+  android-maven-plugin is unmaintained). Build the watch APK with
+  Android tooling (Android Studio / Gradle) instead - this generator
+  does not scaffold that build. See the README section "The two builds".
+-->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
@@ -559,21 +627,33 @@ nursery = "warn"
     <packaging>jar</packaging>
 
     <name>{self.config.project_name}</name>
-    <description>A quality-controlled Java project</description>
+    <description>Pure-logic build for the {self.config.project_name} \
+Wear OS app</description>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.release>{JAVA_RELEASE}</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <junit.version>5.10.0</junit.version>
     </properties>
 
     <dependencies>
-        <!-- Test dependencies -->
+        <!-- JUnit 4: the Android-ecosystem unit-test convention. -->
         <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>${{junit.version}}</version>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>{JUNIT4_VERSION}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- ArchUnit backs the architecture test template parked in
+             plans/architecture/ArchitectureTest.java; declared here so
+             the template compiles the moment it is copied into
+             src/test/java (see plans/architecture/README.md). The base
+             artifact (not archunit-junit4) is deliberate: the template
+             uses plain @Test methods with explicit ClassFileImporter
+             calls, so the JUnit-runner integration adds nothing. -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit</artifactId>
+            <version>{ARCHUNIT_VERSION}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -583,12 +663,106 @@ nursery = "warn"
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version>
+                <version>{MAVEN_COMPILER_PLUGIN_VERSION}</version>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.1.2</version>
+                <version>{SUREFIRE_VERSION}</version>
+            </plugin>
+            <!-- Coverage gate: the plugin-level rules configuration is
+                 the single home of the >=90% bound, applied both to the
+                 lifecycle-bound check execution and to the CI's
+                 standalone `mvn jacoco:check` invocation. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>{JACOCO_VERSION}</version>
+                <configuration>
+                    <rules>
+                        <rule>
+                            <element>BUNDLE</element>
+                            <limits>
+                                <limit>
+                                    <counter>LINE</counter>
+                                    <value>COVEREDRATIO</value>
+                                    <minimum>0.90</minimum>
+                                </limit>
+                            </limits>
+                        </rule>
+                    </rules>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>check</id>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>{CHECKSTYLE_PLUGIN_VERSION}</version>
+                <configuration>
+                    <configLocation>google_checks.xml</configLocation>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-pmd-plugin</artifactId>
+                <version>{PMD_PLUGIN_VERSION}</version>
+                <configuration>
+                    <rulesets>
+                        <!-- PMD 7's category path for the curated
+                             baseline rules (the pre-7 rulesets/java/*
+                             paths no longer resolve). -->
+                        <ruleset>category/java/quickstart.xml</ruleset>
+                        <!-- Companion at the project root (written by the
+                             scripts generator): the SINGLE home of the
+                             cyclomatic-complexity <= 10 gate, shared by
+                             scripts/lint.sh, the pre-commit PMD hook, and
+                             CI. -->
+                        <ruleset>pmd-ruleset.xml</ruleset>
+                    </rulesets>
+                </configuration>
+            </plugin>
+            <!-- Declared so the CI's `mvn spotbugs:check` resolves: the
+                 com.github.spotbugs plugin group is not in Maven's
+                 default plugin-prefix search path. NOTE: spotbugs:check
+                 silently skips without compiled classes - run
+                 `mvn compile spotbugs:check` (scripts/security.sh and
+                 the pre-commit hook do). -->
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+                <version>{SPOTBUGS_PLUGIN_VERSION}</version>
+            </plugin>
+            <!-- Declared so `mvn dependency-check:check` resolves (the
+                 org.owasp group is also outside Maven's default
+                 plugin-prefix search path). The CVSS >= 7 failure bound
+                 lives here; scripts/security.sh invokes the goal and
+                 documents the NVD_API_KEY requirement. -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>{DEPENDENCY_CHECK_PLUGIN_VERSION}</version>
+                <configuration>
+                    <failBuildOnCVSS>7</failBuildOnCVSS>
+                </configuration>
             </plugin>
         </plugins>
     </build>
@@ -597,6 +771,15 @@ nursery = "warn"
 
     def _generate_csharp_dependencies(self) -> dict[str, Path]:
         """Generate C# dependency files.
+
+        Emits the single SDK-style ``.csproj`` that owns the generated
+        project's quality policy (#370): the xUnit test stack, the
+        Coverlet coverage gate (the >=90% bound lives here — the
+        Kover/JaCoCo manifest-owned precedent), the Roslyn analyzer
+        configuration (warnings-as-errors), the ``CodeMetricsConfig.txt``
+        wiring behind the CA1502 complexity ceiling, the NetArchTest
+        dependency backing the architecture template, and the
+        SecurityCodeScan analyzer.
 
         Returns:
             Dictionary mapping file names to file paths
@@ -616,23 +799,87 @@ nursery = "warn"
         """Generate C# .csproj content.
 
         Returns:
-            Content for .csproj with project settings and dependencies
+            Content for .csproj with project settings, the quality
+            gates the manifest owns, and pinned NuGet dependencies
         """
-        return """<Project Sdk="Microsoft.NET.Sdk">
+        return f"""<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Single-project layout: src/ (the application) and tests/ (the
+    xUnit suite) compile into ONE assembly via the SDK's default
+    globbing, so the test packages below sit next to the app code and
+    `dotnet test` runs the whole project. The parked NetArchTest
+    template (plans/architecture/ArchitectureTest.cs) also compiles
+    into this assembly once copied into tests/.
+  -->
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <!-- Roslyn analyzer gate (#370): the SDK analyzers run in every
+         build and TreatWarningsAsErrors makes each `dotnet build`
+         (pre-commit hook, scripts/lint.sh, CI) a failing lint gate.
+         This PropertyGroup is the single home of that policy; nothing
+         restates the flag on a command line. -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- Coverlet coverage gate (#370): the >=90% line bound lives
+         HERE and only here. scripts/test.sh (coverage mode) and CI
+         pass /p:CollectCoverage=true to activate it and never restate
+         the number. coverlet.msbuild hooks the test task itself, so a
+         failing bound fails `dotnet test` directly. -->
+    <Threshold>90</Threshold>
+    <ThresholdType>line</ThresholdType>
+    <ThresholdStat>total</ThresholdStat>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="xunit" Version="2.6.0" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3">
+    <!-- Threshold home for the CA1502 cyclomatic-complexity ceiling
+         (<=10). The .NET SDK metrics analyzers only read the bound
+         from an AdditionalFiles entry named exactly
+         CodeMetricsConfig.txt; the file itself is written at the
+         project root by the scripts generator (the pmd-ruleset.xml
+         companion split), and .editorconfig switches CA1502 on. -->
+    <AdditionalFiles Include="CodeMetricsConfig.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit" Version="{XUNIT_VERSION}" />
+    <PackageReference Include="xunit.runner.visualstudio" \
+Version="{XUNIT_RUNNER_VERSION}">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="{TEST_SDK_VERSION}" />
+
+    <!-- Coverage engine behind the manifest-owned threshold above
+         (build-time assets only, never a runtime dependency). -->
+    <PackageReference Include="coverlet.msbuild" \
+Version="{COVERLET_MSBUILD_VERSION}">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; \
+buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+
+    <!-- Backs plans/architecture/ArchitectureTest.cs (the ArchUnit/
+         Konsist manifest-touch precedent): declared here so the
+         parked template compiles as soon as it is copied into
+         tests/. -->
+    <PackageReference Include="NetArchTest.Rules" \
+Version="{NETARCHTEST_RULES_VERSION}" />
+
+    <!-- Source-level security analysis as a Roslyn analyzer: SQL
+         injection, XSS, weak crypto, and friends fail the build via
+         TreatWarningsAsErrors. Dependency CVE scanning is separate
+         (scripts/security.sh runs the vulnerable-package listing). -->
+    <PackageReference Include="SecurityCodeScan.VS2019" \
+Version="{SECURITY_CODE_SCAN_VERSION}">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>
@@ -672,4 +919,339 @@ group :development, :test do
   gem "rubocop", "~> 1.57"
   gem "simplecov", "~> 0.22"
 end
+"""
+
+    def _generate_swift_dependencies(self) -> dict[str, Path]:
+        """Generate Swift dependency files.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        # Generate the Swift Package Manager manifest
+        files["Package.swift"] = self._write_file(
+            "Package.swift",
+            self._swift_package_swift(),
+        )
+
+        return files
+
+    def _swift_package_swift(self) -> str:
+        """Generate the Swift Package Manager manifest for watchOS.
+
+        Delegates to the shared :func:`~start_green_stay_green.utils.swift.\
+package_swift` helper so the structure and dependency generators emit an
+        identical manifest from one source of truth.
+
+        Returns:
+            Content for ``Package.swift`` declaring a watchOS app target
+        """
+        return package_swift(self.config.package_name)
+
+    def _generate_kotlin_dependencies(self) -> dict[str, Path]:
+        """Generate the Gradle (Kotlin DSL) manifests for Wear OS (#356).
+
+        Emits ``settings.gradle.kts``, the root ``build.gradle.kts``,
+        ``gradle.properties``, and the ``app`` module's
+        ``build.gradle.kts`` with Jetpack Compose for Wear OS
+        dependencies. The Gradle wrapper (``gradlew`` and its jar) is
+        deliberately NOT generated — it is a binary artifact; the
+        settings file and README direct users to run ``gradle wrapper``
+        once instead.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        files["settings.gradle.kts"] = self._write_file(
+            "settings.gradle.kts",
+            self._kotlin_settings_gradle_kts(),
+        )
+        files["build.gradle.kts"] = self._write_file(
+            "build.gradle.kts",
+            self._kotlin_root_build_gradle_kts(),
+        )
+        files["gradle.properties"] = self._write_file(
+            "gradle.properties",
+            self._kotlin_gradle_properties(),
+        )
+
+        # The app module's manifest lives under app/.
+        (self.output_dir / "app").mkdir(parents=True, exist_ok=True)
+        files["app/build.gradle.kts"] = self._write_file(
+            "app/build.gradle.kts",
+            self._kotlin_app_build_gradle_kts(),
+        )
+
+        return files
+
+    def _kotlin_settings_gradle_kts(self) -> str:
+        """Generate ``settings.gradle.kts`` for the Wear OS project.
+
+        Returns:
+            Settings script declaring plugin/dependency repositories, the
+            root project name, and the ``:app`` module. Includes an honest
+            note that the Gradle wrapper binary is not generated.
+        """
+        project = self.config.project_name
+        return f"""// Gradle (Kotlin DSL) settings for the {project} Wear OS project.
+//
+// NOTE: the Gradle wrapper (gradlew, gradle/wrapper/gradle-wrapper.jar)
+// is NOT generated — binary artifacts do not belong in a generator.
+// With a local Gradle install, create it once via:
+//   gradle wrapper --gradle-version {GRADLE_WRAPPER_VERSION}
+pluginManagement {{
+    repositories {{
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }}
+}}
+
+dependencyResolutionManagement {{
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {{
+        google()
+        mavenCentral()
+    }}
+}}
+
+rootProject.name = "{self.config.project_name}"
+include(":app")
+"""
+
+    def _kotlin_root_build_gradle_kts(self) -> str:
+        """Generate the root ``build.gradle.kts``.
+
+        Returns:
+            Root build script pinning the Android Gradle Plugin, the
+            Kotlin Android plugin, the Compose compiler plugin (which
+            must match the Kotlin version), and the Kover coverage
+            plugin for all modules.
+        """
+        return f"""// Root Gradle build: pins plugin versions for all modules.
+// The Compose compiler plugin version must match the Kotlin version.
+plugins {{
+    id("com.android.application") version "{AGP_VERSION}" apply false
+    id("org.jetbrains.kotlin.android") version "{KOTLIN_VERSION}" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "{KOTLIN_VERSION}" apply false
+    // Kover: Kotlin-native code coverage (run: scripts/test.sh --coverage).
+    id("org.jetbrains.kotlinx.kover") version "{KOVER_VERSION}" apply false
+}}
+"""
+
+    def _kotlin_gradle_properties(self) -> str:
+        """Generate ``gradle.properties``.
+
+        Returns:
+            Project-wide Gradle settings: AndroidX opt-in (required by
+            Compose), JVM memory, and the official Kotlin code style.
+        """
+        return """# Project-wide Gradle settings for the Wear OS app.
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+# AndroidX is required by Jetpack Compose.
+android.useAndroidX=true
+kotlin.code.style=official
+"""
+
+    def _kotlin_app_build_gradle_kts(self) -> str:
+        """Generate the ``app`` module's ``build.gradle.kts``.
+
+        Returns:
+            Android application module configured for Wear OS: minSdk 30
+            (Wear OS 3, the Galaxy Watch 4+ baseline), Compose enabled,
+            Jetpack Compose for Wear OS dependencies, a JUnit
+            ``testImplementation`` so ``./gradlew test`` runs the
+            generated unit-test scaffold, the Kover coverage gate
+            (>=90% on the debug variant, run by ``scripts/test.sh
+            --coverage``), and the Konsist dependency backing the
+            generated architecture test (#357).
+        """
+        namespace = android_package(self.config.package_name)
+        return f"""// Android application module for the Wear OS app.
+plugins {{
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlinx.kover")
+}}
+
+android {{
+    namespace = "{namespace}"
+    compileSdk = 35
+
+    defaultConfig {{
+        applicationId = "{namespace}"
+        // Wear OS 3 (Galaxy Watch 4+) baseline.
+        minSdk = 30
+        targetSdk = 35
+        versionCode = 1
+        versionName = "0.1.0"
+    }}
+
+    buildFeatures {{
+        compose = true
+    }}
+
+    compileOptions {{
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }}
+}}
+
+kotlin {{
+    jvmToolchain(17)
+}}
+
+// Coverage gate: scripts/test.sh --coverage runs koverVerifyDebug, which
+// fails the build when debug-variant line coverage drops below 90%. This
+// block is the single source of truth for the bound.
+kover {{
+    reports {{
+        variant("debug") {{
+            verify {{
+                rule {{
+                    minBound(90)
+                }}
+            }}
+        }}
+    }}
+}}
+
+dependencies {{
+    implementation(platform("androidx.compose:compose-bom:{COMPOSE_BOM_VERSION}"))
+    implementation("androidx.activity:activity-compose:{ACTIVITY_COMPOSE_VERSION}")
+
+    // Jetpack Compose for Wear OS (androidx.wear.compose).
+    implementation("androidx.wear.compose:compose-material:{WEAR_COMPOSE_VERSION}")
+    implementation("androidx.wear.compose:compose-foundation:{WEAR_COMPOSE_VERSION}")
+
+    // JUnit scaffold for the unit tests (run: ./gradlew test).
+    testImplementation("junit:junit:{JUNIT_VERSION}")
+
+    // Konsist backs the generated architecture test: copy
+    // plans/architecture/ArchitectureTest.kt into app/src/test/kotlin/
+    // and it compiles with no further dependency edits.
+    testImplementation("com.lemonappdev:konsist:{KONSIST_VERSION}")
+}}
+"""
+
+    def _generate_cpp_dependencies(self) -> dict[str, Path]:
+        """Generate the CMake + Conan manifests for the Tizen scaffold (#361).
+
+        Emits ``CMakeLists.txt`` (pure-logic library + Catch2 test target,
+        buildable WITHOUT Tizen Studio) and ``conanfile.txt`` (Catch2 via
+        Conan 2). ``conanfile.txt`` is used rather than ``conanfile.py``
+        because the scaffold needs only a static requires/generators list
+        — no custom packaging logic — and the txt form is the simpler,
+        declarative option. The ``.tpk`` packaging path (Tizen Studio CLI)
+        is deliberately NOT generated; both manifests and the README
+        disclose it.
+
+        Returns:
+            Dictionary mapping file names to file paths
+        """
+        files: dict[str, Path] = {}
+
+        files["CMakeLists.txt"] = self._write_file(
+            "CMakeLists.txt",
+            self._cpp_cmakelists(),
+        )
+        files["conanfile.txt"] = self._write_file(
+            "conanfile.txt",
+            self._cpp_conanfile_txt(),
+        )
+
+        return files
+
+    def _cpp_cmakelists(self) -> str:
+        """Generate ``CMakeLists.txt`` for the Tizen watch-app scaffold.
+
+        Returns:
+            CMake build covering the pure-logic ``greeting`` library and
+            its Catch2 test target only. ``src/main.cpp`` (the Tizen
+            watch_app + EFL entry point) is deliberately excluded: it
+            needs the Tizen native SDK, and ``.tpk`` packaging is done by
+            the Tizen Studio CLI, which the generator can neither create
+            nor install. That split is what keeps the unit tests runnable
+            on any host with CMake + Conan.
+        """
+        project = cpp_identifier(self.config.package_name)
+        return f"""# CMake build for the {self.config.project_name} Tizen watch app.
+#
+# Scope: ONLY the pure-logic library and its Catch2 unit tests. The Tizen
+# watch-app entry point (src/main.cpp) needs the Tizen native SDK headers
+# and the .tpk package is produced by the Tizen Studio CLI
+# (tizen build-native / tizen package), which cannot be generated or
+# installed by this scaffold — see the README. This split keeps the unit
+# tests buildable on any host with CMake + Conan, no Tizen Studio needed:
+#
+#   conan install . --output-folder=build --build=missing
+#   cmake -B build -S . \\
+#       -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake \\
+#       -DCMAKE_BUILD_TYPE=Release
+#   cmake --build build
+#   ctest --test-dir build
+cmake_minimum_required(VERSION {CMAKE_MINIMUM_VERSION})
+project({project} VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD {CPP_STANDARD})
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Export build/compile_commands.json for clang-tidy: scripts/lint.sh and
+# the pre-commit clang-tidy hook both read it (-p build).
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Coverage instrumentation for scripts/test.sh --coverage (the >=90%
+# line-coverage gate lives in that script). OFF by default so plain
+# builds stay uninstrumented.
+option(ENABLE_COVERAGE "Instrument the build for gcov/lcov coverage" OFF)
+
+# Pure greeting logic: no Tizen dependencies (src/greeting.cpp + inc/).
+# Renaming the source file requires updating both 'greeting' references
+# below (and the target_link_libraries in the test target).
+add_library(greeting src/greeting.cpp)
+target_include_directories(greeting PUBLIC inc)
+
+if(ENABLE_COVERAGE)
+    # --coverage = -fprofile-arcs -ftest-coverage on both gcc and clang.
+    # PUBLIC so consumers (greeting_tests) also compile and link with the
+    # gcov runtime; .gcda data then lands under build/ for lcov.
+    target_compile_options(greeting PUBLIC --coverage -O0 -g)
+    target_link_options(greeting PUBLIC --coverage)
+endif()
+
+# Catch2 unit tests (dependency managed by Conan, see conanfile.txt).
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Catch2 3 REQUIRED)
+    add_executable(greeting_tests tests/test_greeting.cpp)
+    target_link_libraries(greeting_tests PRIVATE greeting Catch2::Catch2WithMain)
+    include(Catch)
+    catch_discover_tests(greeting_tests)
+endif()
+"""
+
+    def _cpp_conanfile_txt(self) -> str:
+        """Generate ``conanfile.txt`` for the Tizen watch-app scaffold.
+
+        Returns:
+            Conan 2 manifest pinning Catch2 (the test framework) and the
+            CMakeDeps/CMakeToolchain generators that the documented CMake
+            invocation consumes. Only the host-buildable test dependency
+            is listed: the Tizen native SDK is provided by Tizen Studio,
+            not by Conan.
+        """
+        return f"""# Conan 2 manifest for {self.config.project_name}.
+# Catch2 backs the unit-test scaffold (tests/test_greeting.cpp); the
+# Tizen native SDK is provided by Tizen Studio, not by Conan.
+[requires]
+catch2/{CATCH2_VERSION}
+
+[generators]
+CMakeDeps
+CMakeToolchain
 """

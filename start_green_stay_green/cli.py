@@ -12,6 +12,7 @@ from datetime import datetime
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
 import shlex
 import shutil
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from collections.abc import Coroutine
     from collections.abc import Generator
+    from collections.abc import Mapping
     from collections.abc import Sequence
 
     from start_green_stay_green.utils.enhance_state import EnhanceState
@@ -42,20 +44,36 @@ from start_green_stay_green.ai.batch_dispatch import resume_subagent_batch
 from start_green_stay_green.ai.batch_dispatch import submit_subagent_batch
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
+from start_green_stay_green.ai.provider_selection import ProviderSelection
+from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
+from start_green_stay_green.ai.provider_selection import build_provider
+from start_green_stay_green.ai.provider_selection import resolve_api_key_env_var
+from start_green_stay_green.ai.provider_selection import resolve_provider_selection
 from start_green_stay_green.generators.architecture import (
     ArchitectureEnforcementGenerator,
 )
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.base import validate_language
 from start_green_stay_green.generators.ci import CIGenerator
+from start_green_stay_green.generators.ci import LANGUAGE_CONFIGS as CI_LANGUAGE_CONFIGS
+from start_green_stay_green.generators.claude_md import ClaudeMdGenerationResult
 from start_green_stay_green.generators.claude_md import ClaudeMdGenerator
 from start_green_stay_green.generators.dependencies import DependenciesGenerator
 from start_green_stay_green.generators.dependencies import DependencyConfig
 from start_green_stay_green.generators.github_actions import (
     GitHubActionsReviewGenerator,
 )
+from start_green_stay_green.generators.metrics import (
+    LANGUAGE_TOOLS as METRICS_LANGUAGE_TOOLS,
+)
 from start_green_stay_green.generators.metrics import MetricsGenerationConfig
 from start_green_stay_green.generators.metrics import MetricsGenerator
+from start_green_stay_green.generators.metrics import ci_status
+from start_green_stay_green.generators.metrics import count_ci_jobs
+from start_green_stay_green.generators.metrics import precommit_status
+from start_green_stay_green.generators.precommit import (
+    LANGUAGE_CONFIGS as PRECOMMIT_LANGUAGE_CONFIGS,
+)
 from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import PreCommitGenerator
 from start_green_stay_green.generators.readme import ReadmeConfig
@@ -132,6 +150,31 @@ config_file_option = Annotated[
         "--config-file",
         help="Path to configuration file (YAML or TOML).",
         exists=False,
+    ),
+]
+
+provider_option = Annotated[
+    str | None,
+    typer.Option(
+        "--provider",
+        help=(
+            "LLM provider for AI features. Precedence: this flag > "
+            "GREEN_LLM_PROVIDER env > config file > default (anthropic). "
+            "The provider's API key is read from its own env var "
+            "(ANTHROPIC_API_KEY for anthropic)."
+        ),
+    ),
+]
+
+model_option = Annotated[
+    str | None,
+    typer.Option(
+        "--model",
+        help=(
+            "Model identifier for AI features. Precedence: this flag > "
+            "GREEN_LLM_MODEL env > config file > the provider's default "
+            "model."
+        ),
     ),
 ]
 
@@ -457,7 +500,7 @@ def _show_dry_run_preview(
     console.print("  - Quality scripts")
     console.print("  - Skills")
     console.print("  - Subagent profiles")
-    console.print("  - CLAUDE.md")
+    console.print("  - CLAUDE.md (modular: index + .claude/docs/)")
     console.print("  - GitHub Actions (AI review)")
     console.print("  - Architecture enforcement")
 
@@ -503,6 +546,7 @@ def _warn_if_cli_api_key(source: str) -> None:
 
 def _lazy_api_key_sources(
     api_key_arg: str | None,
+    api_key_env_var: str = "ANTHROPIC_API_KEY",
 ) -> Generator[tuple[str | None, str]]:
     """Yield API key sources lazily to avoid unnecessary keychain prompts.
 
@@ -511,26 +555,35 @@ def _lazy_api_key_sources(
 
     Args:
         api_key_arg: API key from command line argument.
+        api_key_env_var: Name of the environment variable holding the
+            selected provider's key (``ANTHROPIC_API_KEY`` for the
+            default Anthropic provider, kept unchanged).
 
     Yields:
         (key_or_none, source_name) tuples.
     """
     yield api_key_arg, "command line"
     yield get_api_key_from_keyring(), "keyring"
-    yield os.getenv("ANTHROPIC_API_KEY"), "environment variable"
+    yield os.getenv(api_key_env_var), "environment variable"
 
 
 def _get_api_key_with_source(
     api_key_arg: str | None,
+    api_key_env_var: str = "ANTHROPIC_API_KEY",
     *,
     no_interactive: bool,
 ) -> tuple[str, str] | tuple[None, None]:
     """Get API key from the first available source.
 
+    Args:
+        api_key_arg: API key from the command line argument.
+        api_key_env_var: Environment variable to read the key from.
+        no_interactive: Disable the interactive keyring prompt.
+
     Returns:
         (api_key, source) tuple, or (None, None) if not found.
     """
-    for key, source in _lazy_api_key_sources(api_key_arg):
+    for key, source in _lazy_api_key_sources(api_key_arg, api_key_env_var):
         if key:
             _warn_if_cli_api_key(source)
             return key, source
@@ -543,34 +596,136 @@ def _get_api_key_with_source(
     return None, None
 
 
+@dataclass(frozen=True)
+class _SelectionInputs:
+    """The three provider/model selection inputs threaded from a command.
+
+    Bundles the ``--provider`` / ``--model`` flag values and the parsed
+    config-file mapping so the orchestrator-init helpers pass one object
+    instead of three loose arguments (keeping them under the project's
+    argument-count limit).
+
+    Attributes:
+        provider_flag: Value of ``--provider`` (or ``None``).
+        model_flag: Value of ``--model`` (or ``None``).
+        config_data: Parsed config-file mapping (may be empty).
+    """
+
+    provider_flag: str | None = None
+    model_flag: str | None = None
+    config_data: dict[str, str] | None = None
+
+
+def _resolve_orchestrator_selection(
+    inputs: _SelectionInputs,
+) -> ProviderSelection | None:
+    """Resolve the provider/model selection, reporting any bad input.
+
+    Args:
+        inputs: The bundled ``--provider`` / ``--model`` / config-file
+            selection inputs.
+
+    Returns:
+        The resolved :class:`ProviderSelection`, or ``None`` when the
+        provider name is unknown (an error has already been printed).
+    """
+    try:
+        return resolve_provider_selection(
+            provider_flag=inputs.provider_flag,
+            model_flag=inputs.model_flag,
+            config=inputs.config_data or {},
+            env=os.environ,
+        )
+    except ValueError as e:
+        # ``e`` already names the supported set ("Supported providers: …"),
+        # so we must not append a second copy here (regression: #383).
+        console.print(
+            f"[red]Error:[/red] {e}",
+            style="bold",
+        )
+        return None
+
+
+def _build_orchestrator_from_selection(
+    selection: ProviderSelection,
+    api_key: str,
+    source: str,
+) -> AIOrchestrator | None:
+    """Build an orchestrator from a resolved selection and key.
+
+    Args:
+        selection: Resolved provider/model.
+        api_key: Resolved API key for the provider.
+        source: Human-readable origin of the key (for the status line).
+
+    Returns:
+        The constructed :class:`AIOrchestrator`, or ``None`` if the
+        provider's optional extra is missing or the key is rejected
+        (an actionable error has already been printed).
+    """
+    try:
+        provider = build_provider(
+            selection.provider,
+            api_key=api_key,
+            model=selection.model,
+        )
+        orchestrator = AIOrchestrator(
+            api_key=api_key,
+            model=selection.model,
+            provider=provider,
+        )
+    except ProviderUnavailableError as e:
+        console.print(f"[red]Error:[/red] {e}", style="bold")
+        return None
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] Invalid API key: {e}", style="bold")
+        return None
+    console.print(
+        f"[green]✓[/green] AI features enabled "
+        f"({selection.provider} {selection.model}, key from {source})"
+    )
+    return orchestrator
+
+
 def _initialize_orchestrator(
     api_key_arg: str | None = None,
     *,
     no_interactive: bool = False,
+    selection_inputs: _SelectionInputs | None = None,
 ) -> AIOrchestrator | None:
-    """Initialize AI orchestrator with optional API key.
+    """Initialize AI orchestrator with a resolved provider/model + key.
+
+    Provider and model are resolved with the precedence CLI flag > env
+    (``GREEN_LLM_PROVIDER`` / ``GREEN_LLM_MODEL``) > config file >
+    built-in default (Anthropic + the current model id). The API key is
+    then read from the *selected* provider's env var
+    (``ANTHROPIC_API_KEY`` for Anthropic), keyring, or CLI argument.
 
     Args:
         api_key_arg: API key from CLI argument.
         no_interactive: Disable interactive prompts.
+        selection_inputs: Bundled ``--provider`` / ``--model`` /
+            config-file selection inputs. Defaults to an empty bundle,
+            which resolves to the built-in Anthropic default.
 
     Returns:
-        AIOrchestrator instance if API key found, None otherwise.
+        AIOrchestrator instance if a provider and key resolve, else None.
     """
-    api_key, source = _get_api_key_with_source(
-        api_key_arg, no_interactive=no_interactive
+    selection = _resolve_orchestrator_selection(
+        selection_inputs or _SelectionInputs(),
     )
-
-    if not api_key:
+    if selection is None:
         return None
 
-    try:
-        orchestrator = AIOrchestrator(api_key=api_key)
-        console.print(f"[green]✓[/green] AI features enabled (from {source})")
-        return orchestrator  # noqa: TRY300  # Happy path return is clearer
-    except ValueError as e:
-        console.print(f"[red]Error:[/red] Invalid API key: {e}", style="bold")
+    api_key, source = _get_api_key_with_source(
+        api_key_arg,
+        resolve_api_key_env_var(selection.provider),
+        no_interactive=no_interactive,
+    )
+    if api_key is None or source is None:
         return None
+
+    return _build_orchestrator_from_selection(selection, api_key, source)
 
 
 def _copy_reference_skills(
@@ -787,6 +942,15 @@ def _scripts_dir_has_other_language(scripts_dir: Path, language: str) -> bool:
     return current_marker != "" and current_marker not in content
 
 
+# Languages with native quality-script templates in ScriptsGenerator.
+# The generator falls back to *Python* scripts for anything else, which
+# would be wrong for e.g. a Ruby project, so the init pipeline skips
+# the step instead.
+_SCRIPTS_STEP_LANGUAGES: frozenset[str] = frozenset(
+    {"python", "typescript", "go", "rust", "swift", "kotlin", "cpp", "java", "csharp"}
+)
+
+
 def _generate_scripts_step(
     project_path: Path,
     project_name: str,
@@ -798,6 +962,9 @@ def _generate_scripts_step(
 
     If scripts/ already contains scripts from a different language,
     automatically uses scripts/{language}/ subdirectory to avoid conflicts.
+    Languages without native script templates (ruby)
+    are skipped with an informational message instead of receiving the
+    generator's Python fallback.
 
     Args:
         project_path: Project root directory.
@@ -807,6 +974,13 @@ def _generate_scripts_step(
         subdirectory: If set, write to scripts/{subdirectory}/ instead
             of scripts/. Used for multi-language projects.
     """
+    if language not in _SCRIPTS_STEP_LANGUAGES:
+        console.print(
+            f"[dim]Quality scripts unavailable for {language} "
+            f"(supported: {', '.join(sorted(_SCRIPTS_STEP_LANGUAGES))})[/dim]"
+        )
+        return
+
     scripts_dir = project_path / "scripts"
     if subdirectory:
         scripts_dir = scripts_dir / subdirectory
@@ -834,7 +1008,19 @@ def _generate_precommit_step(
     language: str,
     file_writer: FileWriter | None = None,
 ) -> None:
-    """Generate pre-commit configuration, merging with existing if present."""
+    """Generate pre-commit configuration, merging with existing if present.
+
+    Languages PreCommitGenerator does not support yet (ruby)
+    are skipped with an informational message instead of aborting the
+    whole init run.
+    """
+    if language not in PRECOMMIT_LANGUAGE_CONFIGS:
+        console.print(
+            f"[dim]Pre-commit config unavailable for {language} "
+            f"(supported: {', '.join(PRECOMMIT_LANGUAGE_CONFIGS)})[/dim]"
+        )
+        return
+
     with step_timer("precommit"), console.status("Generating pre-commit config..."):
         precommit_config = GenerationConfig(
             project_name=project_name,
@@ -931,8 +1117,18 @@ def _generate_ci_step(
     only used to opt into the legacy AI-tuned path for backward
     compatibility. ``project_name`` is forwarded to the template
     renderer so any ``<<% project_name %>>`` placeholder lands with
-    the real value rather than the empty string.
+    the real value rather than the empty string. Languages without a
+    CIGenerator config are skipped with an informational message instead
+    of aborting init — with kotlin wired in (#358) every CLI language
+    has one, so this guard is defensive for future additions.
     """
+    if language not in CI_LANGUAGE_CONFIGS:
+        console.print(
+            f"[dim]CI pipeline unavailable for {language} "
+            f"(supported: {', '.join(CI_LANGUAGE_CONFIGS)})[/dim]"
+        )
+        return
+
     with step_timer("ci"), console.status("Generating CI pipeline..."):
         ci_generator = CIGenerator(
             orchestrator,
@@ -976,6 +1172,42 @@ def _generate_review_step(
     console.print("[green]✓[/green] Generated GitHub Actions review")
 
 
+def _write_modular_claude_md(
+    generator: ClaudeMdGenerator,
+    project_path: Path,
+    project_config: dict[str, Any],
+    file_writer: FileWriter | None,
+) -> ClaudeMdGenerationResult:
+    """Render and write the modular ``.claude/`` CLAUDE.md tree (#397).
+
+    Writes the index ``CLAUDE.md`` plus the six ``.claude/docs/*.md`` split
+    files. When a ``file_writer`` is supplied, each file goes through its
+    conflict-aware path so ``green init`` re-runs preserve user edits.
+
+    Args:
+        generator: Configured CLAUDE.md generator.
+        project_path: Target project root directory.
+        project_config: Project configuration passed to the generator.
+        file_writer: Optional conflict-aware writer; direct writes when None.
+
+    Returns:
+        The index generation result (carries token usage telemetry).
+    """
+    index_result, docs = generator.render_modular(project_config)
+    index_file = project_path / "CLAUDE.md"
+    docs_dir = project_path / ".claude" / "docs"
+    if file_writer is not None:
+        file_writer.write_file(index_file, index_result.content)
+        for name, content in docs.items():
+            file_writer.write_file(docs_dir / f"{name}.md", content)
+    else:
+        index_file.write_text(index_result.content, encoding="utf-8")
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        for name, content in docs.items():
+            (docs_dir / f"{name}.md").write_text(content, encoding="utf-8")
+    return index_result
+
+
 def _generate_claude_md_step(
     project_path: Path,
     project_name: str,
@@ -1004,13 +1236,13 @@ def _generate_claude_md_step(
             ],
             "skills": REQUIRED_SKILLS.copy(),
         }
-        claude_md_result = claude_md_generator.generate(project_config)
-        claude_md_file = project_path / "CLAUDE.md"
-        if file_writer is not None:
-            file_writer.write_file(claude_md_file, claude_md_result.content)
-        else:
-            claude_md_file.write_text(claude_md_result.content, encoding="utf-8")
-    console.print("[green]✓[/green] Generated CLAUDE.md")
+        _write_modular_claude_md(
+            claude_md_generator,
+            project_path,
+            project_config,
+            file_writer,
+        )
+    console.print("[green]✓[/green] Generated CLAUDE.md (modular .claude/docs)")
 
 
 def _generate_architecture_step(
@@ -1022,18 +1254,33 @@ def _generate_architecture_step(
     """Generate architecture rules.
 
     Architecture configuration is fully deterministic (import-linter for
-    Python, dependency-cruiser for TypeScript). Runs regardless of API
-    key availability; only Python and TypeScript projects produce output.
-    The previous ``orchestrator`` argument was unused and has been
-    removed from this private helper.
+    Python, dependency-cruiser for TypeScript, go-arch-lint for Go,
+    cargo-deny for Rust, SwiftLint custom rules for Swift, a Konsist test
+    for Kotlin, an include-boundary checker for C/C++, an ArchUnit test
+    for Java, a NetArchTest test for C#). Runs regardless of API key
+    availability; only Python, TypeScript, Go, Rust, Swift, Kotlin,
+    C/C++, Java, and C# projects produce output. The previous
+    ``orchestrator`` argument was unused and has been removed from this
+    private helper.
     """
-    if language not in {"python", "typescript"}:
-        # The generator only supports these two; surface a dim info line
-        # so users understand why no architecture rules were generated
-        # for, e.g., a Go or Rust project rather than seeing silence.
+    supported = {
+        "python",
+        "typescript",
+        "go",
+        "rust",
+        "swift",
+        "kotlin",
+        "cpp",
+        "java",
+        "csharp",
+    }
+    if language not in supported:
+        # The generator only supports these languages; surface a dim info
+        # line so users understand why no architecture rules were generated
+        # for, e.g., a Ruby project rather than seeing silence.
         console.print(
             f"[dim]Architecture rules unavailable for {language} "
-            "(supported: python, typescript)[/dim]"
+            f"(supported: {', '.join(sorted(supported))})[/dim]"
         )
         return
 
@@ -1096,13 +1343,115 @@ def _generate_subagents_step(
     console.print("[green]✓[/green] Generated subagents")
 
 
+def _write_initial_metrics_json(
+    docs_dir: Path,
+    project_name: str,
+    config: MetricsGenerationConfig,
+    precommit_hooks_total: int,
+    ci_jobs_total: int,
+) -> None:
+    """Write the initial ``docs/metrics.json`` payload for the dashboard.
+
+    Args:
+        docs_dir: The project's ``docs/`` directory (must exist).
+        project_name: Name of the project recorded in the payload.
+        config: Metrics generation config supplying the thresholds.
+        precommit_hooks_total: Number of pre-commit hooks configured.
+        ci_jobs_total: Number of CI jobs configured.
+    """
+    initial_metrics = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "project": project_name,
+        "thresholds": {
+            "coverage": config.coverage_threshold,
+            "branch_coverage": config.branch_coverage_threshold,
+            "mutation_score": config.mutation_threshold,
+            "complexity": config.complexity_threshold,
+            "docs_coverage": config.doc_coverage_threshold,
+            "security_issues": 0,
+        },
+        "metrics": {
+            "precommit_status": precommit_status(precommit_hooks_total),
+            "ci_status": ci_status(ci_jobs_total),
+            "coverage": 0.0,
+            "coverage_status": "fail",
+            "branch_coverage": 0.0,
+            "branch_coverage_status": "fail",
+            "mutation_score": 0.0,
+            "mutation_status": "fail",
+            "complexity_avg": 0.0,
+            "complexity_status": "pass",
+            "docs_coverage": 0.0,
+            "docs_status": "fail",
+            "security_issues": 0,
+            "security_status": "pass",
+        },
+    }
+    (docs_dir / "metrics.json").write_text(
+        json.dumps(initial_metrics, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _copy_metrics_assets(project_path: Path, project_name: str) -> tuple[bool, bool]:
+    """Copy the metrics workflow and collection script into the project.
+
+    Args:
+        project_path: Target project root directory.
+        project_name: Project name substituted into the workflow file.
+
+    Returns:
+        ``(missing_workflow, missing_script)`` flags — ``True`` when the
+        corresponding source asset could not be found in the sgsg install.
+    """
+    workflows_dir = project_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+
+    sgsg_root = Path(__file__).parent.parent
+    sgsg_workflow = sgsg_root / ".github" / "workflows" / "metrics.yml"
+    missing_workflow = not sgsg_workflow.exists()
+    if not missing_workflow:
+        target_workflow = workflows_dir / "metrics.yml"
+        shutil.copy(sgsg_workflow, target_workflow)
+        workflow_content = target_workflow.read_text(encoding="utf-8")
+        workflow_content = workflow_content.replace(
+            "start-green-stay-green", project_name
+        )
+        target_workflow.write_text(workflow_content, encoding="utf-8")
+
+    scripts_dir = project_path / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    sgsg_script = sgsg_root / "scripts" / "collect_metrics.py"
+    missing_script = not sgsg_script.exists()
+    if not missing_script:
+        shutil.copy(sgsg_script, scripts_dir / "collect_metrics.py")
+
+    return missing_workflow, missing_script
+
+
 def _generate_metrics_dashboard_step(
     project_path: Path,
     project_name: str,
     language: str,
 ) -> None:
-    """Generate live metrics dashboard and workflow."""
+    """Generate live metrics dashboard and workflow.
+
+    Languages MetricsGenerator does not support yet (ruby)
+    are skipped with an informational message instead of aborting init
+    when ``--enable-live-dashboard`` is passed.
+    """
+    if language not in METRICS_LANGUAGE_TOOLS:
+        console.print(
+            f"[dim]Metrics dashboard unavailable for {language} "
+            f"(supported: {', '.join(METRICS_LANGUAGE_TOOLS)})[/dim]"
+        )
+        return
+
     with step_timer("metrics"), console.status("Generating metrics dashboard..."):
+        precommit_hooks_total = MetricsGenerator.count_precommit_hooks(
+            project_path / ".pre-commit-config.yaml"
+        )
+        ci_jobs_total = count_ci_jobs(project_path / ".github" / "workflows")
         config = MetricsGenerationConfig(
             language=language,
             project_name=project_name,
@@ -1111,6 +1460,8 @@ def _generate_metrics_dashboard_step(
             mutation_threshold=80,
             complexity_threshold=10,
             doc_coverage_threshold=95,
+            precommit_hooks_total=precommit_hooks_total,
+            ci_jobs_total=ci_jobs_total,
             enable_dashboard=True,
             enable_badges=True,
         )
@@ -1121,66 +1472,17 @@ def _generate_metrics_dashboard_step(
         docs_dir.mkdir(parents=True, exist_ok=True)
 
         generator.write_dashboard(docs_dir)
-        initial_metrics_path = docs_dir / "metrics.json"
-        initial_metrics = {
-            "timestamp": datetime.now(UTC).isoformat(),
-            "project": project_name,
-            "thresholds": {
-                "coverage": config.coverage_threshold,
-                "branch_coverage": config.branch_coverage_threshold,
-                "mutation_score": config.mutation_threshold,
-                "complexity": config.complexity_threshold,
-                "docs_coverage": config.doc_coverage_threshold,
-                "security_issues": 0,
-            },
-            "metrics": {
-                "coverage": 0.0,
-                "coverage_status": "fail",
-                "branch_coverage": 0.0,
-                "branch_coverage_status": "fail",
-                "mutation_score": 0.0,
-                "mutation_status": "fail",
-                "complexity_avg": 0.0,
-                "complexity_status": "pass",
-                "docs_coverage": 0.0,
-                "docs_status": "fail",
-                "security_issues": 0,
-                "security_status": "pass",
-            },
-        }
-        initial_metrics_path.write_text(
-            json.dumps(initial_metrics, indent=2),
-            encoding="utf-8",
+        _write_initial_metrics_json(
+            docs_dir,
+            project_name,
+            config,
+            precommit_hooks_total,
+            ci_jobs_total,
         )
 
-        workflows_dir = project_path / ".github" / "workflows"
-        workflows_dir.mkdir(parents=True, exist_ok=True)
-
-        sgsg_root = Path(__file__).parent.parent
-        sgsg_workflow = sgsg_root / ".github" / "workflows" / "metrics.yml"
-        missing_workflow = False
-        missing_script = False
-        if sgsg_workflow.exists():
-            target_workflow = workflows_dir / "metrics.yml"
-            shutil.copy(sgsg_workflow, target_workflow)
-            workflow_content = target_workflow.read_text(encoding="utf-8")
-            workflow_content = workflow_content.replace(
-                "start-green-stay-green", project_name
-            )
-            target_workflow.write_text(workflow_content, encoding="utf-8")
-        else:
-            missing_workflow = True
-
-        scripts_dir = project_path / "scripts"
-        scripts_dir.mkdir(parents=True, exist_ok=True)
-        sgsg_script = sgsg_root / "scripts" / "collect_metrics.py"
-        if sgsg_script.exists():
-            shutil.copy(
-                sgsg_script,
-                scripts_dir / "collect_metrics.py",
-            )
-        else:
-            missing_script = True
+        missing_workflow, missing_script = _copy_metrics_assets(
+            project_path, project_name
+        )
 
     console.print("[green]✓[/green] Generated metrics dashboard")
     if missing_workflow:
@@ -1310,16 +1612,73 @@ def _generate_project_files(
         raise typer.Exit(code=1) from e
 
 
+# "python" is intentionally absent: its venv activation line depends on the
+# user's shell, so its steps are built dynamically in _get_setup_instructions.
 _LANG_SETUP_STEPS: dict[str, list[str]] = {
-    "python": [
-        "python -m venv .venv",
-        "source .venv/bin/activate",
-        "pip install -r requirements.txt -r requirements-dev.txt",
-    ],
     "typescript": ["npm install"],
     "go": ["go mod download"],
     "rust": ["cargo build"],
+    "swift": ["swift package resolve", "swift build"],
+    # The Gradle wrapper jar is a binary the generator never writes, so
+    # the first step materialises it from a local Gradle install (#356).
+    "kotlin": ["gradle wrapper", "./gradlew build"],
+    # Plain CMake + Conan builds the pure-logic library and Catch2 tests;
+    # .tpk packaging needs Tizen Studio, which init cannot install (#361).
+    "cpp": [
+        "conan install . --output-folder=build --build=missing",
+        (
+            "cmake -B build -S . "
+            "-DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake "
+            "-DCMAKE_BUILD_TYPE=Release"
+        ),
+        "cmake --build build",
+        "ctest --test-dir build",
+    ],
+    # Plain Maven builds and tests the pure-logic half of the legacy
+    # Android Wear scaffold; the watch APK needs Android tooling
+    # (Android Studio / Gradle), which init cannot install (#366).
+    "java": ["mvn test"],
+    # `dotnet test` restores, builds (Roslyn analyzers as errors), and
+    # runs the xUnit suite in one invocation — the csproj owns the whole
+    # quality policy (#370), so the single command verifies the scaffold.
+    "csharp": ["dotnet test"],
 }
+
+
+def _venv_activation_command(os_name: str, env: Mapping[str, str]) -> str:
+    r"""Return the venv activation command for the user's shell.
+
+    The default ``source .venv/bin/activate`` is bash/zsh syntax and
+    silently fails in fish, csh/tcsh, cmd.exe, and PowerShell, so a
+    best-effort heuristic detection is applied:
+
+    - Windows (``os_name == "nt"``): a ``PSModulePath`` environment
+      variable is treated as a PowerShell indicator (``Activate.ps1``);
+      otherwise the cmd.exe form (``.venv\Scripts\activate``) is used.
+    - POSIX: the basename of the ``SHELL`` environment variable selects
+      ``activate.fish`` for fish and ``activate.csh`` for csh/tcsh.
+    - Unknown or missing shells fall back to the bash/zsh form, matching
+      the historical default.
+
+    Args:
+        os_name: Platform identifier, typically ``os.name`` ("nt" on
+            Windows, "posix" elsewhere).
+        env: Environment mapping to inspect, typically ``os.environ``.
+
+    Returns:
+        Shell command string that activates ``.venv`` in the detected
+        shell.
+    """
+    if os_name == "nt":
+        if "PSModulePath" in env:
+            return ".venv\\Scripts\\Activate.ps1"
+        return ".venv\\Scripts\\activate"
+    shell = PurePosixPath(env.get("SHELL", "")).name
+    if shell == "fish":
+        return "source .venv/bin/activate.fish"
+    if shell in {"csh", "tcsh"}:
+        return "source .venv/bin/activate.csh"
+    return "source .venv/bin/activate"
 
 
 def _get_setup_instructions(languages: Sequence[str], project_path: Path) -> list[str]:
@@ -1327,7 +1686,11 @@ def _get_setup_instructions(languages: Sequence[str], project_path: Path) -> lis
 
     For multi-language projects, language-specific steps are concatenated
     in the order the languages appear. Shared steps (cd, pre-commit
-    install, check-all) are not duplicated.
+    install, check-all) are not duplicated. The Python venv activation
+    line is shell-aware (see :func:`_venv_activation_command`); the
+    detection is a heuristic based on ``os.name`` and the ``SHELL`` /
+    ``PSModulePath`` environment variables, and defaults to the bash/zsh
+    form when the shell cannot be identified.
 
     Args:
         languages: Ordered sequence of programming languages (python,
@@ -1343,7 +1706,16 @@ def _get_setup_instructions(languages: Sequence[str], project_path: Path) -> lis
 
     middle: list[str] = []
     for lang in dict.fromkeys(languages):
-        middle.extend(_LANG_SETUP_STEPS.get(lang, []))
+        if lang == "python":
+            middle.extend(
+                [
+                    "python -m venv .venv",
+                    _venv_activation_command(os.name, os.environ),
+                    "pip install -r requirements.txt -r requirements-dev.txt",
+                ]
+            )
+        else:
+            middle.extend(_LANG_SETUP_STEPS.get(lang, []))
 
     return [cd, *middle, *common_tail]
 
@@ -1490,6 +1862,7 @@ def _resolve_pass2_orchestrator(
     offline: bool,
     no_enhance: bool,
     no_interactive: bool,
+    selection_inputs: _SelectionInputs | None = None,
 ) -> AIOrchestrator | None:
     """Decide whether Pass 2 should run, and return the orchestrator if so.
 
@@ -1513,7 +1886,11 @@ def _resolve_pass2_orchestrator(
         )
         return None
 
-    orchestrator = _initialize_orchestrator(api_key, no_interactive=no_interactive)
+    orchestrator = _initialize_orchestrator(
+        api_key,
+        no_interactive=no_interactive,
+        selection_inputs=selection_inputs,
+    )
 
     if no_enhance:
         # Always print *something* so the user knows --no-enhance had an
@@ -1706,6 +2083,8 @@ def init(  # noqa: PLR0913
         ),
     ] = None,
     config: config_file_option = None,
+    provider: provider_option = None,
+    model: model_option = None,
 ) -> None:
     """Initialize a new project with quality controls.
 
@@ -1731,6 +2110,8 @@ def init(  # noqa: PLR0913
         enable_live_dashboard: Generate live metrics dashboard with workflow.
         timing_json: Optional path to write a timing/telemetry JSON report.
         config: Configuration file path.
+        provider: Optional LLM provider override (``--provider``).
+        model: Optional model override (``--model``).
 
     Raises:
         typer.Exit: If validation fails or generation errors occur.
@@ -1775,6 +2156,11 @@ def init(  # noqa: PLR0913
         offline=offline,
         no_enhance=no_enhance,
         no_interactive=no_interactive,
+        selection_inputs=_SelectionInputs(
+            provider_flag=provider,
+            model_flag=model,
+            config_data=config_data,
+        ),
     )
 
     # Create project directory
@@ -1812,10 +2198,21 @@ _LANGUAGE_PROBES: tuple[tuple[str, str], ...] = (
     ("go.mod", "go"),
     ("Cargo.toml", "rust"),
     ("pom.xml", "java"),
+    # Kotlin DSL manifests before Groovy build.gradle: a Wear OS scaffold
+    # (#356) ships settings.gradle.kts / build.gradle.kts only.
+    ("settings.gradle.kts", "kotlin"),
+    ("build.gradle.kts", "kotlin"),
     ("build.gradle", "java"),
     ("Gemfile", "ruby"),
     ("composer.json", "php"),
     ("Package.swift", "swift"),
+    # cpp probes come last: tizen-manifest.xml and conanfile.txt are
+    # unambiguous, but CMakeLists.txt also appears in other ecosystems'
+    # projects (e.g. Rust or Swift packages vendoring native code), so
+    # every more specific manifest above must win first (#361).
+    ("tizen-manifest.xml", "cpp"),
+    ("conanfile.txt", "cpp"),
+    ("CMakeLists.txt", "cpp"),
 )
 
 # Pattern for the H1 line in a generated CLAUDE.md file.
@@ -1928,6 +2325,7 @@ def _require_enhance_orchestrator(
     api_key: str | None,
     *,
     no_interactive: bool,
+    selection_inputs: _SelectionInputs | None = None,
 ) -> AIOrchestrator:
     """Resolve an :class:`AIOrchestrator` for the ``enhance`` command.
 
@@ -1939,6 +2337,8 @@ def _require_enhance_orchestrator(
     Args:
         api_key: Optional CLI-supplied key.
         no_interactive: Skip any keyring prompts.
+        selection_inputs: Bundled ``--provider`` / ``--model`` /
+            config-file selection inputs.
 
     Returns:
         A real ``AIOrchestrator`` ready to dispatch.
@@ -1946,13 +2346,17 @@ def _require_enhance_orchestrator(
     Raises:
         typer.Exit: With code 1 if no key could be resolved.
     """
-    orchestrator = _initialize_orchestrator(api_key, no_interactive=no_interactive)
+    orchestrator = _initialize_orchestrator(
+        api_key,
+        no_interactive=no_interactive,
+        selection_inputs=selection_inputs,
+    )
     if orchestrator is None:
         console.print(
-            "[red]Error:[/red] `green enhance` requires an Anthropic API "
-            "key — there is no deterministic fallback for AI-tuned "
-            "artifacts.\n  Set ANTHROPIC_API_KEY (or store one in the "
-            "keyring on first run).",
+            "[red]Error:[/red] `green enhance` requires an API key for the "
+            "selected provider — there is no deterministic fallback for "
+            "AI-tuned artifacts.\n  Set ANTHROPIC_API_KEY (or store one in "
+            "the keyring on first run).",
             style="bold",
         )
         raise typer.Exit(code=1)
@@ -2053,50 +2457,87 @@ def _compute_target_source_hash(
     return hash_helper(project_name, language)
 
 
-def _enhance_claude_md(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
-    project_path: Path,
-    project_name: str,
-    language: str,
+@dataclass(frozen=True)
+class _EnhanceProjectContext:
+    """Project metadata threaded through the enhance dispatchers.
+
+    Bundles the three identifiers that every enhance helper needs to
+    know about the project under tune: where it lives, what it's
+    called, and what language preset to use. Grouping them keeps the
+    enhance pipeline helpers (:func:`_enhance_claude_md`,
+    :func:`_enhance_subagents`, :func:`_dispatch_enhance_targets`,
+    :func:`_run_enhance_pipeline`, :func:`_run_enhance_batch`, and
+    :func:`_submit_subagent_batch_cli`) below the ``PLR0913``
+    threshold without splitting concerns. See issues #316 and #326.
+    """
+
+    project_path: Path
+    project_name: str
+    language: str
+
+
+@dataclass(frozen=True)
+class _EnhanceRunOptions:
+    """Per-invocation behaviour flags for the enhance pipeline.
+
+    Bundles the three knobs that control *how* a ``green enhance`` run
+    writes (or doesn't write) its output: ``dry_run`` skips writes but
+    keeps the API calls, ``force`` bypasses the unchanged-source skip,
+    and ``file_writer`` carries the conflict-resolution policy.
+    Companion to :class:`_EnhanceProjectContext` (which carries *what*
+    is being tuned) so :func:`_dispatch_enhance_targets` and
+    :func:`_run_enhance_pipeline` stay below the ``PLR0913`` threshold.
+    See issue #326.
+    """
+
+    dry_run: bool
+    force: bool
+    file_writer: FileWriter | None
+
+
+def _enhance_claude_md(
+    project: _EnhanceProjectContext,
     orchestrator: AIOrchestrator,
     *,
     dry_run: bool,
     file_writer: FileWriter | None,
 ) -> None:
-    """Re-tune ``CLAUDE.md`` against the existing project.
+    """Re-tune the modular ``CLAUDE.md`` tree against the existing project.
 
     Mirrors :func:`_generate_claude_md_step`'s tuning path but writes
-    to the existing project rather than a fresh scaffold. ``dry_run``
-    skips the write but still runs the API call so the user sees the
-    full token-usage telemetry (and any errors) they'd see for real.
+    to the existing project (``project.project_path``) rather than a
+    fresh scaffold. Emits the index ``CLAUDE.md`` plus the six
+    ``.claude/docs/*.md`` split files. ``dry_run`` skips the writes but
+    still runs the API call so the user sees the full token-usage
+    telemetry (and any errors) they'd see for real.
     """
     with step_timer("enhance_claude_md"), console.status("Re-tuning CLAUDE.md..."):
         claude_md_generator = ClaudeMdGenerator(orchestrator)
-        result = claude_md_generator.generate(
-            {
-                "project_name": project_name,
-                "language": language,
-                "scripts": list(_CLAUDE_MD_SCRIPTS),
-                "skills": REQUIRED_SKILLS.copy(),
-            }
-        )
-        target = project_path / "CLAUDE.md"
+        project_config: dict[str, Any] = {
+            "project_name": project.project_name,
+            "language": project.language,
+            "scripts": list(_CLAUDE_MD_SCRIPTS),
+            "skills": REQUIRED_SKILLS.copy(),
+        }
         if dry_run:
+            index_result, _docs = claude_md_generator.render_modular(project_config)
+            target = project.project_path / "CLAUDE.md"
             console.print(
-                f"[dim]--dry-run: would rewrite {target} "
-                f"({len(result.content):,} chars).[/dim]"
+                f"[dim]--dry-run: would rewrite {target} and "
+                f".claude/docs/ ({len(index_result.content):,} index chars).[/dim]"
             )
             return
-        if file_writer is not None:
-            file_writer.write_file(target, result.content)
-        else:
-            target.write_text(result.content, encoding="utf-8")
-    console.print("[green]✓[/green] Re-tuned CLAUDE.md")
+        _write_modular_claude_md(
+            claude_md_generator,
+            project.project_path,
+            project_config,
+            file_writer,
+        )
+    console.print("[green]✓[/green] Re-tuned CLAUDE.md (modular .claude/docs)")
 
 
-def _enhance_subagents(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
-    project_path: Path,
-    project_name: str,
-    language: str,
+def _enhance_subagents(
+    project: _EnhanceProjectContext,
     orchestrator: AIOrchestrator,
     *,
     dry_run: bool,
@@ -2107,14 +2548,14 @@ def _enhance_subagents(  # noqa: PLR0913 — Pass 2 helpers mirror init steps
     Same parallel-fan-out path as Pass 2 of init, but writes back to
     ``<project>/.claude/agents`` instead of generating it fresh.
     """
-    target_dir = project_path / ".claude" / "agents"
+    target_dir = project.project_path / ".claude" / "agents"
     target_dir.mkdir(parents=True, exist_ok=True)
 
     with step_timer("enhance_subagents"), console.status("Re-tuning subagents..."):
         subagents_generator = SubagentsGenerator(orchestrator)
         target_context = (
-            f"Project: {project_name}, "
-            f"Language: {language}, "
+            f"Project: {project.project_name}, "
+            f"Language: {project.language}, "
             f"Type: existing project being re-tuned via `green enhance`"
         )
         results = run_async(
@@ -2254,20 +2695,19 @@ def _assert_enhance_dispatch_intact() -> None:
 _assert_enhance_dispatch_intact()
 
 
-def _dispatch_enhance_targets(  # noqa: PLR0913 — orchestration glue
+def _dispatch_enhance_targets(
     targets: tuple[str, ...],
     *,
-    project_path: Path,
-    project_name: str,
-    language: str,
+    project: _EnhanceProjectContext,
     orchestrator: AIOrchestrator,
     state: EnhanceState,
-    target_hashes: dict[str, str],
-    dry_run: bool,
-    force: bool,
-    file_writer: FileWriter | None,
+    options: _EnhanceRunOptions,
 ) -> list[str]:
     """Drive Pass 2 across each selected target with the skip/force logic.
+
+    Each target's source hash is computed here (the hash helpers are
+    pure functions of the project name + language) and reused for both
+    the skip check and the ``mark_completed`` record.
 
     Returns the list of target names that were skipped because the
     source hash matched a stored completion. The caller uses that to
@@ -2276,8 +2716,12 @@ def _dispatch_enhance_targets(  # noqa: PLR0913 — orchestration glue
     skipped: list[str] = []
     for target in targets:
         spec = _ENHANCE_DISPATCH[target]
-        target_hash = target_hashes[target]
-        if not force and state.is_unchanged(target, target_hash):
+        target_hash = _compute_target_source_hash(
+            target,
+            project.project_name,
+            project.language,
+        )
+        if not options.force and state.is_unchanged(target, target_hash):
             console.print(spec.skip_message)
             skipped.append(target)
             continue
@@ -2285,14 +2729,12 @@ def _dispatch_enhance_targets(  # noqa: PLR0913 — orchestration glue
         # decorations are honoured.
         helper: Callable[..., None] = globals()[spec.helper_name]
         helper(
-            project_path,
-            project_name,
-            language,
+            project,
             orchestrator,
-            dry_run=dry_run,
-            file_writer=file_writer,
+            dry_run=options.dry_run,
+            file_writer=options.file_writer,
         )
-        if not dry_run:
+        if not options.dry_run:
             state.mark_completed(target, target_hash, orchestrator.model)
     return skipped
 
@@ -2327,48 +2769,38 @@ def _print_enhance_summary(*, project_name: str, dry_run: bool) -> None:
         console.print(f"\n[green]✓[/green] Enhancement complete: {project_name}")
 
 
-def _run_enhance_pipeline(  # noqa: PLR0913 — orchestration glue
+def _run_enhance_pipeline(
     *,
-    project_path: Path,
-    project_name: str,
-    language: str,
+    project: _EnhanceProjectContext,
     selected_targets: tuple[str, ...],
     orchestrator: AIOrchestrator,
-    file_writer: FileWriter | None,
-    dry_run: bool,
-    force: bool,
+    options: _EnhanceRunOptions,
 ) -> None:
     """Execute the full Pass 2 pipeline + persist state on success."""
     console.print(
-        f"[dim]Enhancing project: {project_name} ({language})"
+        f"[dim]Enhancing project: {project.project_name} ({project.language})"
         f"  →  targets: {', '.join(selected_targets)}"
-        f"{'  [DRY RUN]' if dry_run else ''}[/dim]"
+        f"{'  [DRY RUN]' if options.dry_run else ''}[/dim]"
     )
-    state = load_state(project_path)
-    target_hashes = {
-        target: _compute_target_source_hash(target, project_name, language)
-        for target in selected_targets
-    }
+    state = load_state(project.project_path)
     skipped = _dispatch_enhance_targets(
         selected_targets,
-        project_path=project_path,
-        project_name=project_name,
-        language=language,
+        project=project,
         orchestrator=orchestrator,
         state=state,
-        target_hashes=target_hashes,
-        dry_run=dry_run,
-        force=force,
-        file_writer=file_writer,
+        options=options,
     )
     _persist_enhance_state(
-        project_path,
+        project.project_path,
         state,
         skipped=skipped,
         selected_targets=selected_targets,
-        dry_run=dry_run,
+        dry_run=options.dry_run,
     )
-    _print_enhance_summary(project_name=project_name, dry_run=dry_run)
+    _print_enhance_summary(
+        project_name=project.project_name,
+        dry_run=options.dry_run,
+    )
 
 
 def _validate_enhance_path(project_path: Path) -> None:
@@ -2436,23 +2868,6 @@ def _validate_batch_targets(selected_targets: tuple[str, ...]) -> None:
     )
     console.print(msg)
     raise typer.Exit(code=1)
-
-
-@dataclass(frozen=True)
-class _EnhanceProjectContext:
-    """Project metadata threaded through the enhance dispatchers.
-
-    Bundles the three identifiers that every enhance helper needs to
-    know about the project under tune: where it lives, what it's
-    called, and what language preset to use. Grouping them drops
-    :func:`_run_enhance_batch` and :func:`_submit_subagent_batch_cli`
-    below the ``PLR0913`` threshold without splitting concerns. See
-    issue #316.
-    """
-
-    project_path: Path
-    project_name: str
-    language: str
 
 
 def _run_enhance_batch(
@@ -2576,12 +2991,9 @@ def _resume_subagent_batch_cli(
     _render_batch_resume_outcome(outcome)
 
 
-# Static-message statuses for :func:`_render_batch_resume_outcome`.
-# IN_PROGRESS and ENDED are deliberately absent — they need
-# ``outcome.poll`` / ``outcome.bundle`` data woven into the rendered
-# message, so they branch into ``_render_batch_in_progress`` /
-# ``_render_batch_ended`` instead. Adding them to this dict would
-# silently drop their dynamic data.
+# Message contents for the static-message branches of
+# :func:`_render_batch_resume_outcome`; IN_PROGRESS and ENDED have their
+# own ``case`` branches because their messages weave in dynamic data.
 _BATCH_OUTCOME_STATIC: dict[ResumeStatus, str] = {
     ResumeStatus.NO_BATCH: (
         "[yellow]No batch is in flight; nothing to resume.[/yellow]"
@@ -2766,6 +3178,8 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
             ),
         ),
     ] = False,
+    provider: provider_option = None,
+    model: model_option = None,
 ) -> None:
     r"""Re-run Pass 2 (AI tuning) on an existing green-init project.
 
@@ -2799,6 +3213,16 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
             with ``--wait`` for in-process polling.
         wait: Block in-process when ``--batch`` is set; polls every
             30 s until the batch ends or the timeout elapses.
+        provider: Optional LLM provider override (``--provider``).
+        model: Optional model override (``--model``). The case of the
+            model id is preserved verbatim (API identifiers are
+            case-sensitive).
+
+    Note:
+        Unlike ``green init``, ``enhance`` has no config-file tier: it
+        loads no config file, so provider/model resolve from CLI flag >
+        env (``GREEN_LLM_PROVIDER`` / ``GREEN_LLM_MODEL``) > built-in
+        default only. Wiring a config source is tracked as issue #396.
 
     Raises:
         typer.Exit: If the path is invalid, project metadata cannot
@@ -2820,7 +3244,19 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
     if wait and not batch:
         console.print("[red]Error:[/red] --wait only applies in --batch mode.")
         raise typer.Exit(code=1)
-    orchestrator = _require_enhance_orchestrator(api_key, no_interactive=no_interactive)
+    orchestrator = _require_enhance_orchestrator(
+        api_key,
+        no_interactive=no_interactive,
+        # ``enhance`` intentionally omits the config-file tier: it has no
+        # ``--config`` flag and loads no config file, so only CLI flag >
+        # env > built-in default apply here (3 tiers, vs. ``init``'s 4).
+        # ``config_data`` is therefore left unset (``None``). Wiring a
+        # config source into ``enhance`` is tracked as issue #396.
+        selection_inputs=_SelectionInputs(
+            provider_flag=provider,
+            model_flag=model,
+        ),
+    )
     file_writer = FileWriter(
         project_root=project_path,
         force=force,
@@ -2828,13 +3264,15 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         console=console,
     )
 
+    project = _EnhanceProjectContext(
+        project_path=project_path,
+        project_name=resolved_name,
+        language=resolved_language,
+    )
+
     if batch:
         _run_enhance_batch(
-            project=_EnhanceProjectContext(
-                project_path=project_path,
-                project_name=resolved_name,
-                language=resolved_language,
-            ),
+            project=project,
             orchestrator=orchestrator,
             file_writer=file_writer,
             dry_run=dry_run,
@@ -2843,14 +3281,14 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         return
 
     _run_enhance_pipeline(
-        project_path=project_path,
-        project_name=resolved_name,
-        language=resolved_language,
+        project=project,
         selected_targets=selected_targets,
         orchestrator=orchestrator,
-        file_writer=file_writer,
-        dry_run=dry_run,
-        force=force,
+        options=_EnhanceRunOptions(
+            dry_run=dry_run,
+            force=force,
+            file_writer=file_writer,
+        ),
     )
 
 

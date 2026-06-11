@@ -16,9 +16,12 @@ EXPECTED_TEST_FILES: dict[str, list[str]] = {
     "typescript": ["tests/index.test.ts"],
     "go": ["cmd/test_project/main_test.go"],
     "rust": ["tests/integration_test.rs"],
-    "java": ["src/test/java/test_project/MainTest.java"],
+    "java": ["src/test/java/com/example/test_project/GreetingTest.java"],
     "csharp": ["tests/MainTests.cs"],
     "ruby": ["spec/test_project_spec.rb", "spec/spec_helper.rb"],
+    "swift": ["Tests/test_projectTests/test_projectTests.swift"],
+    "kotlin": ["app/src/test/kotlin/com/example/test_project/GreetingTest.kt"],
+    "cpp": ["tests/test_greeting.cpp"],
 }
 
 
@@ -351,7 +354,7 @@ class TestMultiLanguageTests:
             assert "#[test]" in content
 
     def test_java_test_has_test_annotation(self) -> None:
-        """Test Java test file has @Test annotation."""
+        """Test Java test file has the JUnit 4 @Test annotation."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config = Config(
                 project_name="test-project",
@@ -361,8 +364,40 @@ class TestMultiLanguageTests:
             generator = Generator(Path(tmpdir), config)
             files = generator.generate()
 
-            content = files["src/test/java/test_project/MainTest.java"].read_text()
+            content = files[
+                "src/test/java/com/example/test_project/GreetingTest.java"
+            ].read_text()
             assert "@Test" in content
+            # JUnit 4 (org.junit), matching the pom — not JUnit 5 (jupiter).
+            assert "import org.junit.Test;" in content
+            assert "import static org.junit.Assert.assertEquals;" in content
+            assert "jupiter" not in content
+
+    def test_java_test_exercises_the_greeting_logic(self) -> None:
+        """The Java scaffold test verifies real concatenation logic.
+
+        It must compare ``Greeting.greet()`` output against expected
+        literals — for both the project name and an arbitrary name — so
+        the assertions are not tautological.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="java",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files[
+                "src/test/java/com/example/test_project/GreetingTest.java"
+            ].read_text()
+            assert "package com.example.test_project;" in content
+            assert '"Hello from test-project!"' in content
+            assert 'Greeting.greet("test-project")' in content
+            assert 'assertEquals("Hello from wear!", Greeting.greet("wear"));' in (
+                content
+            )
 
     def test_csharp_test_has_fact_attribute(self) -> None:
         """Test C# test file has [Fact] attribute."""
@@ -378,6 +413,28 @@ class TestMultiLanguageTests:
             content = files["tests/MainTests.cs"].read_text()
             assert "[Fact]" in content
 
+    def test_csharp_test_namespace_nests_under_program_namespace(self) -> None:
+        """The xUnit test namespace derives from the shared helper (#370).
+
+        ``MainTests`` lives in ``<Namespace>.Tests`` so C#'s enclosing-
+        namespace lookup resolves ``Program`` (declared in
+        ``<Namespace>`` by the structure generator) without a using
+        directive — but only when both generators agree on the
+        PascalCase namespace.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="csharp",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["tests/MainTests.cs"].read_text()
+            assert "namespace TestProject.Tests" in content
+            assert "Program.Main(" in content
+
     def test_ruby_test_has_describe_block(self) -> None:
         """Test Ruby spec file has describe block."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -391,3 +448,148 @@ class TestMultiLanguageTests:
 
             content = files["spec/test_project_spec.rb"].read_text()
             assert "describe" in content or "RSpec.describe" in content
+
+    def test_swift_test_has_xctest_case(self) -> None:
+        """Test Swift test file uses XCTest with an XCTestCase subclass."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            test_key = "Tests/test_projectTests/test_projectTests.swift"
+            content = files[test_key].read_text()
+            assert "import XCTest" in content
+            assert "XCTestCase" in content
+            assert "func test" in content
+
+    def test_swift_test_has_meaningful_assertions(self) -> None:
+        """Swift test exercises behavior, not identical string literals.
+
+        The generated XCTest must instantiate ``ContentView`` and assert the
+        greeting is assembled from the project name, rather than comparing two
+        identical literals (which would detect no defects).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            test_key = "Tests/test_projectTests/test_projectTests.swift"
+            content = files[test_key].read_text()
+
+            # ContentView is instantiated and checked for nil — verifies the
+            # view type compiles and constructs.
+            assert "ContentView()" in content
+            assert "XCTAssertNotNil" in content
+
+            # The greeting is built dynamically from the project name via
+            # string interpolation, so the assertion verifies real logic
+            # rather than comparing two identical literals.
+            assert 'let projectName = "test-project"' in content
+            assert 'let greeting = "Hello from \\(projectName)!"' in content
+            assert 'XCTAssertEqual(greeting, "Hello from test-project!")' in content
+
+    def test_kotlin_test_is_a_junit_class(self) -> None:
+        """Kotlin test file uses JUnit 4 with @Test methods (#356)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="kotlin",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            test_key = "app/src/test/kotlin/com/example/test_project/GreetingTest.kt"
+            content = files[test_key].read_text()
+            assert "package com.example.test_project" in content
+            assert "import org.junit.Test" in content
+            assert "@Test" in content
+            assert "class GreetingTest" in content
+
+    def test_kotlin_test_has_meaningful_assertions(self) -> None:
+        """Kotlin test exercises greeting(), not identical string literals.
+
+        The generated JUnit test must call the scaffold's ``greeting``
+        function so the assertion verifies the interpolation logic rather
+        than comparing two identical literals (which would detect no
+        defects) — the same review lesson the Swift scaffold learned in
+        PR #392.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="kotlin",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            test_key = "app/src/test/kotlin/com/example/test_project/GreetingTest.kt"
+            content = files[test_key].read_text()
+            assert 'greeting("test-project")' in content
+            assert 'assertEquals("Hello from test-project!", ' in content
+            # A second case proves greeting() reflects its argument.
+            assert 'greeting("wear")' in content
+            assert 'assertEquals("Hello from wear!", ' in content
+
+
+class TestCppTestGeneration:
+    """Test C/C++ Catch2 scaffold generation (#361)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Run the tests generator for a cpp test project.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            Mapping of generated relative keys to file paths.
+        """
+        config = Config(
+            project_name="test-project",
+            language="cpp",
+            package_name="test_project",
+        )
+        return Generator(Path(tmpdir), config).generate()
+
+    def test_cpp_test_uses_catch2(self) -> None:
+        """The scaffold test includes Catch2 v3 and uses TEST_CASE."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["tests/test_greeting.cpp"].read_text()
+            assert "#include <catch2/catch_test_macros.hpp>" in content
+            assert "TEST_CASE(" in content
+
+    def test_cpp_test_exercises_format_greeting_logic(self) -> None:
+        """The test calls format_greeting with project and arbitrary names.
+
+        Exercising the assembly logic with two inputs (rather than
+        comparing identical literals) is the PR #392 review lesson.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["tests/test_greeting.cpp"].read_text()
+            assert 'test_project::format_greeting("test-project")' in content
+            assert '"Hello from test-project!"' in content
+            assert 'test_project::format_greeting("tizen")' in content
+
+    def test_cpp_test_has_no_tizen_dependencies(self) -> None:
+        """The Catch2 scaffold must build without the Tizen SDK."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            files = self._generate(tmpdir)
+
+            content = files["tests/test_greeting.cpp"].read_text()
+            assert "watch_app" not in content
+            assert "Elementary.h" not in content

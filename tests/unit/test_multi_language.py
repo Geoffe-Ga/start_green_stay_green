@@ -160,6 +160,85 @@ class TestMultiLanguageGeneration:
             assert calls[1][0][2] == "go"
 
 
+class TestMultiLanguageArchitectureParity:
+    """Go (#341), Rust (#342), Swift (#352), Kotlin (#357), cpp (#362),
+    java (#367), csharp (#370)."""
+
+    def test_go_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
+        """Go must emit an architecture-enforcement config like py/ts."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "go")
+
+        config = tmp_path / "plans" / "architecture" / ".go-arch-lint.yml"
+        assert config.exists(), "Go init must emit a go-arch-lint config"
+
+    def test_rust_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
+        """Rust must emit an architecture-enforcement config like py/ts/go."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "rust")
+
+        config = tmp_path / "plans" / "architecture" / "deny.toml"
+        assert config.exists(), "Rust init must emit a cargo-deny config"
+
+    def test_swift_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
+        """Swift must emit an architecture-enforcement config like py/ts/go."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "swift")
+
+        config = tmp_path / "plans" / "architecture" / ".swiftlint-architecture.yml"
+        assert config.exists(), "Swift init must emit a SwiftLint rules config"
+
+    def test_kotlin_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
+        """Kotlin must emit an architecture-enforcement config like py/ts/go."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "kotlin")
+
+        config = tmp_path / "plans" / "architecture" / "ArchitectureTest.kt"
+        assert config.exists(), "Kotlin init must emit a Konsist test template"
+
+    def test_cpp_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
+        """cpp must emit an architecture-enforcement config like py/ts/go."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "cpp")
+
+        config = tmp_path / "plans" / "architecture" / "check_architecture.py"
+        assert config.exists(), "cpp init must emit the include-boundary checker"
+
+    def test_java_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
+        """java must emit an architecture-enforcement config like py/ts/go."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "java")
+
+        config = tmp_path / "plans" / "architecture" / "ArchitectureTest.java"
+        assert config.exists(), "java init must emit the ArchUnit test template"
+
+    def test_csharp_exercises_architecture_enforcement(self, tmp_path: Path) -> None:
+        """csharp must emit an architecture-enforcement config like py/ts/go."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "csharp")
+
+        config = tmp_path / "plans" / "architecture" / "ArchitectureTest.cs"
+        assert config.exists(), "csharp init must emit the NetArchTest template"
+
+    @pytest.mark.parametrize(
+        "language",
+        [
+            "python",
+            "typescript",
+            "go",
+            "rust",
+            "swift",
+            "kotlin",
+            "cpp",
+            "java",
+            "csharp",
+        ],
+    )
+    def test_supported_languages_emit_architecture_config(
+        self, tmp_path: Path, language: str
+    ) -> None:
+        """Every supported language produces architecture rules."""
+        project = tmp_path / language
+        cli_mod._generate_architecture_step(project, "my-project", language)
+
+        arch_dir = project / "plans" / "architecture"
+        assert (arch_dir / "README.md").exists()
+        assert (arch_dir / "run-check.sh").exists()
+
+
 class TestMultiLanguageScriptsDir:
     """Test multi-language scripts use subdirectories (#262)."""
 
@@ -265,3 +344,268 @@ class TestSequentialLanguageDetection:
         _generate_scripts_step(project, "myproject", "python", writer)
         assert (project / "scripts" / "python" / "test.sh").exists()
         assert "pytest" in (project / "scripts" / "python" / "test.sh").read_text()
+
+
+class TestGeneratorOnlyLanguagePipelineGates:
+    """Pipeline steps skip gracefully for generator-only languages (#356).
+
+    ruby has structure/dependencies/tests/readme generators but no
+    pre-commit/scripts/metrics/architecture support — instead of
+    crashing init, those tooling steps must no-op with an informational
+    message. Kotlin graduated from this set when #357 wired its quality
+    tooling and #358 wired its CI workflow; java graduated with #367
+    (its CI workflow has been real since #366); csharp graduated with
+    #370 (its CI workflow has been real since the foundation scaffold).
+    """
+
+    def test_precommit_step_writes_for_kotlin(self, tmp_path: Path) -> None:
+        """Kotlin now generates a pre-commit config (#357)."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "kotlin")
+
+        config = tmp_path / ".pre-commit-config.yaml"
+        assert config.exists()
+        assert "ktlint" in config.read_text()
+
+    def test_precommit_step_skips_ruby_without_writing(self, tmp_path: Path) -> None:
+        """No .pre-commit-config.yaml is written and no error is raised."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "ruby")
+
+        assert not (tmp_path / ".pre-commit-config.yaml").exists()
+
+    def test_precommit_step_still_writes_for_python(self, tmp_path: Path) -> None:
+        """Supported languages keep generating the pre-commit config."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "python")
+
+        assert (tmp_path / ".pre-commit-config.yaml").exists()
+
+    def test_scripts_step_writes_kotlin_scripts(self, tmp_path: Path) -> None:
+        """Kotlin now receives its own quality scripts (#357)."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "kotlin")
+
+        test_script = tmp_path / "scripts" / "test.sh"
+        assert test_script.exists()
+        assert "gradlew" in test_script.read_text()
+
+    def test_scripts_step_skips_ruby_without_python_fallback(
+        self, tmp_path: Path
+    ) -> None:
+        """Ruby must not receive the Python-fallback quality scripts."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "ruby")
+
+        assert not (tmp_path / "scripts").exists()
+
+    def test_ci_step_writes_kotlin_workflow(self, tmp_path: Path) -> None:
+        """The kotlin CI workflow is now generated (#358)."""
+        cli_mod._generate_ci_step(tmp_path, "my-project", "kotlin", None)
+
+        ci_file = tmp_path / ".github" / "workflows" / "ci.yml"
+        assert ci_file.exists()
+        assert "Kotlin Quality Checks" in ci_file.read_text()
+
+    def test_metrics_step_writes_kotlin_dashboard(self, tmp_path: Path) -> None:
+        """The metrics dashboard is now generated for kotlin (#357)."""
+        cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "kotlin")
+
+        assert (tmp_path / "docs" / "metrics.json").exists()
+
+    def test_metrics_step_skips_ruby_without_dashboard(self, tmp_path: Path) -> None:
+        """No metrics dashboard is written for unsupported languages."""
+        cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "ruby")
+
+        assert not (tmp_path / "docs" / "metrics.json").exists()
+
+    def test_architecture_step_writes_kotlin_rules(self, tmp_path: Path) -> None:
+        """Architecture rules are now generated for kotlin (#357)."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "kotlin")
+
+        assert (tmp_path / "plans" / "architecture" / "ArchitectureTest.kt").exists()
+
+    def test_architecture_step_skips_ruby(self, tmp_path: Path) -> None:
+        """No architecture rules are generated for unsupported languages."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "ruby")
+
+        assert not (tmp_path / "plans" / "architecture").exists()
+
+
+class TestCppPipelineGates:
+    """Pipeline steps all run for cpp after #362/#363.
+
+    The #361 foundation shipped structure/dependencies/tests/readme only;
+    #362 wired the pre-commit/scripts/metrics/architecture tooling and
+    #363 completed the pipeline with the CI workflow, so every step must
+    now generate real artifacts.
+    """
+
+    def test_precommit_step_writes_for_cpp(self, tmp_path: Path) -> None:
+        """cpp now generates a pre-commit config (#362)."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "cpp")
+
+        config = tmp_path / ".pre-commit-config.yaml"
+        assert config.exists()
+        assert "clang-tidy" in config.read_text()
+
+    def test_scripts_step_writes_cpp_scripts(self, tmp_path: Path) -> None:
+        """cpp now receives its own quality scripts (#362)."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "cpp")
+
+        test_script = tmp_path / "scripts" / "test.sh"
+        assert test_script.exists()
+        assert "ctest" in test_script.read_text()
+
+    def test_scripts_step_writes_clang_companions_at_project_root(
+        self, tmp_path: Path
+    ) -> None:
+        """The .clang-format/.clang-tidy companions land at the root.
+
+        The pre-commit hooks and the format/lint scripts resolve these
+        files relative to the project root, not the scripts directory.
+        """
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "cpp")
+
+        assert (tmp_path / ".clang-format").exists()
+        assert (tmp_path / ".clang-tidy").exists()
+
+    def test_ci_step_writes_cpp_workflow(self, tmp_path: Path) -> None:
+        """ci.yml is now generated for cpp (#363)."""
+        cli_mod._generate_ci_step(tmp_path, "my-project", "cpp", None)
+
+        ci_file = tmp_path / ".github" / "workflows" / "ci.yml"
+        assert ci_file.exists()
+        assert "C/C++ Quality Checks" in ci_file.read_text()
+
+    def test_metrics_step_writes_cpp_dashboard(self, tmp_path: Path) -> None:
+        """The metrics dashboard is now generated for cpp (#362)."""
+        cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "cpp")
+
+        assert (tmp_path / "docs" / "metrics.json").exists()
+
+    def test_architecture_step_writes_cpp_rules(self, tmp_path: Path) -> None:
+        """Architecture rules are now generated for cpp (#362)."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "cpp")
+
+        checker = tmp_path / "plans" / "architecture" / "check_architecture.py"
+        assert checker.exists()
+
+
+class TestJavaPipelineGates:
+    """Pipeline steps all run for java after #367.
+
+    The #366 foundation shipped structure/dependencies/tests/readme plus
+    the CI workflow; #367 wired the pre-commit/scripts/metrics/
+    architecture tooling, so every step must now generate real
+    artifacts.
+    """
+
+    def test_precommit_step_writes_for_java(self, tmp_path: Path) -> None:
+        """java now generates a pre-commit config (#367)."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "java")
+
+        config = tmp_path / ".pre-commit-config.yaml"
+        assert config.exists()
+        content = config.read_text()
+        assert "checkstyle" in content
+        assert "google-java-format" in content
+
+    def test_scripts_step_writes_java_scripts(self, tmp_path: Path) -> None:
+        """java now receives its own quality scripts (#367)."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "java")
+
+        test_script = tmp_path / "scripts" / "test.sh"
+        assert test_script.exists()
+        assert "mvn test" in test_script.read_text()
+
+    def test_scripts_step_writes_pmd_ruleset_at_project_root(
+        self, tmp_path: Path
+    ) -> None:
+        """The pmd-ruleset.xml companion lands at the root.
+
+        The pom's PMD plugin and lint.sh resolve the ruleset relative to
+        the project root, not the scripts directory.
+        """
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "java")
+
+        assert (tmp_path / "pmd-ruleset.xml").exists()
+
+    def test_ci_step_writes_java_workflow(self, tmp_path: Path) -> None:
+        """The java CI workflow is generated (ci.py has a java config)."""
+        cli_mod._generate_ci_step(tmp_path, "my-project", "java", None)
+
+        ci_file = tmp_path / ".github" / "workflows" / "ci.yml"
+        assert ci_file.exists()
+        assert "Java Quality Checks" in ci_file.read_text()
+
+    def test_metrics_step_writes_java_dashboard(self, tmp_path: Path) -> None:
+        """The metrics dashboard is now generated for java (#367)."""
+        cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "java")
+
+        assert (tmp_path / "docs" / "metrics.json").exists()
+
+    def test_architecture_step_writes_java_rules(self, tmp_path: Path) -> None:
+        """Architecture rules are now generated for java (#367)."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "java")
+
+        template = tmp_path / "plans" / "architecture" / "ArchitectureTest.java"
+        assert template.exists()
+
+
+class TestCsharpPipelineGates:
+    """Pipeline steps all run for csharp after #370.
+
+    The foundation shipped structure/dependencies/tests/readme plus the
+    CI workflow (reference/ci/csharp.yml); #370 wired the pre-commit/
+    scripts/metrics/architecture tooling, so every step must now
+    generate real artifacts.
+    """
+
+    def test_precommit_step_writes_for_csharp(self, tmp_path: Path) -> None:
+        """csharp now generates a pre-commit config (#370)."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "csharp")
+
+        config = tmp_path / ".pre-commit-config.yaml"
+        assert config.exists()
+        content = config.read_text()
+        assert "dotnet format" in content
+        assert "roslyn-analyzers" in content
+
+    def test_scripts_step_writes_csharp_scripts(self, tmp_path: Path) -> None:
+        """csharp now receives its own quality scripts (#370)."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "csharp")
+
+        test_script = tmp_path / "scripts" / "test.sh"
+        assert test_script.exists()
+        assert "dotnet test" in test_script.read_text()
+
+    def test_scripts_step_writes_analyzer_companions_at_project_root(
+        self, tmp_path: Path
+    ) -> None:
+        """The .editorconfig/CodeMetricsConfig.txt companions land at the root.
+
+        The csproj's AdditionalFiles entry and the Roslyn analyzers
+        resolve these files relative to the project root, not the
+        scripts directory.
+        """
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "csharp")
+
+        assert (tmp_path / ".editorconfig").exists()
+        assert (tmp_path / "CodeMetricsConfig.txt").exists()
+
+    def test_ci_step_writes_csharp_workflow(self, tmp_path: Path) -> None:
+        """The csharp CI workflow is generated (ci.py has a csharp config)."""
+        cli_mod._generate_ci_step(tmp_path, "my-project", "csharp", None)
+
+        ci_file = tmp_path / ".github" / "workflows" / "ci.yml"
+        assert ci_file.exists()
+        assert "C# Quality Checks" in ci_file.read_text()
+
+    def test_metrics_step_writes_csharp_dashboard(self, tmp_path: Path) -> None:
+        """The metrics dashboard is now generated for csharp (#370)."""
+        cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "csharp")
+
+        assert (tmp_path / "docs" / "metrics.json").exists()
+
+    def test_architecture_step_writes_csharp_rules(self, tmp_path: Path) -> None:
+        """Architecture rules are now generated for csharp (#370)."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "csharp")
+
+        template = tmp_path / "plans" / "architecture" / "ArchitectureTest.cs"
+        assert template.exists()

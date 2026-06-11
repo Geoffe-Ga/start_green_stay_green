@@ -3,10 +3,14 @@
 Tests the complete sgsg init flow for supported languages, verifying
 that the CLI produces valid project structures end-to-end.
 
-Note: java, csharp, and ruby are supported at the generator level but
-the full CLI pipeline (PreCommitGenerator) only supports python, typescript,
-go, and rust currently. Those 3 languages are tested at the unit/integration
-level via test_language_generators.py.
+Note: ruby is supported at the generator level, but the quality-tooling
+pipeline steps (PreCommitGenerator, scripts, metrics, architecture)
+skip it. Kotlin completed the pipeline with #357/#358, C/C++ followed
+with #362 (quality tooling) and #363 (CI workflow), Java with #366
+(Wear OS foundation + CI) and #367 (quality tooling), and C# with #370
+(quality tooling on top of the foundation scaffold + CI), so all four
+join CLI_SUPPORTED_LANGUAGES below
+(test_language_generators.py covers the generator-only languages).
 
 All tests use an environment with API keys stripped and a null keyring
 backend to prevent real Anthropic API calls. See Issue #196.
@@ -23,7 +27,17 @@ import pytest
 from tests.conftest import get_env_without_api_keys
 
 # Languages fully supported in the CLI pipeline (all generators)
-CLI_SUPPORTED_LANGUAGES = ("python", "typescript", "go", "rust")
+CLI_SUPPORTED_LANGUAGES = (
+    "python",
+    "typescript",
+    "go",
+    "rust",
+    "swift",
+    "kotlin",
+    "cpp",
+    "java",
+    "csharp",
+)
 
 # Expected key files per language that sgsg init should create
 EXPECTED_KEY_FILES: dict[str, list[str]] = {
@@ -54,6 +68,63 @@ EXPECTED_KEY_FILES: dict[str, list[str]] = {
         "src/main.rs",
         "Cargo.toml",
         "tests/integration_test.rs",
+        "README.md",
+    ],
+    "swift": [
+        "Sources/test_project/TestProjectApp.swift",
+        "Sources/test_project/ContentView.swift",
+        "Package.swift",
+        "Tests/test_projectTests/test_projectTests.swift",
+        ".swiftlint.yml",
+        "README.md",
+    ],
+    "kotlin": [
+        "settings.gradle.kts",
+        "build.gradle.kts",
+        "gradle.properties",
+        "app/build.gradle.kts",
+        "app/src/main/AndroidManifest.xml",
+        "app/src/main/kotlin/com/example/test_project/MainActivity.kt",
+        "app/src/test/kotlin/com/example/test_project/GreetingTest.kt",
+        "detekt.yml",
+        ".github/workflows/ci.yml",
+        "README.md",
+    ],
+    "cpp": [
+        "CMakeLists.txt",
+        "conanfile.txt",
+        "tizen-manifest.xml",
+        "src/main.cpp",
+        "src/greeting.cpp",
+        "inc/greeting.h",
+        "tests/test_greeting.cpp",
+        ".clang-format",
+        ".clang-tidy",
+        ".github/workflows/ci.yml",
+        "README.md",
+    ],
+    "java": [
+        "pom.xml",
+        "pmd-ruleset.xml",
+        "src/main/java/com/example/test_project/Greeting.java",
+        "src/test/java/com/example/test_project/GreetingTest.java",
+        "app/src/main/AndroidManifest.xml",
+        "app/src/main/java/com/example/test_project/MainActivity.java",
+        ".pre-commit-config.yaml",
+        "scripts/check-all.sh",
+        ".github/workflows/ci.yml",
+        "README.md",
+    ],
+    "csharp": [
+        "test-project.csproj",
+        "src/Program.cs",
+        "tests/MainTests.cs",
+        ".editorconfig",
+        "CodeMetricsConfig.txt",
+        ".pre-commit-config.yaml",
+        "scripts/check-all.sh",
+        "plans/architecture/ArchitectureTest.cs",
+        ".github/workflows/ci.yml",
         "README.md",
     ],
 }

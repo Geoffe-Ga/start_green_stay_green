@@ -1,0 +1,202 @@
+name: C/C++ Quality Checks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# Runner reality for the generated Tizen native watch-app scaffold:
+# - The CMake/Conan build covers ONLY the pure-logic library and its
+#   Catch2 tests (the #361 two-build split): src/main.cpp needs the
+#   Tizen native SDK and is deliberately outside this build — which is
+#   exactly what makes every job below runnable on a plain ubuntu
+#   runner with a compiler, CMake, and Conan.
+# - The .tpk wearable package is produced by the Tizen Studio CLI
+#   (tizen build-native / tizen package). Tizen Studio is distributed
+#   only as a manual, login-gated GUI installer download — there is no
+#   apt/pipx/headless install path a GitHub-hosted runner could
+#   provision deterministically. Following the Kotlin no-emulator and
+#   Swift no-Periphery-on-Linux precedents, that packaging gap is
+#   documented here instead of emitting `tizen` steps that can never
+#   pass: CI builds and tests everything that IS buildable, on both
+#   major compilers, and packaging stays a local Tizen Studio step
+#   (see README.md).
+env:
+  # Conan provisions Catch2 and generates the CMake toolchain file in
+  # every job — one pinned version for all of them.
+  CONAN_VERSION: "2.29.0"
+
+jobs:
+  quality:
+    name: Code Quality Checks
+    # Pinned to 24.04 (not ubuntu-latest): noble's default apt clang
+    # tooling is LLVM 18, matching the mirrors-clang-format v18.1.8 rev
+    # pinned in the generated .pre-commit-config.yaml, so CI and the
+    # local hooks format/lint with the same major version. A floating
+    # ubuntu-latest could silently change that major and break parity.
+    runs-on: ubuntu-24.04
+    env:
+      # Pinned quality-tool versions. GITLEAKS_VERSION matches the rev
+      # pinned in .pre-commit-config.yaml; lizard and flawfinder are
+      # the CLI tools scripts/lint.sh and scripts/security.sh invoke.
+      GITLEAKS_VERSION: "8.18.4"
+      LIZARD_VERSION: "1.23.0"
+      FLAWFINDER_VERSION: "2.0.20"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # clang-format/clang-tidy arrive at LLVM 18 on the pinned 24.04
+      # image (parity with the pre-commit mirror rev above); cppcheck
+      # backs scripts/lint.sh and lcov scripts/test.sh --coverage.
+      - name: Install clang-format, clang-tidy, cppcheck, and lcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-format clang-tidy cppcheck lcov
+
+      # pipx (preinstalled on the runner image) keeps these pinned CLI
+      # tools out of the PEP 668 externally-managed system Python.
+      # Homebrew — the install path the generated scripts document for
+      # local macOS development — is gone from GitHub's Ubuntu images.
+      - name: Install conan, lizard, and flawfinder (pinned, via pipx)
+        run: |
+          pipx install "conan==${CONAN_VERSION}"
+          pipx install "lizard==${LIZARD_VERSION}"
+          pipx install "flawfinder==${FLAWFINDER_VERSION}"
+
+      # Static, version-pinned release artifact (never "latest") —
+      # every URL below is a literal, nothing is discovered at runtime,
+      # so no value ever needs to be validated and exported through
+      # GITHUB_ENV/GITHUB_PATH (the documented Actions env-injection
+      # vector that dynamic discovery has to guard against).
+      - name: Install gitleaks
+        run: |
+          curl -fsSL -o /tmp/gitleaks.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+
+      # The documented configure flow from the CMakeLists.txt header,
+      # verbatim. The build/ directory name is the scaffold-wide
+      # convention: the clang-tidy pre-commit hook, scripts/lint.sh
+      # (-p build), and scripts/test.sh all assume `cmake -B build` —
+      # change it everywhere or nowhere. The configure step also exports
+      # build/compile_commands.json for clang-tidy
+      # (CMAKE_EXPORT_COMPILE_COMMANDS is ON in CMakeLists.txt).
+      - name: Configure the CMake build (Conan toolchain)
+        run: |
+          conan profile detect --force
+          conan install . --output-folder=build --build=missing
+          cmake -B build -S . \
+            -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake \
+            -DCMAKE_BUILD_TYPE=Release
+
+      # The four gates below run the generated scripts themselves rather
+      # than reimplementing their tool invocations in YAML: one source
+      # of truth, so CI can never drift from what the pre-commit hooks
+      # and ./scripts/check-all.sh enforce locally.
+
+      # Check-mode counterpart of the clang-format pre-commit hook —
+      # same root .clang-format config, --dry-run --Werror, and full
+      # .c/.cc/.cpp/.cxx/.h/.hh/.hpp extension coverage.
+      - name: Run clang-format check
+        run: ./scripts/format.sh --check
+
+      # clang-tidy (root .clang-tidy: bugprone/cert/clang-analyzer/...
+      # promoted to errors), cppcheck (warning/performance/portability),
+      # and lizard's cyclomatic-complexity gate — the <=10 bound lives
+      # in lint.sh, the single source, and is not repeated here.
+      - name: Run static analysis (clang-tidy + cppcheck + lizard)
+        run: ./scripts/lint.sh
+
+      # Secret-scanning parity with the gitleaks pre-commit hook.
+      - name: Run gitleaks secret scan
+        run: gitleaks detect --source . --no-banner --redact
+
+      # Coverage gate — a single instrumented ctest execution. The line
+      # bound deliberately lives in scripts/test.sh (CMake has no
+      # canonical manifest home for a coverage threshold, unlike Kover's
+      # minBound in Gradle — see the note in that script) and is NOT
+      # repeated here: raise it there, not in CI. No separate plain
+      # test step duplicates the suite in this job.
+      - name: Run tests with lcov coverage gate
+        run: ./scripts/test.sh --coverage
+
+      # flawfinder's CWE-mapped dangerous-API scan. The script warns
+      # instead of failing when flawfinder is missing (so fresh local
+      # clones pass); it was installed above, so that soft path never
+      # silently passes in CI.
+      - name: Run security scan (flawfinder)
+        run: ./scripts/security.sh
+
+  test:
+    name: Build & Test (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    strategy:
+      # Run every leg to completion: the point of a compiler matrix is
+      # to see exactly which toolchains fail, not just the first one.
+      fail-fast: false
+      matrix:
+        # The C++ standard is pinned to 17 by the generated
+        # CMakeLists.txt (CMAKE_CXX_STANDARD — a project decision, not a
+        # CI input; a -DCMAKE_CXX_STANDARD cache entry would be shadowed
+        # by the project's plain set()), so the honest matrix axis is
+        # the compiler building that pinned standard: both major
+        # toolchains preinstalled on the runner image. The scaffold's
+        # sources are C++20-ready; when the project bumps its pin, this
+        # matrix keeps gating both compilers unchanged.
+        compiler: ["gcc", "clang"]
+        include:
+          - compiler: gcc
+            cc: gcc
+            cxx: g++
+          - compiler: clang
+            cc: clang
+            cxx: clang++
+    env:
+      # Static literals from the matrix include above — consumed by both
+      # `conan profile detect` and CMake, so the whole leg (Catch2
+      # dependency build included) really uses the matrix compiler.
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install conan (pinned, via pipx)
+        run: pipx install "conan==${CONAN_VERSION}"
+
+      - name: Show toolchain versions
+        run: |
+          "$CXX" --version
+          cmake --version
+          conan --version
+
+      # Same documented configure flow as the quality job; conan profile
+      # detect honors $CC/$CXX, so Catch2 is fetched or built for the
+      # same matrix compiler CMake uses.
+      - name: Configure the CMake build (Conan toolchain)
+        run: |
+          conan profile detect --force
+          conan install . --output-folder=build --build=missing
+          cmake -B build -S . \
+            -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build the library and tests
+        run: cmake --build build
+
+      # Plain ctest, no instrumentation: the quality job already gates
+      # coverage exactly once; this job's axis is compiler
+      # compatibility, so rerunning the instrumented suite here would
+      # just duplicate that measurement.
+      - name: Run unit tests (ctest)
+        run: ctest --test-dir build --output-on-failure

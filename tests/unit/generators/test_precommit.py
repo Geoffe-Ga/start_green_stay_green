@@ -1,5 +1,6 @@
 """Unit tests for Pre-commit Generator."""
 
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -404,6 +405,737 @@ class TestGenerateWithRust:
         assert "clippy" in hook_ids
 
 
+class TestGenerateWithSwift:
+    """Test content generation for Swift projects."""
+
+    @staticmethod
+    def _parsed_repos(generator: PreCommitGenerator) -> list[dict[str, Any]]:
+        """Generate the Swift config and return its parsed repos list."""
+        config = GenerationConfig(
+            project_name="swift-project",
+            language="swift",
+            language_config={},
+        )
+        result = generator.generate(config)
+        yaml_content = "\n".join(
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        )
+        parsed = yaml.safe_load(yaml_content)
+        return list(parsed["repos"])
+
+    def test_generate_swift_returns_dict(self, mock_orchestrator: Mock) -> None:
+        """Test generate returns dict for Swift."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        config = GenerationConfig(
+            project_name="swift-project",
+            language="swift",
+            language_config={},
+        )
+        result = generator.generate(config)
+        assert isinstance(result, dict)
+        assert result["content"]
+
+    def test_generate_swift_content_is_valid_yaml(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Generated Swift pre-commit config must be parseable YAML."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        assert isinstance(repos, list)
+        assert repos
+
+    def test_generate_swift_includes_swift_format(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test generated Swift config includes a swift-format hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(
+            (repo for repo in repos if repo.get("repo") == "local"),
+            None,
+        )
+        assert local_repo is not None
+        hook_ids = [hook.get("id", "") for hook in local_repo.get("hooks", [])]
+        assert "swift-format" in hook_ids
+
+    def test_generate_swift_includes_swiftlint(self, mock_orchestrator: Mock) -> None:
+        """Test generated Swift config includes a SwiftLint hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(
+            (repo for repo in repos if repo.get("repo") == "local"),
+            None,
+        )
+        assert local_repo is not None
+        hook_ids = [hook.get("id", "") for hook in local_repo.get("hooks", [])]
+        assert "swiftlint" in hook_ids
+
+    def test_swift_swiftlint_hook_is_strict(self, mock_orchestrator: Mock) -> None:
+        """The SwiftLint hook runs with --strict so warnings fail commits."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        swiftlint = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "swiftlint"
+        )
+        assert "--strict" in swiftlint["entry"]
+
+    def test_swift_local_hooks_use_system_language(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Local Swift hooks invoke system binaries, not SPM source builds.
+
+        Building SwiftLint from source via pre-commit's swift language
+        support takes multiple minutes on first run; the hooks must probe
+        the brew/toolchain-installed binaries instead.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        for hook in local_repo["hooks"]:
+            assert hook["language"] == "system", f"{hook['id']} not language: system"
+            assert hook["types"] == ["swift"], f"{hook['id']} missing swift types"
+
+    def test_generate_swift_includes_gitleaks(self, mock_orchestrator: Mock) -> None:
+        """Test generated Swift config includes the gitleaks secrets hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        gitleaks_repo = next(
+            (repo for repo in repos if "gitleaks/gitleaks" in repo.get("repo", "")),
+            None,
+        )
+        assert gitleaks_repo is not None
+        hook_ids = [hook.get("id", "") for hook in gitleaks_repo.get("hooks", [])]
+        assert "gitleaks" in hook_ids
+
+    def test_generate_swift_includes_detect_secrets(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Swift keeps the detect-secrets hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("Yelp/detect-secrets" in url for url in repo_urls)
+
+    def test_generate_swift_includes_shellcheck(self, mock_orchestrator: Mock) -> None:
+        """Swift keeps the shellcheck hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("shellcheck-py" in url for url in repo_urls)
+
+
+class TestGenerateWithKotlin:
+    """Test content generation for Kotlin projects (#357)."""
+
+    @staticmethod
+    def _parsed_repos(generator: PreCommitGenerator) -> list[dict[str, Any]]:
+        """Generate the Kotlin config and return its parsed repos list."""
+        config = GenerationConfig(
+            project_name="kotlin-project",
+            language="kotlin",
+            language_config={},
+        )
+        result = generator.generate(config)
+        yaml_content = "\n".join(
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        )
+        parsed = yaml.safe_load(yaml_content)
+        return list(parsed["repos"])
+
+    def test_generate_kotlin_returns_dict(self, mock_orchestrator: Mock) -> None:
+        """Test generate returns dict for Kotlin."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        config = GenerationConfig(
+            project_name="kotlin-project",
+            language="kotlin",
+            language_config={},
+        )
+        result = generator.generate(config)
+        assert isinstance(result, dict)
+        assert result["content"]
+
+    def test_generate_kotlin_content_is_valid_yaml(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Generated Kotlin pre-commit config must be parseable YAML."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        assert isinstance(repos, list)
+        assert repos
+
+    def test_generate_kotlin_includes_ktlint(self, mock_orchestrator: Mock) -> None:
+        """Test generated Kotlin config includes a ktlint hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(
+            (repo for repo in repos if repo.get("repo") == "local"),
+            None,
+        )
+        assert local_repo is not None
+        hook_ids = [hook.get("id", "") for hook in local_repo.get("hooks", [])]
+        assert "ktlint" in hook_ids
+
+    def test_generate_kotlin_includes_detekt(self, mock_orchestrator: Mock) -> None:
+        """Test generated Kotlin config includes a detekt hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(
+            (repo for repo in repos if repo.get("repo") == "local"),
+            None,
+        )
+        assert local_repo is not None
+        hook_ids = [hook.get("id", "") for hook in local_repo.get("hooks", [])]
+        assert "detekt" in hook_ids
+
+    def test_kotlin_ktlint_hook_formats_in_place(self, mock_orchestrator: Mock) -> None:
+        """The ktlint hook runs --format so fixable violations are fixed."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        ktlint = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "ktlint"
+        )
+        assert "--format" in ktlint["entry"]
+
+    def test_kotlin_detekt_hook_shares_companion_config(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """The detekt hook reads the same detekt.yml that lint.sh uses.
+
+        The companion config (complexity <=10 gate, potential-bugs rules)
+        is written by the scripts generator; the hook must build upon the
+        default config so only the overrides live in detekt.yml.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        detekt = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "detekt"
+        )
+        assert "--config detekt.yml" in detekt["entry"]
+        assert "--build-upon-default-config" in detekt["entry"]
+
+    def test_kotlin_local_hooks_use_system_language(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Local Kotlin hooks invoke system binaries (brew-installed CLIs).
+
+        Neither pinterest/ktlint nor detekt/detekt ships an official
+        .pre-commit-hooks.yaml manifest, so the hooks must probe the
+        brew-installed binaries instead of a remote hook repo.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        for hook in local_repo["hooks"]:
+            assert hook["language"] == "system", f"{hook['id']} not language: system"
+            assert hook["types"] == ["kotlin"], f"{hook['id']} missing kotlin types"
+
+    def test_generate_kotlin_includes_gitleaks(self, mock_orchestrator: Mock) -> None:
+        """Test generated Kotlin config includes the gitleaks secrets hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        gitleaks_repo = next(
+            (repo for repo in repos if "gitleaks/gitleaks" in repo.get("repo", "")),
+            None,
+        )
+        assert gitleaks_repo is not None
+        hook_ids = [hook.get("id", "") for hook in gitleaks_repo.get("hooks", [])]
+        assert "gitleaks" in hook_ids
+
+    def test_generate_kotlin_includes_detect_secrets(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Kotlin keeps the detect-secrets hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("Yelp/detect-secrets" in url for url in repo_urls)
+
+    def test_generate_kotlin_includes_shellcheck(self, mock_orchestrator: Mock) -> None:
+        """Kotlin keeps the shellcheck hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("shellcheck-py" in url for url in repo_urls)
+
+
+class TestGenerateWithCpp:
+    """Test content generation for C/C++ projects (#362)."""
+
+    @staticmethod
+    def _parsed_repos(generator: PreCommitGenerator) -> list[dict[str, Any]]:
+        """Generate the cpp config and return its parsed repos list."""
+        config = GenerationConfig(
+            project_name="cpp-project",
+            language="cpp",
+            language_config={},
+        )
+        result = generator.generate(config)
+        yaml_content = "\n".join(
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        )
+        parsed = yaml.safe_load(yaml_content)
+        return list(parsed["repos"])
+
+    def test_generate_cpp_returns_dict(self, mock_orchestrator: Mock) -> None:
+        """Test generate returns dict for cpp."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        config = GenerationConfig(
+            project_name="cpp-project",
+            language="cpp",
+            language_config={},
+        )
+        result = generator.generate(config)
+        assert isinstance(result, dict)
+        assert result["content"]
+
+    def test_generate_cpp_content_is_valid_yaml(self, mock_orchestrator: Mock) -> None:
+        """Generated cpp pre-commit config must be parseable YAML."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        assert isinstance(repos, list)
+        assert repos
+
+    def test_generate_cpp_includes_clang_format_mirror(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """clang-format runs from its official pre-commit mirror.
+
+        pre-commit/mirrors-clang-format installs a pinned clang-format
+        wheel from PyPI, so the format hook works without a local LLVM
+        install — unlike clang-tidy/cppcheck, which have no official
+        mirror and must run as local system hooks.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        mirror_repo = next(
+            (repo for repo in repos if "mirrors-clang-format" in repo.get("repo", "")),
+            None,
+        )
+        assert mirror_repo is not None
+        hook_ids = [hook.get("id", "") for hook in mirror_repo.get("hooks", [])]
+        assert "clang-format" in hook_ids
+
+    def test_cpp_clang_format_hook_scopes_to_c_and_cpp(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """The mirror hook is narrowed from its broad default file set."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        mirror_repo = next(
+            repo for repo in repos if "mirrors-clang-format" in repo.get("repo", "")
+        )
+        clang_format = mirror_repo["hooks"][0]
+        assert clang_format["types_or"] == ["c", "c++"]
+
+    def test_generate_cpp_includes_clang_tidy(self, mock_orchestrator: Mock) -> None:
+        """Test generated cpp config includes a clang-tidy hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(
+            (repo for repo in repos if repo.get("repo") == "local"),
+            None,
+        )
+        assert local_repo is not None
+        hook_ids = [hook.get("id", "") for hook in local_repo.get("hooks", [])]
+        assert "clang-tidy" in hook_ids
+
+    def test_generate_cpp_includes_cppcheck(self, mock_orchestrator: Mock) -> None:
+        """Test generated cpp config includes a cppcheck hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(
+            (repo for repo in repos if repo.get("repo") == "local"),
+            None,
+        )
+        assert local_repo is not None
+        hook_ids = [hook.get("id", "") for hook in local_repo.get("hooks", [])]
+        assert "cppcheck" in hook_ids
+
+    def test_cpp_clang_tidy_hook_uses_compile_commands(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """The clang-tidy hook reads the exported compile database.
+
+        -p build resolves build/compile_commands.json, which the
+        generated CMakeLists.txt exports (CMAKE_EXPORT_COMPILE_COMMANDS),
+        so the hook and lint.sh analyze with identical flags.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        clang_tidy = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "clang-tidy"
+        )
+        assert "-p build" in clang_tidy["entry"]
+        assert clang_tidy["types"] == ["c++"]
+
+    def test_cpp_cppcheck_hook_fails_on_findings(self, mock_orchestrator: Mock) -> None:
+        """cppcheck must exit non-zero on findings to gate the commit."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        cppcheck = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "cppcheck"
+        )
+        assert "--error-exitcode=1" in cppcheck["entry"]
+        assert cppcheck["types_or"] == ["c", "c++"]
+
+    def test_cpp_local_hooks_use_system_language(self, mock_orchestrator: Mock) -> None:
+        """Local cpp hooks invoke system binaries (brew/apt-installed CLIs).
+
+        Neither clang-tidy nor cppcheck ships an official
+        .pre-commit-hooks.yaml manifest, so the hooks must probe the
+        installed binaries instead of a remote hook repo.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        for hook in local_repo["hooks"]:
+            assert hook["language"] == "system", f"{hook['id']} not language: system"
+
+    def test_generate_cpp_includes_check_xml(self, mock_orchestrator: Mock) -> None:
+        """tizen-manifest.xml well-formedness is gated via check-xml."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        standard_repo = next(
+            repo for repo in repos if "pre-commit-hooks" in repo.get("repo", "")
+        )
+        hook_ids = [hook.get("id", "") for hook in standard_repo.get("hooks", [])]
+        assert "check-xml" in hook_ids
+
+    def test_generate_cpp_includes_gitleaks(self, mock_orchestrator: Mock) -> None:
+        """Test generated cpp config includes the gitleaks secrets hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        gitleaks_repo = next(
+            (repo for repo in repos if "gitleaks/gitleaks" in repo.get("repo", "")),
+            None,
+        )
+        assert gitleaks_repo is not None
+        hook_ids = [hook.get("id", "") for hook in gitleaks_repo.get("hooks", [])]
+        assert "gitleaks" in hook_ids
+
+    def test_generate_cpp_includes_detect_secrets(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """cpp keeps the detect-secrets hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("Yelp/detect-secrets" in url for url in repo_urls)
+
+    def test_generate_cpp_includes_shellcheck(self, mock_orchestrator: Mock) -> None:
+        """cpp keeps the shellcheck hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("shellcheck-py" in url for url in repo_urls)
+
+
+class TestGenerateWithJava:
+    """Test content generation for Java projects (#367)."""
+
+    @staticmethod
+    def _parsed_repos(generator: PreCommitGenerator) -> list[dict[str, Any]]:
+        """Generate the java config and return its parsed repos list."""
+        config = GenerationConfig(
+            project_name="java-project",
+            language="java",
+            language_config={},
+        )
+        result = generator.generate(config)
+        yaml_content = "\n".join(
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        )
+        parsed = yaml.safe_load(yaml_content)
+        return list(parsed["repos"])
+
+    def test_generate_java_returns_dict(self, mock_orchestrator: Mock) -> None:
+        """Test generate returns dict for java."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        config = GenerationConfig(
+            project_name="java-project",
+            language="java",
+            language_config={},
+        )
+        result = generator.generate(config)
+        assert isinstance(result, dict)
+        assert result["content"]
+
+    def test_generate_java_content_is_valid_yaml(self, mock_orchestrator: Mock) -> None:
+        """Generated java pre-commit config must be parseable YAML."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        assert isinstance(repos, list)
+        assert repos
+
+    def test_generate_java_includes_google_java_format(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """google-java-format runs as a local system hook.
+
+        Unlike clang-format, google-java-format has no official
+        pre-commit mirror (the only hook repos are unofficial wrappers
+        that download release jars at runtime), so the formatter probes
+        the installed binary — the Swift/Kotlin precedent.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(
+            (repo for repo in repos if repo.get("repo") == "local"),
+            None,
+        )
+        assert local_repo is not None
+        hook_ids = [hook.get("id", "") for hook in local_repo.get("hooks", [])]
+        assert "google-java-format" in hook_ids
+
+    def test_java_google_java_format_hook_fails_on_unformatted(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """The formatter hook is check-mode and fails on unformatted files.
+
+        ``--replace`` exits 0 whether or not it changed anything, so it
+        can never fail a commit; the hook must use
+        ``--dry-run --set-exit-if-changed`` (scripts/format.sh keeps the
+        fixing path).
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        formatter = next(
+            hook
+            for hook in local_repo["hooks"]
+            if hook.get("id") == "google-java-format"
+        )
+        assert "--dry-run --set-exit-if-changed" in formatter["entry"]
+        assert "--replace" not in formatter["entry"]
+        assert formatter["types"] == ["java"]
+
+    @pytest.mark.parametrize("hook_id", ["checkstyle", "pmd", "spotbugs"])
+    def test_generate_java_includes_maven_goal_linters(
+        self, mock_orchestrator: Mock, hook_id: str
+    ) -> None:
+        """Checkstyle/PMD/SpotBugs run as Maven goals the pom resolves.
+
+        The #366 pom already pins and configures all three plugins, so
+        the hooks invoke `mvn -q <prefix>:check` — slower than native
+        binaries but zero-install and impossible to version-drift from
+        the build (single source of tool truth: pom.xml).
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        hook = next(
+            (h for h in local_repo["hooks"] if h.get("id") == hook_id),
+            None,
+        )
+        assert hook is not None, f"missing {hook_id} hook"
+        assert hook["entry"].startswith("mvn -q ")
+        assert f"{hook_id}:check" in hook["entry"]
+        assert hook["pass_filenames"] is False
+        assert hook["types"] == ["java"]
+
+    def test_java_spotbugs_hook_compiles_first(self, mock_orchestrator: Mock) -> None:
+        """The SpotBugs hook compiles before analyzing.
+
+        SpotBugs reads bytecode and `mvn spotbugs:check` silently skips
+        when target/classes is empty, so the entry must run the compile
+        phase first or the gate is a no-op.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        spotbugs = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "spotbugs"
+        )
+        assert "compile" in spotbugs["entry"]
+        assert spotbugs["entry"].index("compile") < spotbugs["entry"].index(
+            "spotbugs:check"
+        )
+
+    def test_java_local_hooks_use_system_language(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Local java hooks invoke system binaries (mvn / brew CLIs)."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        local_repo = next(repo for repo in repos if repo.get("repo") == "local")
+        for hook in local_repo["hooks"]:
+            assert hook["language"] == "system", f"{hook['id']} not language: system"
+            assert hook["types"] == ["java"], f"{hook['id']} missing java types"
+
+    def test_generate_java_includes_check_xml(self, mock_orchestrator: Mock) -> None:
+        """AndroidManifest.xml/layout XML well-formedness is gated via check-xml."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        standard_repo = next(
+            repo for repo in repos if "pre-commit-hooks" in repo.get("repo", "")
+        )
+        hook_ids = [hook.get("id", "") for hook in standard_repo.get("hooks", [])]
+        assert "check-xml" in hook_ids
+
+    def test_generate_java_includes_gitleaks(self, mock_orchestrator: Mock) -> None:
+        """Test generated java config includes the gitleaks secrets hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        gitleaks_repo = next(
+            (repo for repo in repos if "gitleaks/gitleaks" in repo.get("repo", "")),
+            None,
+        )
+        assert gitleaks_repo is not None
+        hook_ids = [hook.get("id", "") for hook in gitleaks_repo.get("hooks", [])]
+        assert "gitleaks" in hook_ids
+
+    def test_generate_java_includes_detect_secrets(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """java keeps the detect-secrets hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("Yelp/detect-secrets" in url for url in repo_urls)
+
+    def test_generate_java_includes_shellcheck(self, mock_orchestrator: Mock) -> None:
+        """java keeps the shellcheck hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("shellcheck-py" in url for url in repo_urls)
+
+
+class TestGenerateWithCsharp:
+    """Test content generation for C# projects (#370)."""
+
+    @staticmethod
+    def _parsed_repos(generator: PreCommitGenerator) -> list[dict[str, Any]]:
+        """Generate the csharp config and return its parsed repos list."""
+        config = GenerationConfig(
+            project_name="csharp-project",
+            language="csharp",
+            language_config={},
+        )
+        result = generator.generate(config)
+        yaml_content = "\n".join(
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        )
+        parsed = yaml.safe_load(yaml_content)
+        return list(parsed["repos"])
+
+    def _local_repo(self, generator: PreCommitGenerator) -> dict[str, Any]:
+        """Return the ``repo: local`` block from the csharp config."""
+        repos = self._parsed_repos(generator)
+        return next(repo for repo in repos if repo.get("repo") == "local")
+
+    def test_generate_csharp_content_is_valid_yaml(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Generated csharp pre-commit config must be parseable YAML."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        assert isinstance(repos, list)
+        assert repos
+
+    def test_csharp_dotnet_format_hook_fails_on_unformatted(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """The formatter hook is check-mode and fails on unformatted files.
+
+        A bare ``dotnet format`` rewrites files and exits 0 either way,
+        so it could never fail a commit; the hook must use
+        ``--verify-no-changes``, which exits non-zero when formatting
+        is needed (scripts/format.sh keeps the fixing path).
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        local_repo = self._local_repo(generator)
+        formatter = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "dotnet-format"
+        )
+        assert "--verify-no-changes" in formatter["entry"]
+        assert formatter["entry"].startswith("dotnet format")
+
+    def test_csharp_roslyn_hook_builds_with_manifest_owned_gate(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """The lint hook is a plain build; the csproj owns the policy.
+
+        Roslyn analyzers (SDK rules, CA1502 complexity, SecurityCodeScan)
+        all run inside the compiler, and the generated csproj sets
+        TreatWarningsAsErrors — so `dotnet build` IS the failing lint
+        gate and the hook must not restate any -warnaserror flag
+        (single home: the csproj).
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        local_repo = self._local_repo(generator)
+        linter = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "roslyn-analyzers"
+        )
+        assert linter["entry"].startswith("dotnet build")
+        assert "warnaserror" not in linter["entry"]
+
+    def test_csharp_local_hooks_run_once_per_commit(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """dotnet hooks operate on the project, not on filenames.
+
+        ``dotnet format`` and ``dotnet build`` take a project (not a
+        file list), so the hooks must set ``pass_filenames: false`` and
+        scope themselves to C# sources via types — otherwise pre-commit
+        would append staged paths as misparsed CLI arguments.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        local_repo = self._local_repo(generator)
+        for hook in local_repo["hooks"]:
+            assert hook["pass_filenames"] is False, f"{hook['id']} passes filenames"
+            assert hook["language"] == "system", f"{hook['id']} not language: system"
+            assert hook["types"] == ["c#"], f"{hook['id']} missing c# types"
+
+    def test_generate_csharp_includes_check_xml(self, mock_orchestrator: Mock) -> None:
+        """The csproj manifest's XML well-formedness is gated via check-xml.
+
+        identify tags ``.csproj`` files as xml, so the stock check-xml
+        hook covers the manifest (the AndroidManifest/tizen-manifest
+        precedent) without a files override.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        standard_repo = next(
+            repo for repo in repos if "pre-commit-hooks" in repo.get("repo", "")
+        )
+        hook_ids = [hook.get("id", "") for hook in standard_repo.get("hooks", [])]
+        assert "check-xml" in hook_ids
+
+    def test_generate_csharp_includes_gitleaks(self, mock_orchestrator: Mock) -> None:
+        """Test generated csharp config includes the gitleaks secrets hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        gitleaks_repo = next(
+            (repo for repo in repos if "gitleaks/gitleaks" in repo.get("repo", "")),
+            None,
+        )
+        assert gitleaks_repo is not None
+        hook_ids = [hook.get("id", "") for hook in gitleaks_repo.get("hooks", [])]
+        assert "gitleaks" in hook_ids
+
+    def test_generate_csharp_includes_detect_secrets(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """csharp keeps the detect-secrets hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("Yelp/detect-secrets" in url for url in repo_urls)
+
+    def test_generate_csharp_includes_shellcheck(self, mock_orchestrator: Mock) -> None:
+        """csharp keeps the shellcheck hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("shellcheck-py" in url for url in repo_urls)
+
+
 class TestValidateLanguage:
     """Test language validation functionality."""
 
@@ -425,6 +1157,30 @@ class TestValidateLanguage:
         """Test validate_language returns True for Go."""
         generator = PreCommitGenerator(mock_orchestrator)
         assert generator.validate_language("go")
+
+    def test_validate_language_swift_returns_true(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test validate_language returns True for Swift."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        assert generator.validate_language("swift")
+
+    def test_validate_language_kotlin_returns_true(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test validate_language returns True for Kotlin."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        assert generator.validate_language("kotlin")
+
+    def test_validate_language_cpp_returns_true(self, mock_orchestrator: Mock) -> None:
+        """Test validate_language returns True for cpp."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        assert generator.validate_language("cpp")
+
+    def test_validate_language_java_returns_true(self, mock_orchestrator: Mock) -> None:
+        """Test validate_language returns True for java (#367)."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        assert generator.validate_language("java")
 
     def test_validate_language_rust_returns_true(self, mock_orchestrator: Mock) -> None:
         """Test validate_language returns True for Rust."""
@@ -493,11 +1249,51 @@ class TestGetSupportedLanguages:
         result = generator.get_supported_languages()
         assert "rust" in result
 
+    def test_get_supported_languages_includes_swift(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_supported_languages includes swift."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_supported_languages()
+        assert "swift" in result
+
+    def test_get_supported_languages_includes_kotlin(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_supported_languages includes kotlin."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_supported_languages()
+        assert "kotlin" in result
+
+    def test_get_supported_languages_includes_cpp(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_supported_languages includes cpp."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_supported_languages()
+        assert "cpp" in result
+
+    def test_get_supported_languages_includes_java(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_supported_languages includes java (#367)."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_supported_languages()
+        assert "java" in result
+
+    def test_get_supported_languages_includes_csharp(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_supported_languages includes csharp (#370)."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_supported_languages()
+        assert "csharp" in result
+
     def test_get_supported_languages_exact_count(self, mock_orchestrator: Mock) -> None:
         """Test get_supported_languages returns expected count."""
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_supported_languages()
-        assert len(result) == 4
+        assert len(result) == 9
 
     def test_get_supported_languages_no_duplicates(
         self, mock_orchestrator: Mock
@@ -545,6 +1341,36 @@ class TestGetLanguageHooks:
         """Test get_language_hooks returns list for rust."""
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_language_hooks("rust")
+        assert isinstance(result, list)
+
+    def test_get_language_hooks_swift_returns_list(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_language_hooks returns list for swift."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_language_hooks("swift")
+        assert isinstance(result, list)
+
+    def test_get_language_hooks_kotlin_returns_list(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_language_hooks returns list for kotlin."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_language_hooks("kotlin")
+        assert isinstance(result, list)
+
+    def test_get_language_hooks_cpp_returns_list(self, mock_orchestrator: Mock) -> None:
+        """Test get_language_hooks returns list for cpp."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_language_hooks("cpp")
+        assert isinstance(result, list)
+
+    def test_get_language_hooks_java_returns_list(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_language_hooks returns list for java (#367)."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_language_hooks("java")
         assert isinstance(result, list)
 
     def test_get_language_hooks_unsupported_raises_error(
@@ -608,6 +1434,39 @@ class TestCountHooksForLanguage:
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.count_hooks_for_language("rust")
         assert isinstance(result, int)
+
+    def test_count_hooks_swift_counts_every_hook(self, mock_orchestrator: Mock) -> None:
+        """Test count_hooks_for_language sums all Swift hooks exactly.
+
+        12 shared pre-commit-hooks + swift-format + swiftlint + gitleaks
+        + shellcheck + detect-secrets = 17.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.count_hooks_for_language("swift")
+        assert result == 17
+
+    def test_count_hooks_kotlin_counts_every_hook(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test count_hooks_for_language sums all Kotlin hooks exactly.
+
+        12 shared pre-commit-hooks + ktlint + detekt + gitleaks
+        + shellcheck + detect-secrets = 17.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.count_hooks_for_language("kotlin")
+        assert result == 17
+
+    def test_count_hooks_cpp_counts_every_hook(self, mock_orchestrator: Mock) -> None:
+        """Test count_hooks_for_language sums all cpp hooks exactly.
+
+        13 shared pre-commit-hooks (12 + check-xml for tizen-manifest.xml)
+        + clang-format + clang-tidy + cppcheck + gitleaks + shellcheck
+        + detect-secrets = 19.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.count_hooks_for_language("cpp")
+        assert result == 19
 
     def test_count_hooks_unsupported_raises_error(
         self, mock_orchestrator: Mock
@@ -696,6 +1555,18 @@ class TestLanguageConfigsStructure:
     def test_language_configs_has_rust(self) -> None:
         """Test LANGUAGE_CONFIGS has rust entry."""
         assert "rust" in LANGUAGE_CONFIGS
+
+    def test_language_configs_has_swift(self) -> None:
+        """Test LANGUAGE_CONFIGS has swift entry."""
+        assert "swift" in LANGUAGE_CONFIGS
+
+    def test_language_configs_has_kotlin(self) -> None:
+        """Test LANGUAGE_CONFIGS has kotlin entry."""
+        assert "kotlin" in LANGUAGE_CONFIGS
+
+    def test_language_configs_has_cpp(self) -> None:
+        """Test LANGUAGE_CONFIGS has cpp entry."""
+        assert "cpp" in LANGUAGE_CONFIGS
 
     def test_each_language_has_hooks_key(self) -> None:
         """Test each language config has hooks key."""
@@ -1655,6 +2526,11 @@ class TestLanguageConfigsStructureValidation:
                 # Skip local hooks (id-only entries)
                 if "id" in repo and "repo" not in repo:
                     continue
+                # Skip `repo: local` blocks: pre-commit's schema defines
+                # local repos without a rev (hooks declare entry/language
+                # inline). Used by Swift's system-binary hooks.
+                if repo.get("repo") == "local":
+                    continue
                 actual_keys = set(repo.keys())
                 assert required_keys.issubset(actual_keys), (
                     f"{language} repo {idx} missing keys: "
@@ -1709,6 +2585,14 @@ class TestLanguageConfigsStructureValidation:
     def test_rust_repos_exact_count(self) -> None:
         """Test Rust has exactly 4 repository configurations."""
         assert len(LANGUAGE_CONFIGS["rust"]["hooks"]) == 4
+
+    def test_swift_repos_exact_count(self) -> None:
+        """Test Swift has exactly 5 repository configurations."""
+        assert len(LANGUAGE_CONFIGS["swift"]["hooks"]) == 5
+
+    def test_kotlin_repos_exact_count(self) -> None:
+        """Test Kotlin has exactly 5 repository configurations."""
+        assert len(LANGUAGE_CONFIGS["kotlin"]["hooks"]) == 5
 
     def test_every_hook_has_id_key(self) -> None:
         """Test every individual hook has an 'id' key."""

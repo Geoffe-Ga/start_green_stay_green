@@ -17,8 +17,8 @@ Start Green Stay Green is a meta-tool that scaffolds new software projects with 
 
 - **Enterprise-Grade Quality**: 90%+ code coverage, mutation testing, comprehensive linting
 - **AI Integration**: Pre-configured AI subagent profiles and code review workflows
-- **Multi-Language Support**: Python, TypeScript, Go, Rust, and more
-- **Architecture Enforcement**: Import-linter (Python) and dependency-cruiser (TypeScript)
+- **Multi-Language Support**: Python, TypeScript, Go, Rust, Swift (watchOS), Kotlin (Wear OS), C/C++ (Tizen), Java (Wear OS legacy), and C# (.NET)
+- **Architecture Enforcement**: import-linter (Python), dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust), SwiftLint custom rules (Swift), Konsist (Kotlin), an include-boundary checker (C/C++), ArchUnit (Java), and NetArchTest (C#)
 - **Complete CI/CD**: GitHub Actions workflows with quality gates
 - **Additive Init**: Safe to re-run in existing directories — preserves your files
 - **Developer Experience**: Rich console output, interactive prompts, dry-run mode
@@ -429,6 +429,14 @@ Project names must follow these rules:
 - **TypeScript**: jest, eslint, prettier, typescript
 - **Go**: go test, golangci-lint, gofmt
 - **Rust**: cargo test, clippy, rustfmt
+- **Swift**: swift test (≥90% coverage via llvm-cov), SwiftLint, swift-format, Periphery
+- **Kotlin**: ./gradlew test (≥90% coverage via Kover), detekt, ktlint, OWASP dependency-check
+- **C/C++**: ctest (≥90% coverage via gcov/lcov), clang-format, clang-tidy + cppcheck, lizard, flawfinder
+- **Java**: mvn test (≥90% coverage via JaCoCo), google-java-format, Checkstyle + PMD, SpotBugs, OWASP dependency-check
+- **C#**: dotnet test (≥90% coverage via Coverlet), dotnet format, Roslyn analyzers (CA1502 complexity ≤10), SecurityCodeScan + vulnerable-package scan
+
+See the [CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for the
+full per-language toolchain table and prerequisites.
 
 (More languages coming soon)
 
@@ -493,6 +501,126 @@ for name in service-a service-b service-c; do
     --no-interactive
 done
 ```
+
+### Example 5: Swift (watchOS) Project
+
+```bash
+# Prerequisites: Swift 5.9, 5.10, or 6.0 with Swift Package Manager (SPM),
+# plus the local quality toolchain for the generated pre-commit hooks:
+brew install swiftlint swift-format gitleaks
+
+start-green-stay-green init \
+  --project-name wrist-timer \
+  --language swift \
+  --no-interactive
+
+cd wrist-timer
+swift package resolve
+swift build
+pre-commit install
+./scripts/check-all.sh  # swift-format, SwiftLint, swift test + ≥90% llvm-cov coverage
+```
+
+The generated CI pipeline runs on macOS runners with a Swift
+5.9/5.10/6.0 version matrix and a watchOS-simulator build-and-test job.
+See [examples/swift/](examples/swift/) for real generated output and the
+[CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
+the full Swift toolchain table.
+
+### Example 6: Kotlin (Wear OS) Project
+
+```bash
+# Prerequisites: JDK 17+ and a local Gradle install (the Gradle wrapper
+# is NOT generated — binary artifacts are never scaffolded), plus the
+# quality toolchain for the generated pre-commit hooks:
+brew install gradle ktlint detekt   # or your platform's SDK manager
+
+start-green-stay-green init \
+  --project-name wrist-counter \
+  --language kotlin \
+  --no-interactive
+
+cd wrist-counter
+gradle wrapper        # materialize gradlew once, locally
+./gradlew build
+pre-commit install
+./scripts/check-all.sh  # ktlint, detekt, ./gradlew test + ≥90% Kover coverage
+```
+
+The generated CI pipeline runs on ubuntu runners with a JDK 17/21 test
+matrix, a quality job enforcing the Kover ≥90% coverage gate, and a
+Wear OS debug-APK build (CI provisions its own pinned Gradle, so it is
+green before you commit a wrapper). See [examples/kotlin/](examples/kotlin/)
+for real generated output and the
+[CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
+the full Kotlin toolchain table.
+
+### Example 7: C/C++ (Tizen) Project
+
+```bash
+# Prerequisites: CMake ≥3.20, Conan 2, and a C11/C17 or C++17/C++20
+# compiler (the scaffold pins C++17), plus the quality toolchain for the
+# generated pre-commit hooks (clang-tidy ships in the keg-only llvm
+# formula on macOS; Debian/Ubuntu: apt-get install clang-format
+# clang-tidy cppcheck lcov):
+brew install clang-format llvm cppcheck lcov
+pip install lizard flawfinder
+
+start-green-stay-green init \
+  --project-name wrist-pulse \
+  --language cpp \
+  --no-interactive
+
+cd wrist-pulse
+conan install . --output-folder=build --build=missing
+cmake -B build -S . \
+    -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake \
+    -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build
+pre-commit install
+./scripts/check-all.sh  # clang-format, clang-tidy + cppcheck + lizard, ctest + ≥90% lcov coverage, flawfinder
+```
+
+The generated CI pipeline runs on ubuntu runners with a gcc/clang
+build-and-test matrix and a quality job that invokes the generated
+scripts themselves (≥90% lcov coverage gate included). The scaffold
+deliberately splits into two builds: unit tests need only CMake + Conan,
+while packaging the installable `.tpk` watch app requires the Tizen
+Studio CLI (a manual install — see the generated README). See
+[examples/cpp/](examples/cpp/) for real generated output and the
+[CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
+the full C/C++ toolchain table.
+
+### Example 8: Java (Wear OS legacy) Project
+
+```bash
+# Prerequisites: JDK 17+ and Maven, plus google-java-format for the
+# generated pre-commit format hook (the linters are Maven plugins
+# pinned in the generated pom.xml - no extra installs):
+brew install google-java-format
+
+start-green-stay-green init \
+  --project-name wrist-tempo \
+  --language java \
+  --no-interactive
+
+cd wrist-tempo
+mvn test
+pre-commit install
+./scripts/check-all.sh  # google-java-format, Checkstyle + PMD (CCN ≤10), mvn test + ≥90% JaCoCo coverage, SpotBugs + OWASP dependency-check
+```
+
+The generated CI pipeline runs on ubuntu runners with a JDK 17/21
+(Temurin) quality matrix running the same Maven goals as the local
+build, including the pom-backed `mvn jacoco:check` ≥90% coverage gate.
+The scaffold deliberately splits into two builds: the pure logic and
+its JUnit 4 tests build with plain Maven on any host, while the watch
+APK requires Android tooling (Android Studio / Gradle — see the
+generated README). See [examples/java/](examples/java/) for real
+generated output and the
+[CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
+the full Java toolchain table.
 
 ## Project Structure
 
@@ -663,6 +791,11 @@ All contributions must:
 - ✅ `--force` and `--interactive` conflict resolution (#252)
 - ✅ YAML-aware pre-commit config merging (#253)
 - ✅ Multi-language `--language` support (#254)
+- ✅ Swift (watchOS) language support — scaffold, quality tooling, CI, tests (#351, #352, #353, #354)
+- ✅ Kotlin (Wear OS) language support — scaffold, quality tooling, CI, tests (#356, #357, #358, #359)
+- ✅ C/C++ (Tizen native) language support — scaffold, quality tooling, CI, tests (#361, #362, #363, #364)
+- ✅ Java (Wear OS legacy) language support — scaffold, quality tooling, CI, tests, docs (#366, #367, #368, #369)
+- ✅ C# (.NET) quality tooling on top of the foundation scaffold + CI (#370)
 
 ### Planned
 

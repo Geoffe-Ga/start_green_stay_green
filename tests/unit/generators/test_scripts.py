@@ -1,12 +1,17 @@
 """Unit tests for Scripts Generator."""
 
 from pathlib import Path
+import shutil
+import subprocess
 import tempfile
 
+from defusedxml import ElementTree as DefusedElementTree
 import pytest
+import yaml
 
 from start_green_stay_green.generators.scripts import ScriptConfig
 from start_green_stay_green.generators.scripts import ScriptsGenerator
+from start_green_stay_green.utils.cpp import CPP_STANDARD
 
 
 class TestScriptConfig:
@@ -63,7 +68,7 @@ class TestScriptConfig:
 
     def test_script_config_language_various_values(self) -> None:
         """Test ScriptConfig accepts various language values."""
-        languages = ["python", "typescript", "go", "rust", "javascript"]
+        languages = ["python", "typescript", "go", "rust", "swift", "javascript"]
         for lang in languages:
             config = ScriptConfig(
                 language=lang,
@@ -184,6 +189,44 @@ class TestScriptsGeneratorPythonGeneration:
             assert "Running All Quality Checks" in content
             assert "lint.sh" in content
             assert "format.sh" in content
+
+    def test_python_check_all_uses_safe_array_expansion(self) -> None:
+        """check-all.sh run_check must use the exact safe-expansion form.
+
+        Regression guard: a stray trailing backslash-quote after the
+        safe expansion is a bash parse error under strict shells and a
+        silent literal argument under permissive ones. The expansion
+        must match the TypeScript generator's correct form exactly.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["check-all.sh"].read_text()
+            assert '"${args[@]+"${args[@]}"}" $VERBOSE_FLAG' in content
+            assert '}\\" $VERBOSE_FLAG' not in content
+
+    def test_python_fix_all_uses_safe_array_expansion(self) -> None:
+        """fix-all.sh must guard empty args with the safe expansion.
+
+        Under ``set -u`` some bash versions raise a bad-substitution
+        error when expanding an empty ``${args[@]}`` directly.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="python",
+                package_name="my_package",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            content = scripts["fix-all.sh"].read_text()
+            assert '--fix "${args[@]+"${args[@]}"}" $VERBOSE_FLAG' in content
+            assert '--fix "${args[@]}" $VERBOSE_FLAG' not in content
 
     def test_python_format_script_contains_expected_content(self) -> None:
         """Test Python format.sh contains expected content."""
@@ -599,6 +642,1072 @@ class TestScriptsGeneratorRustGeneration:
             assert "cargo test" in content
 
 
+class TestScriptsGeneratorSwiftGeneration:
+    """Test Swift script generation (#352)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Generate Swift scripts into ``tmpdir`` and return the mapping."""
+        config = ScriptConfig(
+            language="swift",
+            package_name="my_watch_app",
+        )
+        generator = ScriptsGenerator(Path(tmpdir), config)
+        return generator.generate()
+
+    def test_generate_swift_scripts_creates_files(self) -> None:
+        """Test generate creates the full Swift script set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            assert "check-all.sh" in scripts
+            assert "format.sh" in scripts
+            assert "lint.sh" in scripts
+            assert "test.sh" in scripts
+            assert "security.sh" in scripts
+
+    def test_swift_format_script_uses_swift_format(self) -> None:
+        """Test Swift format.sh uses swift-format."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "swift-format" in content
+
+    def test_swift_lint_script_uses_swiftlint_strict(self) -> None:
+        """Test Swift lint.sh runs SwiftLint with --strict."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "swiftlint lint --strict" in content
+
+    def test_swift_test_script_enables_code_coverage(self) -> None:
+        """Test Swift test.sh runs swift test with coverage instrumentation."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "swift test --enable-code-coverage" in content
+
+    def test_swift_test_script_enforces_90_percent_coverage(self) -> None:
+        """Coverage mode reads the llvm-cov codecov JSON and gates at 90%."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            # llvm-cov export JSON path comes from swift test itself.
+            assert "--show-codecov-path" in content
+            assert "THRESHOLD=90" in content
+
+    def test_swift_security_script_uses_periphery(self) -> None:
+        """Test Swift security.sh runs Periphery dead-code analysis."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "periphery scan" in content
+
+    def test_swift_check_all_runs_full_toolchain(self) -> None:
+        """check-all.sh runs format, lint, tests (with coverage), security."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["check-all.sh"].read_text()
+            assert 'run_check "Format" "format.sh"' in content
+            assert 'run_check "Linting" "lint.sh"' in content
+            assert 'run_check "Tests" "test.sh" --coverage' in content
+            assert 'run_check "Security" "security.sh"' in content
+
+    def test_swift_writes_swiftlint_config_companion(self) -> None:
+        """A .swiftlint.yml companion lands at the project root."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            config_path = Path(tmpdir) / ".swiftlint.yml"
+            assert config_path.exists()
+
+    def test_swiftlint_config_is_parseable_yaml(self) -> None:
+        """.swiftlint.yml must be syntactically valid YAML."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".swiftlint.yml").read_text()
+            parsed = yaml.safe_load(content)
+            assert isinstance(parsed, dict)
+
+    def test_swiftlint_config_caps_cyclomatic_complexity_at_10(self) -> None:
+        """.swiftlint.yml errors when cyclomatic complexity exceeds 10."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".swiftlint.yml").read_text()
+            parsed = yaml.safe_load(content)
+            assert parsed["cyclomatic_complexity"]["error"] == 10
+
+    def test_swiftlint_config_preserves_existing_file(self) -> None:
+        """An existing user .swiftlint.yml is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / ".swiftlint.yml"
+            existing.write_text("disabled_rules: [todo]\n")
+
+            self._generate(tmpdir)
+
+            assert existing.read_text() == "disabled_rules: [todo]\n"
+
+    def test_swiftlint_config_documents_security_gap(self) -> None:
+        """.swiftlint.yml discloses that secret scanning lives in pre-commit.
+
+        SwiftLint has no dedicated security ruleset; the config must say
+        where secret scanning actually happens instead of overclaiming.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".swiftlint.yml").read_text()
+            assert "gitleaks" in content
+
+
+class TestScriptsGeneratorKotlinGeneration:
+    """Test Kotlin script generation (#357)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Generate Kotlin scripts into ``tmpdir`` and return the mapping."""
+        config = ScriptConfig(
+            language="kotlin",
+            package_name="my_wear_app",
+        )
+        generator = ScriptsGenerator(Path(tmpdir), config)
+        return generator.generate()
+
+    def test_generate_kotlin_scripts_creates_files(self) -> None:
+        """Test generate creates the full Kotlin script set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            assert "check-all.sh" in scripts
+            assert "format.sh" in scripts
+            assert "lint.sh" in scripts
+            assert "test.sh" in scripts
+            assert "security.sh" in scripts
+
+    def test_kotlin_format_script_uses_ktlint(self) -> None:
+        """Test Kotlin format.sh uses ktlint."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "ktlint" in content
+            assert "ktlint --format" in content
+
+    def test_kotlin_lint_script_uses_detekt_with_companion_config(self) -> None:
+        """Test Kotlin lint.sh runs detekt against the shared detekt.yml."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "detekt" in content
+            assert "--config detekt.yml" in content
+            assert "--build-upon-default-config" in content
+
+    def test_kotlin_test_script_requires_gradle_wrapper(self) -> None:
+        """test.sh fails with instructions when ./gradlew is missing.
+
+        The #356 scaffold deliberately never writes the wrapper jar
+        (binary artifact); the script must say how to create it instead
+        of emitting a bare command-not-found.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "./gradlew" in content
+            assert "gradle wrapper" in content
+
+    def test_kotlin_test_script_enforces_coverage_via_kover(self) -> None:
+        """Coverage mode runs the Kover verify task gating at 90%.
+
+        The 90% bound itself lives in app/build.gradle.kts (kover block);
+        the script must invoke the verify task and document where the
+        bound is configured rather than duplicating the number in shell.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "koverVerifyDebug" in content
+            assert "koverXmlReportDebug" in content
+            assert "app/build.gradle.kts" in content
+
+    def test_kotlin_security_script_uses_dependency_check(self) -> None:
+        """Test Kotlin security.sh runs OWASP dependency-check."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "dependency-check" in content
+
+    def test_kotlin_security_script_warns_and_skips_when_tool_missing(self) -> None:
+        """security.sh degrades to a warning when dependency-check is absent.
+
+        Mirrors the Swift Periphery precedent: a fresh clone must pass
+        check-all.sh out of the box, with a documented tighten-me path.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "command -v dependency-check" in content
+            assert "brew install dependency-check" in content
+            assert "Tighten" in content
+
+    def test_kotlin_check_all_runs_full_toolchain(self) -> None:
+        """check-all.sh runs format, lint, tests (with coverage), security."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["check-all.sh"].read_text()
+            assert 'run_check "Format" "format.sh"' in content
+            assert 'run_check "Linting" "lint.sh"' in content
+            assert 'run_check "Tests" "test.sh" --coverage' in content
+            assert 'run_check "Security" "security.sh"' in content
+
+    def test_kotlin_writes_detekt_config_companion(self) -> None:
+        """A detekt.yml companion lands at the project root."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            config_path = Path(tmpdir) / "detekt.yml"
+            assert config_path.exists()
+
+    def test_detekt_config_is_parseable_yaml(self) -> None:
+        """detekt.yml must be syntactically valid YAML."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / "detekt.yml").read_text()
+            parsed = yaml.safe_load(content)
+            assert isinstance(parsed, dict)
+
+    def test_detekt_config_caps_cyclomatic_complexity_at_10(self) -> None:
+        """detekt.yml enforces the project-wide <=10 complexity ceiling.
+
+        detekt 1.23.x reports methods whose McCabe complexity is >= the
+        configured threshold, so a threshold of 11 reports 11+ and
+        enforces <=10 — the same gate radon/eslint/gocyclo/clippy/
+        SwiftLint apply for the other languages.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / "detekt.yml").read_text()
+            parsed = yaml.safe_load(content)
+            rule = parsed["complexity"]["CyclomaticComplexMethod"]
+            assert rule["active"] is True
+            assert rule["threshold"] == 11
+
+    def test_detekt_config_activates_potential_bugs(self) -> None:
+        """detekt.yml keeps the potential-bugs ruleset active."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / "detekt.yml").read_text()
+            parsed = yaml.safe_load(content)
+            assert parsed["potential-bugs"]["active"] is True
+
+    def test_detekt_config_preserves_existing_file(self) -> None:
+        """An existing user detekt.yml is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / "detekt.yml"
+            existing.write_text("complexity:\n  active: false\n")
+
+            self._generate(tmpdir)
+
+            assert existing.read_text() == "complexity:\n  active: false\n"
+
+    def test_detekt_config_documents_security_gap(self) -> None:
+        """detekt.yml discloses that secret scanning lives in pre-commit.
+
+        detekt has no dedicated security ruleset; the config must say
+        where secret scanning actually happens instead of overclaiming.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / "detekt.yml").read_text()
+            assert "gitleaks" in content
+
+
+class TestScriptsGeneratorCppGeneration:
+    """Test C/C++ script generation (#362)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Generate cpp scripts into ``tmpdir`` and return the mapping."""
+        config = ScriptConfig(
+            language="cpp",
+            package_name="my_watch_app",
+        )
+        generator = ScriptsGenerator(Path(tmpdir), config)
+        return generator.generate()
+
+    def test_generate_cpp_scripts_creates_files(self) -> None:
+        """Test generate creates the full cpp script set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            assert "check-all.sh" in scripts
+            assert "format.sh" in scripts
+            assert "lint.sh" in scripts
+            assert "test.sh" in scripts
+            assert "security.sh" in scripts
+
+    def test_cpp_format_script_uses_clang_format(self) -> None:
+        """Test cpp format.sh uses clang-format against the shared config."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "clang-format -i" in content
+            assert "clang-format --dry-run --Werror" in content
+            assert ".clang-format" in content
+
+    def test_cpp_format_script_covers_all_cpp_extensions(self) -> None:
+        """format.sh finds every extension the pre-commit hook covers.
+
+        The clang-format hook uses types_or c/c++ (covering .c/.cc/.cxx/
+        .hh automatically); the standalone script's find must not
+        silently skip those files.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            for ext in ("*.c", "*.cc", "*.cpp", "*.cxx", "*.h", "*.hh", "*.hpp"):
+                assert f"-name '{ext}'" in content, ext
+
+    def test_cpp_shell_scripts_pass_bash_syntax_check(self) -> None:
+        """Every generated cpp shell script parses under bash -n.
+
+        Completes the parse-validation pattern: the templates embed
+        run_check() with array expansions, so a literal syntax check
+        guards against template-escaping regressions.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            for name, path in scripts.items():
+                if not name.endswith(".sh"):
+                    continue
+                bash = shutil.which("bash")
+                assert bash is not None, "bash not found on PATH"
+                result = subprocess.run(  # noqa: S603  # Issue #362: bash -n on generated content, no untrusted input
+                    [bash, "-n", str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, f"{name}: {result.stderr}"
+
+    def test_cpp_lint_script_runs_full_static_analysis(self) -> None:
+        """lint.sh runs clang-tidy, cppcheck, and the lizard CCN gate."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "clang-tidy" in content
+            assert "cppcheck --enable=warning,performance,portability" in content
+            assert "lizard --CCN" in content
+
+    def test_cpp_lint_script_gates_complexity_at_10_in_one_place(self) -> None:
+        """The CCN ceiling lives once, as MAX_CCN=10 in lint.sh.
+
+        The companion .clang-tidy deliberately does not duplicate the
+        bound via readability-function-cognitive-complexity; lizard owns
+        the complexity gate (single source of truth).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "MAX_CCN=10" in content
+            assert 'lizard --CCN "$MAX_CCN"' in content
+
+    def test_cpp_lint_script_requires_compile_commands(self) -> None:
+        """lint.sh fails with instructions when the build is unconfigured.
+
+        clang-tidy needs build/compile_commands.json; the script must say
+        how to produce it (the cmake configure step) instead of emitting
+        a bare clang-tidy error.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "build/compile_commands.json" in content
+            assert "conan install . --output-folder=build --build=missing" in content
+
+    def test_cpp_test_script_runs_ctest(self) -> None:
+        """Test cpp test.sh runs the Catch2 suite via CTest."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "ctest --test-dir build" in content
+
+    def test_cpp_test_script_enforces_90_percent_coverage(self) -> None:
+        """Coverage mode rebuilds instrumented and gates at 90% via lcov.
+
+        THRESHOLD=90 in test.sh is the single place the bound lives; the
+        ENABLE_COVERAGE instrumentation option it toggles is defined in
+        the generated CMakeLists.txt.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "THRESHOLD=90" in content
+            assert "-DENABLE_COVERAGE=ON" in content
+            assert "lcov --capture" in content
+
+    def test_cpp_test_script_excludes_third_party_from_coverage(self) -> None:
+        """The lcov data is narrowed to first-party src/ and inc/ sources."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert 'lcov --extract build/coverage.info "*/src/*" "*/inc/*"' in content
+
+    def test_cpp_test_script_documents_main_cpp_coverage_limit(self) -> None:
+        """test.sh discloses that the Tizen entry point is not measured.
+
+        src/main.cpp needs the Tizen SDK and is outside the host build,
+        so the coverage gate honestly excludes it rather than implying
+        whole-project coverage.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "src/main.cpp" in content
+            assert "coverage denominator" in content
+
+    def test_cpp_security_script_uses_flawfinder(self) -> None:
+        """Test cpp security.sh runs flawfinder's dangerous-API scan."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "flawfinder --error-level=4" in content
+
+    def test_cpp_security_script_warns_and_skips_when_tool_missing(self) -> None:
+        """security.sh degrades to a warning when flawfinder is absent.
+
+        Mirrors the Swift Periphery / Kotlin dependency-check precedent:
+        a fresh clone must pass check-all.sh out of the box, with a
+        documented tighten-me path.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "command -v flawfinder" in content
+            assert "pip install flawfinder" in content
+            assert "Tighten" in content
+
+    def test_cpp_security_script_documents_division_of_labor(self) -> None:
+        """security.sh discloses where the other security passes live.
+
+        cppcheck and the clang-analyzer checks run in lint.sh; secret
+        scanning runs in pre-commit; scan-build is the documented
+        tighten-me. The script must say so instead of overclaiming.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "gitleaks" in content
+            assert "clang-analyzer" in content
+            assert "scan-build" in content
+
+    def test_cpp_check_all_runs_full_toolchain(self) -> None:
+        """check-all.sh runs format, lint, tests (with coverage), security."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["check-all.sh"].read_text()
+            assert 'run_check "Format" "format.sh"' in content
+            assert 'run_check "Linting" "lint.sh"' in content
+            assert 'run_check "Tests" "test.sh" --coverage' in content
+            assert 'run_check "Security" "security.sh"' in content
+
+    def test_cpp_writes_clang_config_companions(self) -> None:
+        """.clang-format and .clang-tidy companions land at the project root."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            assert (Path(tmpdir) / ".clang-format").exists()
+            assert (Path(tmpdir) / ".clang-tidy").exists()
+
+    def test_clang_format_config_is_parseable_yaml(self) -> None:
+        """.clang-format must be syntactically valid YAML."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".clang-format").read_text()
+            parsed = yaml.safe_load(content)
+            assert isinstance(parsed, dict)
+            assert parsed["BasedOnStyle"] == "Google"
+
+    def test_clang_format_config_pins_the_cpp_standard(self) -> None:
+        """.clang-format's Standard matches the CMakeLists C++ standard.
+
+        Both interpolate utils.cpp.CPP_STANDARD, so the formatter and the
+        compiler can never disagree about the language version.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".clang-format").read_text()
+            parsed = yaml.safe_load(content)
+            assert parsed["Standard"] == f"c++{CPP_STANDARD}"
+
+    def test_clang_tidy_config_is_parseable_yaml(self) -> None:
+        """.clang-tidy must be syntactically valid YAML."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".clang-tidy").read_text()
+            parsed = yaml.safe_load(content)
+            assert isinstance(parsed, dict)
+
+    def test_clang_tidy_config_promotes_warnings_to_errors(self) -> None:
+        """.clang-tidy enables the analyzer checks and fails on findings."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".clang-tidy").read_text()
+            parsed = yaml.safe_load(content)
+            assert parsed["WarningsAsErrors"] == "*"
+            assert "clang-analyzer-*" in parsed["Checks"]
+            assert "bugprone-*" in parsed["Checks"]
+
+    def test_clang_tidy_config_documents_tighten_me_checks(self) -> None:
+        """.clang-tidy discloses the deliberately deferred check groups."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / ".clang-tidy").read_text()
+            assert "Tighten-me" in content
+            assert "cppcoreguidelines" in content
+
+    def test_clang_config_companions_preserve_existing_files(self) -> None:
+        """Existing user .clang-format/.clang-tidy are never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing_format = Path(tmpdir) / ".clang-format"
+            existing_format.write_text("BasedOnStyle: LLVM\n")
+            existing_tidy = Path(tmpdir) / ".clang-tidy"
+            existing_tidy.write_text("Checks: bugprone-*\n")
+
+            self._generate(tmpdir)
+
+            assert existing_format.read_text() == "BasedOnStyle: LLVM\n"
+            assert existing_tidy.read_text() == "Checks: bugprone-*\n"
+
+
+class TestScriptsGeneratorJavaGeneration:
+    """Test Java script generation (#367)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Generate java scripts into ``tmpdir`` and return the mapping."""
+        config = ScriptConfig(
+            language="java",
+            package_name="my_wear_app",
+        )
+        generator = ScriptsGenerator(Path(tmpdir), config)
+        return generator.generate()
+
+    def test_generate_java_scripts_creates_files(self) -> None:
+        """Test generate creates the full java script set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            assert "check-all.sh" in scripts
+            assert "format.sh" in scripts
+            assert "lint.sh" in scripts
+            assert "test.sh" in scripts
+            assert "security.sh" in scripts
+
+    def test_java_shell_scripts_pass_bash_syntax_check(self) -> None:
+        """Every generated java shell script parses under bash -n.
+
+        The #362 lesson: this literal syntax check caught a real
+        template-escaping bug in the cpp scripts, so every new language
+        gets it from day one.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            for name, path in scripts.items():
+                if not name.endswith(".sh"):
+                    continue
+                bash = shutil.which("bash")
+                assert bash is not None, "bash not found on PATH"
+                result = subprocess.run(  # noqa: S603  # Issue #367: bash -n on generated content, no untrusted input
+                    [bash, "-n", str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, f"{name}: {result.stderr}"
+
+    def test_java_format_script_uses_google_java_format(self) -> None:
+        """format.sh formats in place and verifies with --dry-run."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "google-java-format" in content
+            assert "--replace" in content
+            assert "--dry-run --set-exit-if-changed" in content
+
+    def test_java_format_script_requires_the_formatter(self) -> None:
+        """format.sh fails with install instructions when the tool is absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "command -v google-java-format" in content
+            assert "brew install google-java-format" in content
+
+    def test_java_lint_script_runs_pom_backed_goals(self) -> None:
+        """lint.sh runs Checkstyle and PMD via the Maven goals the pom pins."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "mvn -q checkstyle:check" in content
+            assert "mvn -q pmd:check" in content
+
+    def test_java_lint_script_requires_maven(self) -> None:
+        """lint.sh fails with install instructions when mvn is absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "command -v mvn" in content
+            assert "brew install maven" in content
+
+    def test_java_lint_script_documents_pmd_as_complexity_owner(self) -> None:
+        """The CCN ceiling lives once, in the pmd-ruleset.xml companion.
+
+        PMD's CyclomaticComplexity rule owns the <=10 gate (single
+        source of truth); lint.sh and the script's help text must point
+        at the companion ruleset rather than duplicating a threshold.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "pmd-ruleset.xml" in content
+            assert "CyclomaticComplexity" in content
+            # No shell-side duplicate of the bound.
+            assert "MAX_CCN" not in content
+
+    def test_java_test_script_runs_maven_tests(self) -> None:
+        """test.sh runs the JUnit 4 suite via plain `mvn test`.
+
+        The literal string `mvn test` doubles as the language marker
+        cli._scripts_dir_has_other_language probes for java.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "mvn test" in content
+            assert "command -v mvn" in content
+
+    def test_java_test_script_enforces_coverage_via_pom_jacoco_gate(self) -> None:
+        """Coverage mode runs the full lifecycle; the bound stays in the pom.
+
+        ``mvn clean verify`` fires the pom's bound jacoco executions
+        (prepare-agent -> report -> check) in order; invoking
+        ``jacoco:check`` as a standalone goal can silently pass against
+        an empty report. Unlike the cpp THRESHOLD=90 (CMake has no
+        manifest home for the bound), the JaCoCo plugin rules in pom.xml
+        are the single source of the coverage bound, so the script must
+        not restate the number.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "mvn clean verify" in content
+            # No standalone goal invocation remains in the command line
+            # (the string may still appear in explanatory comments).
+            assert "mvn clean test jacoco:report jacoco:check" not in content
+            assert "pom.xml" in content
+            assert "THRESHOLD=" not in content
+
+    def test_java_test_script_documents_app_module_coverage_limit(self) -> None:
+        """test.sh discloses that the Android app module is not measured.
+
+        app/ needs the Android SDK and sits outside the Maven build, so
+        the coverage gate honestly excludes it rather than implying
+        whole-project coverage — the cpp src/main.cpp precedent.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "app/" in content
+            assert "coverage denominator" in content
+
+    def test_java_security_script_compiles_before_spotbugs(self) -> None:
+        """security.sh compiles before the SpotBugs bytecode scan.
+
+        `mvn spotbugs:check` silently skips when target/classes is
+        empty, so the script must run the compile phase first or the
+        gate is a no-op.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "mvn -q compile spotbugs:check" in content
+
+    def test_java_security_script_gates_dependency_check_on_nvd_key(self) -> None:
+        """dependency-check runs only when an NVD API key is configured.
+
+        The pom pins org.owasp:dependency-check-maven, so there is no
+        binary to install — but without an NVD API key the NVD download
+        is throttled to impracticality, so the pragmatic warn-first
+        default skips the scan with a documented tighten-me path.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "NVD_API_KEY" in content
+            assert "dependency-check:check" in content
+            assert "Tighten" in content
+
+    def test_java_security_script_documents_division_of_labor(self) -> None:
+        """security.sh discloses where the other security passes live."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "gitleaks" in content
+            assert "detect-secrets" in content
+
+    def test_java_check_all_runs_full_toolchain(self) -> None:
+        """check-all.sh runs format, lint, tests (with coverage), security."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["check-all.sh"].read_text()
+            assert 'run_check "Format" "format.sh"' in content
+            assert 'run_check "Linting" "lint.sh"' in content
+            assert 'run_check "Tests" "test.sh" --coverage' in content
+            assert 'run_check "Security" "security.sh"' in content
+
+    def test_java_writes_pmd_ruleset_companion(self) -> None:
+        """The pmd-ruleset.xml companion lands at the project root."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            assert (Path(tmpdir) / "pmd-ruleset.xml").exists()
+
+    def test_pmd_ruleset_is_well_formed_xml_with_ccn_rule(self) -> None:
+        """pmd-ruleset.xml parses as XML and gates CCN at <=10.
+
+        PMD reports methods whose complexity is >= methodReportLevel,
+        so 11 reports 11+ and enforces the <=10 ceiling the other
+        languages gate on (the detekt threshold: 11 precedent).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / "pmd-ruleset.xml").read_text()
+            root = DefusedElementTree.fromstring(content)
+            assert root.tag.endswith("ruleset")
+            assert "CyclomaticComplexity" in content
+            assert 'value="11"' in content
+            assert "methodReportLevel" in content
+
+    def test_pmd_ruleset_documents_the_threshold_mapping(self) -> None:
+        """The ruleset explains the report-at-11 == ceiling-10 mapping."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            content = (Path(tmpdir) / "pmd-ruleset.xml").read_text()
+            assert "<= 10" in content
+
+    def test_pmd_ruleset_preserves_existing_file(self) -> None:
+        """An existing user pmd-ruleset.xml is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / "pmd-ruleset.xml"
+            existing.write_text("<ruleset />\n")
+
+            self._generate(tmpdir)
+
+            assert existing.read_text() == "<ruleset />\n"
+
+
+class TestScriptsGeneratorCsharpGeneration:
+    """Test C# script generation (#370)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Generate csharp scripts into ``tmpdir`` and return the mapping."""
+        config = ScriptConfig(
+            language="csharp",
+            package_name="my_dotnet_app",
+        )
+        generator = ScriptsGenerator(Path(tmpdir), config)
+        return generator.generate()
+
+    def test_generate_csharp_scripts_creates_files(self) -> None:
+        """Test generate creates the full csharp script set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            assert "check-all.sh" in scripts
+            assert "format.sh" in scripts
+            assert "lint.sh" in scripts
+            assert "test.sh" in scripts
+            assert "security.sh" in scripts
+
+    def test_csharp_shell_scripts_pass_bash_syntax_check(self) -> None:
+        """Every generated csharp shell script parses under bash -n.
+
+        The #362 lesson: this literal syntax check caught a real
+        template-escaping bug in the cpp scripts, so every new language
+        gets it from day one.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            for name, path in scripts.items():
+                if not name.endswith(".sh"):
+                    continue
+                bash = shutil.which("bash")
+                assert bash is not None, "bash not found on PATH"
+                result = subprocess.run(  # noqa: S603  # Issue #370: bash -n on generated content, no untrusted input
+                    [bash, "-n", str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, f"{name}: {result.stderr}"
+
+    def test_csharp_shell_scripts_pass_shellcheck(self) -> None:
+        """Every generated csharp shell script is clean under shellcheck.
+
+        bash -n only catches parse errors; shellcheck catches the
+        quoting/expansion bugs that have bitten generated scripts
+        before (#425/SC2059), so the linter itself gates the templates.
+        Skips only when shellcheck is not installed (it ships on the
+        GitHub ubuntu runners and via shellcheck-py in pre-commit).
+        """
+        shellcheck = shutil.which("shellcheck")
+        if shellcheck is None:
+            pytest.skip("shellcheck not on PATH (covered in CI)")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            for name, path in scripts.items():
+                if not name.endswith(".sh"):
+                    continue
+                result = subprocess.run(  # noqa: S603  # Issue #370: shellcheck on generated content, no untrusted input
+                    [shellcheck, str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, f"{name}: {result.stdout}"
+
+    def test_csharp_format_script_uses_dotnet_format(self) -> None:
+        """format.sh fixes by default and verifies with --verify-no-changes."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "dotnet format" in content
+            assert "--verify-no-changes" in content
+
+    def test_csharp_format_script_requires_the_dotnet_cli(self) -> None:
+        """format.sh fails with install instructions when dotnet is absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "command -v dotnet" in content
+            assert "brew install dotnet-sdk" in content
+
+    def test_csharp_lint_script_builds_with_manifest_owned_policy(self) -> None:
+        """lint.sh is a plain dotnet build; the csproj owns the policy.
+
+        All Roslyn analysis (SDK CA rules, the CA1502 complexity
+        ceiling, SecurityCodeScan) runs inside the compiler and the
+        csproj's TreatWarningsAsErrors makes the build fail on
+        findings — the script must not restate any -warnaserror flag.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "dotnet build --nologo" in content
+            assert "warnaserror" not in content
+            assert "TreatWarningsAsErrors" in content
+
+    def test_csharp_lint_script_documents_ca1502_as_complexity_owner(self) -> None:
+        """The complexity ceiling lives once, in CodeMetricsConfig.txt.
+
+        The Roslyn CA1502 rule owns the <=10 gate; lint.sh points at
+        the companion config rather than duplicating a threshold.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "CA1502" in content
+            assert "CodeMetricsConfig.txt" in content
+            # No shell-side duplicate of the bound.
+            assert "MAX_CCN" not in content
+
+    def test_csharp_test_script_runs_dotnet_test(self) -> None:
+        """test.sh runs the xUnit suite via plain `dotnet test`.
+
+        The literal string `dotnet test` doubles as the language marker
+        cli._scripts_dir_has_other_language probes for csharp.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "dotnet test" in content
+            assert "command -v dotnet" in content
+
+    def test_csharp_test_script_enforces_coverage_via_csproj_gate(self) -> None:
+        """Coverage mode activates Coverlet; the bound stays in the csproj.
+
+        ``dotnet test /p:CollectCoverage=true`` lets coverlet.msbuild
+        hook the test task itself, so a missed bound fails the
+        invocation directly (no standalone-goal/empty-report no-op
+        path). The >=90% number lives only in the csproj's
+        Threshold/ThresholdType/ThresholdStat properties, so the script
+        must not restate it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "/p:CollectCoverage=true" in content
+            assert ".csproj" in content
+            assert "THRESHOLD=" not in content
+            assert "/p:Threshold=" not in content
+
+    def test_csharp_security_script_gates_on_vulnerable_packages(self) -> None:
+        """security.sh fails when the vulnerable-package listing reports hits.
+
+        ``dotnet list package --vulnerable`` kept exit code 0 even with
+        findings across several SDK lines (dotnet/sdk#25091), so the
+        gate greps the report line instead of trusting the exit code.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "dotnet list package --vulnerable" in content
+            assert "has the following vulnerable packages" in content
+
+    def test_csharp_security_script_warns_when_offline(self) -> None:
+        """The vulnerability scan needs the network; offline warns, not fails.
+
+        The listing queries the NuGet vulnerability database (and needs
+        a restore), so the pragmatic warn-first default skips with a
+        documented tighten-me path instead of failing a fresh offline
+        clone — the NVD_API_KEY precedent.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "network" in content
+            assert "Tighten" in content
+
+    def test_csharp_security_script_documents_division_of_labor(self) -> None:
+        """security.sh discloses where the other security passes live."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "gitleaks" in content
+            assert "detect-secrets" in content
+            assert "SecurityCodeScan" in content
+
+    def test_csharp_check_all_runs_full_toolchain(self) -> None:
+        """check-all.sh runs format, lint, tests (with coverage), security."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["check-all.sh"].read_text()
+            assert 'run_check "Format" "format.sh"' in content
+            assert 'run_check "Linting" "lint.sh"' in content
+            assert 'run_check "Tests" "test.sh" --coverage' in content
+            assert 'run_check "Security" "security.sh"' in content
+
+    def test_csharp_writes_editorconfig_companion(self) -> None:
+        """.editorconfig lands at the project root and enables CA1502.
+
+        CA1502 ships with the .NET SDK analyzers but is disabled by
+        default; the .editorconfig severity switch is what turns the
+        complexity gate on (the threshold itself lives in
+        CodeMetricsConfig.txt).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            config = Path(tmpdir) / ".editorconfig"
+            assert config.exists()
+            content = config.read_text()
+            assert "dotnet_diagnostic.CA1502.severity = error" in content
+
+    def test_csharp_writes_code_metrics_config_companion(self) -> None:
+        """CodeMetricsConfig.txt is the single home of the <=10 bound.
+
+        The .NET SDK metrics analyzers read 'CA1502: 10' from this
+        AdditionalFiles entry; CA1502 fires when complexity EXCEEDS the
+        threshold, so 10 reports 11+ — the same ceiling the other
+        languages gate on.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            config = Path(tmpdir) / "CodeMetricsConfig.txt"
+            assert config.exists()
+            content = config.read_text()
+            assert "CA1502: 10" in content
+            assert "<= 10" in content
+
+    def test_csharp_companions_preserve_existing_files(self) -> None:
+        """Existing user companion configs are never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing_editor = Path(tmpdir) / ".editorconfig"
+            existing_editor.write_text("root = true\n")
+            existing_metrics = Path(tmpdir) / "CodeMetricsConfig.txt"
+            existing_metrics.write_text("CA1502: 25\n")
+
+            self._generate(tmpdir)
+
+            assert existing_editor.read_text() == "root = true\n"
+            assert existing_metrics.read_text() == "CA1502: 25\n"
+
+
 class TestScriptsGeneratorLanguageFallback:
     """Test language fallback behavior."""
 
@@ -848,6 +1957,76 @@ class TestMutationKillers:
             content = scripts["lint.sh"].read_text()
             assert "clippy" in content
 
+    def test_swift_language_dispatches_to_swift_generator(self) -> None:
+        """Test 'swift' language dispatches to Swift generator."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="swift",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            # Should generate Swift scripts with SwiftLint
+            content = scripts["lint.sh"].read_text()
+            assert "swiftlint" in content
+
+    def test_kotlin_language_dispatches_to_kotlin_generator(self) -> None:
+        """Test 'kotlin' language dispatches to Kotlin generator."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="kotlin",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            # Should generate Kotlin scripts with detekt
+            content = scripts["lint.sh"].read_text()
+            assert "detekt" in content
+
+    def test_cpp_language_dispatches_to_cpp_generator(self) -> None:
+        """Test 'cpp' language dispatches to the C/C++ generator."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="cpp",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            # Should generate cpp scripts with clang-tidy
+            content = scripts["lint.sh"].read_text()
+            assert "clang-tidy" in content
+
+    def test_java_language_dispatches_to_java_generator(self) -> None:
+        """Test 'java' language dispatches to the Java generator (#367)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="java",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            # Should generate java scripts with the pom-backed goals
+            content = scripts["lint.sh"].read_text()
+            assert "checkstyle:check" in content
+
+    def test_csharp_language_dispatches_to_csharp_generator(self) -> None:
+        """Test 'csharp' language dispatches to the C# generator (#370)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="csharp",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            # Should generate csharp scripts with the dotnet CLI gates
+            content = scripts["lint.sh"].read_text()
+            assert "dotnet build" in content
+
     def test_generated_scripts_exact_count_python(self) -> None:
         """Test Python generator creates EXACTLY 12 scripts.
 
@@ -866,6 +2045,58 @@ class TestMutationKillers:
             assert len(scripts) == 12
             assert len(scripts) > 11
             assert len(scripts) < 13
+
+    def test_generated_scripts_exact_count_cpp(self) -> None:
+        """Test C/C++ generator creates EXACTLY 6 scripts.
+
+        Kills mutations in script count logic and catches silent script
+        additions/removals. Scripts: check-all, format, lint, test,
+        security, pr-status (companion configs .clang-format/.clang-tidy
+        are written separately and not counted here).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="cpp",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            assert len(scripts) == 6
+            assert sorted(scripts) == [
+                "check-all.sh",
+                "format.sh",
+                "lint.sh",
+                "pr-status.sh",
+                "security.sh",
+                "test.sh",
+            ]
+
+    def test_generated_scripts_exact_count_java(self) -> None:
+        """Test Java generator creates EXACTLY 6 scripts (#367).
+
+        Kills mutations in script count logic and catches silent script
+        additions/removals. Scripts: check-all, format, lint, test,
+        security, pr-status (the pmd-ruleset.xml companion is written
+        separately and not counted here).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="java",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            assert len(scripts) == 6
+            assert sorted(scripts) == [
+                "check-all.sh",
+                "format.sh",
+                "lint.sh",
+                "pr-status.sh",
+                "security.sh",
+                "test.sh",
+            ]
 
     def test_generated_scripts_exact_count_typescript(self) -> None:
         """Test TypeScript generator creates EXACTLY 6 scripts."""
@@ -1527,7 +2758,7 @@ class TestPrStatusScript:
 
     def test_pr_status_script_generated_for_all_languages(self) -> None:
         """Test pr-status.sh is generated for all supported languages."""
-        languages = ["python", "typescript", "go", "rust"]
+        languages = ["python", "typescript", "go", "rust", "swift"]
         for lang in languages:
             with tempfile.TemporaryDirectory() as tmpdir:
                 config = ScriptConfig(

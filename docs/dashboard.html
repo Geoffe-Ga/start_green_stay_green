@@ -85,8 +85,8 @@
             color: #fff;
         }
         .status-unknown {
-            background: #484f58;
-            color: #c9d1d9;
+            background: #30363d;
+            color: #8b949e;
         }
         .footer {
             text-align: center;
@@ -103,6 +103,30 @@
         <p class="subtitle">Quality Metrics Dashboard</p>
 
         <div class="metrics-grid">
+            <div class="metric-card" id="precommit-status">
+                <div class="metric-name">Pre-Commit Status</div>
+                <div class="metric-value" id="precommit-value">--</div>
+                <div class="metric-threshold">
+                    Threshold:
+                    <span id="precommit-threshold">31/31 Hooks</span>
+                </div>
+                <div class="metric-status status-pass" id="precommit-status-badge">
+                    PASSING
+                </div>
+            </div>
+
+            <div class="metric-card" id="ci-status">
+                <div class="metric-name">CI Status</div>
+                <div class="metric-value" id="ci-value">--</div>
+                <div class="metric-threshold">
+                    Threshold:
+                    <span id="ci-threshold">10/10 Jobs</span>
+                </div>
+                <div class="metric-status status-pass" id="ci-status-badge">
+                    PASSING
+                </div>
+            </div>
+
             <div class="metric-card">
                 <div class="metric-name">Code Coverage</div>
                 <div class="metric-value" id="coverage-value">--</div>
@@ -124,6 +148,17 @@
             </div>
 
             <div class="metric-card">
+                <div class="metric-name">Mutation Score</div>
+                <div class="metric-value" id="mutation-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≥80%
+                </div>
+                <div class="metric-status status-pass" id="mutation-status">
+                    PASSING
+                </div>
+            </div>
+
+            <div class="metric-card">
                 <div class="metric-name">Cyclomatic Complexity</div>
                 <div class="metric-value" id="complexity-value">--</div>
                 <div class="metric-threshold">
@@ -132,6 +167,15 @@
                 <div class="metric-status status-pass" id="complexity-status">
                     PASSING
                 </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-name">Documentation Coverage</div>
+                <div class="metric-value" id="docs-value">--</div>
+                <div class="metric-threshold">
+                    Threshold: ≥95%
+                </div>
+                <div class="metric-status status-pass" id="docs-status">PASSING</div>
             </div>
 
             <div class="metric-card">
@@ -217,6 +261,12 @@
             document.getElementById('last-updated').textContent =
                 new Date(data.timestamp).toLocaleString();
 
+            // Pre-Commit Status (index 0): green 100%, yellow 90-99%, red <90%
+            updatePrecommitStatus(metrics.precommit_status);
+
+            // CI Status (index 1): green 100%, yellow 85-99%, red <85%
+            updateCIStatus(metrics.ci_status);
+
             // Coverage
             if (metrics.coverage !== undefined) {
                 if (metrics.coverage === null) {
@@ -239,6 +289,18 @@
                 }
             }
 
+            // Mutation Score (Issue #217): null (no .mutmut-cache in CI)
+            // renders the gray N/A treatment via updateStatus, never red.
+            if (metrics.mutation_score !== undefined) {
+                if (metrics.mutation_score === null) {
+                    document.getElementById('mutation-value').textContent = 'N/A';
+                    updateStatus('mutation', 'N/A', false);
+                } else {
+                    updateMetric('mutation', metrics.mutation_score, '%',
+                        metrics.mutation_score >= thresholds.mutation_score);
+                }
+            }
+
             // Complexity
             if (metrics.complexity_avg !== undefined) {
                 if (metrics.complexity_avg === null) {
@@ -247,6 +309,18 @@
                 } else {
                     updateMetric('complexity', metrics.complexity_avg, '',
                         metrics.complexity_avg <= thresholds.complexity);
+                }
+            }
+
+            // Documentation Coverage (Issue #217): sourced from
+            // metrics-docs.sh (ruff D rules); null renders gray N/A.
+            if (metrics.docs_coverage !== undefined) {
+                if (metrics.docs_coverage === null) {
+                    document.getElementById('docs-value').textContent = 'N/A';
+                    updateStatus('docs', 'N/A', false);
+                } else {
+                    updateMetric('docs', metrics.docs_coverage, '%',
+                        metrics.docs_coverage >= thresholds.docs_coverage);
                 }
             }
 
@@ -323,6 +397,98 @@
             }
         }
 
+        function updatePrecommitStatus(precommit) {
+            const valueElem = document.getElementById('precommit-value');
+            const thresholdElem = document.getElementById('precommit-threshold');
+            const badgeElem =
+                document.getElementById('precommit-status-badge');
+
+            // No-data guard (Issue #154): when there is no precommit data, or
+            // the status is 'unknown' (no .pre-commit-config.yaml), render the
+            // gray N/A treatment BEFORE the percentage thresholds so a 0%
+            // unknown card does not fall through to red FAILING.
+            if (!precommit || precommit.status === 'unknown') {
+                valueElem.textContent = 'N/A';
+                thresholdElem.textContent = 'No data';
+                badgeElem.textContent = 'N/A';
+                badgeElem.className = 'metric-status status-unknown';
+                return;
+            }
+
+            const total = precommit.total_hooks || 0;
+            const passing = precommit.passing_hooks || 0;
+            const percentage = (precommit.percentage !== undefined &&
+                precommit.percentage !== null)
+                ? precommit.percentage
+                : (total > 0 ? (passing / total) * 100 : 0);
+
+            valueElem.textContent = percentage.toFixed(0) + '%';
+            thresholdElem.textContent = passing + '/' + total + ' Hooks';
+
+            // Color coding per Issue #154:
+            // green (100%), yellow (90-99%), red (<90%)
+            let statusClass;
+            let statusText;
+            if (percentage >= 100) {
+                statusClass = 'status-pass';
+                statusText = 'PASSING';
+            } else if (percentage >= 90) {
+                statusClass = 'status-warn';
+                statusText = 'WARNING';
+            } else {
+                statusClass = 'status-fail';
+                statusText = 'FAILING';
+            }
+            badgeElem.textContent = statusText;
+            badgeElem.className = 'metric-status ' + statusClass;
+        }
+
+        function updateCIStatus(ci) {
+            const valueElem = document.getElementById('ci-value');
+            const thresholdElem = document.getElementById('ci-threshold');
+            const badgeElem = document.getElementById('ci-status-badge');
+
+            // No-data guard (Issue #159): when there is no CI data, or the
+            // status is 'unknown' (static workflow count or API failure),
+            // render the gray N/A treatment BEFORE the percentage
+            // thresholds so a 0% unknown card does not fall through to red
+            // FAILING.
+            if (!ci || ci.status === 'unknown') {
+                valueElem.textContent = 'N/A';
+                thresholdElem.textContent = 'No data';
+                badgeElem.textContent = 'N/A';
+                badgeElem.className = 'metric-status status-unknown';
+                return;
+            }
+
+            const total = ci.total_jobs || 0;
+            const passing = ci.passing_jobs || 0;
+            const percentage = (ci.percentage !== undefined &&
+                ci.percentage !== null)
+                ? ci.percentage
+                : (total > 0 ? (passing / total) * 100 : 0);
+
+            valueElem.textContent = percentage.toFixed(0) + '%';
+            thresholdElem.textContent = passing + '/' + total + ' Jobs';
+
+            // Color coding per Issue #159:
+            // green (100%), yellow (85-99%), red (<85%)
+            let statusClass;
+            let statusText;
+            if (percentage >= 100) {
+                statusClass = 'status-pass';
+                statusText = 'PASSING';
+            } else if (percentage >= 85) {
+                statusClass = 'status-warn';
+                statusText = 'WARNING';
+            } else {
+                statusClass = 'status-fail';
+                statusText = 'FAILING';
+            }
+            badgeElem.textContent = statusText;
+            badgeElem.className = 'metric-status ' + statusClass;
+        }
+
         function updateMetric(name, value, suffix, passing) {
             const elem = document.getElementById(`${name}-value`);
             elem.textContent = value.toFixed(2) + suffix;
@@ -333,6 +499,9 @@
             const elem = document.getElementById(`${name}-status`);
             if (!elem) return;
             elem.textContent = text;
+            // No-data cards pass 'N/A' (Issue #154): map to the gray
+            // status-unknown state so a fresh project does not surface
+            // alarming red "no data" badges.
             let statusClass;
             if (text === 'N/A') {
                 statusClass = 'status-unknown';

@@ -11,6 +11,7 @@ This module provides:
 from collections.abc import Generator
 import os
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -44,13 +45,20 @@ def get_env_without_api_keys() -> dict[str, str]:
     This is the canonical helper for API key isolation in subprocess tests.
     See Issue #196.
 
+    Also pins the running interpreter's bin directory to the front of PATH
+    so console scripts (e.g. ``sgsg``) resolve to the environment under
+    test rather than a stale globally-installed copy (#354).
+
     Returns:
-        Environment dict with API keys removed and null keyring backend.
+        Environment dict with API keys removed, null keyring backend, and
+        the current interpreter's bin directory first on PATH.
     """
     env = os.environ.copy()
     env.pop("ANTHROPIC_API_KEY", None)
     env.pop("CLAUDE_API_KEY", None)
     env["PYTHON_KEYRING_BACKEND"] = "keyring.backends.null.Keyring"
+    interpreter_bin = str(Path(sys.executable).parent)
+    env["PATH"] = os.pathsep.join([interpreter_bin, env.get("PATH", "")])
     return env
 
 
@@ -63,6 +71,9 @@ LANGUAGE_EXTENSIONS: dict[str, str] = {
     "java": ".java",
     "csharp": ".cs",
     "ruby": ".rb",
+    "swift": ".swift",
+    "kotlin": ".kt",
+    "cpp": ".cpp",
 }
 
 
@@ -70,7 +81,7 @@ LANGUAGE_EXTENSIONS: dict[str, str] = {
 def language(request: pytest.FixtureRequest) -> str:
     """Parametrized fixture providing each supported language.
 
-    Yields each of the 7 supported languages as a separate test case.
+    Yields each entry of SUPPORTED_LANGUAGES as a separate test case.
 
     Args:
         request: Pytest fixture request.

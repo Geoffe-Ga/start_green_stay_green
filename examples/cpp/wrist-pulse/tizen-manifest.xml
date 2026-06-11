@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns="http://tizen.org/ns/packages" api-version="5.5" package="org.example.wristpulse" version="0.1.0">
+    <profile name="wearable" />
+    <watch-application appid="org.example.wristpulse" exec="wrist_pulse" ambient-support="false">
+        <label>wrist-pulse</label>
+        <!-- The icon PNG is a binary artifact and is NOT generated; add
+             shared/res/wrist_pulse.png via Tizen Studio before packaging
+             (see shared/res/README.md). -->
+        <icon>wrist_pulse.png</icon>
+    </watch-application>
+    <feature name="http://tizen.org/feature/watch_app">true</feature>
+</manifest>

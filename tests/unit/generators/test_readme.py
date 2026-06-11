@@ -15,9 +15,12 @@ EXPECTED_COMMANDS: dict[str, list[str]] = {
     "typescript": ["npm install", "npm test"],
     "go": ["go build", "go test"],
     "rust": ["cargo build", "cargo test"],
-    "java": ["mvn compile", "mvn test"],
+    "java": ["mvn test", "mvn jacoco:check"],
     "csharp": ["dotnet build", "dotnet test"],
     "ruby": ["bundle install", "rspec"],
+    "swift": ["swift build", "swift test"],
+    "kotlin": ["./gradlew build", "./gradlew test"],
+    "cpp": ["cmake --build build", "ctest --test-dir build"],
 }
 
 
@@ -326,3 +329,506 @@ class TestMultiLanguageReadme:
 
             content = files["README.md"].read_text()
             assert "License" in content
+
+
+class TestSwiftReadme:
+    """Test Swift-specific README content."""
+
+    def test_swift_readme_mentions_watchos(self) -> None:
+        """Test Swift README documents the watchOS / Apple Watch target."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "watchOS" in content
+            assert "SwiftUI" in content
+
+    def test_swift_readme_mentions_spm(self) -> None:
+        """Test Swift README documents Swift Package Manager usage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "swift build" in content
+            assert "swift test" in content
+            assert "Package.swift" in content
+
+    def test_swift_readme_only_checkmarks_generated_features(self) -> None:
+        """Swift README ✅-marks the full generated pipeline.
+
+        After #352 the quality toolchain (SwiftLint, swift-format,
+        pre-commit hooks, quality scripts) IS generated, and after #353
+        the CI pipeline is too — every one of them must carry a
+        checkmark.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+
+            assert "- ✅" in content
+            assert "Swift Package Manager manifest" in content
+            wired = ("SwiftLint", "swift-format", "Pre-commit hooks", "CI/CD pipeline")
+            for feature in wired:
+                assert any(
+                    "✅" in line and feature in line for line in content.splitlines()
+                ), f"README must advertise wired feature: {feature}"
+
+    def test_swift_readme_advertises_generated_ci_pipeline(self) -> None:
+        """The CI pipeline (#353) is generated — no 'Planned' disclosure left.
+
+        The Swift README kept its truthful 'Planned / coming soon' CI
+        disclosure after #353 actually started generating
+        .github/workflows/ci.yml — stale ever since. Fixed alongside the
+        identical C/C++ flip (#365): the README must document the real
+        pipeline (macOS runners, Swift 5.9/5.10/6.0 version matrix,
+        watchOS simulator job) and drop the planned section.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "Planned / coming soon" not in content
+            assert ".github/workflows/ci.yml" in content
+            assert "5.9, 5.10, and 6.0" in content
+            assert "macOS" in content
+
+    def test_swift_readme_instructs_pre_commit_install(self) -> None:
+        """README tells users to install the now-generated pre-commit hooks.
+
+        Inverted from the #351 foundation scaffold: #352 wires a Swift
+        .pre-commit-config.yaml, so the README must document installing it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "pre-commit install" in content
+
+    def test_swift_readme_documents_quality_tool_installs(self) -> None:
+        """README documents installing the brew-distributed quality tools."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReadmeConfig(
+                project_name="test-project",
+                language="swift",
+                package_name="test_project",
+            )
+            generator = ReadmeGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["README.md"].read_text()
+            assert "brew install swiftlint swift-format periphery" in content
+
+
+class TestKotlinReadme:
+    """Test Kotlin-specific README content (#356)."""
+
+    @staticmethod
+    def _readme_content(tmpdir: str) -> str:
+        """Generate the kotlin README and return its text.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            The rendered README.md content.
+        """
+        config = ReadmeConfig(
+            project_name="test-project",
+            language="kotlin",
+            package_name="test_project",
+        )
+        files = ReadmeGenerator(Path(tmpdir), config).generate()
+        readme_path: Path = files["README.md"]
+        return readme_path.read_text()
+
+    def test_kotlin_readme_mentions_wear_os_and_compose(self) -> None:
+        """Kotlin README documents the Wear OS / Compose target."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Wear OS" in content
+            assert "Jetpack Compose" in content
+
+    def test_kotlin_readme_documents_gradle_usage(self) -> None:
+        """Kotlin README documents Gradle build and test commands."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "./gradlew build" in content
+            assert "./gradlew test" in content
+            assert "settings.gradle.kts" in content
+
+    def test_kotlin_readme_documents_missing_gradle_wrapper(self) -> None:
+        """README tells users to create the wrapper (it is not generated)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "gradle wrapper" in content
+            assert "not generated" in content.lower()
+
+    def test_kotlin_readme_only_checkmarks_generated_features(self) -> None:
+        """Kotlin README ✅-marks the full generated pipeline.
+
+        After #357 the quality toolchain (ktlint, detekt, pre-commit
+        hooks, quality scripts) IS generated, and after #358 the CI
+        pipeline is too — every one of them must carry a checkmark.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+
+            assert "- ✅" in content
+            wired = ("ktlint", "detekt", "Pre-commit hooks", "CI/CD pipeline")
+            for feature in wired:
+                assert any(
+                    "✅" in line and feature in line for line in content.splitlines()
+                ), f"README must advertise wired feature: {feature}"
+
+    def test_kotlin_readme_advertises_generated_ci_pipeline(self) -> None:
+        """The CI pipeline (#358) is generated — no 'Planned' disclosure left.
+
+        Inverted from the #356/#357 scaffolds, which truthfully deferred
+        CI under a 'Planned / coming soon' section. #358 generates
+        .github/workflows/ci.yml, so the README must document it as real
+        (ubuntu runners, JDK 17/21 matrix) and drop the planned section.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Planned / coming soon" not in content
+            assert ".github/workflows/ci.yml" in content
+            assert "JDK 17 and 21" in content
+            assert "ubuntu" in content
+
+    def test_kotlin_readme_instructs_pre_commit_install(self) -> None:
+        """README tells users to install the now-generated pre-commit hooks.
+
+        Inverted from the #356 foundation scaffold: #357 wires a Kotlin
+        .pre-commit-config.yaml, so the README must document installing it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "pre-commit install" in content
+
+    def test_kotlin_readme_documents_quality_tool_installs(self) -> None:
+        """README documents installing the brew-distributed quality tools."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "brew install ktlint detekt" in content
+
+    def test_kotlin_readme_documents_check_all_gate(self) -> None:
+        """README points at the generated quality-gate entry point."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "./scripts/check-all.sh" in content
+
+
+class TestJavaReadme:
+    """Test the Java legacy Android Wear README content (#366)."""
+
+    @staticmethod
+    def _readme_content(tmpdir: str) -> str:
+        """Generate the java README and return its text.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            The rendered README.md content.
+        """
+        config = ReadmeConfig(
+            project_name="test-project",
+            language="java",
+            package_name="test_project",
+        )
+        files = ReadmeGenerator(Path(tmpdir), config).generate()
+        readme_path: Path = files["README.md"]
+        return readme_path.read_text()
+
+    def test_java_readme_targets_legacy_android_wear(self) -> None:
+        """README documents the Wear OS (legacy Android Wear) target."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Wear OS" in content
+            assert "legacy Android Wear" in content
+            assert "androidx.wear" in content
+
+    def test_java_readme_documents_two_builds_split(self) -> None:
+        """README explains that the APK build needs Android tooling."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "## The two builds" in content
+            assert "Android Studio" in content
+            assert "android-maven-plugin is unmaintained" in content
+
+    def test_java_readme_documents_maven_usage(self) -> None:
+        """README documents the pure-logic Maven commands."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "mvn test" in content
+            assert "mvn jacoco:check" in content
+            assert "mvn checkstyle:check" in content
+            assert "mvn pmd:check" in content
+            # The honest SpotBugs invocation compiles first:
+            # spotbugs:check silently skips without compiled classes.
+            assert "mvn compile spotbugs:check" in content
+
+    def test_java_readme_advertises_the_wired_quality_tooling(self) -> None:
+        """README advertises the #367 quality tooling as real.
+
+        With the #367 toolchain (google-java-format, Maven-goal
+        pre-commit hooks, quality scripts, PMD complexity gate, ArchUnit
+        architecture test) and the #366 CI pipeline both generated,
+        every roadmap item is real and the 'Planned / coming soon'
+        section is gone — the Kotlin (#360) / C/C++ (#365) precedent.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Planned / coming soon" not in content
+            assert ".github/workflows/ci.yml" in content
+            assert "✅ Pre-commit hooks" in content
+            assert "✅ Quality scripts" in content
+            assert "./scripts/check-all.sh" in content
+            assert "google-java-format" in content
+            assert "ArchUnit" in content
+            assert "plans/architecture" in content
+            assert "pmd-ruleset.xml" in content
+
+    def test_java_readme_documents_coverage_denominator_limit(self) -> None:
+        """README discloses that app/ sits outside the coverage denominator."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "coverage denominator" in content
+
+    def test_java_readme_names_the_sanitized_application_id(self) -> None:
+        """README surfaces the com.example application ID."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "com.example.test_project" in content
+
+
+class TestCsharpReadme:
+    """Test the C# README content (#370)."""
+
+    @staticmethod
+    def _readme_content(tmpdir: str) -> str:
+        """Generate the csharp README and return its text.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            The rendered README.md content.
+        """
+        config = ReadmeConfig(
+            project_name="test-project",
+            language="csharp",
+            package_name="test_project",
+        )
+        files = ReadmeGenerator(Path(tmpdir), config).generate()
+        readme_path: Path = files["README.md"]
+        return readme_path.read_text()
+
+    def test_csharp_readme_advertises_the_wired_quality_tooling(self) -> None:
+        """README advertises the #370 quality tooling as real.
+
+        With the #370 toolchain (dotnet format + Roslyn-analyzer
+        pre-commit hooks, quality scripts, the CA1502 complexity gate,
+        the NetArchTest architecture template) and the foundation CI
+        pipeline both generated, every roadmap item is real — the
+        Kotlin (#360) / C/C++ (#365) / Java (#367) precedent.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Planned / coming soon" not in content
+            assert ".github/workflows/ci.yml" in content
+            assert "./scripts/check-all.sh" in content
+            assert "NetArchTest" in content
+            assert "plans/architecture" in content
+            assert "CodeMetricsConfig.txt" in content
+
+    def test_csharp_readme_documents_dotnet_usage(self) -> None:
+        """README documents the dotnet CLI quality commands."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "dotnet test" in content
+            assert "dotnet build" in content
+            assert "dotnet format --verify-no-changes" in content
+            assert "dotnet test /p:CollectCoverage=true" in content
+
+    def test_csharp_readme_documents_threshold_homes(self) -> None:
+        """README points at the single homes of the numeric gates.
+
+        The >=90% coverage bound lives in the csproj and the <=10
+        complexity bound in CodeMetricsConfig.txt; the README must
+        direct readers there rather than inventing a third home.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "test-project.csproj" in content
+            assert "CA1502" in content
+
+    def test_csharp_readme_structure_matches_generated_tree(self) -> None:
+        """README's structure block names only files init generates.
+
+        The truthfulness contract: no solution (.sln) file is generated
+        and the test scaffold is tests/MainTests.cs, so the README must
+        not claim otherwise.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert ".sln" not in content
+            assert "UnitTests.cs" not in content
+            assert "MainTests.cs" in content
+            assert "src/Program.cs" in content or "Program.cs" in content
+
+
+class TestCppReadme:
+    """Test C/C++ Tizen-specific README content (#361/#362)."""
+
+    @staticmethod
+    def _readme_content(tmpdir: str) -> str:
+        """Generate the cpp README and return its text.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            The rendered README.md content.
+        """
+        config = ReadmeConfig(
+            project_name="test-project",
+            language="cpp",
+            package_name="test_project",
+        )
+        files = ReadmeGenerator(Path(tmpdir), config).generate()
+        readme_path: Path = files["README.md"]
+        return readme_path.read_text()
+
+    def test_cpp_readme_mentions_tizen_watch_target(self) -> None:
+        """cpp README documents the Tizen native Galaxy Watch target."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Tizen" in content
+            assert "Galaxy Watch" in content
+            assert "org.example.testproject" in content
+
+    def test_cpp_readme_advertises_generated_ci_pipeline(self) -> None:
+        """The CI pipeline (#363) is generated — no 'Planned' disclosure left.
+
+        Inverted from the #361/#362 scaffolds, which truthfully deferred
+        CI under a 'Planned / coming soon' section. #363 generates
+        .github/workflows/ci.yml, so the README must document it as real
+        (ubuntu runners, gcc/clang compiler matrix) and drop the planned
+        section (#365).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Planned / coming soon" not in content
+            assert ".github/workflows/ci.yml" in content
+            assert "gcc and clang" in content
+            assert "ubuntu" in content
+
+    def test_cpp_readme_only_checkmarks_generated_features(self) -> None:
+        """cpp README ✅-marks the full generated pipeline.
+
+        After #362 the quality toolchain (clang-format/clang-tidy/cppcheck,
+        pre-commit hooks, quality scripts, architecture rules) IS generated,
+        and after #363 the CI pipeline is too — every one of them must
+        carry a checkmark.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+
+            wired = (
+                "clang-format",
+                "clang-tidy",
+                "Pre-commit hooks",
+                "lizard",
+                "CI/CD pipeline",
+            )
+            for feature in wired:
+                assert any(
+                    "✅" in line and feature in line for line in content.splitlines()
+                ), f"README must advertise wired feature: {feature}"
+
+    def test_cpp_readme_instructs_pre_commit_install(self) -> None:
+        """README tells users to install the now-generated pre-commit hooks.
+
+        Inverted from the #361 foundation scaffold: #362 wires a cpp
+        .pre-commit-config.yaml, so the README must document installing it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "pre-commit install" in content
+
+    def test_cpp_readme_documents_quality_tool_installs(self) -> None:
+        """README documents installing the quality toolchain.
+
+        clang-format/llvm/cppcheck/lcov come from brew or apt; lizard and
+        flawfinder are pip-installable — both install paths must appear.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "brew install clang-format llvm cppcheck lcov" in content
+            assert "apt-get install clang-format clang-tidy cppcheck lcov" in content
+            assert "pip install lizard flawfinder" in content
+
+    def test_cpp_readme_documents_check_all_gate(self) -> None:
+        """README points at the generated quality-gate entry point."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "./scripts/check-all.sh" in content
+
+    def test_cpp_readme_documents_coverage_denominator_limit(self) -> None:
+        """README discloses that main.cpp is outside the coverage gate.
+
+        src/main.cpp needs the Tizen SDK and is not part of the host
+        build, so the >=90% lcov gate cannot see it; the README must say
+        so instead of implying whole-project coverage.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "coverage denominator" in content
+
+    def test_cpp_readme_documents_tizen_studio_split(self) -> None:
+        """README explains the plain-CMake vs Tizen Studio build split."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "Tizen Studio" in content
+            assert "tizen package" in content
+            assert "no Tizen Studio" in content
+
+    def test_cpp_readme_documents_cmake_conan_commands(self) -> None:
+        """README documents the Conan install and CMake/CTest commands."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "conan install . --output-folder=build --build=missing" in content
+            assert "cmake --build build" in content
+            assert "ctest --test-dir build" in content

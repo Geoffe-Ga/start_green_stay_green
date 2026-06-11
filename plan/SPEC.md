@@ -38,7 +38,10 @@ The core insight: Claude Code can produce excellent code **if given strict guard
 
 ### Supported Target Languages
 
-The tool generates quality infrastructure for projects in any of the following languages:
+The tool generates quality infrastructure for projects in any of the following languages.
+**Implemented today**: Python, TypeScript, Go, Rust, Swift (watchOS),
+Kotlin (Wear OS), C/C++ (Tizen native), and Java (Wear OS legacy
+Android Wear). The remaining rows are planned.
 
 | Language | Package Manager | Test Framework | Linter | Formatter |
 |----------|----------------|----------------|--------|-----------|
@@ -46,12 +49,13 @@ The tool generates quality infrastructure for projects in any of the following l
 | TypeScript/JavaScript | npm/yarn/pnpm | jest/vitest | eslint | prettier |
 | Go | go modules | go test | golangci-lint | gofmt/goimports |
 | Rust | cargo | cargo test | clippy | rustfmt |
-| Java | maven/gradle | junit | checkstyle | google-java-format |
+| Swift | Swift Package Manager (SPM), Swift 5.9/5.10/6.0 | XCTest (`swift test` + llvm-cov coverage) | SwiftLint | swift-format |
+| Kotlin | Gradle (Kotlin DSL), Kotlin 2.0 on JDK 17/21 | JUnit (`./gradlew test` + Kover ≥90% coverage) | detekt + ktlint | ktlint |
+| C/C++ (Tizen native) | CMake ≥3.20 + Conan 2 (C++17 pinned) | Catch2 (`ctest` + gcov/lcov ≥90% coverage) | clang-tidy + cppcheck + lizard | clang-format |
+| Java (Wear OS legacy) | Maven (pure logic; Java 17), watch APK via Android tooling | JUnit 4 (`mvn test` + JaCoCo ≥90% coverage) | Checkstyle (google_checks) + PMD (CCN ≤10) + SpotBugs | google-java-format |
 | C# | nuget/dotnet | xunit/nunit | roslyn | dotnet format |
-| Swift | swift package manager | xctest | swiftlint | swiftformat |
 | Ruby | bundler | rspec | rubocop | rubocop |
 | PHP | composer | phpunit | phpstan | php-cs-fixer |
-| Kotlin | gradle/maven | junit | ktlint | ktlint |
 
 ---
 
@@ -1437,7 +1441,7 @@ project:
   description: "A brief description"
 
 languages:
-  # Supported: python, typescript, javascript, go, rust, java, csharp, swift, ruby, php, kotlin
+  # Supported: python, typescript, javascript, go, rust, java, csharp, swift, ruby, php, kotlin, cpp
   primary: python
   secondary:
     - typescript

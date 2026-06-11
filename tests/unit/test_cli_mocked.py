@@ -29,6 +29,7 @@ def test_something(mock_path: Mock) -> None:
 import asyncio
 import json
 from pathlib import Path
+from typing import cast
 from unittest import mock
 from unittest.mock import MagicMock
 from unittest.mock import Mock
@@ -42,6 +43,7 @@ from start_green_stay_green import cli
 from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
+from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
 from start_green_stay_green.utils.enhance_state import BatchProgress
@@ -523,6 +525,114 @@ class TestGetAPIKeyWithSource:
             assert source is None
 
 
+class TestProviderModelSelection:
+    """Test the ``--provider`` / ``--model`` selection wiring in the CLI."""
+
+    def test_lazy_sources_read_provider_specific_env_var(self) -> None:
+        """The env-var source honors the per-provider key var name."""
+        with (
+            patch(
+                "start_green_stay_green.cli.get_api_key_from_keyring",
+                return_value=None,
+            ),
+            patch.dict(
+                "os.environ",
+                {"CUSTOM_KEY_VAR": "custom-env-key"},  # pragma: allowlist secret
+                clear=True,
+            ),
+        ):
+            sources = list(cli._lazy_api_key_sources(None, "CUSTOM_KEY_VAR"))
+        # Last yielded source is the env var; it must read CUSTOM_KEY_VAR.
+        assert sources[-1] == ("custom-env-key", "environment variable")
+
+    @patch("start_green_stay_green.cli.AIOrchestrator")
+    @patch("start_green_stay_green.cli.build_provider")
+    @patch(
+        "start_green_stay_green.cli._get_api_key_with_source",
+        return_value=("k", "command line"),
+    )
+    def test_initialize_orchestrator_threads_flags_into_selection(
+        self,
+        mock_get_key: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_build: Mock,
+        mock_orch: Mock,
+    ) -> None:
+        """Flags resolve to a selection that drives build_provider + orchestrator."""
+        with patch.dict("os.environ", {}, clear=True):
+            cli._initialize_orchestrator(
+                api_key_arg="k",
+                no_interactive=True,
+                selection_inputs=cli._SelectionInputs(model_flag="model-from-flag"),
+            )
+        # build_provider receives the resolved provider + model.
+        _, build_kwargs = mock_build.call_args
+        assert mock_build.call_args.args[0] == "anthropic"
+        assert build_kwargs["model"] == "model-from-flag"
+        # The orchestrator is constructed with the resolved model + provider.
+        _, orch_kwargs = mock_orch.call_args
+        assert orch_kwargs["model"] == "model-from-flag"
+        assert orch_kwargs["provider"] is mock_build.return_value
+
+    @patch("start_green_stay_green.cli.console")
+    def test_initialize_orchestrator_unknown_provider_prints_and_returns_none(
+        self, mock_console: Mock
+    ) -> None:
+        """An unknown ``--provider`` prints an error and yields no orchestrator."""
+        with patch.dict("os.environ", {}, clear=True):
+            result = cli._initialize_orchestrator(
+                api_key_arg="k",
+                no_interactive=True,
+                selection_inputs=cli._SelectionInputs(provider_flag="does-not-exist"),
+            )
+        assert result is None
+        mock_console.print.assert_called()
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        # The supported set must appear exactly once — the underlying
+        # ``ValueError`` already names it, so the CLI must not append a
+        # second ``(supported: …)`` copy (regression: #383).
+        assert printed.count("Supported providers:") == 1
+        assert "(supported:" not in printed
+
+    @patch("start_green_stay_green.cli.console")
+    @patch(
+        "start_green_stay_green.cli.build_provider",
+        side_effect=ProviderUnavailableError("install hint here"),
+    )
+    @patch(
+        "start_green_stay_green.cli._get_api_key_with_source",
+        return_value=("k", "command line"),
+    )
+    def test_initialize_orchestrator_missing_extra_prints_hint(
+        self,
+        mock_get_key: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_build: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_console: Mock,
+    ) -> None:
+        """A missing provider extra surfaces the install hint, not a crash."""
+        with patch.dict("os.environ", {}, clear=True):
+            result = cli._initialize_orchestrator(api_key_arg="k", no_interactive=True)
+        assert result is None
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "install hint here" in printed
+
+    @patch("start_green_stay_green.cli.build_provider")
+    @patch("start_green_stay_green.cli.AIOrchestrator")
+    @patch(
+        "start_green_stay_green.cli._get_api_key_with_source",
+        return_value=("k", "command line"),
+    )
+    def test_env_var_selects_model_over_default(
+        self,
+        mock_get_key: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_orch: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_build: Mock,
+    ) -> None:
+        """``GREEN_LLM_MODEL`` overrides the default model when no flag given."""
+        with patch.dict("os.environ", {"GREEN_LLM_MODEL": "env-model"}, clear=True):
+            cli._initialize_orchestrator(api_key_arg="k", no_interactive=True)
+        assert mock_build.call_args.kwargs["model"] == "env-model"
+
+
 class TestInitCommand:
     """Test init command execution."""
 
@@ -732,6 +842,7 @@ class TestMetricsDashboardGeneration:
         # Setup mock generator
         mock_generator = Mock()
         mock_generator_class.return_value = mock_generator
+        mock_generator_class.count_precommit_hooks.return_value = 31
 
         # Mock shutil.copy to create a dummy workflow file when called
         def copy_side_effect(_src: Path, dst: Path) -> None:
@@ -772,6 +883,15 @@ class TestMetricsDashboardGeneration:
         assert "thresholds" in metrics_data
         assert "metrics" in metrics_data
 
+        # Issue #159: fresh projects seed a ci_status entry. No workflows
+        # exist when the dashboard step counts jobs, so it degrades to the
+        # unknown/no-data status (rendered gray, not red).
+        ci_seed = metrics_data["metrics"]["ci_status"]
+        assert ci_seed["total_jobs"] == 0
+        assert ci_seed["passing_jobs"] == 0
+        assert ci_seed["percentage"] == 0.0
+        assert ci_seed["status"] == "unknown"
+
     @patch("start_green_stay_green.cli.shutil.copy")
     @patch("start_green_stay_green.cli.MetricsGenerator")
     def test_generate_metrics_dashboard_creates_workflows_dir(
@@ -780,6 +900,7 @@ class TestMetricsDashboardGeneration:
         """Test _generate_metrics_dashboard_step creates .github/workflows."""
         # Setup mock generator to avoid instantiation errors
         mock_generator_class.return_value = Mock()
+        mock_generator_class.count_precommit_hooks.return_value = 31
 
         # Mock shutil.copy to create files
         def copy_side_effect(_src: Path, dst: Path) -> None:
@@ -812,6 +933,7 @@ class TestMetricsDashboardGeneration:
         """Test _generate_metrics_dashboard_step warns when workflow missing."""
         # Setup mock generator
         mock_generator_class.return_value = Mock()
+        mock_generator_class.count_precommit_hooks.return_value = 31
         # Setup mock copy (not used but required by patch decorator order)
         mock_shutil_copy.return_value = None
 
@@ -838,6 +960,7 @@ class TestMetricsDashboardGeneration:
         """Test _generate_metrics_dashboard_step replaces project name in workflow."""
         # Setup mock generator
         mock_generator_class.return_value = Mock()
+        mock_generator_class.count_precommit_hooks.return_value = 31
 
         # Create source workflow with SGSG project name
         workflow_content = "project: start-green-stay-green\nname: Metrics"
@@ -1212,12 +1335,15 @@ class TestGenerateSteps:
 
     @patch("start_green_stay_green.cli.ClaudeMdGenerator")
     def test_generate_claude_md_step(self, mock_generator_class: Mock) -> None:
-        """Test _generate_claude_md_step creates generator."""
+        """Test _generate_claude_md_step renders the modular tree."""
         mock_orchestrator = MagicMock()
         mock_generator = MagicMock()
         mock_result = MagicMock()
         mock_result.content = "# CLAUDE.md content"
-        mock_generator.generate.return_value = mock_result
+        mock_generator.render_modular.return_value = (
+            mock_result,
+            {"principles": "# principles", "tools": "# tools"},
+        )
         mock_generator_class.return_value = mock_generator
         mock_path = MagicMock(spec=Path)
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
@@ -1230,7 +1356,60 @@ class TestGenerateSteps:
                 mock_orchestrator,
             )
 
-        mock_generator.generate.assert_called()
+        mock_generator.render_modular.assert_called_once()
+
+    def test_generate_claude_md_step_writes_modular_tree(self, tmp_path: Path) -> None:
+        """_generate_claude_md_step (no writer) emits index + split docs."""
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_claude_md_step(
+                tmp_path,
+                "real-modular-project",
+                "python",
+                None,  # No orchestrator -> deterministic baseline.
+            )
+
+        index = tmp_path / "CLAUDE.md"
+        assert index.exists()
+        assert "real-modular-project" in index.read_text()
+        docs_dir = tmp_path / ".claude" / "docs"
+        for name in ("principles", "quality-standards", "troubleshooting"):
+            assert (docs_dir / f"{name}.md").exists()
+
+    def test_enhance_claude_md_writes_modular_tree(self, tmp_path: Path) -> None:
+        """_enhance_claude_md (real generator, no writer) writes the tree."""
+        # ``None`` orchestrator drives the deterministic baseline index so
+        # the test needs no live API; the modular tree is still emitted.
+        with patch("start_green_stay_green.cli.console"):
+            cli._enhance_claude_md(
+                cli._EnhanceProjectContext(
+                    project_path=tmp_path,
+                    project_name="enhanced-project",
+                    language="python",
+                ),
+                cast("AIOrchestrator", None),
+                dry_run=False,
+                file_writer=None,
+            )
+
+        assert (tmp_path / "CLAUDE.md").exists()
+        assert (tmp_path / ".claude" / "docs" / "workflow.md").exists()
+
+    def test_enhance_claude_md_dry_run_skips_writes(self, tmp_path: Path) -> None:
+        """_enhance_claude_md dry-run renders but writes nothing."""
+        with patch("start_green_stay_green.cli.console"):
+            cli._enhance_claude_md(
+                cli._EnhanceProjectContext(
+                    project_path=tmp_path,
+                    project_name="dryrun-project",
+                    language="python",
+                ),
+                cast("AIOrchestrator", None),
+                dry_run=True,
+                file_writer=None,
+            )
+
+        assert not (tmp_path / "CLAUDE.md").exists()
+        assert not (tmp_path / ".claude" / "docs").exists()
 
     @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
     def test_generate_architecture_step(self, mock_generator_class: Mock) -> None:
@@ -1246,6 +1425,130 @@ class TestGenerateSteps:
             cli._generate_architecture_step(mock_path, "my-project", "python")
 
         mock_generator.generate.assert_called()
+
+    @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
+    def test_generate_architecture_step_go(self, mock_generator_class: Mock) -> None:
+        """Test _generate_architecture_step generates rules for Go."""
+        mock_generator = MagicMock()
+        mock_generator_class.return_value = mock_generator
+        mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_architecture_step(mock_path, "my-project", "go")
+
+        # Go now has architecture parity: the generator must be invoked.
+        mock_generator.generate.assert_called_once()
+        assert mock_generator.generate.call_args.kwargs["language"] == "go"
+
+    @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
+    def test_generate_architecture_step_rust(self, mock_generator_class: Mock) -> None:
+        """Test _generate_architecture_step generates rules for Rust."""
+        mock_generator = MagicMock()
+        mock_generator_class.return_value = mock_generator
+        mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_architecture_step(mock_path, "my-project", "rust")
+
+        # Rust now has architecture parity: the generator must be invoked.
+        mock_generator.generate.assert_called_once()
+        assert mock_generator.generate.call_args.kwargs["language"] == "rust"
+
+    @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
+    def test_generate_architecture_step_swift(self, mock_generator_class: Mock) -> None:
+        """Test _generate_architecture_step generates rules for Swift."""
+        mock_generator = MagicMock()
+        mock_generator_class.return_value = mock_generator
+        mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_architecture_step(mock_path, "my-project", "swift")
+
+        # Swift now has architecture parity: the generator must be invoked.
+        mock_generator.generate.assert_called_once()
+        assert mock_generator.generate.call_args.kwargs["language"] == "swift"
+
+    @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
+    def test_generate_architecture_step_kotlin(
+        self, mock_generator_class: Mock
+    ) -> None:
+        """Test _generate_architecture_step generates rules for Kotlin."""
+        mock_generator = MagicMock()
+        mock_generator_class.return_value = mock_generator
+        mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_architecture_step(mock_path, "my-project", "kotlin")
+
+        # Kotlin now has architecture parity (#357): the generator runs.
+        mock_generator.generate.assert_called_once()
+        assert mock_generator.generate.call_args.kwargs["language"] == "kotlin"
+
+    @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
+    def test_generate_architecture_step_cpp(self, mock_generator_class: Mock) -> None:
+        """Test _generate_architecture_step generates rules for C/C++."""
+        mock_generator = MagicMock()
+        mock_generator_class.return_value = mock_generator
+        mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_architecture_step(mock_path, "my-project", "cpp")
+
+        # cpp now has architecture parity (#362): the generator runs.
+        mock_generator.generate.assert_called_once()
+        assert mock_generator.generate.call_args.kwargs["language"] == "cpp"
+
+    @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
+    def test_generate_architecture_step_java(self, mock_generator_class: Mock) -> None:
+        """Test _generate_architecture_step generates rules for Java."""
+        mock_generator = MagicMock()
+        mock_generator_class.return_value = mock_generator
+        mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_architecture_step(mock_path, "my-project", "java")
+
+        # java now has architecture parity (#367): the generator runs.
+        mock_generator.generate.assert_called_once()
+        assert mock_generator.generate.call_args.kwargs["language"] == "java"
+
+    @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
+    def test_generate_architecture_step_csharp(
+        self, mock_generator_class: Mock
+    ) -> None:
+        """Test _generate_architecture_step generates rules for C#."""
+        mock_generator = MagicMock()
+        mock_generator_class.return_value = mock_generator
+        mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_architecture_step(mock_path, "my-project", "csharp")
+
+        # csharp now has architecture parity (#370): the generator runs.
+        mock_generator.generate.assert_called_once()
+        assert mock_generator.generate.call_args.kwargs["language"] == "csharp"
+
+    @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
+    def test_generate_architecture_step_skips_unsupported(
+        self, mock_generator_class: Mock
+    ) -> None:
+        """Test unsupported languages skip architecture generation."""
+        mock_generator = MagicMock()
+        mock_generator_class.return_value = mock_generator
+        mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_architecture_step(mock_path, "my-project", "ruby")
+
+        mock_generator.generate.assert_not_called()
 
     @patch("start_green_stay_green.cli.run_async")
     @patch("start_green_stay_green.cli.SubagentsGenerator")
@@ -1715,6 +2018,46 @@ class TestEnhanceDetectionHelpers:
         (tmp_path / "package.json").write_text("{}")
         assert cli._detect_project_language(tmp_path) == "typescript"
 
+    def test_detect_project_language_kotlin(self, tmp_path: Path) -> None:
+        """``settings.gradle.kts`` → kotlin (#356)."""
+        (tmp_path / "settings.gradle.kts").write_text('rootProject.name = "x"\n')
+        assert cli._detect_project_language(tmp_path) == "kotlin"
+
+    def test_detect_project_language_groovy_gradle_stays_java(
+        self, tmp_path: Path
+    ) -> None:
+        """A Groovy ``build.gradle`` (no .kts) still detects as java."""
+        (tmp_path / "build.gradle").write_text("apply plugin: 'java'\n")
+        assert cli._detect_project_language(tmp_path) == "java"
+
+    def test_detect_project_language_cpp_tizen_manifest(self, tmp_path: Path) -> None:
+        """``tizen-manifest.xml`` → cpp (#361)."""
+        (tmp_path / "tizen-manifest.xml").write_text("<manifest/>\n")
+        assert cli._detect_project_language(tmp_path) == "cpp"
+
+    def test_detect_project_language_cpp_conanfile(self, tmp_path: Path) -> None:
+        """``conanfile.txt`` → cpp (#361)."""
+        (tmp_path / "conanfile.txt").write_text("[requires]\n")
+        assert cli._detect_project_language(tmp_path) == "cpp"
+
+    def test_detect_project_language_cpp_cmakelists(self, tmp_path: Path) -> None:
+        """``CMakeLists.txt`` alone → cpp (#361)."""
+        (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+        assert cli._detect_project_language(tmp_path) == "cpp"
+
+    def test_detect_project_language_cmakelists_never_shadows_others(
+        self, tmp_path: Path
+    ) -> None:
+        """A Rust project vendoring CMake still detects as rust.
+
+        CMakeLists.txt shows up inside other ecosystems' projects (native
+        build scripts, vendored deps), so every more specific probe must
+        win over the cpp fallback.
+        """
+        (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+        (tmp_path / "Cargo.toml").write_text("[package]\n")
+        assert cli._detect_project_language(tmp_path) == "rust"
+
     def test_detect_project_language_returns_none_for_empty(
         self, tmp_path: Path
     ) -> None:
@@ -1846,8 +2189,45 @@ class TestEnhanceCommand:
         )
         assert result.exit_code == 1
         flat = self._flat(result.stdout)
-        assert "requires an Anthropic API key" in flat
+        # ``enhance`` now accepts ``--provider``/``--model``, so the
+        # no-key message must be provider-neutral (regression: #383).
+        assert "requires an API key for the selected provider" in flat
+        assert "Anthropic API key" not in flat
         assert "ANTHROPIC_API_KEY" in flat
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_omits_config_tier_by_design(
+        self,
+        mock_init: Mock,
+        mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """``enhance`` intentionally has no config-file tier (see #396).
+
+        Unlike ``green init`` (4 tiers), ``enhance`` has no ``--config``
+        flag and loads no config file, so it deliberately wires only
+        CLI flag > env > built-in default. The selection inputs it builds
+        must therefore carry ``config_data is None`` — the config tier is
+        a no-op here. Tracked for future wiring as issue #396.
+        """
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path, name="no-config", language="python")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            ["enhance", str(project), "--model", "Flag-Model", "--no-interactive"],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        selection_inputs = mock_init.call_args.kwargs["selection_inputs"]
+        # The config tier is omitted by design: enhance has no config input.
+        assert selection_inputs.config_data is None
+        # The CLI ``--model`` flag still flows through (case preserved).
+        assert selection_inputs.model_flag == "Flag-Model"
 
     @patch("start_green_stay_green.cli._enhance_subagents")
     @patch("start_green_stay_green.cli._enhance_claude_md")
@@ -1965,9 +2345,9 @@ class TestEnhanceCommand:
         # The helper was called with the *explicit* values, not the
         # auto-detected ones.
         call = mock_claude.call_args
-        # positional args: (project_path, project_name, language, orchestrator)
-        assert call.args[1] == "explicit-name"
-        assert call.args[2] == "typescript"
+        # positional args: (project: _EnhanceProjectContext, orchestrator)
+        assert call.args[0].project_name == "explicit-name"
+        assert call.args[0].language == "typescript"
 
     @patch("start_green_stay_green.cli._initialize_orchestrator")
     def test_unknown_language_in_override_exits(
