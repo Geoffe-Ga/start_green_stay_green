@@ -27,6 +27,7 @@ import pytest
 from start_green_stay_green.ai.orchestrator import ModelConfig
 from start_green_stay_green.ai.provider_selection import DEFAULT_MODEL
 from start_green_stay_green.ai.provider_selection import DEFAULT_PROVIDER
+from start_green_stay_green.ai.provider_selection import OPENAI_DEFAULT_MODEL
 from start_green_stay_green.ai.provider_selection import ProviderSelection
 from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
 from start_green_stay_green.ai.provider_selection import _coalesce
@@ -355,7 +356,7 @@ def test_openai_selection_uses_provider_default_model() -> None:
         env={},
     )
     assert selection.provider == "openai"
-    assert selection.model == "gpt-5.5"
+    assert selection.model == OPENAI_DEFAULT_MODEL
     assert selection.model != DEFAULT_MODEL
 
 
@@ -484,7 +485,7 @@ def test_describe_providers_carries_spec_and_capabilities() -> None:
     assert anthropic.api_key_env_var == "ANTHROPIC_API_KEY"  # pragma: allowlist secret
     assert anthropic.capabilities.batch
     openai = by_name["openai"]
-    assert openai.default_model == "gpt-5.5"
+    assert openai.default_model == OPENAI_DEFAULT_MODEL
     assert openai.api_key_env_var == "OPENAI_API_KEY"  # pragma: allowlist secret
     assert not openai.capabilities.batch
 

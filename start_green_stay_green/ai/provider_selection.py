@@ -59,7 +59,8 @@ class _ProviderFactory(Protocol):
         """Construct a provider; see ``AnthropicProvider.__init__``."""
         ...  # pragma: no cover - structural typing only
 
-    def capabilities(self) -> ProviderCapabilities:
+    @classmethod
+    def capabilities(cls) -> ProviderCapabilities:
         """Return the class-level capability advertisement."""
         ...  # pragma: no cover - structural typing only
 
@@ -69,6 +70,7 @@ __all__ = [
     "DEFAULT_PROVIDER",
     "ENV_MODEL",
     "ENV_PROVIDER",
+    "OPENAI_DEFAULT_MODEL",
     "ProviderListing",
     "ProviderSelection",
     "ProviderUnavailableError",
@@ -89,6 +91,12 @@ DEFAULT_MODEL: Final[str] = "claude-sonnet-4-5-20250929"
 
 # Built-in default provider. Anthropic remains the zero-config default.
 DEFAULT_PROVIDER: Final[str] = "anthropic"
+
+# Default model for the OpenAI-compatible provider. Current flagship
+# chat model; live-verified against developers.openai.com on
+# 2026-06-11. Local/OSS servers ignore this default — pass --model (or
+# GREEN_LLM_MODEL) with the hosted model's name instead.
+OPENAI_DEFAULT_MODEL: Final[str] = "gpt-5.5"
 
 # Environment variables for the selection layer. Documented precedence
 # tier 2 (below CLI flags, above config-file keys).
@@ -138,11 +146,7 @@ _PROVIDERS: Final[dict[str, ProviderSpec]] = {
         module="start_green_stay_green.ai.providers.openai_provider",
         class_name="OpenAIProvider",
         api_key_env_var="OPENAI_API_KEY",  # pragma: allowlist secret
-        # Current flagship chat model; live-verified against
-        # developers.openai.com on 2026-06-11. Local/OSS servers ignore
-        # this default — pass --model (or GREEN_LLM_MODEL) with the
-        # hosted model's name instead.
-        default_model="gpt-5.5",
+        default_model=OPENAI_DEFAULT_MODEL,
     ),
 }
 

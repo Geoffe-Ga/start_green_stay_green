@@ -6,6 +6,7 @@ Implements the command-line interface using Typer with rich output formatting.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import dataclasses
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
@@ -19,6 +20,7 @@ import shutil
 import sys
 from typing import Annotated
 from typing import Any
+from typing import Final
 from typing import TYPE_CHECKING
 from typing import TypeVar
 from typing import assert_never
@@ -313,8 +315,18 @@ def version(
         console.print(f"[bold cyan]Start Green Stay Green v{version_str}[/bold cyan]")
 
 
+# Display labels for ProviderCapabilities flag fields whose name alone
+# doesn't read well; every other bool field falls back to its field
+# name with underscores spaced.
+_CAPABILITY_FLAG_LABELS: Final[dict[str, str]] = {"tool_use": "tool-use"}
+
+
 def _format_capability_flags(capabilities: ProviderCapabilities) -> str:
     """Render one provider's capability flags as a short yes/no line.
+
+    Derives the flag list from the dataclass's own bool fields so a new
+    capability added to :class:`ProviderCapabilities` shows up here
+    without a second edit point.
 
     Args:
         capabilities: The provider's frozen advertisement.
@@ -324,9 +336,12 @@ def _format_capability_flags(capabilities: ProviderCapabilities) -> str:
         ``"batch: yes, tool-use: yes, token accounting: yes"``.
     """
     flags = (
-        ("batch", capabilities.batch),
-        ("tool-use", capabilities.tool_use),
-        ("token accounting", capabilities.token_accounting),
+        (
+            _CAPABILITY_FLAG_LABELS.get(field.name, field.name.replace("_", " ")),
+            getattr(capabilities, field.name),
+        )
+        for field in dataclasses.fields(capabilities)
+        if isinstance(getattr(capabilities, field.name), bool)
     )
     return ", ".join(
         f"{label}: {'yes' if supported else 'no'}" for label, supported in flags
@@ -3403,7 +3418,7 @@ def _warn_batch_capability_fallback(capabilities: ProviderCapabilities) -> None:
     """
     console.print(
         f"[yellow]Warning:[/yellow] provider {capabilities.provider!r} "
-        f"does not support the Message Batches API — falling back to "
+        f"does not support batch processing — falling back to "
         f"sequential API calls now (same results; no batch discount, "
         f"no submit/resume flow). Run `green providers` to see "
         f"per-provider capabilities.",
@@ -3817,6 +3832,9 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         language=resolved_language,
     )
 
+    # A False return means the provider lacks batch support and a
+    # fallback warning was already printed — fall through to the
+    # sequential pipeline below instead of returning.
     if batch and _dispatch_enhance_batch(
         project=project,
         orchestrator=orchestrator,

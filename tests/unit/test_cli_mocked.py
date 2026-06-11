@@ -2801,6 +2801,35 @@ class TestEnhanceDispatchAssertion:
             cli._assert_enhance_dispatch_intact()
 
 
+class TestValidateEnhanceFlags:
+    """Direct unit tests for the extracted ``_validate_enhance_flags``."""
+
+    def test_wait_without_batch_exits(self) -> None:
+        """``--wait`` without ``--batch`` fails fast with exit code 1."""
+        with pytest.raises(typer.Exit) as exc_info:
+            cli._validate_enhance_flags(
+                batch=False, wait=True, selected_targets=("subagents",)
+            )
+        assert exc_info.value.exit_code == 1
+
+    def test_batch_with_unsupported_target_exits(self) -> None:
+        """``--batch`` with a non-batchable target fails fast."""
+        with pytest.raises(typer.Exit) as exc_info:
+            cli._validate_enhance_flags(
+                batch=True, wait=False, selected_targets=("claude-md",)
+            )
+        assert exc_info.value.exit_code == 1
+
+    def test_valid_combinations_pass(self) -> None:
+        """Supported combinations return without raising."""
+        cli._validate_enhance_flags(
+            batch=False, wait=False, selected_targets=("claude-md", "subagents")
+        )
+        cli._validate_enhance_flags(
+            batch=True, wait=True, selected_targets=("subagents",)
+        )
+
+
 class TestEnhanceBatchCLI:
     """Phase 5b: ``green enhance --batch`` flag wiring."""
 
@@ -3073,7 +3102,7 @@ class TestEnhanceBatchCLI:
 
         assert result.exit_code == 0
         flat = self._flat(result.stdout)
-        assert "does not support the Message Batches API" in flat
+        assert "does not support batch processing" in flat
         assert "sequential" in flat
         # Points the user at the capability listing for discoverability.
         assert "green providers" in flat
@@ -3152,7 +3181,7 @@ class TestEnhanceBatchCLI:
 
         assert result.exit_code == 0
         flat = self._flat(result.stdout)
-        assert "does not support the Message Batches API" not in flat
+        assert "does not support batch processing" not in flat
         run_batch.assert_called_once()
         run_pipeline.assert_not_called()
 
