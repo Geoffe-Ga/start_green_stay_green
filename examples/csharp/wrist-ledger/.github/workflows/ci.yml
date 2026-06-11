@@ -1,0 +1,82 @@
+name: C# Quality Checks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  quality:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # The generated csproj targets net8.0, which older SDKs cannot
+        # build, so the matrix pins the 8.0 line (extend it together
+        # with the TargetFramework).
+        dotnet-version: ["8.0"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up .NET ${{ matrix.dotnet-version }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.dotnet-version }}
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      # The csproj treats analyzer warnings as errors (Roslyn CA rules,
+      # the CA1502 complexity ceiling, SecurityCodeScan), so this plain
+      # build doubles as the lint gate.
+      - name: Build (Roslyn analyzers as errors)
+        run: dotnet build --no-restore
+
+      - name: Check formatting (dotnet format)
+        run: dotnet format --verify-no-changes
+
+      # /p:CollectCoverage=true activates the Coverlet gate; the >=90%
+      # line bound lives in the csproj (Threshold/ThresholdType/
+      # ThresholdStat) — its single home — so this invocation enforces
+      # it without restating the number. opencover output feeds the
+      # Codecov upload below.
+      - name: Run tests with coverage (>=90% gate in the csproj)
+        run: dotnet test --no-build --verbosity normal /p:CollectCoverage=true /p:CoverletOutputFormat=opencover
+
+      # Best-effort: a fresh `green init` project ships no
+      # CODECOV_TOKEN secret, so a failing upload must not start the
+      # project red; the real coverage gate is the Coverlet run above.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.opencover.xml
+          fail_ci_if_error: false
+
+  build:
+    name: Build and Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0"
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build release
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Publish
+        run: dotnet publish --configuration Release --no-build
