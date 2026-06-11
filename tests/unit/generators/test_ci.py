@@ -2277,3 +2277,151 @@ class TestJavaReferenceTemplate:
         run_commands = _all_run_commands(parsed)
         assert not any("GITHUB_ENV" in cmd for cmd in run_commands)
         assert not any("GITHUB_PATH" in cmd for cmd in run_commands)
+
+
+class TestCsharpReferenceTemplate:
+    """Tests for the C# reference CI workflow (#370/#371).
+
+    The csharp scaffold is a single-project net8.0 console app whose
+    csproj is the single home of the quality policy: Roslyn analyzers
+    as errors, the Coverlet >=90% line-coverage bound, and the CA1502
+    complexity ceiling. Every assertion here checks that the workflow
+    runs thin dotnet invocations against that policy and restates none
+    of it — the same manifest-owned shape the Kotlin/Java workflows
+    follow.
+    """
+
+    @pytest.fixture
+    def csharp_workflow(self) -> CIWorkflow:
+        """Render the deterministic C# reference workflow."""
+        return CIGenerator(language="csharp").generate_workflow_from_template()
+
+    def test_workflow_is_valid_yaml(self, csharp_workflow: CIWorkflow) -> None:
+        """Rendered workflow parses with yaml.safe_load and validates."""
+        parsed = yaml.safe_load(csharp_workflow.content)
+        assert csharp_workflow.is_valid
+        assert isinstance(parsed, dict)
+        assert parsed["name"] == "C# Quality Checks"
+
+    def test_workflow_has_quality_and_build_jobs(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """Workflow declares exactly the quality and build jobs."""
+        parsed = yaml.safe_load(csharp_workflow.content)
+        assert set(parsed["jobs"]) == {"quality", "build"}
+
+    def test_all_jobs_run_on_ubuntu(self, csharp_workflow: CIWorkflow) -> None:
+        """Every job runs on ubuntu: the .NET SDK needs no macOS."""
+        parsed = yaml.safe_load(csharp_workflow.content)
+        for name, job in parsed["jobs"].items():
+            assert job["runs-on"] == "ubuntu-latest", f"{name} must run on ubuntu"
+
+    def test_sdk_matrix_pins_the_line_that_builds_net8(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """The quality job matrixes over exactly the 8.0 SDK line.
+
+        The generated csproj targets net8.0, which older SDKs cannot
+        build (the 7.0 matrix entry was dropped for that reason); the
+        matrix extends together with the TargetFramework.
+        """
+        parsed = yaml.safe_load(csharp_workflow.content)
+        matrix = parsed["jobs"]["quality"]["strategy"]["matrix"]
+        assert matrix["dotnet-version"] == ["8.0"]
+
+    def test_setup_actions_are_pinned_to_majors(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """checkout and setup-dotnet are pinned to major versions."""
+        content = csharp_workflow.content
+        assert "actions/checkout@v4" in content
+        assert "actions/setup-dotnet@v4" in content
+
+    def test_quality_job_runs_every_csproj_backed_gate(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """CI runs the restore/build/format/test gates the csproj backs.
+
+        The plain build doubles as the lint gate (the csproj treats
+        analyzer warnings as errors), and the coverage-collecting test
+        run reuses its output via --no-build so the suite executes
+        exactly once (the Swift no-double-test-run lesson).
+        """
+        parsed = yaml.safe_load(csharp_workflow.content)
+        quality_commands = [
+            cmd.strip()
+            for step in parsed["jobs"]["quality"]["steps"]
+            if (cmd := step.get("run"))
+        ]
+        assert "dotnet restore" in quality_commands
+        assert "dotnet build --no-restore" in quality_commands
+        assert "dotnet format --verify-no-changes" in quality_commands
+        test_runs = [c for c in quality_commands if c.startswith("dotnet test")]
+        assert len(test_runs) == 1
+        assert "--no-build" in test_runs[0]
+        assert "/p:CollectCoverage=true" in test_runs[0]
+
+    def test_coverage_step_defers_the_bound_to_the_csproj(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """No run command restates the Coverlet coverage threshold.
+
+        The >=90% bound lives in the csproj
+        (Threshold/ThresholdType/ThresholdStat — its single home);
+        /p:CollectCoverage=true activates the gate without duplicating
+        the number, so the workflow cannot drift from the manifest.
+        """
+        parsed = yaml.safe_load(csharp_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert not any("Threshold" in cmd for cmd in run_commands)
+
+    def test_codecov_upload_cannot_fail_ci(self, csharp_workflow: CIWorkflow) -> None:
+        """The tokenless Codecov upload is best-effort, never a gate.
+
+        A fresh project has no CODECOV_TOKEN secret, so a failing
+        upload must not start the project red; the enforced coverage
+        gate is the csproj-backed Coverlet run in the test step.
+        """
+        parsed = yaml.safe_load(csharp_workflow.content)
+        codecov_steps = [
+            step
+            for job in parsed["jobs"].values()
+            for step in job["steps"]
+            if "codecov" in step.get("uses", "")
+        ]
+        assert len(codecov_steps) == 1
+        assert codecov_steps[0]["with"]["fail_ci_if_error"] is False
+
+    def test_build_job_packages_without_rerunning_tests(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """The build job publishes the app; the suite ran once in quality.
+
+        The Release build feeds dotnet publish via --no-build, and no
+        dotnet test invocation appears — the single coverage-gated test
+        execution lives in the quality job.
+        """
+        parsed = yaml.safe_load(csharp_workflow.content)
+        build_commands = [
+            step.get("run", "") for step in parsed["jobs"]["build"]["steps"]
+        ]
+        publish_runs = [c for c in build_commands if "dotnet publish" in c]
+        assert len(publish_runs) == 1
+        assert "--no-build" in publish_runs[0]
+        assert not any("dotnet test" in c for c in build_commands)
+
+    def test_workflow_writes_nothing_to_github_env(
+        self, csharp_workflow: CIWorkflow
+    ) -> None:
+        """Nothing discovered at runtime is exported to GITHUB_ENV.
+
+        The Swift PR #414 review flagged unvalidated GITHUB_ENV writes
+        as the documented Actions env-injection vector; like the
+        Kotlin, cpp, and java workflows, every value here is a static
+        literal, so there is no dynamic discovery and no
+        GITHUB_ENV/GITHUB_PATH write to guard.
+        """
+        parsed = yaml.safe_load(csharp_workflow.content)
+        run_commands = _all_run_commands(parsed)
+        assert not any("GITHUB_ENV" in cmd for cmd in run_commands)
+        assert not any("GITHUB_PATH" in cmd for cmd in run_commands)

@@ -1638,6 +1638,10 @@ _LANG_SETUP_STEPS: dict[str, list[str]] = {
     # Android Wear scaffold; the watch APK needs Android tooling
     # (Android Studio / Gradle), which init cannot install (#366).
     "java": ["mvn test"],
+    # `dotnet test` restores, builds (Roslyn analyzers as errors), and
+    # runs the xUnit suite in one invocation — the csproj owns the whole
+    # quality policy (#370), so the single command verifies the scaffold.
+    "csharp": ["dotnet test"],
 }
 
 
