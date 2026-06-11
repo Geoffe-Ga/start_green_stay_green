@@ -1,9 +1,11 @@
 """Unit tests for Scripts Generator."""
 
+import json
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from typing import ClassVar
 
 from defusedxml import ElementTree as DefusedElementTree
 import pytest
@@ -2382,7 +2384,12 @@ class TestMutationKillers:
             ]
 
     def test_generated_scripts_exact_count_typescript(self) -> None:
-        """Test TypeScript generator creates EXACTLY 6 scripts."""
+        """Test TypeScript generator creates EXACTLY 8 scripts.
+
+        Scripts: check-all, format, lint, test, typecheck, fix-all,
+        mutation, pr-status (the stryker.conf.json companion is written
+        separately and not counted here).
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
                 language="typescript",
@@ -2391,9 +2398,9 @@ class TestMutationKillers:
             generator = ScriptsGenerator(Path(tmpdir), config)
             scripts = generator.generate()
 
-            assert len(scripts) == 7
-            assert len(scripts) > 6
-            assert len(scripts) < 8
+            assert len(scripts) == 8
+            assert len(scripts) > 7
+            assert len(scripts) < 9
 
     def test_script_file_executable_permission_exact(self) -> None:
         """Test generated scripts have EXACT executable permission (0o755).
@@ -3308,3 +3315,300 @@ class TestScriptsGeneratorCrossPlatformDocs:
             )
             assert result.returncode == 0, result.stderr
             assert "Usage" in result.stdout
+
+
+class TestMultiLanguageMutationScripts:
+    """Mutation testing parity for TypeScript, Go, and Rust (#398).
+
+    Each implemented language emits a ``mutation.sh`` gate wired to the
+    ecosystem's maintained mutation tool (StrykerJS, gremlins,
+    cargo-mutants) with the same 80% posture as the Python gate. The
+    scripts must fail loudly on tool errors — never exit 0 because the
+    tool was missing or crashed.
+    """
+
+    LANGUAGES = ("typescript", "go", "rust")
+
+    #: Install instruction fragments each script must surface when its
+    #: tool is missing (tool names and commands live-verified
+    #: 2026-06-11). Fragments, because the emitted echo lines may wrap
+    #: long commands across bash continuations.
+    INSTALL_HINTS: ClassVar[dict[str, tuple[str, ...]]] = {
+        "typescript": (
+            "npm install --save-dev @stryker-mutator/core",
+            "@stryker-mutator/jest-runner",
+        ),
+        "go": ("go install github.com/go-gremlins/gremlins/cmd/gremlins@latest",),
+        "rust": ("cargo install --locked cargo-mutants",),
+    }
+
+    @staticmethod
+    def _generate(tmpdir: str, language: str) -> dict[str, Path]:
+        """Generate scripts for ``language`` into ``tmpdir``/scripts."""
+        config = ScriptConfig(language=language, package_name="my_package")
+        generator = ScriptsGenerator(
+            Path(tmpdir) / "scripts",
+            config,
+            project_root=Path(tmpdir),
+        )
+        return generator.generate()
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_emitted(self, language: str) -> None:
+        """Each implemented language emits a mutation.sh gate."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            assert "mutation.sh" in scripts
+            assert scripts["mutation.sh"].exists()
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_is_executable(self, language: str) -> None:
+        """mutation.sh carries the standard executable mode."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            assert_executable(scripts["mutation.sh"])
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_uses_lf_only(self, language: str) -> None:
+        """mutation.sh never carries CR bytes (bash cannot run CRLF)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            assert b"\r" not in scripts["mutation.sh"].read_bytes()
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_passes_bash_syntax_check(self, language: str) -> None:
+        """mutation.sh parses under bash -n (template-escaping guard)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            bash = shutil.which("bash")
+            assert bash is not None, "bash not found on PATH"
+            result = subprocess.run(  # noqa: S603  # Issue #398: bash -n on generated content, no untrusted input
+                [bash, "-n", str(scripts["mutation.sh"])],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0, result.stderr
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_help_executes_under_bash(self, language: str) -> None:
+        """`bash scripts/mutation.sh --help` exits 0 with usage text."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            bash = shutil.which("bash")
+            assert bash is not None, "bash not found on PATH"
+            result = subprocess.run(  # noqa: S603  # Issue #398: bash on generated content, no untrusted input
+                [bash, str(scripts["mutation.sh"]), "--help"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0, result.stderr
+            assert "Usage" in result.stdout
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_rejects_unknown_options(self, language: str) -> None:
+        """Unknown options exit 2 with a diagnostic, mirroring all gates."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            bash = shutil.which("bash")
+            assert bash is not None, "bash not found on PATH"
+            result = subprocess.run(  # noqa: S603  # Issue #398: bash on generated content, no untrusted input
+                [bash, str(scripts["mutation.sh"]), "--bogus"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 2
+            assert "Unknown option" in result.stderr
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_fails_loudly_when_tool_missing(
+        self, language: str
+    ) -> None:
+        """A missing tool exits 2 with install instructions (no vacuous 0)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            for fragment in self.INSTALL_HINTS[language]:
+                assert fragment in content
+            assert "exit 2" in content
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_has_bash_safety(self, language: str) -> None:
+        """mutation.sh enables strict mode like every other gate."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "set -euo pipefail" in content
+
+    # --- TypeScript (StrykerJS) ---
+
+    def test_typescript_mutation_script_runs_stryker(self) -> None:
+        """The TS gate runs StrykerJS without npx auto-installing it."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "typescript")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "npx --no-install stryker run" in content
+
+    def test_typescript_mutation_threshold_lives_in_stryker_config(self) -> None:
+        """The 80% break threshold is single-sourced in stryker.conf.json."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "typescript")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "stryker.conf.json" in content
+            # The script must not duplicate the threshold the config owns.
+            assert "MIN_SCORE" not in content
+
+    def test_typescript_writes_stryker_config_companion(self) -> None:
+        """stryker.conf.json lands at the project root, break: 80."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir, "typescript")
+
+            config_path = Path(tmpdir) / "stryker.conf.json"
+            assert config_path.exists()
+            parsed = json.loads(config_path.read_text(encoding="utf-8"))
+            assert parsed["thresholds"]["break"] == 80
+            assert parsed["thresholds"]["high"] == 80
+            assert parsed["testRunner"] == "jest"
+
+    def test_stryker_config_preserves_existing_file(self) -> None:
+        """A user-owned stryker.conf.json is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / "stryker.conf.json"
+            existing.write_text('{"testRunner": "vitest"}\n', encoding="utf-8")
+
+            self._generate(tmpdir, "typescript")
+
+            assert existing.read_text(encoding="utf-8") == '{"testRunner": "vitest"}\n'
+
+    # --- Go (gremlins) ---
+
+    def test_go_mutation_script_runs_gremlins_unleash(self) -> None:
+        """The Go gate runs gremlins unleash."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "go")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "gremlins unleash" in content
+
+    def test_go_mutation_script_maps_gremlins_exit_codes(self) -> None:
+        """Threshold misses (gremlins exits 10/11) map to gate failure 1.
+
+        Any other non-zero gremlins exit is a tool error and must exit 2
+        — never a silent pass.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "go")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "10" in content
+            assert "11" in content
+            assert "exit 1" in content
+            assert "exit 2" in content
+
+    def test_go_mutation_threshold_lives_in_gremlins_config(self) -> None:
+        """The 80% efficacy threshold is single-sourced in .gremlins.yaml."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "go")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert ".gremlins.yaml" in content
+            assert "MIN_SCORE" not in content
+
+    def test_go_writes_gremlins_config_companion(self) -> None:
+        """.gremlins.yaml lands at the project root with efficacy: 80."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir, "go")
+
+            config_path = Path(tmpdir) / ".gremlins.yaml"
+            assert config_path.exists()
+            parsed = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            assert parsed["unleash"]["threshold"]["efficacy"] == 80
+
+    def test_gremlins_config_preserves_existing_file(self) -> None:
+        """A user-owned .gremlins.yaml is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / ".gremlins.yaml"
+            existing.write_text("silent: true\n", encoding="utf-8")
+
+            self._generate(tmpdir, "go")
+
+            assert existing.read_text(encoding="utf-8") == "silent: true\n"
+
+    # --- Rust (cargo-mutants) ---
+
+    def test_rust_mutation_script_runs_cargo_mutants(self) -> None:
+        """The Rust gate runs cargo mutants."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "rust")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "cargo mutants" in content
+
+    def test_rust_mutation_script_has_80_percent_threshold(self) -> None:
+        """The script owns the 80% score gate (cargo-mutants has no
+        manifest threshold home — documented divergence)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "rust")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "MIN_SCORE=80" in content
+            assert "--min-score" in content
+
+    def test_rust_mutation_script_computes_score_from_outcome_lists(self) -> None:
+        """Score comes from the mutants.out caught/missed/timeout lists."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "rust")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "mutants.out" in content
+            assert "caught.txt" in content
+            assert "missed.txt" in content
+            assert "timeout.txt" in content
+
+    def test_rust_mutation_script_fails_on_zero_mutants(self) -> None:
+        """Zero generated mutants exits 2 — not the vacuous exit 0 the
+        legacy Python gate allowed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "rust")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            zero_mutants_block = content.split('if [ "$TOTAL" -eq 0 ]')[1]
+            first_exit = zero_mutants_block.split("exit ")[1].split()[0]
+            assert first_exit == "2"
+
+    def test_rust_mutation_script_fails_loudly_on_tool_errors(self) -> None:
+        """Baseline/usage failures (exit codes other than 0/2/3) exit 2."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "rust")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            # 0 = clean, 2 = missed mutants, 3 = timeouts: score is
+            # still computable. Everything else is a tool error.
+            assert "0|2|3)" in content
+            assert "exit 2" in content
+
+    # --- Cross-cutting: README rows and python parity ---
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_scripts_readme_documents_mutation_gate(self, language: str) -> None:
+        """scripts/README.md grows a mutation.sh row per language."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir, language)
+
+            content = (Path(tmpdir) / "scripts" / "README.md").read_text(
+                encoding="utf-8"
+            )
+            assert "| `mutation.sh` |" in content
+            assert "`bash scripts/mutation.sh`" in content

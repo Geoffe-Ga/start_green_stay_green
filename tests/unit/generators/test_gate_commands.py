@@ -78,12 +78,16 @@ class TestGateDocsTable:
         [
             ("python", "test.sh", "pytest tests/"),
             ("python", "lint.sh", "ruff check ."),
+            ("python", "mutation.sh", "mutmut run"),
             ("typescript", "test.sh", "npx jest"),
             ("typescript", "lint.sh", "npx eslint ."),
+            ("typescript", "mutation.sh", "npx stryker run"),
             ("go", "test.sh", "go test -cover ./..."),
             ("go", "lint.sh", "golangci-lint run ./..."),
+            ("go", "mutation.sh", "gremlins unleash"),
             ("rust", "test.sh", "cargo test"),
             ("rust", "lint.sh", "cargo clippy --all -- -D warnings"),
+            ("rust", "mutation.sh", "cargo mutants"),
             ("swift", "test.sh", "swift test --enable-code-coverage"),
             ("swift", "lint.sh", "swiftlint lint --strict"),
             ("kotlin", "test.sh", "./gradlew test"),
@@ -110,6 +114,25 @@ class TestGateDocsTable:
     ) -> None:
         """test/lint gates document the exact toolchain-native command."""
         assert GATE_DOCS[language][gate].native == native
+
+    def test_mutation_gate_documented_for_implemented_languages_only(self) -> None:
+        """Exactly the languages with mutation tooling document the gate.
+
+        Python (mutmut), TypeScript (StrykerJS), Go (gremlins), and Rust
+        (cargo-mutants) emit mutation.sh (#398); the remaining languages
+        were declined because no comparably maintained tool exists, so a
+        documented row there would be drift.
+        """
+        documented = {
+            language for language, rows in GATE_DOCS.items() if "mutation.sh" in rows
+        }
+        assert documented == {"python", "typescript", "go", "rust"}
+
+    def test_rust_mutation_row_notes_the_stricter_bare_command(self) -> None:
+        """The rust row honestly flags that bare cargo-mutants enforces
+        zero missed mutants while the script applies the 80% score gate."""
+        note = GATE_DOCS["rust"]["mutation.sh"].note
+        assert "80" in note
 
     @pytest.mark.parametrize("language", sorted(CANONICAL_LANGUAGES))
     def test_no_bespoke_windows_shims_in_native_commands(self, language: str) -> None:
