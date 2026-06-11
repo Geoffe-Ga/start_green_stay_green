@@ -21,6 +21,8 @@ from start_green_stay_green.utils.csharp import csharp_namespace
 from start_green_stay_green.utils.java import android_package
 from start_green_stay_green.utils.java import android_package_path
 from start_green_stay_green.utils.naming import pascal_case
+from start_green_stay_green.utils.ruby import ruby_gemfile
+from start_green_stay_green.utils.ruby import ruby_module_name
 from start_green_stay_green.utils.swift import package_swift
 
 if TYPE_CHECKING:
@@ -65,12 +67,10 @@ class StructureGenerator(BaseGenerator):
     __init__.py, Hello World starter code) for the target project's language.
 
     All 10 supported languages (python, typescript, go, rust, java, csharp,
-    ruby, swift, kotlin, cpp) are available at the generator level. Note that
-    the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
-    architecture, and metrics steps for ruby —
-    the CI workflow step covers every language. Kotlin (#357/#358),
-    C/C++ (#362/#363), Java (#366/#367), and C# (#370) run the full
-    pipeline.
+    ruby, swift, kotlin, cpp) are available at the generator level, and all
+    of them run the full CLI pipeline (``sgsg init``): Kotlin graduated
+    with #357/#358, C/C++ with #362/#363, Java with #366/#367, C# with
+    #370, and Ruby with #373.
 
     Attributes:
         output_dir: Directory where structure will be created
@@ -850,16 +850,21 @@ namespace {namespace}
     def _ruby_lib_rb(self) -> str:
         """Generate Ruby library file content.
 
+        The module name comes from the shared
+        :func:`~start_green_stay_green.utils.ruby.ruby_module_name`
+        helper so the RSpec scaffold (tests generator) describes the
+        same constant this file declares (#373). The module carries a
+        documentation comment so the scaffold passes RuboCop's
+        ``Style/Documentation`` cop out of the box.
+
         Returns:
             Content for main Ruby library file
         """
-        # Convert package_name to module name (capitalize each part)
-        module_name = "".join(
-            word.capitalize() for word in self.config.package_name.split("_")
-        )
+        module_name = ruby_module_name(self.config.package_name)
 
         return f"""# frozen_string_literal: true
 
+# Entry point module for {self.config.project_name}.
 module {module_name}
   VERSION = "0.1.0"
 
@@ -875,17 +880,15 @@ end
     def _ruby_gemfile(self) -> str:
         """Generate Ruby Gemfile content.
 
+        Delegates to the shared
+        :func:`~start_green_stay_green.utils.ruby.ruby_gemfile` helper
+        so the structure and dependencies generators emit an identical
+        manifest from one source of truth (#373).
+
         Returns:
             Content for Gemfile
         """
-        return """# frozen_string_literal: true
-
-source "https://rubygems.org"
-
-gem "rake", "~> 13.0"
-gem "rspec", "~> 3.0"
-gem "rubocop", "~> 1.0"
-"""
+        return ruby_gemfile()
 
     def _generate_swift_structure(self) -> dict[str, Path]:
         """Generate Swift watchOS project structure.

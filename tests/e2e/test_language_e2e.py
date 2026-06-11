@@ -3,14 +3,12 @@
 Tests the complete sgsg init flow for supported languages, verifying
 that the CLI produces valid project structures end-to-end.
 
-Note: ruby is supported at the generator level, but the quality-tooling
-pipeline steps (PreCommitGenerator, scripts, metrics, architecture)
-skip it. Kotlin completed the pipeline with #357/#358, C/C++ followed
-with #362 (quality tooling) and #363 (CI workflow), Java with #366
-(Wear OS foundation + CI) and #367 (quality tooling), and C# with #370
-(quality tooling on top of the foundation scaffold + CI), so all four
-join CLI_SUPPORTED_LANGUAGES below
-(test_language_generators.py covers the generator-only languages).
+Note: every base.SUPPORTED_LANGUAGES entry now runs the full pipeline.
+Kotlin completed it with #357/#358, C/C++ followed with #362 (quality
+tooling) and #363 (CI workflow), Java with #366 (Wear OS foundation +
+CI) and #367 (quality tooling), C# with #370 (quality tooling on top
+of the foundation scaffold + CI), and Ruby with #373, so all of them
+join CLI_SUPPORTED_LANGUAGES below.
 
 All tests use an environment with API keys stripped and a null keyring
 backend to prevent real Anthropic API calls. See Issue #196.
@@ -37,6 +35,7 @@ CLI_SUPPORTED_LANGUAGES = (
     "cpp",
     "java",
     "csharp",
+    "ruby",
 )
 
 # Expected key files per language that sgsg init should create
@@ -124,6 +123,19 @@ EXPECTED_KEY_FILES: dict[str, list[str]] = {
         ".pre-commit-config.yaml",
         "scripts/check-all.sh",
         "plans/architecture/ArchitectureTest.cs",
+        ".github/workflows/ci.yml",
+        "README.md",
+    ],
+    "ruby": [
+        "Gemfile",
+        "lib/test_project.rb",
+        "spec/test_project_spec.rb",
+        "spec/spec_helper.rb",
+        ".rubocop.yml",
+        ".pre-commit-config.yaml",
+        "scripts/check-all.sh",
+        "plans/architecture/packwerk.yml",
+        "plans/architecture/package.yml",
         ".github/workflows/ci.yml",
         "README.md",
     ],

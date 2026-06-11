@@ -32,7 +32,7 @@ class ArchitectureResult:
         output_dir: Directory containing generated files.
         files_created: List of files created.
         language: Target language (python, typescript, go, rust, swift,
-            kotlin, cpp, java, csharp).
+            kotlin, cpp, java, csharp, ruby).
     """
 
     output_dir: Path
@@ -193,6 +193,28 @@ _LANGUAGE_TOOLING: dict[str, _LanguageTooling] = {
         docs_url="https://github.com/BenMorris/NetArchTest",
         display_name="C#",
     ),
+    "ruby": _LanguageTooling(
+        # Packwerk (the issue's choice; Shopify's boundary enforcer)
+        # reads packwerk.yml from the working directory — no config
+        # flag exists, so run_cmd carries no {config_file} placeholder
+        # and the one-time wiring (copy packwerk.yml + the root
+        # package.yml to the project root) lives in install_cmd, the
+        # Konsist/ArchUnit/NetArchTest parked-template precedent. The
+        # packwerk gem is already pinned in the generated Gemfile. The
+        # generated configs document the enforcement limits explicitly:
+        # Packwerk targets Zeitwerk-style autoloaded codebases, so on
+        # this plain-Ruby scaffold the check stays vacuous until
+        # packages (and Zeitwerk-conventional paths) are defined.
+        tool="Packwerk",
+        config_file="packwerk.yml",
+        install_cmd=(
+            "cp plans/architecture/packwerk.yml "
+            "plans/architecture/package.yml . && bundle install"
+        ),
+        run_cmd="bundle exec packwerk check",
+        docs_url="https://github.com/Shopify/packwerk",
+        display_name="Ruby",
+    ),
 }
 
 
@@ -203,8 +225,9 @@ class ArchitectureEnforcementGenerator:
     config for TypeScript, go-arch-lint config for Go, cargo-deny
     config for Rust, SwiftLint custom rules for Swift, a Konsist
     test for Kotlin, a runnable include-boundary checker for C/C++,
-    an ArchUnit test for Java, and a NetArchTest test for C# to
-    enforce layer separation and prevent circular dependencies.
+    an ArchUnit test for Java, a NetArchTest test for C#, and a
+    Packwerk package configuration for Ruby to enforce layer
+    separation and prevent circular dependencies.
 
     Attributes:
         orchestrator: AI orchestrator for content generation.
@@ -252,7 +275,7 @@ class ArchitectureEnforcementGenerator:
 
         Args:
             language: Target language (python, typescript, go, rust,
-                swift, kotlin, cpp, java, csharp).
+                swift, kotlin, cpp, java, csharp, ruby).
             project_name: Name of the project.
 
         Returns:
@@ -281,6 +304,7 @@ class ArchitectureEnforcementGenerator:
             "cpp": self._generate_cpp_config,
             "java": partial(self._generate_java_config, project_name),
             "csharp": partial(self._generate_csharp_config, project_name),
+            "ruby": partial(self._generate_ruby_config, project_name),
         }
         files_created = config_builders[language]()
 
@@ -1224,6 +1248,123 @@ namespace {namespace}.Architecture
         config_path.write_text(config_content)
         return [config_path]
 
+    def _generate_ruby_config(self, project_name: str) -> list[Path]:
+        """Generate the Packwerk package configuration for Ruby.
+
+        Packwerk (the issue's choice; Shopify's boundary enforcer)
+        expresses architecture rules as packages: ``packwerk.yml``
+        configures the tool and each ``package.yml`` declares a
+        package and the packages it may depend on. Both files are
+        parked templates in ``plans/architecture`` (the Konsist/
+        ArchUnit/NetArchTest precedent): they only enforce once copied
+        to the project root (the ``packwerk`` gem is already pinned in
+        the generated Gemfile).
+
+        The configs document their enforcement limits explicitly and
+        honestly: Packwerk performs static constant-reference analysis
+        and assumes Zeitwerk-style autoload paths to resolve constants
+        — it is built for Rails/Zeitwerk codebases, and on this
+        plain-Ruby scaffold (a single flat ``lib/``) the dependency
+        check passes vacuously until packages are defined and the code
+        follows Zeitwerk conventions (a tighten-me note, the
+        ``withOptionalLayers(true)`` analogue). They also note WHY a
+        boundary tool matters in Ruby: unlike a compiler, Ruby's
+        ``require`` does NOT reject circular requires at load time — a
+        require cycle silently yields a partially-defined module at
+        runtime — so static boundary enforcement is the only early
+        signal.
+
+        Args:
+            project_name: Name of the project (used in the generated
+                file headers).
+
+        Returns:
+            List of files created.
+        """
+        packwerk_path = self.output_dir / "packwerk.yml"
+        packwerk_content = f"""\
+# Packwerk configuration for {project_name}.
+#
+# Generated by Start Green Stay Green (#373). This file and the root
+# package.yml beside it are parked templates: copy BOTH to the project
+# root to activate enforcement (plans/architecture/run-check.sh
+# documents the same wiring):
+#
+#   cp plans/architecture/packwerk.yml plans/architecture/package.yml .
+#   bundle install        # packwerk is already pinned in the Gemfile
+#   bundle exec packwerk check
+#
+# ENFORCEMENT LIMITS — read before relying on the gate:
+#
+# - Packwerk performs STATIC constant-reference analysis. Constants
+#   reached via metaprogramming (const_get, send, method_missing) are
+#   invisible to it.
+# - Packwerk is built for Zeitwerk-style autoloaded codebases (Rails
+#   apps get this for free). Constant resolution assumes
+#   Zeitwerk-conventional file paths; on this plain-Ruby scaffold (a
+#   single flat lib/ with explicit requires) the check passes
+#   VACUOUSLY until packages are defined and the load paths follow
+#   Zeitwerk conventions. Tighten as the codebase grows: split lib/
+#   into package directories, give each its own package.yml with an
+#   explicit dependencies list, and adopt Zeitwerk
+#   (https://github.com/fxn/zeitwerk) for autoloading.
+# - WHY a boundary tool at all: unlike a compiler, Ruby's require does
+#   NOT reject circular requires at load time — a require cycle
+#   silently yields a partially-defined module at runtime (constants
+#   missing until the cycle unwinds). Packwerk's acyclic package graph
+#   (validated by `bundle exec packwerk validate`) is the only EARLY
+#   signal; Ruby itself will not give a load-time error.
+
+# Patterns for folder paths to include in the analysis.
+include:
+  - "**/*.{{rb,rake,erb}}"
+
+# Patterns for folder paths to exclude.
+exclude:
+  - "{{bin,node_modules,script,tmp,vendor}}/**/*"
+
+# Where to find package configuration files (each package.yml defines
+# one package; the root package.yml makes the whole app one package
+# until you split it).
+package_paths: "**/"
+
+# Fork parsing out to subprocesses for speed.
+parallel: true
+"""
+        packwerk_path.write_text(packwerk_content)
+
+        package_path = self.output_dir / "package.yml"
+        package_content = f"""\
+# Root package definition for {project_name} (Packwerk).
+#
+# Generated by Start Green Stay Green (#373). Copy to the project root
+# together with packwerk.yml (see that file for the full wiring and
+# enforcement-limit notes).
+#
+# This declares the whole application as ONE package with dependency
+# enforcement switched on. With a single package there are no
+# boundaries to violate yet — the gate is vacuous by construction.
+# Tighten it by adding a package.yml to each component directory, e.g.:
+#
+#   # lib/billing/package.yml
+#   enforce_dependencies: true
+#   dependencies:
+#     - lib/accounts
+#
+# After that, any constant reference that crosses a package boundary
+# without a declared dependency fails `bundle exec packwerk check`,
+# and `bundle exec packwerk validate` rejects cycles in the declared
+# dependency graph (presentation -> application -> domain layering is
+# expressed by listing only lower layers as dependencies).
+enforce_dependencies: true
+
+# Packages this package may depend on (none: it is the root).
+dependencies: []
+"""
+        package_path.write_text(package_content)
+
+        return [packwerk_path, package_path]
+
     def _generate_readme(self, language: str, project_name: str) -> Path:
         """Generate README with usage instructions.
 
@@ -1313,6 +1454,7 @@ Edit the configuration file:
 - C/C++: `check_architecture.py` (the ALLOWED_DEPENDENCIES matrix at the top)
 - Java: `ArchitectureTest.java` (the layered-architecture rules in the test)
 - C#: `ArchitectureTest.cs` (the NetArchTest rules in the test)
+- Ruby: `packwerk.yml` / `package.yml` (the Packwerk package boundaries)
 
 See documentation:
 - Python: https://import-linter.readthedocs.io/
@@ -1324,6 +1466,7 @@ See documentation:
 - C/C++: the header comment in check_architecture.py (self-documented)
 - Java: https://www.archunit.org/
 - C#: https://github.com/BenMorris/NetArchTest
+- Ruby: https://github.com/Shopify/packwerk
 
 ## Integration
 

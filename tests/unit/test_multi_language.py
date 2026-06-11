@@ -349,13 +349,13 @@ class TestSequentialLanguageDetection:
 class TestGeneratorOnlyLanguagePipelineGates:
     """Pipeline steps skip gracefully for generator-only languages (#356).
 
-    ruby has structure/dependencies/tests/readme generators but no
-    pre-commit/scripts/metrics/architecture support — instead of
-    crashing init, those tooling steps must no-op with an informational
-    message. Kotlin graduated from this set when #357 wired its quality
-    tooling and #358 wired its CI workflow; java graduated with #367
-    (its CI workflow has been real since #366); csharp graduated with
-    #370 (its CI workflow has been real since the foundation scaffold).
+    A language outside the supported pipeline set must not crash init:
+    the tooling steps no-op with an informational message. Every
+    base.SUPPORTED_LANGUAGES entry now runs the full pipeline — Kotlin
+    graduated when #357 wired its quality tooling and #358 its CI
+    workflow; java with #367 (CI real since #366); csharp with #370;
+    ruby with #373 — so the skip path is probed with php, a language
+    with reference assets but no pipeline support.
     """
 
     def test_precommit_step_writes_for_kotlin(self, tmp_path: Path) -> None:
@@ -366,9 +366,17 @@ class TestGeneratorOnlyLanguagePipelineGates:
         assert config.exists()
         assert "ktlint" in config.read_text()
 
-    def test_precommit_step_skips_ruby_without_writing(self, tmp_path: Path) -> None:
-        """No .pre-commit-config.yaml is written and no error is raised."""
+    def test_precommit_step_writes_for_ruby(self, tmp_path: Path) -> None:
+        """Ruby now generates a pre-commit config (#373)."""
         cli_mod._generate_precommit_step(tmp_path, "my-project", "ruby")
+
+        config = tmp_path / ".pre-commit-config.yaml"
+        assert config.exists()
+        assert "rubocop" in config.read_text()
+
+    def test_precommit_step_skips_php_without_writing(self, tmp_path: Path) -> None:
+        """No .pre-commit-config.yaml is written and no error is raised."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "php")
 
         assert not (tmp_path / ".pre-commit-config.yaml").exists()
 
@@ -386,11 +394,19 @@ class TestGeneratorOnlyLanguagePipelineGates:
         assert test_script.exists()
         assert "gradlew" in test_script.read_text()
 
-    def test_scripts_step_skips_ruby_without_python_fallback(
+    def test_scripts_step_writes_ruby_scripts(self, tmp_path: Path) -> None:
+        """Ruby now receives its own quality scripts (#373)."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "ruby")
+
+        test_script = tmp_path / "scripts" / "test.sh"
+        assert test_script.exists()
+        assert "rspec" in test_script.read_text()
+
+    def test_scripts_step_skips_php_without_python_fallback(
         self, tmp_path: Path
     ) -> None:
-        """Ruby must not receive the Python-fallback quality scripts."""
-        cli_mod._generate_scripts_step(tmp_path, "my-project", "ruby")
+        """PHP must not receive the Python-fallback quality scripts."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "php")
 
         assert not (tmp_path / "scripts").exists()
 
@@ -408,9 +424,15 @@ class TestGeneratorOnlyLanguagePipelineGates:
 
         assert (tmp_path / "docs" / "metrics.json").exists()
 
-    def test_metrics_step_skips_ruby_without_dashboard(self, tmp_path: Path) -> None:
-        """No metrics dashboard is written for unsupported languages."""
+    def test_metrics_step_writes_ruby_dashboard(self, tmp_path: Path) -> None:
+        """The metrics dashboard is now generated for ruby (#373)."""
         cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "ruby")
+
+        assert (tmp_path / "docs" / "metrics.json").exists()
+
+    def test_metrics_step_skips_php_without_dashboard(self, tmp_path: Path) -> None:
+        """No metrics dashboard is written for unsupported languages."""
+        cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "php")
 
         assert not (tmp_path / "docs" / "metrics.json").exists()
 
@@ -420,9 +442,16 @@ class TestGeneratorOnlyLanguagePipelineGates:
 
         assert (tmp_path / "plans" / "architecture" / "ArchitectureTest.kt").exists()
 
-    def test_architecture_step_skips_ruby(self, tmp_path: Path) -> None:
-        """No architecture rules are generated for unsupported languages."""
+    def test_architecture_step_writes_ruby_rules(self, tmp_path: Path) -> None:
+        """Architecture rules are now generated for ruby (#373)."""
         cli_mod._generate_architecture_step(tmp_path, "my-project", "ruby")
+
+        assert (tmp_path / "plans" / "architecture" / "packwerk.yml").exists()
+        assert (tmp_path / "plans" / "architecture" / "package.yml").exists()
+
+    def test_architecture_step_skips_php(self, tmp_path: Path) -> None:
+        """No architecture rules are generated for unsupported languages."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "php")
 
         assert not (tmp_path / "plans" / "architecture").exists()
 

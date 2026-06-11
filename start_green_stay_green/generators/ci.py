@@ -157,8 +157,15 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         "test_framework": "rspec",
         "linters": ["rubocop"],
         "formatters": ["rubocop"],
-        "security_tools": ["brakeman"],
-        "supported_versions": ["3.1", "3.2"],
+        # bundler-audit owns dependency CVE scanning (#373); Brakeman is
+        # Rails-specific and errors on the plain-Ruby scaffold, so it is
+        # documented (scripts/security.sh) rather than wired.
+        "security_tools": ["bundler-audit"],
+        # The Ruby lines still receiving upstream maintenance (3.1/3.2
+        # reached EOL; verified against ruby-lang.org's branch table).
+        # Bump together with reference/ci/ruby.yml's matrix and the
+        # generated .rubocop.yml TargetRubyVersion.
+        "supported_versions": ["3.3", "3.4"],
         "package_manager": "bundler",
     },
 }

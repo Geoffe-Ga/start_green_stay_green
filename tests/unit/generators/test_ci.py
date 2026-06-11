@@ -1135,12 +1135,21 @@ jobs:
         assert LANGUAGE_CONFIGS["ruby"]["formatters"] == ["rubocop"]
 
     def test_ruby_security_tools_exact(self) -> None:
-        """Test Ruby security_tools list is exact."""
-        assert LANGUAGE_CONFIGS["ruby"]["security_tools"] == ["brakeman"]
+        """Test Ruby security_tools list is exact.
+
+        bundler-audit owns the generated security gate (#373); Brakeman
+        is Rails-specific and errors on the plain-Ruby scaffold, so it
+        must not be advertised as wired tooling.
+        """
+        assert LANGUAGE_CONFIGS["ruby"]["security_tools"] == ["bundler-audit"]
 
     def test_ruby_supported_versions_exact(self) -> None:
-        """Test Ruby supported_versions list is exact."""
-        assert LANGUAGE_CONFIGS["ruby"]["supported_versions"] == ["3.1", "3.2"]
+        """Test Ruby supported_versions list is exact.
+
+        3.1 and 3.2 reached upstream EOL; 3.3/3.4 are the maintained
+        lines (verified against ruby-lang.org, 2026-06).
+        """
+        assert LANGUAGE_CONFIGS["ruby"]["supported_versions"] == ["3.3", "3.4"]
 
     def test_ruby_package_manager_exact(self) -> None:
         """Test Ruby package_manager is exactly bundler."""

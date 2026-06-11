@@ -1708,15 +1708,283 @@ class TestScriptsGeneratorCsharpGeneration:
             assert existing_metrics.read_text() == "CA1502: 25\n"
 
 
+class TestScriptsGeneratorRubyGeneration:
+    """Test Ruby script generation (#373)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Generate ruby scripts into ``tmpdir`` and return the mapping."""
+        config = ScriptConfig(
+            language="ruby",
+            package_name="my_gem",
+        )
+        generator = ScriptsGenerator(Path(tmpdir), config)
+        return generator.generate()
+
+    def test_generate_ruby_scripts_creates_files(self) -> None:
+        """Test generate creates the full ruby script set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            assert "check-all.sh" in scripts
+            assert "format.sh" in scripts
+            assert "lint.sh" in scripts
+            assert "test.sh" in scripts
+            assert "security.sh" in scripts
+
+    def test_ruby_shell_scripts_pass_bash_syntax_check(self) -> None:
+        """Every generated ruby shell script parses under bash -n.
+
+        The #362 lesson: this literal syntax check caught a real
+        template-escaping bug in the cpp scripts, so every new language
+        gets it from day one.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            for name, path in scripts.items():
+                if not name.endswith(".sh"):
+                    continue
+                bash = shutil.which("bash")
+                assert bash is not None, "bash not found on PATH"
+                result = subprocess.run(  # noqa: S603  # Issue #373: bash -n on generated content, no untrusted input
+                    [bash, "-n", str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, f"{name}: {result.stderr}"
+
+    def test_ruby_shell_scripts_pass_shellcheck(self) -> None:
+        """Every generated ruby shell script is clean under shellcheck.
+
+        bash -n only catches parse errors; shellcheck catches the
+        quoting/expansion bugs that have bitten generated scripts
+        before (#425/SC2059), so the linter itself gates the templates.
+        Skips only when shellcheck is not installed (it ships on the
+        GitHub ubuntu runners and via shellcheck-py in pre-commit).
+        """
+        shellcheck = shutil.which("shellcheck")
+        if shellcheck is None:
+            pytest.skip("shellcheck not on PATH (covered in CI)")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            for name, path in scripts.items():
+                if not name.endswith(".sh"):
+                    continue
+                result = subprocess.run(  # noqa: S603  # Issue #373: shellcheck on generated content, no untrusted input
+                    [shellcheck, str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, f"{name}: {result.stdout}"
+
+    def test_ruby_format_script_owns_the_fixing_path(self) -> None:
+        """format.sh fixes with --autocorrect; the hook stays check-mode.
+
+        The issue's "--autocorrect" belongs here, in the fixing path —
+        NOT in the pre-commit hook, where a fixing-mode formatter could
+        never fail a commit (the #430 lesson).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "bundle exec rubocop --autocorrect" in content
+
+    def test_ruby_format_check_mode_runs_the_layout_slice(self) -> None:
+        """--check verifies the Layout (formatting) cop department only.
+
+        lint.sh owns the full cop set, so the two checks in
+        check-all.sh never double-report the same offenses.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "bundle exec rubocop --only Layout" in content
+
+    def test_ruby_format_script_requires_bundler(self) -> None:
+        """format.sh fails with install instructions when bundler is absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "command -v bundle" in content
+            assert "gem install bundler" in content
+
+    def test_ruby_lint_script_runs_full_rubocop_with_config_owned_policy(
+        self,
+    ) -> None:
+        """lint.sh is a plain full RuboCop run; .rubocop.yml owns the policy.
+
+        The complexity bound, the Security cop department, and every
+        style decision live in the companion config — the script must
+        not restate any threshold via CLI flags.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "bundle exec rubocop --force-exclusion" in content
+            assert ".rubocop.yml" in content
+            assert "--only" not in content.replace("--only Layout", "")
+            assert "MAX_CCN" not in content
+
+    def test_ruby_lint_script_documents_complexity_and_flog_alternative(
+        self,
+    ) -> None:
+        """The <=10 ceiling lives once, in .rubocop.yml.
+
+        Metrics/CyclomaticComplexity owns the gate; flog is named as
+        the documented standalone alternative without being wired, so
+        the bound keeps a single home.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "Metrics/CyclomaticComplexity" in content
+            assert "flog" in content
+
+    def test_ruby_test_script_runs_rspec(self) -> None:
+        """test.sh runs the suite via plain `bundle exec rspec`.
+
+        The literal string `rspec` doubles as the language marker
+        cli._scripts_dir_has_other_language probes for ruby.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "bundle exec rspec" in content
+            assert "command -v bundle" in content
+
+    def test_ruby_test_script_enforces_coverage_via_spec_helper_gate(self) -> None:
+        """Coverage mode sets COVERAGE=true; the bound stays in spec_helper.
+
+        SimpleCov hooks rspec's exit, so a missed bound fails the
+        invocation directly (no standalone-report no-op path). The
+        >=90% number lives only in spec/spec_helper.rb, so the script
+        must not restate it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "COVERAGE=true bundle exec rspec" in content
+            assert "spec/spec_helper.rb" in content
+            assert "THRESHOLD=" not in content
+            assert "--minimum-coverage" not in content
+
+    def test_ruby_security_script_gates_on_bundler_audit(self) -> None:
+        """security.sh owns dependency CVEs via bundler-audit."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "bundle exec bundler-audit update" in content
+            assert "bundle exec bundler-audit check" in content
+
+    def test_ruby_security_script_warns_when_offline(self) -> None:
+        """The advisory-db update needs the network; offline warns, not fails.
+
+        bundler-audit checks against the ruby-advisory-db, which must
+        be fetched over the network, so the pragmatic warn-first
+        default skips with a documented tighten-me path instead of
+        failing a fresh offline clone — the NVD_API_KEY precedent.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "network" in content
+            assert "Tighten" in content
+
+    def test_ruby_security_script_documents_division_of_labor(self) -> None:
+        """security.sh discloses where the other security passes live.
+
+        Source-level security is RuboCop's Security cop department
+        (inside lint.sh's full run); Brakeman is documented as the
+        Rails-only deeper scanner rather than wired into a plain-Ruby
+        scaffold where it can only error.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "gitleaks" in content
+            assert "detect-secrets" in content
+            assert "Security cop" in content
+            assert "Brakeman" in content
+            assert "Rails" in content
+
+    def test_ruby_check_all_runs_full_toolchain(self) -> None:
+        """check-all.sh runs format check, lint, coverage-gated tests, security."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["check-all.sh"].read_text()
+            assert 'run_check "Format" "format.sh" --check' in content
+            assert 'run_check "Linting" "lint.sh"' in content
+            assert 'run_check "Tests" "test.sh" --coverage' in content
+            assert 'run_check "Security" "security.sh"' in content
+
+    def test_ruby_writes_rubocop_config_companion(self) -> None:
+        """.rubocop.yml lands at the project root with the <=10 bound.
+
+        The companion is the single home of the RuboCop policy shared
+        by the pre-commit hook, format.sh, lint.sh, and CI; it must
+        parse as YAML (the parse-validation guardrail).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            config = Path(tmpdir) / ".rubocop.yml"
+            assert config.exists()
+            parsed = yaml.safe_load(config.read_text())
+            assert parsed["Metrics/CyclomaticComplexity"]["Max"] == 10
+            assert parsed["AllCops"]["NewCops"] == "enable"
+
+    def test_ruby_rubocop_config_excludes_specs_from_block_length(self) -> None:
+        """RSpec files are excluded from Metrics/BlockLength.
+
+        RSpec example groups are naturally long blocks; without the
+        exclusion the scaffold's own spec files would fail the lint
+        gate out of the box.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            parsed = yaml.safe_load((Path(tmpdir) / ".rubocop.yml").read_text())
+            assert "spec/**/*" in parsed["Metrics/BlockLength"]["Exclude"]
+
+    def test_ruby_companion_preserves_existing_file(self) -> None:
+        """An existing user .rubocop.yml is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / ".rubocop.yml"
+            existing.write_text("AllCops:\n  NewCops: disable\n")
+
+            self._generate(tmpdir)
+
+            assert existing.read_text() == "AllCops:\n  NewCops: disable\n"
+
+
 class TestScriptsGeneratorLanguageFallback:
     """Test language fallback behavior."""
 
     def test_unknown_language_falls_back_to_python(self) -> None:
-        """Test unknown language falls back to Python scripts."""
+        """Test unknown language falls back to Python scripts.
+
+        ruby graduated to its own template set with #373, so the probe
+        uses php — a language with no native script templates.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
-                language="ruby",
-                package_name="my_gem",
+                language="php",
+                package_name="my_package",
             )
             generator = ScriptsGenerator(Path(tmpdir), config)
             scripts = generator.generate()
@@ -2026,6 +2294,20 @@ class TestMutationKillers:
             # Should generate csharp scripts with the dotnet CLI gates
             content = scripts["lint.sh"].read_text()
             assert "dotnet build" in content
+
+    def test_ruby_language_dispatches_to_ruby_generator(self) -> None:
+        """Test 'ruby' language dispatches to the Ruby generator (#373)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="ruby",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            # Should generate ruby scripts with the bundler-driven gates
+            content = scripts["lint.sh"].read_text()
+            assert "bundle exec rubocop" in content
 
     def test_generated_scripts_exact_count_python(self) -> None:
         """Test Python generator creates EXACTLY 12 scripts.
