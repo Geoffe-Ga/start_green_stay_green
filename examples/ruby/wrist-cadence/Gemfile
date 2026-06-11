@@ -13,7 +13,7 @@ group :development, :test do
   # Formatter, linter, complexity (<=10 via Metrics cops), and
   # source-level security cops in one tool; .rubocop.yml is the single
   # home of the policy shared by pre-commit, scripts, and CI.
-  gem "rubocop", "~> 1.87", require: false
+  gem "rubocop", "~> 1.87.0", require: false
 
   # Dependency CVE scanning against the ruby-advisory-db
   # (scripts/security.sh). Brakeman is deliberately absent: it is a

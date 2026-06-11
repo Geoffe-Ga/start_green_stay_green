@@ -59,10 +59,13 @@ jobs:
       # Best-effort: a fresh `green init` project ships no
       # CODECOV_TOKEN secret, so a failing upload must not start the
       # project red; the real coverage gate is the SimpleCov run above.
+      # No files: override — SimpleCov's .resultset.json is an internal
+      # format Codecov cannot parse; the uploader's auto-detection is
+      # the honest best effort (add simplecov-cobertura for a real
+      # coverage.xml feed).
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6
         with:
-          files: ./coverage/.resultset.json
           fail_ci_if_error: false
 
   # No packaging job: the generated scaffold is a plain-Ruby project
