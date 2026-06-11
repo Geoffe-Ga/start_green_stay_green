@@ -231,8 +231,48 @@ class TestMutationGate:
         monkeypatch.setattr(common, "stream_tool", fake_stream)
         rel = "start_green_stay_green/mod.py"
         assert mutation.main(["--paths-to-mutate", rel]) == 0
-        assert commands == [["/fake/mutmut", "run", f"--paths-to-mutate={rel}"]]
+        assert commands == [["/fake/mutmut", "run", "--paths-to-mutate", rel]]
         assert f"Mutating specific files: {rel}" in capsys.readouterr().out
+
+    def test_multiple_paths_pass_one_flag_each(
+        self,
+        fake_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Two mutate paths become two --paths-to-mutate flags.
+
+        mutmut does not split a joined value: a single space-joined
+        argument would name one nonexistent path and silently mutate
+        nothing.
+        """
+        first = fake_root / "start_green_stay_green" / "a.py"
+        second = fake_root / "start_green_stay_green" / "b.py"
+        first.parent.mkdir(parents=True)
+        first.write_text("x = 1\n")
+        second.write_text("y = 2\n")
+        write_cache(fake_root, ["ok_killed"])
+        commands: list[list[str]] = []
+
+        def fake_stream(cmd: list[str]) -> tuple[int, str]:
+            commands.append(cmd)
+            return (0, "")
+
+        monkeypatch.setattr(common, "stream_tool", fake_stream)
+        rel_a = "start_green_stay_green/a.py"
+        rel_b = "start_green_stay_green/b.py"
+
+        assert mutation.main(["--paths-to-mutate", rel_a, rel_b]) == 0
+
+        assert commands == [
+            [
+                "/fake/mutmut",
+                "run",
+                "--paths-to-mutate",
+                rel_a,
+                "--paths-to-mutate",
+                rel_b,
+            ]
+        ]
 
     def test_interrupt_cleans_cache(
         self, fake_root: Path, monkeypatch: pytest.MonkeyPatch

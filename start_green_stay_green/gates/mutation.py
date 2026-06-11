@@ -174,7 +174,10 @@ def _run_mutmut(mutmut: str, paths: list[str] | None) -> tuple[int, str]:
     """
     cmd = [mutmut, "run"]
     if paths:
-        cmd.append(f"--paths-to-mutate={' '.join(paths)}")
+        # One flag per path: mutmut does not split a joined value, so a
+        # single space-joined argument would name a nonexistent path.
+        for path in paths:
+            cmd.extend(["--paths-to-mutate", path])
     try:
         return common.stream_tool(cmd)
     except KeyboardInterrupt:

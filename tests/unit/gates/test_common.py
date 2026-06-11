@@ -59,10 +59,31 @@ class TestProjectRoot:
 
 
 class TestResolveTool:
-    def test_resolves_tool_next_to_interpreter(self) -> None:
+    def test_resolves_tool_from_active_environment(self) -> None:
+        """The live pytest binary resolves from the active environment.
+
+        Venvs co-locate tools with the interpreter (bin/ on POSIX,
+        ``Scripts`` on Windows venvs); Windows system installs keep them
+        in the ``Scripts`` subdirectory — all three layouts are valid.
+        """
         resolved = common.resolve_tool("pytest")
         assert resolved is not None
-        assert Path(resolved).parent == Path(sys.executable).parent
+        interpreter_dir = Path(sys.executable).parent
+        assert Path(resolved).parent in {
+            interpreter_dir,
+            interpreter_dir / "Scripts",
+        }
+
+    def test_windows_system_layout_checks_scripts_subdir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """System-install layout: python.exe above Scripts/<tool>.exe."""
+        scripts = tmp_path / "Scripts"
+        scripts.mkdir()
+        (scripts / "ruff.exe").write_text("")
+        monkeypatch.setattr(common, "is_windows", lambda: True)
+        monkeypatch.setattr(sys, "executable", str(tmp_path / "python.exe"))
+        assert common.resolve_tool("ruff") == str(scripts / "ruff.exe")
 
     def test_missing_tool_returns_none(self) -> None:
         assert common.resolve_tool("definitely-not-a-real-tool-382") is None

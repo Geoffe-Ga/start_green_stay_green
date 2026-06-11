@@ -94,7 +94,14 @@ def _metrics(pytest_tool: str) -> int:
             '"status": "unknown"}'
         )
         return 0
-    print(json.dumps(_coverage_json_metrics(report)))
+    try:
+        metrics = _coverage_json_metrics(report)
+    except (KeyError, json.JSONDecodeError) as exc:
+        # A schema drift or truncated report must read as a clean,
+        # diagnosable failure rather than a raw traceback.
+        print(f"✗ coverage.json is unreadable: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(metrics))
     return 0
 
 

@@ -100,9 +100,15 @@ def resolve_tool(name: str) -> str | None:
         installed.
     """
     suffix = ".exe" if is_windows() else ""
-    candidate = Path(sys.executable).parent / f"{name}{suffix}"
-    if candidate.exists():
-        return str(candidate)
+    interpreter_dir = Path(sys.executable).parent
+    candidates = [interpreter_dir / f"{name}{suffix}"]
+    if is_windows():
+        # System installs keep python.exe one level above Scripts\;
+        # venvs co-locate them. Check both before falling back to PATH.
+        candidates.append(interpreter_dir / "Scripts" / f"{name}{suffix}")
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
     return shutil.which(name)
 
 
