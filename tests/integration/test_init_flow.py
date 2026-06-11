@@ -43,7 +43,7 @@ def _stub_ci_step(
     project_path: Path,
     _project_name: str,
     _language: str,
-    _orchestrator: object,
+    _pass2: object,
     _file_writer: object = None,
 ) -> None:
     """Stub CI generation step that writes minimal valid workflow files.
@@ -52,7 +52,8 @@ def _stub_ci_step(
         project_path: Target project directory.
         _project_name: Project name (unused in stub).
         _language: Programming language (unused in stub).
-        _orchestrator: Mock orchestrator (unused in stub).
+        _pass2: Pass 2 options bundle — orchestrator plus the
+            ``--windows-ci`` flag (#388) — unused in stub.
         _file_writer: File writer (unused in stub).
     """
     workflows_dir = project_path / ".github" / "workflows"
