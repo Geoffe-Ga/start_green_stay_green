@@ -154,6 +154,49 @@ class TestScriptsReferences:
             assert "/p:CollectCoverage=true" in command
             assert "Threshold" not in command
 
+    def test_ruby_lint_script_runs_only_gemfile_backed_tools(
+        self, scripts_dir: Path
+    ) -> None:
+        """The ruby reference lint script invokes no missing gems (#374).
+
+        The generated Gemfile pins RuboCop only for linting — Reek is
+        not in the toolchain and Brakeman is Rails-specific (it errors
+        on plain-Ruby projects), so invoking either would fail on every
+        generated project. RuboCop's full cop set is the lint gate,
+        run with --force-exclusion — parity with the generated
+        scripts/lint.sh and reference/ci/ruby.yml.
+        """
+        content = (scripts_dir / "ruby" / "lint.sh").read_text()
+        commands = [
+            line for line in content.splitlines() if not line.lstrip().startswith("#")
+        ]
+        assert any("rubocop --force-exclusion" in c for c in commands)
+        assert not any("reek" in c for c in commands)
+        assert not any("brakeman" in c for c in commands)
+
+    def test_ruby_test_script_defers_the_coverage_bound_to_spec_helper(
+        self, scripts_dir: Path
+    ) -> None:
+        """The ruby reference test script never restates the threshold (#374).
+
+        The >=90% SimpleCov bound lives in spec/spec_helper.rb (its
+        single home); COVERAGE=true activates the gate without
+        duplicating the number, matching reference/ci/ruby.yml and the
+        generated scripts/test.sh. (rspec has no --minimum-coverage
+        flag — the pre-#374 invocation restated the threshold through
+        an option rspec would reject.)
+        """
+        content = (scripts_dir / "ruby" / "test.sh").read_text()
+        commands = [
+            line for line in content.splitlines() if not line.lstrip().startswith("#")
+        ]
+        test_runs = [c for c in commands if "rspec" in c]
+        assert test_runs, "test.sh must run rspec"
+        for command in test_runs:
+            assert "COVERAGE=true" in command
+            assert "minimum-coverage" not in command
+            assert "90" not in command
+
 
 class TestSkillsReferences:
     """Test skills references exist and have proper structure."""
