@@ -174,6 +174,10 @@ def _check_scripts_executable(project_dir: Path) -> list[str]:
 def _check_precommit_hooks(project_dir: Path) -> list[str]:
     """Check that the pre-commit config declares at least the minimum hooks.
 
+    A missing config file is not reported here: ``_check_required_files``
+    already reports it, so this check returns cleanly instead of crashing
+    with ``FileNotFoundError`` (#402).
+
     Args:
         project_dir: Root of the generated project.
 
@@ -181,6 +185,8 @@ def _check_precommit_hooks(project_dir: Path) -> list[str]:
         A list of failure messages (empty when enough hooks are declared).
     """
     config = project_dir / ".pre-commit-config.yaml"
+    if not config.is_file():
+        return []
     text = config.read_text(encoding="utf-8")
     hook_count = sum(
         1 for line in text.splitlines() if line.strip().startswith("- id:")
