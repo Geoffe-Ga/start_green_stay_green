@@ -17,6 +17,7 @@ from start_green_stay_green.generators.base import validate_language
 from start_green_stay_green.utils.cpp import TIZEN_API_VERSION
 from start_green_stay_green.utils.cpp import cpp_identifier
 from start_green_stay_green.utils.cpp import tizen_app_id
+from start_green_stay_green.utils.csharp import csharp_namespace
 from start_green_stay_green.utils.java import android_package
 from start_green_stay_green.utils.java import android_package_path
 from start_green_stay_green.utils.naming import pascal_case
@@ -66,9 +67,10 @@ class StructureGenerator(BaseGenerator):
     All 10 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin, cpp) are available at the generator level. Note that
     the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
-    architecture, and metrics steps for csharp and ruby —
+    architecture, and metrics steps for ruby —
     the CI workflow step covers every language. Kotlin (#357/#358),
-    C/C++ (#362/#363), and Java (#366/#367) run the full pipeline.
+    C/C++ (#362/#363), Java (#366/#367), and C# (#370) run the full
+    pipeline.
 
     Attributes:
         output_dir: Directory where structure will be created
@@ -791,16 +793,25 @@ public class MainActivity extends Activity {{
     def _csharp_program_cs(self) -> str:
         """Generate C# Program.cs content.
 
+        The namespace comes from the shared
+        :func:`~start_green_stay_green.utils.csharp.csharp_namespace`
+        helper so the structure, tests, and architecture generators can
+        never disagree on it, and ``Main`` is public because the
+        scaffolded xUnit test (``tests/MainTests.cs``) invokes it
+        directly — an implicitly private ``Main`` would be a guaranteed
+        compile error in the generated project (#370).
+
         Returns:
             Content for Program.cs with Hello World
         """
+        namespace = csharp_namespace(self.config.package_name)
         return f"""using System;
 
-namespace {self.config.package_name}
+namespace {namespace}
 {{
     class Program
     {{
-        static void Main(string[] args)
+        public static void Main(string[] args)
         {{
             Console.WriteLine("Hello from {self.config.project_name}!");
         }}

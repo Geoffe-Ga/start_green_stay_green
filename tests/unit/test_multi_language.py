@@ -332,12 +332,13 @@ class TestSequentialLanguageDetection:
 class TestGeneratorOnlyLanguagePipelineGates:
     """Pipeline steps skip gracefully for generator-only languages (#356).
 
-    csharp/ruby have structure/dependencies/tests/readme generators but
-    no pre-commit/scripts/metrics/architecture support — instead of
+    ruby has structure/dependencies/tests/readme generators but no
+    pre-commit/scripts/metrics/architecture support — instead of
     crashing init, those tooling steps must no-op with an informational
     message. Kotlin graduated from this set when #357 wired its quality
     tooling and #358 wired its CI workflow; java graduated with #367
-    (its CI workflow has been real since #366).
+    (its CI workflow has been real since #366); csharp graduated with
+    #370 (its CI workflow has been real since the foundation scaffold).
     """
 
     def test_precommit_step_writes_for_kotlin(self, tmp_path: Path) -> None:
@@ -527,4 +528,67 @@ class TestJavaPipelineGates:
         cli_mod._generate_architecture_step(tmp_path, "my-project", "java")
 
         template = tmp_path / "plans" / "architecture" / "ArchitectureTest.java"
+        assert template.exists()
+
+
+class TestCsharpPipelineGates:
+    """Pipeline steps all run for csharp after #370.
+
+    The foundation shipped structure/dependencies/tests/readme plus the
+    CI workflow (reference/ci/csharp.yml); #370 wired the pre-commit/
+    scripts/metrics/architecture tooling, so every step must now
+    generate real artifacts.
+    """
+
+    def test_precommit_step_writes_for_csharp(self, tmp_path: Path) -> None:
+        """csharp now generates a pre-commit config (#370)."""
+        cli_mod._generate_precommit_step(tmp_path, "my-project", "csharp")
+
+        config = tmp_path / ".pre-commit-config.yaml"
+        assert config.exists()
+        content = config.read_text()
+        assert "dotnet format" in content
+        assert "roslyn-analyzers" in content
+
+    def test_scripts_step_writes_csharp_scripts(self, tmp_path: Path) -> None:
+        """csharp now receives its own quality scripts (#370)."""
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "csharp")
+
+        test_script = tmp_path / "scripts" / "test.sh"
+        assert test_script.exists()
+        assert "dotnet test" in test_script.read_text()
+
+    def test_scripts_step_writes_analyzer_companions_at_project_root(
+        self, tmp_path: Path
+    ) -> None:
+        """The .editorconfig/CodeMetricsConfig.txt companions land at the root.
+
+        The csproj's AdditionalFiles entry and the Roslyn analyzers
+        resolve these files relative to the project root, not the
+        scripts directory.
+        """
+        cli_mod._generate_scripts_step(tmp_path, "my-project", "csharp")
+
+        assert (tmp_path / ".editorconfig").exists()
+        assert (tmp_path / "CodeMetricsConfig.txt").exists()
+
+    def test_ci_step_writes_csharp_workflow(self, tmp_path: Path) -> None:
+        """The csharp CI workflow is generated (ci.py has a csharp config)."""
+        cli_mod._generate_ci_step(tmp_path, "my-project", "csharp", None)
+
+        ci_file = tmp_path / ".github" / "workflows" / "ci.yml"
+        assert ci_file.exists()
+        assert "C# Quality Checks" in ci_file.read_text()
+
+    def test_metrics_step_writes_csharp_dashboard(self, tmp_path: Path) -> None:
+        """The metrics dashboard is now generated for csharp (#370)."""
+        cli_mod._generate_metrics_dashboard_step(tmp_path, "my-project", "csharp")
+
+        assert (tmp_path / "docs" / "metrics.json").exists()
+
+    def test_architecture_step_writes_csharp_rules(self, tmp_path: Path) -> None:
+        """Architecture rules are now generated for csharp (#370)."""
+        cli_mod._generate_architecture_step(tmp_path, "my-project", "csharp")
+
+        template = tmp_path / "plans" / "architecture" / "ArchitectureTest.cs"
         assert template.exists()

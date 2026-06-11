@@ -3,7 +3,7 @@
 Generates architecture validation configuration for import-linter (Python),
 dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust),
 SwiftLint custom rules (Swift), Konsist (Kotlin), a stdlib-Python
-include-boundary checker (C/C++), and ArchUnit (Java).
+include-boundary checker (C/C++), ArchUnit (Java), and NetArchTest (C#).
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 import warnings
 
+from start_green_stay_green.utils.csharp import csharp_namespace
 from start_green_stay_green.utils.java import android_package
 from start_green_stay_green.utils.java import android_package_path
 
@@ -31,7 +32,7 @@ class ArchitectureResult:
         output_dir: Directory containing generated files.
         files_created: List of files created.
         language: Target language (python, typescript, go, rust, swift,
-            kotlin, cpp, java).
+            kotlin, cpp, java, csharp).
     """
 
     output_dir: Path
@@ -175,6 +176,23 @@ _LANGUAGE_TOOLING: dict[str, _LanguageTooling] = {
         docs_url="https://www.archunit.org/",
         display_name="Java",
     ),
+    "csharp": _LanguageTooling(
+        # NetArchTest is the issue's first choice (ArchUnitNET is the
+        # alternative; it adds slices/cycle rules but a heavier API —
+        # the gap is documented in the generated test). Its 'config' is
+        # an xUnit test compiled into the project — the Konsist/ArchUnit
+        # precedent — so run_cmd carries no {config_file} placeholder
+        # and the one-time wiring lives in install_cmd. Unlike javac,
+        # C# namespaces carry no directory-matching requirement, so the
+        # flat copy into tests/ is correct and no {package_path}
+        # resolution is needed (the inverse of the Java entry).
+        tool="NetArchTest",
+        config_file="ArchitectureTest.cs",
+        install_cmd="cp plans/architecture/ArchitectureTest.cs tests/",
+        run_cmd="dotnet test --filter FullyQualifiedName~ArchitectureTest",
+        docs_url="https://github.com/BenMorris/NetArchTest",
+        display_name="C#",
+    ),
 }
 
 
@@ -185,8 +203,8 @@ class ArchitectureEnforcementGenerator:
     config for TypeScript, go-arch-lint config for Go, cargo-deny
     config for Rust, SwiftLint custom rules for Swift, a Konsist
     test for Kotlin, a runnable include-boundary checker for C/C++,
-    and an ArchUnit test for Java to enforce layer separation and
-    prevent circular dependencies.
+    an ArchUnit test for Java, and a NetArchTest test for C# to
+    enforce layer separation and prevent circular dependencies.
 
     Attributes:
         orchestrator: AI orchestrator for content generation.
@@ -234,7 +252,7 @@ class ArchitectureEnforcementGenerator:
 
         Args:
             language: Target language (python, typescript, go, rust,
-                swift, kotlin, cpp, java).
+                swift, kotlin, cpp, java, csharp).
             project_name: Name of the project.
 
         Returns:
@@ -262,6 +280,7 @@ class ArchitectureEnforcementGenerator:
             "kotlin": partial(self._generate_kotlin_config, project_name),
             "cpp": self._generate_cpp_config,
             "java": partial(self._generate_java_config, project_name),
+            "csharp": partial(self._generate_csharp_config, project_name),
         }
         files_created = config_builders[language]()
 
@@ -1058,6 +1077,153 @@ public class ArchitectureTest {{
         config_path.write_text(config_content)
         return [config_path]
 
+    def _generate_csharp_config(self, project_name: str) -> list[Path]:
+        """Generate the NetArchTest architecture test for C#.
+
+        NetArchTest (the issue's first choice; ArchUnitNET is the
+        documented alternative) expresses layer rules as an xUnit test
+        over the compiled assembly — the C# analogue of the Kotlin
+        Konsist and Java ArchUnit tests. The emitted file is a template
+        parked in ``plans/architecture``: it only enforces once copied
+        into ``tests/`` (the NetArchTest.Rules dependency is already
+        declared in the generated ``.csproj``). Unlike javac, C#
+        namespaces carry no directory-matching requirement, so the flat
+        copy is correct — the inverse of the Java package-path lesson.
+        The test documents its enforcement limits explicitly: compiled-
+        assembly analysis (reflection/DI invisible), namespace-
+        convention layers, the vacuous pass on still-empty layer
+        namespaces (the ``withOptionalLayers(true)`` analogue, with a
+        tighten-me note), and the missing slices/cycle rule (cycle
+        freedom among the four layers follows from the acyclic matrix;
+        ArchUnitNET is named for anything stronger). The dependency
+        matrix mirrors the Go/Java configs: presentation -> application
+        -> domain, with infrastructure allowed to depend on domain only.
+
+        Args:
+            project_name: Name of the project; layer namespaces derive
+                from its shared PascalCase namespace so the test stays
+                in sync with the scaffolded sources.
+
+        Returns:
+            List of files created.
+        """
+        config_path = self.output_dir / "ArchitectureTest.cs"
+
+        namespace = csharp_namespace(project_name)
+        config_content = f"""\
+// NetArchTest architecture test enforcing layered architecture.
+//
+// NetArchTest (https://github.com/BenMorris/NetArchTest) expresses
+// layer rules as an xUnit test over the compiled assembly — the C#
+// analogue of the Kotlin Konsist and Java ArchUnit tests.
+//
+// Wiring (one-time): this file is a template parked in
+// plans/architecture; it only enforces once it lives in the test
+// tree. C# namespaces carry no directory-matching requirement
+// (unlike Java packages), so a flat copy is correct:
+//   cp plans/architecture/ArchitectureTest.cs tests/
+//   dotnet test --filter FullyQualifiedName~ArchitectureTest
+// The NetArchTest.Rules dependency is already declared in the
+// generated .csproj.
+//
+// Enforcement limits (documented, not hidden):
+//   - NetArchTest analyzes the compiled assembly (via Mono.Cecil), so
+//     the project must build first (dotnet test does); dependencies
+//     created via reflection or dependency-injection wiring are
+//     invisible.
+//   - Layers are defined by the namespace convention below
+//     ({namespace}.<Layer>); code outside those namespaces is
+//     unchecked.
+//   - A rule whose namespace selects no types yet passes vacuously —
+//     the pragmatic warn-first default (the ArchUnit
+//     withOptionalLayers(true) analogue). Tighten by asserting
+//     result.SelectedTypesForTesting is non-empty once every layer
+//     namespace has code.
+//   - NetArchTest has no slices/cycle rule. Cycle freedom among the
+//     four layers follows from the acyclic dependency matrix below,
+//     but arbitrary namespace cycles outside it go unchecked — and
+//     the C# compiler does NOT reject namespace cycles, so that gap
+//     cannot be attributed to the build system. ArchUnitNET
+//     (https://archunitnet.readthedocs.io/) adds true cycle slices if
+//     this project ever needs them.
+//
+// Dependency matrix (mirrors the Go/Java configs):
+//   Presentation   -> Application, Domain
+//   Application    -> Domain
+//   Infrastructure -> Domain
+//   Domain         -> (nothing)
+using NetArchTest.Rules;
+using Xunit;
+
+namespace {namespace}.Architecture
+{{
+    public class ArchitectureTest
+    {{
+        private const string BaseNamespace = "{namespace}";
+
+        private static Types ProjectTypes() =>
+            Types.InAssembly(typeof(ArchitectureTest).Assembly);
+
+        private static string Offenders(TestResult result) =>
+            result.FailingTypeNames == null
+                ? "(none reported)"
+                : string.Join(", ", result.FailingTypeNames);
+
+        [Fact]
+        public void DomainDoesNotDependOnOuterLayers()
+        {{
+            var result = ProjectTypes()
+                .That().ResideInNamespaceStartingWith(BaseNamespace + ".Domain")
+                .ShouldNot().HaveDependencyOnAny(
+                    BaseNamespace + ".Application",
+                    BaseNamespace + ".Presentation",
+                    BaseNamespace + ".Infrastructure")
+                .GetResult();
+
+            Assert.True(
+                result.IsSuccessful,
+                "Domain must stay pure; offenders: " + Offenders(result));
+        }}
+
+        [Fact]
+        public void ApplicationDependsOnlyInward()
+        {{
+            var result = ProjectTypes()
+                .That().ResideInNamespaceStartingWith(BaseNamespace + ".Application")
+                .ShouldNot().HaveDependencyOnAny(
+                    BaseNamespace + ".Presentation",
+                    BaseNamespace + ".Infrastructure")
+                .GetResult();
+
+            Assert.True(
+                result.IsSuccessful,
+                "Application may depend on Domain only; offenders: "
+                    + Offenders(result));
+        }}
+
+        [Fact]
+        public void InfrastructureDependsOnlyOnDomain()
+        {{
+            var result = ProjectTypes()
+                .That()
+                .ResideInNamespaceStartingWith(BaseNamespace + ".Infrastructure")
+                .ShouldNot().HaveDependencyOnAny(
+                    BaseNamespace + ".Presentation",
+                    BaseNamespace + ".Application")
+                .GetResult();
+
+            Assert.True(
+                result.IsSuccessful,
+                "Infrastructure may depend on Domain only; offenders: "
+                    + Offenders(result));
+        }}
+    }}
+}}
+"""
+
+        config_path.write_text(config_content)
+        return [config_path]
+
     def _generate_readme(self, language: str, project_name: str) -> Path:
         """Generate README with usage instructions.
 
@@ -1146,6 +1312,7 @@ Edit the configuration file:
 - Kotlin: `ArchitectureTest.kt`
 - C/C++: `check_architecture.py` (the ALLOWED_DEPENDENCIES matrix at the top)
 - Java: `ArchitectureTest.java` (the layered-architecture rules in the test)
+- C#: `ArchitectureTest.cs` (the NetArchTest rules in the test)
 
 See documentation:
 - Python: https://import-linter.readthedocs.io/
@@ -1156,6 +1323,7 @@ See documentation:
 - Kotlin: https://docs.konsist.lemonappdev.com/
 - C/C++: the header comment in check_architecture.py (self-documented)
 - Java: https://www.archunit.org/
+- C#: https://github.com/BenMorris/NetArchTest
 
 ## Integration
 

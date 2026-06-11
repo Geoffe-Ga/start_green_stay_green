@@ -1375,6 +1375,234 @@ class TestArchitectureEnforcementGeneratorJava:
         assert result.language == "java"
 
 
+class TestArchitectureEnforcementGeneratorCsharp:
+    """Test C#-specific architecture rules (#370)."""
+
+    @staticmethod
+    def _generate(tmp_path: Path, project_name: str = "my-app") -> Path:
+        """Generate the C# architecture config and return its directory."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+        generator.generate(language="csharp", project_name=project_name)
+        return output_dir
+
+    def test_generate_csharp_creates_netarchtest_test(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test generating the NetArchTest architecture test for C#."""
+        output_dir = self._generate(tmp_path)
+
+        config_file = output_dir / "ArchitectureTest.cs"
+        assert config_file.exists()
+
+        # Should create README and run script
+        assert (output_dir / "README.md").exists()
+        assert (output_dir / "run-check.sh").exists()
+
+    def test_csharp_config_is_structurally_valid_csharp(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """ArchitectureTest.cs must be structurally valid C# source.
+
+        There is no C# parser in the test environment, so validity is
+        checked structurally (the Kotlin/Java precedent): balanced
+        braces/parentheses, usings before the namespace declaration,
+        and no unrendered template placeholders.
+        """
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.cs").read_text()
+        code_lines = [
+            line
+            for line in source.splitlines()
+            if line.strip() and not line.lstrip().startswith(("//", "*", "/*"))
+        ]
+        code = "\n".join(code_lines)
+
+        assert code.count("{") == code.count("}")
+        assert code.count("(") == code.count(")")
+        # Usings come first, then the namespace, then the class.
+        assert code_lines[0].startswith("using ")
+        using_lines = [line for line in code_lines if line.startswith("using ")]
+        assert using_lines
+        assert all(line.rstrip().endswith(";") for line in using_lines)
+        assert code.index("using ") < code.index("namespace ")
+        assert code.index("namespace ") < code.index("public class ArchitectureTest")
+        assert "[Fact]" in code
+        # No unrendered Python format placeholders may survive.
+        assert "{namespace}" not in source
+
+    def test_csharp_config_uses_netarchtest_api(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The test drives NetArchTest's fluent rules API."""
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.cs").read_text()
+        assert "using NetArchTest.Rules;" in source
+        assert "using Xunit;" in source
+        assert "Types.InAssembly(" in source
+        assert ".GetResult()" in source
+        assert ".IsSuccessful" in source
+
+    def test_csharp_config_enforces_layer_separation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test C# config encodes the four-layer inward-only matrix."""
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.cs").read_text()
+        for layer in ("Domain", "Application", "Presentation", "Infrastructure"):
+            assert f'"{layer}"' in source or f".{layer}" in source
+        # Domain must not reach any outer layer; application must not
+        # reach presentation/infrastructure; infrastructure must not
+        # reach presentation/application.
+        assert ".ShouldNot()" in source
+        assert ".HaveDependencyOnAny(" in source
+
+    def test_csharp_config_documents_cycle_rule_gap(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The test discloses how cycle freedom is (and is not) covered.
+
+        NetArchTest has no slices/cycle rule (ArchUnitNET does — the
+        documented alternative): cycle freedom among the four layers
+        follows from the acyclic dependency matrix, but arbitrary
+        namespace cycles outside it go unchecked, and the C# compiler
+        does NOT reject namespace cycles, so the limit must be stated
+        rather than attributed to the build system.
+        """
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.cs").read_text()
+        assert "ArchUnitNET" in source
+        assert "does NOT reject" in source
+        assert "acyclic" in source
+
+    def test_csharp_config_derives_layer_namespaces_from_project_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Layer namespaces come from the shared csharp_namespace helper.
+
+        A hyphenated project name must produce the PascalCase namespace
+        (my-app -> MyApp), keeping the architecture test in sync with
+        the scaffolded sources.
+        """
+        output_dir = self._generate(tmp_path, project_name="my-app")
+
+        source = (output_dir / "ArchitectureTest.cs").read_text()
+        assert '"MyApp"' in source
+        assert "namespace MyApp.Architecture" in source
+
+    def test_csharp_config_documents_compiled_assembly_limits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The test documents what NetArchTest cannot enforce.
+
+        NetArchTest analyzes the compiled assembly (via Mono.Cecil), so
+        the generated test must disclose that reflection/DI wiring is
+        invisible and that the project must build first.
+        """
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.cs").read_text()
+        assert "reflection" in source
+        assert "compiled" in source
+
+    def test_csharp_config_documents_wiring_requirement(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The test discloses it only enforces once copied into tests/.
+
+        Unlike javac, C# namespaces carry no directory-matching
+        requirement, so the flat copy is correct (and the template says
+        so — the inverse of the Java package-path lesson).
+        """
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.cs").read_text()
+        assert "cp plans/architecture/ArchitectureTest.cs tests/" in source
+        assert "directory" in source
+
+    def test_csharp_config_documents_vacuous_pass_default(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The warn-first empty-namespace default carries a tighten note.
+
+        NetArchTest rules pass vacuously when a layer namespace has no
+        types yet (the withOptionalLayers(true) analogue), so the test
+        must disclose it and point at the tighten-me path.
+        """
+        output_dir = self._generate(tmp_path)
+
+        source = (output_dir / "ArchitectureTest.cs").read_text()
+        assert "vacuous" in source
+        assert "Tighten" in source
+
+    def test_csharp_readme_mentions_netarchtest(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the C# README references the NetArchTest tooling."""
+        output_dir = self._generate(tmp_path)
+
+        readme = (output_dir / "README.md").read_text()
+        assert "NetArchTest" in readme
+        assert "ArchitectureTest.cs" in readme
+
+    def test_csharp_run_script_probes_dotnet(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the C# run-check.sh probes the dotnet binary."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "command -v dotnet" in script
+
+    def test_csharp_run_script_filters_to_architecture_test(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the C# run-check.sh runs only the architecture test."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "--filter" in script
+        assert "ArchitectureTest" in script
+
+    def test_csharp_run_script_uses_display_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the C# run-check.sh announces the 'C#' display name."""
+        output_dir = self._generate(tmp_path)
+
+        script = (output_dir / "run-check.sh").read_text()
+        assert "Checking C# architecture" in script
+
+    def test_csharp_result_reports_csharp_language(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the result object records the csharp language."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        result = generator.generate(language="csharp", project_name="my-app")
+
+        assert result.language == "csharp"
+
+
 class TestArchitectureEnforcementGeneratorTypeScript:
     """Test TypeScript-specific architecture rules."""
 
@@ -1425,6 +1653,7 @@ class TestLanguageTooling:
             ("kotlin", "Kotlin"),
             ("cpp", "C/C++"),
             ("java", "Java"),
+            ("csharp", "C#"),
         ],
     )
     def test_each_tooling_carries_a_display_name(
@@ -1469,6 +1698,21 @@ class TestLanguageTooling:
         tooling = _LANGUAGE_TOOLING["java"]
         assert "{config_file}" not in tooling.run_cmd
         assert f"plans/architecture/{tooling.config_file}" in tooling.install_cmd
+
+    def test_csharp_install_cmd_carries_the_config_path(self) -> None:
+        """C# references its config via install_cmd, not run_cmd (#370).
+
+        NetArchTest's 'config' is an xUnit test compiled into the
+        project — the Konsist/ArchUnit precedent — so the dotnet run
+        command takes no config-file flag and the wiring step (the flat
+        copy into tests/) lives in install_cmd. Unlike javac, C#
+        namespaces carry no directory-matching requirement, so the
+        flat copy needs no {package_path} resolution.
+        """
+        tooling = _LANGUAGE_TOOLING["csharp"]
+        assert "{config_file}" not in tooling.run_cmd
+        assert f"plans/architecture/{tooling.config_file}" in tooling.install_cmd
+        assert "{package_path}" not in tooling.install_cmd
 
     def test_java_install_cmd_resolves_package_matched_path(self) -> None:
         """Java's install command targets the package-matching directory.

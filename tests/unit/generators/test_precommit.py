@@ -1006,6 +1006,136 @@ class TestGenerateWithJava:
         assert any("shellcheck-py" in url for url in repo_urls)
 
 
+class TestGenerateWithCsharp:
+    """Test content generation for C# projects (#370)."""
+
+    @staticmethod
+    def _parsed_repos(generator: PreCommitGenerator) -> list[dict[str, Any]]:
+        """Generate the csharp config and return its parsed repos list."""
+        config = GenerationConfig(
+            project_name="csharp-project",
+            language="csharp",
+            language_config={},
+        )
+        result = generator.generate(config)
+        yaml_content = "\n".join(
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        )
+        parsed = yaml.safe_load(yaml_content)
+        return list(parsed["repos"])
+
+    def _local_repo(self, generator: PreCommitGenerator) -> dict[str, Any]:
+        """Return the ``repo: local`` block from the csharp config."""
+        repos = self._parsed_repos(generator)
+        return next(repo for repo in repos if repo.get("repo") == "local")
+
+    def test_generate_csharp_content_is_valid_yaml(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Generated csharp pre-commit config must be parseable YAML."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        assert isinstance(repos, list)
+        assert repos
+
+    def test_csharp_dotnet_format_hook_fails_on_unformatted(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """The formatter hook is check-mode and fails on unformatted files.
+
+        A bare ``dotnet format`` rewrites files and exits 0 either way,
+        so it could never fail a commit; the hook must use
+        ``--verify-no-changes``, which exits non-zero when formatting
+        is needed (scripts/format.sh keeps the fixing path).
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        local_repo = self._local_repo(generator)
+        formatter = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "dotnet-format"
+        )
+        assert "--verify-no-changes" in formatter["entry"]
+        assert formatter["entry"].startswith("dotnet format")
+
+    def test_csharp_roslyn_hook_builds_with_manifest_owned_gate(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """The lint hook is a plain build; the csproj owns the policy.
+
+        Roslyn analyzers (SDK rules, CA1502 complexity, SecurityCodeScan)
+        all run inside the compiler, and the generated csproj sets
+        TreatWarningsAsErrors — so `dotnet build` IS the failing lint
+        gate and the hook must not restate any -warnaserror flag
+        (single home: the csproj).
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        local_repo = self._local_repo(generator)
+        linter = next(
+            hook for hook in local_repo["hooks"] if hook.get("id") == "roslyn-analyzers"
+        )
+        assert linter["entry"].startswith("dotnet build")
+        assert "warnaserror" not in linter["entry"]
+
+    def test_csharp_local_hooks_run_once_per_commit(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """dotnet hooks operate on the project, not on filenames.
+
+        ``dotnet format`` and ``dotnet build`` take a project (not a
+        file list), so the hooks must set ``pass_filenames: false`` and
+        scope themselves to C# sources via types — otherwise pre-commit
+        would append staged paths as misparsed CLI arguments.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        local_repo = self._local_repo(generator)
+        for hook in local_repo["hooks"]:
+            assert hook["pass_filenames"] is False, f"{hook['id']} passes filenames"
+            assert hook["language"] == "system", f"{hook['id']} not language: system"
+            assert hook["types"] == ["c#"], f"{hook['id']} missing c# types"
+
+    def test_generate_csharp_includes_check_xml(self, mock_orchestrator: Mock) -> None:
+        """The csproj manifest's XML well-formedness is gated via check-xml.
+
+        identify tags ``.csproj`` files as xml, so the stock check-xml
+        hook covers the manifest (the AndroidManifest/tizen-manifest
+        precedent) without a files override.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        standard_repo = next(
+            repo for repo in repos if "pre-commit-hooks" in repo.get("repo", "")
+        )
+        hook_ids = [hook.get("id", "") for hook in standard_repo.get("hooks", [])]
+        assert "check-xml" in hook_ids
+
+    def test_generate_csharp_includes_gitleaks(self, mock_orchestrator: Mock) -> None:
+        """Test generated csharp config includes the gitleaks secrets hook."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        gitleaks_repo = next(
+            (repo for repo in repos if "gitleaks/gitleaks" in repo.get("repo", "")),
+            None,
+        )
+        assert gitleaks_repo is not None
+        hook_ids = [hook.get("id", "") for hook in gitleaks_repo.get("hooks", [])]
+        assert "gitleaks" in hook_ids
+
+    def test_generate_csharp_includes_detect_secrets(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """csharp keeps the detect-secrets hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("Yelp/detect-secrets" in url for url in repo_urls)
+
+    def test_generate_csharp_includes_shellcheck(self, mock_orchestrator: Mock) -> None:
+        """csharp keeps the shellcheck hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("shellcheck-py" in url for url in repo_urls)
+
+
 class TestValidateLanguage:
     """Test language validation functionality."""
 
@@ -1151,11 +1281,19 @@ class TestGetSupportedLanguages:
         result = generator.get_supported_languages()
         assert "java" in result
 
+    def test_get_supported_languages_includes_csharp(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Test get_supported_languages includes csharp (#370)."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        result = generator.get_supported_languages()
+        assert "csharp" in result
+
     def test_get_supported_languages_exact_count(self, mock_orchestrator: Mock) -> None:
         """Test get_supported_languages returns expected count."""
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_supported_languages()
-        assert len(result) == 8
+        assert len(result) == 9
 
     def test_get_supported_languages_no_duplicates(
         self, mock_orchestrator: Mock

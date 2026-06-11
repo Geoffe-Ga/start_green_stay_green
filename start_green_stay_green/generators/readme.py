@@ -70,9 +70,10 @@ class ReadmeGenerator(BaseGenerator):
     All 10 supported languages (python, typescript, go, rust, java, csharp,
     ruby, swift, kotlin, cpp) are available at the generator level. Note that
     the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
-    architecture, and metrics steps for csharp and ruby —
+    architecture, and metrics steps for ruby —
     the CI workflow step covers every language. Kotlin (#357/#358),
-    C/C++ (#362/#363), and Java (#366/#367) run the full pipeline.
+    C/C++ (#362/#363), Java (#366/#367), and C# (#370) run the full
+    pipeline.
 
     Attributes:
         output_dir: Directory where README.md will be created
@@ -1021,13 +1022,22 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
     def _csharp_readme_content(self) -> str:
         """Generate C# README.md content.
 
+        Truthfully advertises the #370 quality toolchain: every
+        artifact the README names (pre-commit hooks, quality scripts,
+        the analyzer companions, the NetArchTest template, the CI
+        workflow) is generated next to it, and the numeric gates are
+        described by pointing at their single homes (the csproj for
+        coverage, CodeMetricsConfig.txt for complexity) rather than
+        inventing another copy.
+
         Returns:
             Content for README.md
         """
         # Convert project name to title case for display
         display_name = self.config.project_name.replace("-", " ").title()
+        project = self.config.project_name
 
-        return f"""# {self.config.project_name}
+        return f"""# {project}
 
 {display_name} - A quality-controlled C# project generated with
 Start Green Stay Green.
@@ -1036,12 +1046,17 @@ Start Green Stay Green.
 
 This project was generated with maximum quality standards from day one, including:
 
-- ✅ Comprehensive testing infrastructure (xUnit with 90%+ coverage requirement)
-- ✅ Code quality tools (Roslyn analyzers, dotnet format)
-- ✅ Security scanning (dotnet list package --vulnerable)
-- ✅ Type safety (C#'s strong typing system)
-- ✅ Pre-commit hooks (quality checks)
-- ✅ CI/CD pipeline (GitHub Actions)
+- ✅ Comprehensive testing infrastructure (xUnit; ≥90% line coverage
+  enforced by Coverlet — the bound lives in `{project}.csproj`)
+- ✅ Code quality tools (Roslyn analyzers as errors, dotnet format,
+  cyclomatic complexity ≤10 via the CA1502 rule)
+- ✅ Security scanning (SecurityCodeScan analyzer in every build +
+  `dotnet list package --vulnerable` in `scripts/security.sh`)
+- ✅ Pre-commit hooks (`.pre-commit-config.yaml`)
+- ✅ Quality scripts (`./scripts/check-all.sh` and friends)
+- ✅ Architecture enforcement (NetArchTest template in
+  `plans/architecture/`)
+- ✅ CI/CD pipeline (`.github/workflows/ci.yml`)
 - ✅ AI-assisted development (Claude Code skills and subagents)
 
 ## Installation
@@ -1049,7 +1064,7 @@ This project was generated with maximum quality standards from day one, includin
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd {self.config.project_name}
+cd {project}
 
 # Restore dependencies
 dotnet restore
@@ -1068,7 +1083,7 @@ dotnet run
 
 Expected output:
 ```
-Hello from {self.config.project_name}!
+Hello from {project}!
 ```
 
 ## Development
@@ -1076,48 +1091,79 @@ Hello from {self.config.project_name}!
 ### Running Quality Checks
 
 ```bash
+# Everything at once (format, lint, tests + coverage, security)
+./scripts/check-all.sh
+
 # Run all tests
 dotnet test
 
-# Run tests with coverage
-dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=opencover
+# Run tests with the ≥90% coverage gate (the bound lives in
+# {project}.csproj — Threshold/ThresholdType/ThresholdStat — its
+# single home; nothing on the command line restates it)
+dotnet test /p:CollectCoverage=true
 
-# Format code
+# Format code (fix in place)
 dotnet format
 
-# Check formatting
+# Check formatting (exits non-zero on unformatted code; this is what
+# the pre-commit hook runs)
 dotnet format --verify-no-changes
 
-# Build project
+# Lint: the Roslyn analyzers run inside the compiler, and the csproj
+# treats warnings as errors, so a plain build IS the lint gate
 dotnet build
-
-# Build for release
-dotnet build -c Release
 ```
 
 ### Quality Tools
 
 This project includes:
 
-- **xUnit**: Testing framework with 90%+ coverage requirement
-- **Coverlet**: Code coverage tool
-- **Roslyn Analyzers**: Static code analysis
-- **dotnet format**: Code formatter
-- **NuGet**: Package management with vulnerability scanning
+- **xUnit**: Testing framework
+- **Coverlet** (`coverlet.msbuild`): Coverage with the ≥90% line bound
+  pinned in `{project}.csproj`
+- **Roslyn analyzers**: Static analysis in every `dotnet build`, with
+  warnings promoted to errors by the csproj
+- **CA1502 complexity gate**: Cyclomatic complexity ≤10; the rule is
+  enabled in `.editorconfig` and its threshold lives in
+  `CodeMetricsConfig.txt` (the single home of the number)
+- **SecurityCodeScan**: Source-level security analysis as a Roslyn
+  analyzer
+- **dotnet format**: Code formatter (reads `.editorconfig`)
+- **NetArchTest**: Architecture rules as an xUnit test (see below)
+- **NuGet**: Package management; `scripts/security.sh` scans for
+  vulnerable packages (needs network access — it warns and skips
+  offline)
+
+### Architecture Enforcement
+
+`plans/architecture/ArchitectureTest.cs` is a NetArchTest xUnit test
+template enforcing the layered architecture. Wire it once:
+
+```bash
+# C# namespaces carry no directory-matching requirement, so a flat
+# copy is correct:
+cp plans/architecture/ArchitectureTest.cs tests/
+dotnet test --filter FullyQualifiedName~ArchitectureTest
+```
+
+See `plans/architecture/README.md` for the layer matrix and the
+documented enforcement limits.
 
 ### Project Structure
 
 ```
-{self.config.project_name}/
+{project}/
 ├── src/                  # Application source code
 │   └── Program.cs
-├── tests/                # Test suite
-│   └── UnitTests.cs
+├── tests/                # Test suite (xUnit)
+│   └── MainTests.cs
 ├── scripts/              # Quality control scripts
+├── plans/architecture/   # NetArchTest template + runner
 ├── .github/workflows/    # CI/CD pipelines
 ├── .claude/              # AI subagents and skills
-├── {self.config.project_name}.sln  # Solution file
-└── {self.config.project_name}.csproj  # Project file
+├── .editorconfig         # Roslyn analyzer severities (enables CA1502)
+├── CodeMetricsConfig.txt # CA1502 complexity threshold (≤10)
+└── {project}.csproj  # Project file (coverage gate + analyzer policy)
 ```
 
 ### Testing
@@ -1126,7 +1172,7 @@ This project includes:
 # Run all tests
 dotnet test
 
-# Run tests with coverage
+# Run tests with coverage (gate enforced by the csproj)
 dotnet test /p:CollectCoverage=true
 
 # Run tests with verbose output
@@ -1140,9 +1186,12 @@ dotnet test --filter "FullyQualifiedName~TestName"
 
 This project maintains MAXIMUM QUALITY standards:
 
-- **Test Coverage**: ≥90% required
-- **Type Safety**: 100% compile-time type checking
-- **All Analyzers**: Must pass with zero violations
+- **Test Coverage**: ≥90% required (Coverlet, bound in the csproj)
+- **Complexity**: ≤10 per method (CA1502, bound in
+  CodeMetricsConfig.txt)
+- **Type Safety**: 100% compile-time type checking (nullable enabled)
+- **All Analyzers**: Must pass with zero violations (warnings are
+  errors)
 - **Code Style**: Enforced by dotnet format
 
 ## License
