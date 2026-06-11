@@ -1136,6 +1136,107 @@ class TestGenerateWithCsharp:
         assert any("shellcheck-py" in url for url in repo_urls)
 
 
+class TestGenerateWithRuby:
+    """Test content generation for Ruby projects (#373)."""
+
+    @staticmethod
+    def _parsed_repos(generator: PreCommitGenerator) -> list[dict[str, Any]]:
+        """Generate the ruby config and return its parsed repos list."""
+        config = GenerationConfig(
+            project_name="ruby-project",
+            language="ruby",
+            language_config={},
+        )
+        result = generator.generate(config)
+        yaml_content = "\n".join(
+            line for line in result["content"].split("\n") if not line.startswith("#")
+        )
+        parsed = yaml.safe_load(yaml_content)
+        return list(parsed["repos"])
+
+    def _rubocop_repo(self, generator: PreCommitGenerator) -> dict[str, Any]:
+        """Return the rubocop repo block from the ruby config."""
+        repos = self._parsed_repos(generator)
+        return next(repo for repo in repos if "rubocop/rubocop" in repo.get("repo", ""))
+
+    def test_generate_ruby_content_is_valid_yaml(self, mock_orchestrator: Mock) -> None:
+        """Generated ruby pre-commit config must be parseable YAML."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        assert isinstance(repos, list)
+        assert repos
+
+    def test_ruby_uses_the_official_rubocop_hook_repo(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """RuboCop comes from its official hook repo at a pinned tag.
+
+        rubocop/rubocop ships a .pre-commit-hooks.yaml at its repo root
+        (verified at the pinned tag), so unlike the other languages no
+        `repo: local` system hook is needed — pre-commit builds an
+        isolated gem environment from the tag, and the RuboCop version
+        can never drift from the rev.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        rubocop_repo = self._rubocop_repo(generator)
+        assert rubocop_repo["rev"].startswith("v")
+        hook_ids = {hook["id"] for hook in rubocop_repo["hooks"]}
+        assert hook_ids == {"rubocop"}
+
+    def test_ruby_rubocop_hook_is_check_mode(self, mock_orchestrator: Mock) -> None:
+        """The rubocop hook can actually fail on offenses.
+
+        The upstream manifest's DEFAULT args include --autocorrect — a
+        fixing mode that rewrites correctable offenses instead of
+        failing on them (the #430 formatter lesson). The hook must
+        override args so plain check-mode rubocop runs, exiting
+        non-zero on ANY offense; scripts/format.sh keeps the
+        --autocorrect fixing path.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        rubocop_repo = self._rubocop_repo(generator)
+        hook = next(h for h in rubocop_repo["hooks"] if h["id"] == "rubocop")
+        assert "--autocorrect" not in hook["args"]
+        assert "-a" not in hook["args"]
+        assert "--force-exclusion" in hook["args"]
+
+    def test_ruby_hook_restates_no_thresholds(self, mock_orchestrator: Mock) -> None:
+        """.rubocop.yml is the single home of the RuboCop policy.
+
+        The complexity bound (Metrics/CyclomaticComplexity <=10) and
+        every other cop setting live in the generated .rubocop.yml; the
+        hook must not restate any of it via CLI flags.
+        """
+        generator = PreCommitGenerator(mock_orchestrator)
+        rubocop_repo = self._rubocop_repo(generator)
+        hook = next(h for h in rubocop_repo["hooks"] if h["id"] == "rubocop")
+        assert not any("--only" in arg for arg in hook["args"])
+        assert not any("Metrics" in arg for arg in hook["args"])
+
+    def test_generate_ruby_includes_gitleaks(self, mock_orchestrator: Mock) -> None:
+        """ruby keeps the gitleaks hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("gitleaks" in url for url in repo_urls)
+
+    def test_generate_ruby_includes_detect_secrets(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """ruby keeps the detect-secrets hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("Yelp/detect-secrets" in url for url in repo_urls)
+
+    def test_generate_ruby_includes_shellcheck(self, mock_orchestrator: Mock) -> None:
+        """ruby keeps the shellcheck hook shared by every language."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        repos = self._parsed_repos(generator)
+        repo_urls = [repo.get("repo", "") for repo in repos]
+        assert any("shellcheck-py" in url for url in repo_urls)
+
+
 class TestValidateLanguage:
     """Test language validation functionality."""
 
@@ -1290,10 +1391,10 @@ class TestGetSupportedLanguages:
         assert "csharp" in result
 
     def test_get_supported_languages_exact_count(self, mock_orchestrator: Mock) -> None:
-        """Test get_supported_languages returns expected count."""
+        """get_supported_languages count is exact (ruby joined with #373)."""
         generator = PreCommitGenerator(mock_orchestrator)
         result = generator.get_supported_languages()
-        assert len(result) == 9
+        assert len(result) == 10
 
     def test_get_supported_languages_no_duplicates(
         self, mock_orchestrator: Mock

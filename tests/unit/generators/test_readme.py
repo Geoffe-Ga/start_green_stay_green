@@ -709,6 +709,98 @@ class TestCsharpReadme:
             assert "src/Program.cs" in content or "Program.cs" in content
 
 
+class TestRubyReadme:
+    """Test the Ruby README content (#373)."""
+
+    @staticmethod
+    def _readme_content(tmpdir: str) -> str:
+        """Generate the ruby README and return its text.
+
+        Args:
+            tmpdir: Directory to generate into.
+
+        Returns:
+            The rendered README.md content.
+        """
+        config = ReadmeConfig(
+            project_name="test-project",
+            language="ruby",
+            package_name="test_project",
+        )
+        files = ReadmeGenerator(Path(tmpdir), config).generate()
+        readme_path: Path = files["README.md"]
+        return readme_path.read_text()
+
+    def test_ruby_readme_advertises_the_wired_quality_tooling(self) -> None:
+        """README advertises the #373 quality tooling as real.
+
+        With the #373 toolchain (the RuboCop pre-commit hook, quality
+        scripts, the SimpleCov coverage gate, the Packwerk architecture
+        configs) and the foundation CI pipeline both generated, every
+        advertised item is real — the Kotlin (#360) / C/C++ (#365) /
+        Java (#367) / C# (#370) precedent.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert ".github/workflows/ci.yml" in content
+            assert "./scripts/check-all.sh" in content
+            assert "Packwerk" in content
+            assert "plans/architecture" in content
+            assert ".rubocop.yml" in content
+
+    def test_ruby_readme_documents_bundler_usage(self) -> None:
+        """README documents the bundler-driven quality commands."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "bundle install" in content
+            assert "bundle exec rspec" in content
+            assert "bundle exec rubocop" in content
+            assert "COVERAGE=true bundle exec rspec" in content
+
+    def test_ruby_readme_documents_threshold_homes(self) -> None:
+        """README points at the single homes of the numeric gates.
+
+        The >=90% coverage bound lives in spec/spec_helper.rb and the
+        <=10 complexity bound in .rubocop.yml; the README must direct
+        readers there rather than inventing a third home.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "spec_helper.rb" in content
+            assert "Metrics/CyclomaticComplexity" in content
+
+    def test_ruby_readme_structure_matches_generated_tree(self) -> None:
+        """README's structure block names only files init generates.
+
+        The truthfulness contract: the scaffold is lib/{package}.rb and
+        spec/{package}_spec.rb, no Gemfile.lock is generated, and Reek/
+        Sorbet/RBS are not wired — the pre-#373 README claimed all of
+        them.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "lib/main.rb" not in content
+            assert "main_spec.rb" not in content
+            assert "Gemfile.lock" not in content
+            assert "Reek" not in content
+            assert "Sorbet" not in content
+            assert "lib/test_project.rb" in content
+            assert "test_project_spec.rb" in content
+
+    def test_ruby_readme_is_honest_about_brakeman(self) -> None:
+        """Brakeman is documented as Rails-only, not advertised as wired.
+
+        brakeman errors on non-Rails projects, so the README must
+        position it as the add-on for when Rails is adopted while
+        bundler-audit is the real generated security gate.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            content = self._readme_content(tmpdir)
+            assert "bundler-audit" in content
+            assert "Brakeman" in content
+            assert "Rails" in content
+
+
 class TestCppReadme:
     """Test C/C++ Tizen-specific README content (#361/#362)."""
 

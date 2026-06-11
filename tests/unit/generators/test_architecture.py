@@ -94,11 +94,15 @@ class TestArchitectureEnforcementGeneratorGenerate:
         assert dc_file.exists()
 
     def test_generate_raises_on_unsupported_language(self) -> None:
-        """Test generate raises ValueError for unsupported languages."""
+        """Test generate raises ValueError for unsupported languages.
+
+        ruby graduated to a real Packwerk config with #373, so the
+        probe uses php — a language with no architecture tooling.
+        """
         generator = ArchitectureEnforcementGenerator()
 
         with pytest.raises(ValueError, match="Unsupported language"):
-            generator.generate(language="ruby", project_name="test")
+            generator.generate(language="php", project_name="test")
 
     def test_generate_creates_readme_with_usage_instructions(
         self,
@@ -1603,6 +1607,154 @@ class TestArchitectureEnforcementGeneratorCsharp:
         assert result.language == "csharp"
 
 
+class TestArchitectureEnforcementGeneratorRuby:
+    """Test Ruby-specific architecture rules (#373)."""
+
+    @staticmethod
+    def _generate(tmp_path: Path, project_name: str = "my-gem") -> Path:
+        """Generate the Ruby architecture config and return its directory."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+        generator.generate(language="ruby", project_name=project_name)
+        return output_dir
+
+    def test_generate_ruby_creates_packwerk_configs(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test generating the Packwerk configuration pair for Ruby."""
+        output_dir = self._generate(tmp_path)
+
+        assert (output_dir / "packwerk.yml").exists()
+        assert (output_dir / "package.yml").exists()
+
+        # Should create README and run script
+        assert (output_dir / "README.md").exists()
+        assert (output_dir / "run-check.sh").exists()
+
+    def test_ruby_packwerk_config_parses_as_yaml(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """packwerk.yml must parse as YAML with Packwerk's documented keys.
+
+        Parse-validation guardrail: every generated artifact must be
+        loadable by the tool that will read it.
+        """
+        output_dir = self._generate(tmp_path)
+
+        parsed = yaml.safe_load((output_dir / "packwerk.yml").read_text())
+        assert parsed["include"] == ["**/*.{rb,rake,erb}"]
+        assert parsed["package_paths"] == "**/"
+        assert parsed["parallel"] is True
+
+    def test_ruby_package_config_enforces_dependencies(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """package.yml parses as YAML and switches enforcement on."""
+        output_dir = self._generate(tmp_path)
+
+        parsed = yaml.safe_load((output_dir / "package.yml").read_text())
+        assert parsed["enforce_dependencies"] is True
+        assert parsed["dependencies"] == []
+
+    def test_ruby_config_documents_zeitwerk_limit(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The config discloses Packwerk's Zeitwerk assumption honestly.
+
+        Packwerk is built for Zeitwerk-style autoloaded codebases; on
+        the plain-Ruby scaffold the check passes vacuously until
+        packages are defined, and the config must say so (no
+        overclaiming) with a tighten-me path.
+        """
+        output_dir = self._generate(tmp_path)
+
+        content = (output_dir / "packwerk.yml").read_text()
+        assert "Zeitwerk" in content
+        assert "VACUOUSLY" in content
+        assert "Tighten" in content
+
+    def test_ruby_config_documents_static_analysis_limit(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The config discloses the static-analysis blind spot."""
+        output_dir = self._generate(tmp_path)
+
+        content = (output_dir / "packwerk.yml").read_text()
+        assert "STATIC" in content
+        assert "const_get" in content
+
+    def test_ruby_config_documents_circular_require_hazard(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The config explains Ruby's load-time behavior accurately.
+
+        Ruby's require does NOT reject circular requires at load time —
+        the cycle silently yields a partially-defined module at
+        runtime — so the config must document boundary enforcement as
+        the only early signal, without overclaiming a compiler-style
+        rejection.
+        """
+        output_dir = self._generate(tmp_path)
+
+        content = (output_dir / "packwerk.yml").read_text()
+        assert "NOT reject circular requires" in content
+        assert "partially-defined module" in content
+
+    def test_ruby_config_documents_wiring_requirement(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Both files document the copy-to-root activation step."""
+        output_dir = self._generate(tmp_path)
+
+        packwerk = (output_dir / "packwerk.yml").read_text()
+        package = (output_dir / "package.yml").read_text()
+        assert "cp plans/architecture/packwerk.yml" in packwerk
+        assert "bundle exec packwerk check" in packwerk
+        assert "project root" in package
+
+    def test_ruby_readme_mentions_packwerk(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """The architecture README names Packwerk and its docs."""
+        output_dir = self._generate(tmp_path)
+
+        content = (output_dir / "README.md").read_text()
+        assert "Packwerk" in content
+        assert "https://github.com/Shopify/packwerk" in content
+
+    def test_ruby_run_script_probes_bundler(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """run-check.sh guards on the bundle binary before running."""
+        output_dir = self._generate(tmp_path)
+
+        content = (output_dir / "run-check.sh").read_text()
+        assert "command -v bundle" in content
+        assert "bundle exec packwerk check" in content
+
+    def test_ruby_result_reports_ruby_language(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Test the result object records the ruby language."""
+        output_dir = tmp_path / "plans" / "architecture"
+        generator = ArchitectureEnforcementGenerator(output_dir=output_dir)
+
+        result = generator.generate(language="ruby", project_name="my-gem")
+
+        assert result.language == "ruby"
+        assert len(result.files_created) == 4
+
+
 class TestArchitectureEnforcementGeneratorTypeScript:
     """Test TypeScript-specific architecture rules."""
 
@@ -1654,6 +1806,7 @@ class TestLanguageTooling:
             ("cpp", "C/C++"),
             ("java", "Java"),
             ("csharp", "C#"),
+            ("ruby", "Ruby"),
         ],
     )
     def test_each_tooling_carries_a_display_name(
@@ -1712,6 +1865,21 @@ class TestLanguageTooling:
         tooling = _LANGUAGE_TOOLING["csharp"]
         assert "{config_file}" not in tooling.run_cmd
         assert f"plans/architecture/{tooling.config_file}" in tooling.install_cmd
+        assert "{package_path}" not in tooling.install_cmd
+
+    def test_ruby_install_cmd_carries_the_config_path(self) -> None:
+        """Ruby references its config via install_cmd, not run_cmd (#373).
+
+        Packwerk reads packwerk.yml from the working directory (no
+        config flag exists), so the run command takes no config-file
+        placeholder and the wiring step — copying packwerk.yml and the
+        root package.yml to the project root — lives in install_cmd,
+        the Konsist/ArchUnit/NetArchTest parked-template precedent.
+        """
+        tooling = _LANGUAGE_TOOLING["ruby"]
+        assert "{config_file}" not in tooling.run_cmd
+        assert f"plans/architecture/{tooling.config_file}" in tooling.install_cmd
+        assert "package.yml" in tooling.install_cmd
         assert "{package_path}" not in tooling.install_cmd
 
     def test_java_install_cmd_resolves_package_matched_path(self) -> None:
@@ -1797,6 +1965,6 @@ class TestLanguageTooling:
             result = generator.generate(language=language, project_name="myapp")
             assert result.language == language
 
-        assert "ruby" not in _LANGUAGE_TOOLING
+        assert "php" not in _LANGUAGE_TOOLING
         with pytest.raises(ValueError, match="Unsupported language"):
-            generator.generate(language="ruby", project_name="myapp")
+            generator.generate(language="php", project_name="myapp")

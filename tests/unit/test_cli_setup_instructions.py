@@ -8,9 +8,9 @@ from start_green_stay_green.cli import _get_setup_instructions
 from start_green_stay_green.cli import _venv_activation_command
 
 # Languages exercised by the per-language common-tail tests. The
-# unknown-language default path is covered separately with "ruby"
+# unknown-language default path is covered separately with "php"
 # (java gained its own Maven step with #366, csharp its dotnet step
-# with #371).
+# with #371, ruby its bundler steps with #373).
 ALL_LANGUAGES = (
     "python",
     "typescript",
@@ -21,6 +21,7 @@ ALL_LANGUAGES = (
     "cpp",
     "java",
     "csharp",
+    "ruby",
 )
 
 
@@ -237,10 +238,26 @@ class TestGetSetupInstructions:
         assert not any("dotnet restore" in c for c in instructions)
         assert not any("dotnet build" in c for c in instructions)
 
-    def test_unknown_language_has_sensible_default(self) -> None:
-        """Unknown languages should still get pre-commit + check-all."""
+    def test_ruby_includes_bundler_steps(self) -> None:
+        """Ruby instructions provision gems and verify the scaffold (#373).
+
+        `bundle install` provisions the pinned quality gems and
+        `bundle exec rspec` verifies the scaffold — the csharp #371
+        lesson: a supported language must not sit on the
+        unknown-language default path.
+        """
         instructions = _get_setup_instructions(("ruby",), Path("/home/user/ruby-proj"))
-        assert instructions[0] == "cd /home/user/ruby-proj"
+        assert "bundle install" in instructions
+        assert "bundle exec rspec" in instructions
+
+    def test_unknown_language_has_sensible_default(self) -> None:
+        """Unknown languages should still get pre-commit + check-all.
+
+        ruby gained its own bundler steps with #373, so the probe uses
+        php — a language with no setup-step entry.
+        """
+        instructions = _get_setup_instructions(("php",), Path("/home/user/php-proj"))
+        assert instructions[0] == "cd /home/user/php-proj"
         assert "pre-commit install" in instructions
         assert "./scripts/check-all.sh" in instructions
 

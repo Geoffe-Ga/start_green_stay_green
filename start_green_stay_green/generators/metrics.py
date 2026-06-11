@@ -529,6 +529,27 @@ LANGUAGE_TOOLS: dict[str, dict[str, str]] = {
         "security": "SecurityCodeScan (Roslyn analyzer)",
         "dependency_check": "dotnet list package --vulnerable",
     },
+    # Ruby (#373): coverage is SimpleCov, activated by COVERAGE=true
+    # with the >=90% bound living in spec/spec_helper.rb (the
+    # manifest-owned precedent of the JaCoCo/Kover/Coverlet gates).
+    # RuboCop's Metrics/CyclomaticComplexity cop owns the <=10
+    # complexity gate (.rubocop.yml is its single home; flog is the
+    # documented standalone alternative). mutant is a periodic mutation
+    # gate like pitest/mull/muter/Stryker, not a per-commit hook. Each
+    # tool appears in exactly one category: bundler-audit owns security
+    # (dependency CVEs against the ruby-advisory-db — RuboCop's
+    # Security cop department runs inside the complexity/lint pass and
+    # Brakeman applies only once Rails is adopted, so neither is
+    # double-listed here) and `bundle outdated` owns dependency
+    # staleness (the cargo-outdated/npm-check-updates analogue).
+    "ruby": {
+        "coverage": "SimpleCov (COVERAGE=true bundle exec rspec)",
+        "mutation": "mutant (bundle exec mutant run)",
+        "complexity": "RuboCop Metrics/CyclomaticComplexity (.rubocop.yml)",
+        "documentation": "YARD",
+        "security": "bundler-audit (bundle exec bundler-audit check)",
+        "dependency_check": "bundle outdated",
+    },
 }
 
 

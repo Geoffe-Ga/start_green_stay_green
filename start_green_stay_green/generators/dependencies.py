@@ -44,6 +44,7 @@ from start_green_stay_green.utils.kotlin import KONSIST_VERSION
 from start_green_stay_green.utils.kotlin import KOTLIN_VERSION
 from start_green_stay_green.utils.kotlin import KOVER_VERSION
 from start_green_stay_green.utils.kotlin import WEAR_COMPOSE_VERSION
+from start_green_stay_green.utils.ruby import ruby_gemfile
 from start_green_stay_green.utils.swift import package_swift
 
 if TYPE_CHECKING:
@@ -89,12 +90,10 @@ class DependenciesGenerator(BaseGenerator):
     target project's language and tooling.
 
     All 10 supported languages (python, typescript, go, rust, java, csharp,
-    ruby, swift, kotlin, cpp) are available at the generator level. Note that
-    the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
-    architecture, and metrics steps for ruby —
-    the CI workflow step covers every language. Kotlin (#357/#358),
-    C/C++ (#362/#363), Java (#366/#367), and C# (#370) run the full
-    pipeline.
+    ruby, swift, kotlin, cpp) are available at the generator level, and all
+    of them run the full CLI pipeline (``sgsg init``): Kotlin graduated
+    with #357/#358, C/C++ with #362/#363, Java with #366/#367, C# with
+    #370, and Ruby with #373.
 
     Attributes:
         output_dir: Directory where dependency files will be written
@@ -904,22 +903,16 @@ Version="{SECURITY_CODE_SCAN_VERSION}">
     def _ruby_gemfile(self) -> str:
         """Generate Ruby Gemfile content.
 
+        Delegates to the shared
+        :func:`~start_green_stay_green.utils.ruby.ruby_gemfile` helper
+        so the structure and dependencies generators emit an identical
+        manifest from one source of truth (#373) — before #373 the two
+        emitted diverging Gemfiles with stale, unpinned tool lines.
+
         Returns:
             Content for Gemfile with gem dependencies
         """
-        return """# frozen_string_literal: true
-
-source "https://rubygems.org"
-
-# Specify your gem's dependencies in gemspec if building a gem
-# gemspec
-
-group :development, :test do
-  gem "rspec", "~> 3.12"
-  gem "rubocop", "~> 1.57"
-  gem "simplecov", "~> 0.22"
-end
-"""
+        return ruby_gemfile()
 
     def _generate_swift_dependencies(self) -> dict[str, Path]:
         """Generate Swift dependency files.

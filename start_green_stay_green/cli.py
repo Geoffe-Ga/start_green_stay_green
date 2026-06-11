@@ -944,10 +944,23 @@ def _scripts_dir_has_other_language(scripts_dir: Path, language: str) -> bool:
 
 # Languages with native quality-script templates in ScriptsGenerator.
 # The generator falls back to *Python* scripts for anything else, which
-# would be wrong for e.g. a Ruby project, so the init pipeline skips
-# the step instead.
+# would be wrong for e.g. a PHP project, so the init pipeline skips
+# the step instead. Every base.SUPPORTED_LANGUAGES entry now has native
+# templates (ruby joined with #373); the gate remains for typo'd or
+# future languages.
 _SCRIPTS_STEP_LANGUAGES: frozenset[str] = frozenset(
-    {"python", "typescript", "go", "rust", "swift", "kotlin", "cpp", "java", "csharp"}
+    {
+        "python",
+        "typescript",
+        "go",
+        "rust",
+        "swift",
+        "kotlin",
+        "cpp",
+        "java",
+        "csharp",
+        "ruby",
+    }
 )
 
 
@@ -962,9 +975,9 @@ def _generate_scripts_step(
 
     If scripts/ already contains scripts from a different language,
     automatically uses scripts/{language}/ subdirectory to avoid conflicts.
-    Languages without native script templates (ruby)
-    are skipped with an informational message instead of receiving the
-    generator's Python fallback.
+    Languages without native script templates (none of the supported
+    set since ruby joined with #373) are skipped with an informational
+    message instead of receiving the generator's Python fallback.
 
     Args:
         project_path: Project root directory.
@@ -1010,9 +1023,9 @@ def _generate_precommit_step(
 ) -> None:
     """Generate pre-commit configuration, merging with existing if present.
 
-    Languages PreCommitGenerator does not support yet (ruby)
-    are skipped with an informational message instead of aborting the
-    whole init run.
+    Languages PreCommitGenerator does not support yet (none of the
+    supported set since ruby joined with #373) are skipped with an
+    informational message instead of aborting the whole init run.
     """
     if language not in PRECOMMIT_LANGUAGE_CONFIGS:
         console.print(
@@ -1257,11 +1270,11 @@ def _generate_architecture_step(
     Python, dependency-cruiser for TypeScript, go-arch-lint for Go,
     cargo-deny for Rust, SwiftLint custom rules for Swift, a Konsist test
     for Kotlin, an include-boundary checker for C/C++, an ArchUnit test
-    for Java, a NetArchTest test for C#). Runs regardless of API key
-    availability; only Python, TypeScript, Go, Rust, Swift, Kotlin,
-    C/C++, Java, and C# projects produce output. The previous
-    ``orchestrator`` argument was unused and has been removed from this
-    private helper.
+    for Java, a NetArchTest test for C#, a Packwerk package config for
+    Ruby). Runs regardless of API key availability; only Python,
+    TypeScript, Go, Rust, Swift, Kotlin, C/C++, Java, C#, and Ruby
+    projects produce output. The previous ``orchestrator`` argument was
+    unused and has been removed from this private helper.
     """
     supported = {
         "python",
@@ -1273,11 +1286,12 @@ def _generate_architecture_step(
         "cpp",
         "java",
         "csharp",
+        "ruby",
     }
     if language not in supported:
         # The generator only supports these languages; surface a dim info
         # line so users understand why no architecture rules were generated
-        # for, e.g., a Ruby project rather than seeing silence.
+        # for, e.g., a PHP project rather than seeing silence.
         console.print(
             f"[dim]Architecture rules unavailable for {language} "
             f"(supported: {', '.join(sorted(supported))})[/dim]"
@@ -1436,9 +1450,10 @@ def _generate_metrics_dashboard_step(
 ) -> None:
     """Generate live metrics dashboard and workflow.
 
-    Languages MetricsGenerator does not support yet (ruby)
-    are skipped with an informational message instead of aborting init
-    when ``--enable-live-dashboard`` is passed.
+    Languages MetricsGenerator does not support yet (none of the
+    supported set since ruby joined with #373) are skipped with an
+    informational message instead of aborting init when
+    ``--enable-live-dashboard`` is passed.
     """
     if language not in METRICS_LANGUAGE_TOOLS:
         console.print(
@@ -1642,6 +1657,12 @@ _LANG_SETUP_STEPS: dict[str, list[str]] = {
     # runs the xUnit suite in one invocation — the csproj owns the whole
     # quality policy (#370), so the single command verifies the scaffold.
     "csharp": ["dotnet test"],
+    # bundle install provisions the pinned quality gems (rspec,
+    # rubocop, simplecov, bundler-audit, packwerk) and `bundle exec
+    # rspec` verifies the scaffold (#373) — the csharp #371 lesson:
+    # never leave a supported language on the unknown-language default
+    # path.
+    "ruby": ["bundle install", "bundle exec rspec"],
 }
 
 

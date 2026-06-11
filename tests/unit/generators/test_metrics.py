@@ -187,6 +187,7 @@ class TestLanguageTools:
             "cpp",
             "java",
             "csharp",
+            "ruby",
         }
         assert required_languages.issubset(set(LANGUAGE_TOOLS.keys()))
 
@@ -216,6 +217,48 @@ class TestLanguageTools:
             "complexity": {"CA1502"},
             "security": {"SecurityCodeScan"},
             "documentation": {"DocFX"},
+        }
+        for category, names in names_per_category.items():
+            for other_category, other_names in names_per_category.items():
+                if category != other_category:
+                    assert names.isdisjoint(other_names)
+            for name in names:
+                assert name in tools[category]
+
+    def test_ruby_tools(self) -> None:
+        """Test Ruby tool mappings (#373).
+
+        Each tool appears in exactly one category: SimpleCov owns
+        coverage (the >=90% bound lives in spec/spec_helper.rb),
+        RuboCop's Metrics/CyclomaticComplexity cop owns complexity
+        (threshold in .rubocop.yml), bundler-audit owns security
+        (dependency CVEs; Brakeman applies only once Rails is adopted),
+        `bundle outdated` owns dependency staleness, and mutant is a
+        periodic mutation gate like pitest/mull/muter/Stryker.
+        """
+        tools = LANGUAGE_TOOLS["ruby"]
+        assert tools["coverage"] == "SimpleCov (COVERAGE=true bundle exec rspec)"
+        assert tools["mutation"] == "mutant (bundle exec mutant run)"
+        assert tools["complexity"] == (
+            "RuboCop Metrics/CyclomaticComplexity (.rubocop.yml)"
+        )
+        assert tools["documentation"] == "YARD"
+        assert tools["security"] == "bundler-audit (bundle exec bundler-audit check)"
+        assert tools["dependency_check"] == "bundle outdated"
+
+    def test_ruby_tools_do_not_double_list_across_categories(self) -> None:
+        """No Ruby tool is claimed by two metric categories.
+
+        bundler-audit in particular owns exactly one category
+        (security); dependency staleness goes to `bundle outdated`.
+        """
+        tools = LANGUAGE_TOOLS["ruby"]
+        names_per_category = {
+            "coverage": {"SimpleCov"},
+            "complexity": {"Metrics/CyclomaticComplexity"},
+            "security": {"bundler-audit"},
+            "documentation": {"YARD"},
+            "dependency_check": {"bundle outdated"},
         }
         for category, names in names_per_category.items():
             for other_category, other_names in names_per_category.items():

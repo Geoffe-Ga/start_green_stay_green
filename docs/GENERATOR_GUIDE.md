@@ -83,7 +83,7 @@ output_path.write_text(yaml_content)
 
 **Configuration Options**:
 - `project_name`: Name of the project
-- `language`: python, typescript, go, rust, swift, kotlin, cpp, java, or csharp
+- `language`: python, typescript, go, rust, swift, kotlin, cpp, java, csharp, ruby, or ruby
 - `language_config`: Language-specific settings (dict)
 
 **Output**: `.pre-commit-config.yaml` with hooks for:
@@ -138,7 +138,7 @@ scripts = generator.generate()
 - `complexity.sh` - Code complexity analysis
 
 **Configuration Options**:
-- `language`: python, typescript, go, rust, swift, kotlin, cpp, java, csharp
+- `language`: python, typescript, go, rust, swift, kotlin, cpp, java, csharp, ruby
 - `package_name`: Python package name (snake_case)
 
 ### CIGenerator (AI-powered)
@@ -178,7 +178,7 @@ workflows_dir.mkdir(parents=True, exist_ok=True)
 - Documentation validation
 
 **Configuration Options**:
-- `language`: python, typescript, go, rust, swift, kotlin, cpp, java, csharp
+- `language`: python, typescript, go, rust, swift, kotlin, cpp, java, csharp, ruby
 
 ### SkillsGenerator
 
@@ -377,6 +377,7 @@ generator.generate(language="python", project_name="my-app")
 - C/C++: include-boundary checker (stdlib Python script)
 - Java: ArchUnit architecture test
 - C#: NetArchTest architecture test
+- Ruby: Packwerk package configuration (packwerk.yml + package.yml)
 
 ### GitHubActionsReviewGenerator (AI-powered)
 

@@ -17,8 +17,8 @@ Start Green Stay Green is a meta-tool that scaffolds new software projects with 
 
 - **Enterprise-Grade Quality**: 90%+ code coverage, mutation testing, comprehensive linting
 - **AI Integration**: Pre-configured AI subagent profiles and code review workflows
-- **Multi-Language Support**: Python, TypeScript, Go, Rust, Swift (watchOS), Kotlin (Wear OS), C/C++ (Tizen), Java (Wear OS legacy), and C# (.NET)
-- **Architecture Enforcement**: import-linter (Python), dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust), SwiftLint custom rules (Swift), Konsist (Kotlin), an include-boundary checker (C/C++), ArchUnit (Java), and NetArchTest (C#)
+- **Multi-Language Support**: Python, TypeScript, Go, Rust, Swift (watchOS), Kotlin (Wear OS), C/C++ (Tizen), Java (Wear OS legacy), C# (.NET), and Ruby
+- **Architecture Enforcement**: import-linter (Python), dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust), SwiftLint custom rules (Swift), Konsist (Kotlin), an include-boundary checker (C/C++), ArchUnit (Java), NetArchTest (C#), and Packwerk (Ruby)
 - **Complete CI/CD**: GitHub Actions workflows with quality gates
 - **Additive Init**: Safe to re-run in existing directories — preserves your files
 - **Developer Experience**: Rich console output, interactive prompts, dry-run mode

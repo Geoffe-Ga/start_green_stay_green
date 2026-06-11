@@ -68,12 +68,10 @@ class ReadmeGenerator(BaseGenerator):
     for the quality tools included in the project.
 
     All 10 supported languages (python, typescript, go, rust, java, csharp,
-    ruby, swift, kotlin, cpp) are available at the generator level. Note that
-    the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
-    architecture, and metrics steps for ruby —
-    the CI workflow step covers every language. Kotlin (#357/#358),
-    C/C++ (#362/#363), Java (#366/#367), and C# (#370) run the full
-    pipeline.
+    ruby, swift, kotlin, cpp) are available at the generator level, and all
+    of them run the full CLI pipeline (``sgsg init``): Kotlin graduated
+    with #357/#358, C/C++ with #362/#363, Java with #366/#367, C# with
+    #370, and Ruby with #373.
 
     Attributes:
         output_dir: Directory where README.md will be created
@@ -1216,11 +1214,20 @@ Generated with [Start Green Stay Green](https://github.com/Geoffe-Ga/start_green
     def _ruby_readme_content(self) -> str:
         """Generate Ruby README.md content.
 
+        Only artifacts the scaffold actually generates carry a
+        checkmark (the truthfulness contract). With the #373 quality
+        toolchain (RuboCop via pre-commit and scripts, the SimpleCov
+        ≥90% coverage gate in spec_helper.rb, bundler-audit, the
+        Packwerk architecture configs) every advertised item is real;
+        the pre-#373 claims (Reek, Sorbet/RBS, Brakeman, lib/main.rb,
+        Gemfile.lock) named tools and files init never emits.
+
         Returns:
             Content for README.md
         """
         # Convert project name to title case for display
         display_name = self.config.project_name.replace("-", " ").title()
+        package_name = self.config.package_name
 
         return f"""# {self.config.project_name}
 
@@ -1229,14 +1236,26 @@ Start Green Stay Green.
 
 ## Description
 
-This project was generated with maximum quality standards from day one, including:
+This project was generated with maximum quality standards from day one,
+including:
 
-- ✅ Comprehensive testing infrastructure (RSpec with 90%+ coverage requirement)
-- ✅ Code quality tools (RuboCop, Reek)
-- ✅ Security scanning (Bundler Audit)
-- ✅ Type checking (Sorbet or RBS)
-- ✅ Pre-commit hooks (quality checks)
-- ✅ CI/CD pipeline (GitHub Actions)
+- ✅ Comprehensive testing infrastructure (RSpec with a 90%+ SimpleCov
+  coverage gate, activated by `COVERAGE=true` — the bound lives in
+  `spec/spec_helper.rb`)
+- ✅ Code quality tools (RuboCop: format, lint, complexity ≤10 via
+  `Metrics/CyclomaticComplexity`, and the Security cop department —
+  policy in `.rubocop.yml`)
+- ✅ Security scanning (bundler-audit dependency CVE scan via
+  `./scripts/security.sh`; gitleaks + detect-secrets in pre-commit.
+  Brakeman applies once Rails is adopted — it errors on plain-Ruby
+  projects, so it is documented rather than wired.)
+- ✅ Architecture enforcement (Packwerk configs in `plans/architecture/`
+  — see `packwerk.yml` there for the activation step and honest
+  enforcement limits)
+- ✅ Pre-commit hooks (RuboCop check-mode plus shared hygiene and
+  secret scanning)
+- ✅ Quality scripts (`./scripts/check-all.sh`)
+- ✅ CI/CD pipeline (`.github/workflows/ci.yml`)
 - ✅ AI-assisted development (Claude Code skills and subagents)
 
 ## Installation
@@ -1258,7 +1277,7 @@ pre-commit install
 Run the Hello World application:
 
 ```bash
-bundle exec ruby lib/main.rb
+bundle exec ruby lib/{package_name}.rb
 ```
 
 Expected output:
@@ -1271,34 +1290,42 @@ Hello from {self.config.project_name}!
 ### Running Quality Checks
 
 ```bash
+# Run everything (format check, lint, coverage-gated tests, security)
+./scripts/check-all.sh
+
 # Run all tests
 bundle exec rspec
 
-# Run tests with coverage
-bundle exec rspec --format documentation
+# Run tests with the >=90% coverage gate
+./scripts/test.sh --coverage
 
-# Run RuboCop
+# Run RuboCop (full cop set: lint, style, complexity, security cops)
 bundle exec rubocop
 
-# Run RuboCop with auto-correct
-bundle exec rubocop -a
+# Auto-fix correctable offenses
+./scripts/format.sh
 
-# Run Reek (code smell detector)
-bundle exec reek
+# Run the dependency CVE scan
+./scripts/security.sh
 
-# Run security scan
-bundle exec bundle-audit check --update
+# Run the architecture check (after the one-time wiring documented in
+# plans/architecture/packwerk.yml)
+./plans/architecture/run-check.sh
 ```
 
 ### Quality Tools
 
 This project includes:
 
-- **RSpec**: Testing framework with 90%+ coverage requirement
-- **SimpleCov**: Code coverage tool
-- **RuboCop**: Ruby linter and code formatter
-- **Reek**: Code smell detector
-- **Bundler Audit**: Security vulnerability scanner
+- **RSpec**: Testing framework
+- **SimpleCov**: Code coverage with a ≥90% bound (single home:
+  `spec/spec_helper.rb`)
+- **RuboCop**: Formatter, linter, complexity gate (≤10), and
+  source-level security cops (single home: `.rubocop.yml`)
+- **bundler-audit**: Dependency CVE scanning against the
+  ruby-advisory-db
+- **Packwerk**: Package boundary enforcement (configs parked in
+  `plans/architecture/`)
 - **Bundler**: Dependency management
 
 ### Project Structure
@@ -1306,16 +1333,16 @@ This project includes:
 ```
 {self.config.project_name}/
 ├── lib/                  # Application source code
-│   └── main.rb
+│   └── {package_name}.rb
 ├── spec/                 # Test suite
-│   ├── spec_helper.rb
-│   └── main_spec.rb
+│   ├── spec_helper.rb    # RSpec config + the SimpleCov >=90% bound
+│   └── {package_name}_spec.rb
 ├── scripts/              # Quality control scripts
+├── plans/architecture/   # Packwerk configs (parked; see packwerk.yml)
 ├── .github/workflows/    # CI/CD pipelines
 ├── .claude/              # AI subagents and skills
-├── Gemfile               # Dependency definition
-├── Gemfile.lock          # Dependency lock file
-└── .rubocop.yml          # RuboCop configuration
+├── Gemfile               # Dependency definition (quality gems pinned)
+└── .rubocop.yml          # RuboCop policy (complexity <=10 lives here)
 ```
 
 ### Testing
@@ -1324,14 +1351,14 @@ This project includes:
 # Run all tests
 bundle exec rspec
 
-# Run tests with coverage
-bundle exec rspec
+# Run tests with the coverage gate (the bound lives in spec_helper.rb)
+COVERAGE=true bundle exec rspec
 
-# View coverage report
+# View the coverage report
 open coverage/index.html
 
-# Run specific test file
-bundle exec rspec spec/main_spec.rb
+# Run a specific spec file
+bundle exec rspec spec/{package_name}_spec.rb
 
 # Run tests with documentation format
 bundle exec rspec --format documentation
@@ -1341,10 +1368,13 @@ bundle exec rspec --format documentation
 
 This project maintains MAXIMUM QUALITY standards:
 
-- **Test Coverage**: ≥90% required
-- **Code Style**: Enforced by RuboCop
+- **Test Coverage**: ≥90% required (SimpleCov, gated in CI and
+  `./scripts/test.sh --coverage`)
+- **Code Style**: Enforced by RuboCop (check-mode in pre-commit;
+  `./scripts/format.sh` owns the fixing path)
+- **Complexity**: ≤10 per method (`Metrics/CyclomaticComplexity` in
+  `.rubocop.yml`)
 - **All Linters**: Must pass with zero violations
-- **Code Smells**: Detected and resolved with Reek
 
 ## License
 

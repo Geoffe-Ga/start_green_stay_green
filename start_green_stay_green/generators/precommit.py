@@ -26,7 +26,7 @@ class GenerationConfig:
     Attributes:
         project_name: Name of the project.
         language: Programming language (python, typescript, go, rust,
-            swift, kotlin, cpp, java, csharp).
+            swift, kotlin, cpp, java, csharp, ruby).
         language_config: Additional language-specific configuration.
     """
 
@@ -726,6 +726,85 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         ],
         "default_language_version": {},
     },
+    "ruby": {
+        "hooks": [
+            {
+                "repo": "https://github.com/pre-commit/pre-commit-hooks",
+                "rev": "v4.5.0",
+                "hooks": [
+                    {"id": "trailing-whitespace"},
+                    {"id": "end-of-file-fixer"},
+                    {"id": "check-yaml"},
+                    {"id": "check-json"},
+                    {"id": "check-added-large-files", "args": ["--maxkb=500"]},
+                    {"id": "check-case-conflict"},
+                    {"id": "check-merge-conflict"},
+                    {"id": "check-symlinks"},
+                    {"id": "detect-private-key"},
+                    {"id": "fix-byte-order-marker"},
+                    {"id": "mixed-line-ending", "args": ["--fix=lf"]},
+                    {"id": "no-commit-to-branch", "args": ["--branch", "main"]},
+                ],
+            },
+            # RuboCop is the one official-hook language in the matrix:
+            # rubocop/rubocop ships a .pre-commit-hooks.yaml at its repo
+            # root (verified at the pinned tag), so no `repo: local`
+            # system hook is needed. `language: ruby` means pre-commit
+            # builds an isolated gem environment from the pinned tag —
+            # a Ruby runtime must be on PATH, but the RuboCop version
+            # can never drift from this rev.
+            #
+            # The manifest's DEFAULT args include --autocorrect, which
+            # rewrites correctable offenses and would let them through
+            # (the #430 formatter lesson: a fixing-mode hook can fail
+            # only via pre-commit's file-modified detection, and silently
+            # passes once files are clean-but-unchecked-in). Overriding
+            # args to --force-exclusion alone makes the hook check-mode:
+            # plain `rubocop` exits non-zero on ANY offense.
+            # scripts/format.sh keeps the --autocorrect fixing path.
+            #
+            # One hook covers format (Layout cops), lint (Lint/Style),
+            # complexity (Metrics/CyclomaticComplexity <=10), and the
+            # source-level Security cops — .rubocop.yml at the project
+            # root is the single home of that policy, shared with
+            # scripts/lint.sh and CI; no flag here restates any of it.
+            {
+                "repo": "https://github.com/rubocop/rubocop",
+                "rev": "v1.87.0",
+                "hooks": [
+                    {
+                        "id": "rubocop",
+                        "args": ["--force-exclusion"],
+                    },
+                ],
+            },
+            {
+                "repo": "https://github.com/gitleaks/gitleaks",
+                "rev": "v8.18.4",
+                "hooks": [
+                    {"id": "gitleaks"},
+                ],
+            },
+            {
+                "repo": "https://github.com/shellcheck-py/shellcheck-py",
+                "rev": "v0.9.0.6",
+                "hooks": [
+                    {"id": "shellcheck"},
+                ],
+            },
+            {
+                "repo": "https://github.com/Yelp/detect-secrets",
+                "rev": "v1.4.0",
+                "hooks": [
+                    {
+                        "id": "detect-secrets",
+                        "args": ["--baseline", ".secrets.baseline"],
+                    },
+                ],
+            },
+        ],
+        "default_language_version": {},
+    },
     "cpp": {
         "hooks": [
             {
@@ -851,7 +930,7 @@ class PreCommitGenerator(BaseGenerator):
     Includes formatting, linting, security, and general file quality checks.
 
     Supports: Python, TypeScript, Go, Rust, Swift, Kotlin, C/C++ (cpp),
-    Java, C# (csharp), and other languages.
+    Java, C# (csharp), Ruby, and other languages.
 
     Attributes:
         orchestrator: Optional AI orchestrator for enhanced generation.

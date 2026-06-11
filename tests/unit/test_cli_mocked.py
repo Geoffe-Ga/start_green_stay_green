@@ -1546,7 +1546,7 @@ class TestGenerateSteps:
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_architecture_step(mock_path, "my-project", "ruby")
+            cli._generate_architecture_step(mock_path, "my-project", "php")
 
         mock_generator.generate.assert_not_called()
 

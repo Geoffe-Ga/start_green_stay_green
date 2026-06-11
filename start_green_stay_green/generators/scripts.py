@@ -207,6 +207,7 @@ class ScriptsGenerator:
             "cpp": self._generate_cpp_scripts,
             "java": self._generate_java_scripts,
             "csharp": self._generate_csharp_scripts,
+            "ruby": self._generate_ruby_scripts,
         }
         # Fallback to Python scripts for unknown languages.
         builder = builders.get(self.config.language, self._generate_python_scripts)
@@ -575,6 +576,51 @@ class ScriptsGenerator:
         self._write_companion_config(
             "CodeMetricsConfig.txt", self._CODE_METRICS_CONFIG_TEMPLATE
         )
+
+        return scripts
+
+    def _generate_ruby_scripts(self) -> dict[str, Path]:
+        """Generate Ruby-specific quality control scripts (#373).
+
+        Emits check/format/lint/test/security scripts plus a companion
+        ``.rubocop.yml`` at the project root — the single home of the
+        RuboCop policy (including the Metrics/CyclomaticComplexity
+        <=10 bound) shared by the pre-commit rubocop hook, these
+        scripts, and CI. Like the Java/C# scripts, most gates are owned
+        by project-level config rather than CLI flags: the >=90%
+        SimpleCov coverage bound lives in ``spec/spec_helper.rb`` (the
+        manifest-owned precedent) and every RuboCop threshold lives in
+        ``.rubocop.yml``, so the scripts are thin ``bundle exec``
+        invocations that cannot drift from the policy.
+
+        Returns:
+            Dictionary mapping script names to file paths
+        """
+        scripts: dict[str, Path] = {}
+
+        scripts["check-all.sh"] = self._write_script(
+            "check-all.sh",
+            self._ruby_check_all_script(),
+        )
+        scripts["format.sh"] = self._write_script(
+            "format.sh",
+            self._ruby_format_script(),
+        )
+        scripts["lint.sh"] = self._write_script(
+            "lint.sh",
+            self._ruby_lint_script(),
+        )
+        scripts["test.sh"] = self._write_script(
+            "test.sh",
+            self._ruby_test_script(),
+        )
+        scripts["security.sh"] = self._write_script(
+            "security.sh",
+            self._ruby_security_script(),
+        )
+        # Companion RuboCop config — written at the project root, not
+        # added to the scripts dict (it isn't an executable).
+        self._write_companion_config(".rubocop.yml", self._RUBOCOP_CONFIG_TEMPLATE)
 
         return scripts
 
@@ -5390,6 +5436,505 @@ dotnet_diagnostic.CA1502.severity = error
 # that bound (.editorconfig only flips the rule's severity, and the
 # .csproj only wires this file in via AdditionalFiles).
 CA1502: 10
+"""
+
+    def _ruby_check_all_script(self) -> str:
+        """Generate Ruby check-all.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/check-all.sh - Run all quality checks
+# Usage: ./scripts/check-all.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run all quality checks in sequence.
+
+Runs:
+  1. Format check (RuboCop Layout cops, check mode)
+  2. Lint + complexity <=10 + Security cops (full RuboCop run;
+     .rubocop.yml holds the whole policy)
+  3. Tests + coverage >=90% (RSpec + SimpleCov; the bound lives in
+     spec/spec_helper.rb)
+  4. Security (bundler-audit dependency CVE scan)
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All checks passed
+    1           One or more checks failed
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+VERBOSE_FLAG=""
+if $VERBOSE; then
+    VERBOSE_FLAG="--verbose"
+fi
+
+echo "=== Running All Quality Checks ==="
+echo ""
+
+FAILED_CHECKS=()
+PASSED_CHECKS=()
+
+run_check() {
+    local check_name=$1
+    local script=$2
+    shift 2
+
+    echo "Running: $check_name"
+    # "${@}" is safe under set -u even when no extra args remain
+    # (unlike a named local array, which needs the
+    # ${args[@]+"${args[@]}"} guard the python template uses).
+    if "$SCRIPT_DIR/$script" "${@}" $VERBOSE_FLAG; then
+        PASSED_CHECKS+=("$check_name")
+        echo "✓ $check_name passed"
+    else
+        FAILED_CHECKS+=("$check_name")
+        echo "✗ $check_name failed" >&2
+    fi
+    echo ""
+}
+
+run_check "Format" "format.sh" --check
+run_check "Linting" "lint.sh"
+run_check "Tests" "test.sh" --coverage
+run_check "Security" "security.sh"
+
+echo "=== Quality Checks Summary ==="
+echo "Passed: ${#PASSED_CHECKS[@]}"
+echo "Failed: ${#FAILED_CHECKS[@]}"
+
+if [ ${#FAILED_CHECKS[@]} -gt 0 ]; then
+    exit 1
+else
+    echo "✓ All quality checks passed!"
+    exit 0
+fi
+"""
+
+    def _ruby_format_script(self) -> str:
+        """Generate Ruby format.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/format.sh - Format Ruby code
+# Usage: ./scripts/format.sh [--fix] [--check] [--verbose] [--help]
+# Default (no flags) writes formatting in place, same as --fix; use
+# --check for a non-mutating verification pass.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+FIX=false
+CHECK=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --fix)
+            FIX=true
+            shift
+            ;;
+        --check)
+            CHECK=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Format Ruby code using RuboCop — the same tool (and the same
+.rubocop.yml policy) the pre-commit hook and scripts/lint.sh use, so
+the three can never disagree. This script owns the FIXING path
+(--autocorrect); the pre-commit hook deliberately runs check-mode
+because a fixing-mode hook can never fail on correctable offenses.
+
+OPTIONS:
+    --fix       Apply formatting (default; --autocorrect writes safe
+                corrections in place and still exits non-zero if
+                uncorrectable offenses remain)
+    --check     Check only, fail if formatting is needed (runs the
+                Layout cop department — RuboCop's formatter slice —
+                in check mode; lint.sh runs the full cop set)
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           Code is properly formatted
+    1           Formatting issues found
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+if ! command -v bundle &> /dev/null; then
+    echo "✗ bundler not found" >&2
+    echo "  Install Ruby (brew install ruby / apt-get install ruby-full)" >&2
+    echo "  then: gem install bundler && bundle install" >&2
+    exit 1
+fi
+
+echo "=== Formatting (RuboCop) ==="
+
+# Fixing is the default; an explicit --fix overrides --check.
+if $CHECK && ! $FIX; then
+    bundle exec rubocop --only Layout --force-exclusion || \
+        { echo "✗ Format check failed" >&2; exit 1; }
+    echo "✓ Code formatting check passed"
+else
+    bundle exec rubocop --autocorrect --force-exclusion || \
+        { echo "✗ Formatting failed (uncorrectable offenses remain)" >&2; exit 1; }
+    echo "✓ Code formatted successfully"
+fi
+exit 0
+"""
+
+    def _ruby_lint_script(self) -> str:
+        """Generate Ruby lint.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/lint.sh - Static analysis: RuboCop (full cop set)
+# Usage: ./scripts/lint.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run static analysis. RuboCop's full cop set IS the lint gate —
+.rubocop.yml at the project root is the single source of the policy
+and this script restates none of it:
+  - Lint + Style departments (correctness and idiom checks)
+  - Complexity <=10: Metrics/CyclomaticComplexity, bounded in
+    .rubocop.yml (the single home; nothing else restates the number;
+    flog is the documented standalone alternative if you want a
+    second opinion on hotspots)
+  - Security department (source-level security cops: Security/Eval,
+    Security/Open, ... — scripts/security.sh covers dependency CVEs
+    instead, so the two never double-report. Brakeman applies only
+    when Rails is adopted; it errors on plain-Ruby projects.)
+
+The pre-commit rubocop hook runs the same tool against the same
+config, so local commits and this script can never disagree.
+
+Install: bundle install (rubocop is pinned in the Gemfile)
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All checks passed
+    1           RuboCop offenses found
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+if ! command -v bundle &> /dev/null; then
+    echo "✗ bundler not found - RuboCop runs via bundle exec" >&2
+    echo "  Install Ruby (brew install ruby / apt-get install ruby-full)" >&2
+    echo "  then: gem install bundler && bundle install" >&2
+    exit 1
+fi
+
+echo "=== Static Analysis (RuboCop) ==="
+
+bundle exec rubocop --force-exclusion || \
+    { echo "✗ RuboCop found offenses" >&2; exit 1; }
+
+echo "✓ Linting checks passed"
+exit 0
+"""
+
+    def _ruby_test_script(self) -> str:
+        """Generate Ruby test.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/test.sh - Run Ruby tests via RSpec
+# Usage: ./scripts/test.sh [--coverage] [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+COVERAGE=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --coverage)
+            COVERAGE=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run the RSpec suite (bundle exec rspec).
+
+OPTIONS:
+    --coverage  Enforce >=90% line coverage via SimpleCov
+                (COVERAGE=true activates the gate; the bound lives in
+                spec/spec_helper.rb — its single home; this script
+                never restates the number. SimpleCov's at_exit hook
+                fails the rspec invocation directly when the bound is
+                missed, so there is no standalone-report no-op path.)
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           All tests passed (and coverage met, with --coverage)
+    1           Test failures or coverage below threshold
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+if ! command -v bundle &> /dev/null; then
+    echo "✗ bundler not found - the test suite runs via bundle exec rspec" >&2
+    echo "  Install Ruby (brew install ruby / apt-get install ruby-full)" >&2
+    echo "  then: gem install bundler && bundle install" >&2
+    exit 1
+fi
+
+echo "=== Running Tests (RSpec) ==="
+
+if $COVERAGE; then
+    COVERAGE=true bundle exec rspec || \
+        { echo "✗ Tests or coverage gate failed" >&2; exit 1; }
+else
+    bundle exec rspec || { echo "✗ Tests failed" >&2; exit 1; }
+fi
+
+echo "✓ Tests passed"
+exit 0
+"""
+
+    def _ruby_security_script(self) -> str:
+        """Generate Ruby security.sh script."""
+        return """#!/usr/bin/env bash
+# scripts/security.sh - Security checks for Ruby
+# Usage: ./scripts/security.sh [--verbose] [--help]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run security checks.
+
+Division of labor:
+  - Secret scanning (gitleaks + detect-secrets) runs in pre-commit.
+  - Source-level security analysis is RuboCop's Security cop
+    department, configured in .rubocop.yml: it runs inside every
+    full RuboCop pass (scripts/lint.sh, the pre-commit hook, CI), so
+    this script does not re-run it. Brakeman is the deeper scanner to
+    add WHEN the project adopts Rails — it is Rails-specific and
+    errors on plain-Ruby projects, so it is not wired here.
+  - This script owns dependency CVE scanning via bundler-audit.
+
+bundler-audit checks Gemfile.lock against the ruby-advisory-db, which
+must first be fetched/updated over the network; when the update cannot
+run (offline) the scan is skipped with a warning rather than failing a
+fresh clone.
+
+OPTIONS:
+    --verbose   Show detailed output
+    --help      Display this help message
+
+EXIT CODES:
+    0           No issues found (or the CVE scan skipped; see above)
+    1           Vulnerable gems reported
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+cd "$PROJECT_ROOT"
+
+if $VERBOSE; then
+    set -x
+fi
+
+if ! command -v bundle &> /dev/null; then
+    echo "✗ bundler not found - the security checks run via bundle exec" >&2
+    echo "  Install Ruby (brew install ruby / apt-get install ruby-full)" >&2
+    echo "  then: gem install bundler && bundle install" >&2
+    exit 1
+fi
+
+echo "=== Security (bundler-audit dependency CVE scan) ==="
+
+# bundler-audit needs Gemfile.lock; materialize it on a fresh clone.
+if [ ! -f Gemfile.lock ]; then
+    bundle lock >/dev/null 2>&1 || {
+        echo "⚠ Could not generate Gemfile.lock (bundle lock failed)" >&2
+        echo "⚠ - skipping the dependency CVE scan" >&2
+        echo "✓ Security checks passed"
+        exit 0
+    }
+fi
+
+# Pragmatic default: the advisory database lives at
+# https://github.com/rubysec/ruby-advisory-db and `bundler-audit update`
+# needs network access to fetch it. When the update cannot run
+# (offline), warn and skip so a fresh clone passes check-all.sh out of
+# the box. Tighten by replacing the warning block with 'exit 1' once
+# network access is guaranteed everywhere (including CI).
+if bundle exec bundler-audit update >/dev/null 2>&1; then
+    bundle exec bundler-audit check || \
+        { echo "✗ Vulnerable gems found" >&2; exit 1; }
+    echo "✓ No vulnerable gems reported"
+else
+    echo "⚠ Could not update the ruby-advisory-db" >&2
+    echo "⚠ (bundler-audit needs network access to fetch it)" >&2
+    echo "⚠ - skipping the dependency CVE scan" >&2
+fi
+
+echo "✓ Security checks passed"
+exit 0
+"""
+
+    # .rubocop.yml companion — the SINGLE home of the RuboCop policy
+    # shared by the pre-commit rubocop hook, scripts/format.sh,
+    # scripts/lint.sh, and CI (mirroring the pmd-ruleset.xml /
+    # CodeMetricsConfig.txt companion split). It carries the
+    # cyclomatic-complexity <=10 bound the other languages gate via
+    # radon/eslint/gocyclo/clippy/SwiftLint/detekt/lizard/PMD/CA1502;
+    # neither the scripts nor the hooks restate the number.
+    _RUBOCOP_CONFIG_TEMPLATE = """\
+# .rubocop.yml generated by Start Green Stay Green.
+#
+# The pre-commit rubocop hook, scripts/format.sh, scripts/lint.sh, and
+# CI all read this file, so the style/lint/complexity/security policy
+# has exactly one home.
+
+AllCops:
+  # Match the oldest Ruby line still receiving upstream maintenance
+  # (verified against ruby-lang.org's branch table); bump together
+  # with the CI matrix in .github/workflows/ci.yml.
+  TargetRubyVersion: 3.3
+  # Opt into new cops as RuboCop releases them - maximum quality means
+  # adopting new checks by default rather than pinning to old behavior.
+  NewCops: enable
+  # Keep the run reproducible: do not prompt about extension gems.
+  SuggestExtensions: false
+
+# The <=10 cyclomatic-complexity ceiling every supported language
+# gates on. This is the bound's SINGLE home - the scripts and hooks
+# never restate it. (flog is the documented standalone alternative for
+# complexity hotspot analysis; it is deliberately not wired so the
+# bound keeps one home.)
+Metrics/CyclomaticComplexity:
+  Max: 10
+
+# RSpec example groups and Gemfile/gemspec DSL blocks are naturally
+# long; excluding them here mirrors the rubocop-rspec community
+# default without pulling in the extension gem.
+Metrics/BlockLength:
+  Exclude:
+    - "spec/**/*"
+    - "Gemfile"
+
+# The generated scaffold uses double-quoted strings throughout (the
+# Gemfile convention); keep the project consistent with it.
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
 """
 
     # Language-agnostic script generators
