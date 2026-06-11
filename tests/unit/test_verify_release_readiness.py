@@ -20,6 +20,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 import verify_release_readiness as vrr
 
 
+def _always_posix() -> bool:
+    """Pin the POSIX branch of the is_windows seam."""
+    return False
+
+
+def _always_windows() -> bool:
+    """Pin the Windows branch of the is_windows seam."""
+    return True
+
+
 def _make_valid_project(root: Path) -> Path:
     """Create a synthetic project tree that passes every check.
 
@@ -115,12 +125,41 @@ class TestScriptsExecutable:
         failures = vrr._check_scripts_executable(project)
         assert any("test.sh" in f for f in failures)
 
-    def test_reports_non_executable_script(self, tmp_path: Path) -> None:
-        """A non-executable quality script is reported."""
+    def test_reports_non_executable_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A non-executable quality script is reported (POSIX branch)."""
+        # Pin the POSIX branch: Windows has no executable bit, so the
+        # exec-bit half of the check is POSIX-only (#380).
+        monkeypatch.setattr(vrr, "is_windows", _always_posix)
         project = _make_valid_project(tmp_path)
         (project / "scripts" / "lint.sh").chmod(0o644)
         failures = vrr._check_scripts_executable(project)
         assert any("not executable" in f and "lint.sh" in f for f in failures)
+
+    def test_windows_checks_existence_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """On Windows the executable bit is not enforced (#380).
+
+        Windows stat() derives the exec bits from the file extension, so
+        enforcing 0o111 there would flag every .sh script. The check
+        degrades to existence-only.
+        """
+        monkeypatch.setattr(vrr, "is_windows", _always_windows)
+        project = _make_valid_project(tmp_path)
+        (project / "scripts" / "lint.sh").chmod(0o644)
+        assert vrr._check_scripts_executable(project) == []
+
+    def test_windows_still_reports_missing_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing scripts are reported on Windows too (#380)."""
+        monkeypatch.setattr(vrr, "is_windows", _always_windows)
+        project = _make_valid_project(tmp_path)
+        (project / "scripts" / "test.sh").unlink()
+        failures = vrr._check_scripts_executable(project)
+        assert any("test.sh" in f for f in failures)
 
 
 class TestPrecommitHooks:

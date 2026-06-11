@@ -13,6 +13,7 @@ import re
 from typing import TYPE_CHECKING
 
 from start_green_stay_green.utils.cpp import CPP_STANDARD
+from start_green_stay_green.utils.fs import make_executable
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -6484,8 +6485,8 @@ esac
         # Write script content
         script_path.write_text(content, encoding="utf-8")
 
-        # Make script executable
-        script_path.chmod(0o755)
+        # Make script executable (no-op on Windows, see utils.fs #380)
+        make_executable(script_path)
 
         return script_path
 
@@ -6507,7 +6508,7 @@ esac
         # Write file content
         file_path.write_text(content, encoding="utf-8")
 
-        # Make executable
-        file_path.chmod(0o755)
+        # Make executable (no-op on Windows, see utils.fs #380)
+        make_executable(file_path)
 
         return file_path

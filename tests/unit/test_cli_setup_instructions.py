@@ -1,11 +1,30 @@
 """Tests for language-specific setup instructions in CLI init output."""
 
+import os
 from pathlib import Path
+import shlex
 
 import pytest
 
 from start_green_stay_green.cli import _get_setup_instructions
 from start_green_stay_green.cli import _venv_activation_command
+
+
+def _assert_cd_command(command: str, path: Path) -> None:
+    """Assert that ``command`` is a cd to exactly ``path``.
+
+    The shlex round-trip keeps the assertion platform-agnostic: on
+    Windows ``str(Path(...))`` uses backslashes, which ``shlex.quote``
+    wraps in quotes, so a literal string comparison would be
+    platform-dependent (#380). Parsing the command back proves a shell
+    would cd to exactly the intended directory.
+
+    Args:
+        command: The generated shell command under test.
+        path: The project path the command must cd into.
+    """
+    assert shlex.split(command) == ["cd", str(path)]
+
 
 # Languages exercised by the per-language common-tail tests. The
 # unknown-language default path is covered separately with "php"
@@ -89,33 +108,59 @@ class TestGetSetupInstructions:
     def test_python_includes_venv_activation(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Python setup should activate the virtualenv."""
+        """Python setup embeds the canonical activation command.
+
+        Platform-agnostic by construction: the expected string is
+        computed through the same helper the production code calls, for
+        the live platform plus a controlled environment. The exact
+        POSIX/Windows command strings are pinned hermetically in
+        TestVenvActivationCommand; the real os.name is never patched —
+        pathlib.Path dispatches on it at construction time, so patching
+        it crashes Path() on Windows runners (#380).
+        """
         monkeypatch.delenv("SHELL", raising=False)
+        # Production passes os.environ; computing the expectation with
+        # the same mapping keeps this true on Windows runners, where
+        # PSModulePath selects the PowerShell activation form.
+        expected = _venv_activation_command(os.name, os.environ)
+
         instructions = _get_setup_instructions(
             ("python",), Path("/home/user/my-project")
         )
-        assert "source .venv/bin/activate" in instructions
 
-    def test_python_activation_respects_fish_shell(
+        assert expected in instructions
+
+    def test_python_activation_respects_shell_env(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Python setup should emit the fish activation script under fish."""
+        """Setup instructions follow the helper's SHELL-sensitive output.
+
+        Under fish on POSIX this is the activate.fish form; on Windows
+        SHELL is ignored and the Scripts form appears — either way the
+        instructions must embed exactly what the canonical helper
+        produces for the same inputs.
+        """
         monkeypatch.setenv("SHELL", "/usr/bin/fish")
+        expected = _venv_activation_command(os.name, os.environ)
+
         instructions = _get_setup_instructions(
             ("python",), Path("/home/user/my-project")
         )
-        assert "source .venv/bin/activate.fish" in instructions
-        assert "source .venv/bin/activate" not in instructions
+
+        assert expected in instructions
 
     def test_python_activation_defaults_without_shell_var(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Python setup should keep the bash/zsh form when SHELL is unset."""
+        """Unset SHELL yields the helper's platform default."""
         monkeypatch.delenv("SHELL", raising=False)
+        expected = _venv_activation_command(os.name, os.environ)
+
         instructions = _get_setup_instructions(
             ("python",), Path("/home/user/my-project")
         )
-        assert "source .venv/bin/activate" in instructions
+
+        assert expected in instructions
 
     def test_python_includes_pip_install(self) -> None:
         """Python setup should install requirements."""
@@ -137,10 +182,9 @@ class TestGetSetupInstructions:
 
     def test_python_starts_with_cd(self) -> None:
         """Python setup should start with cd into project."""
-        instructions = _get_setup_instructions(
-            ("python",), Path("/home/user/my-project")
-        )
-        assert instructions[0] == "cd /home/user/my-project"
+        path = Path("/home/user/my-project")
+        instructions = _get_setup_instructions(("python",), path)
+        _assert_cd_command(instructions[0], path)
 
     def test_typescript_includes_npm_install(self) -> None:
         """TypeScript setup should run npm install."""
@@ -256,8 +300,9 @@ class TestGetSetupInstructions:
         ruby gained its own bundler steps with #373, so the probe uses
         php — a language with no setup-step entry.
         """
-        instructions = _get_setup_instructions(("php",), Path("/home/user/php-proj"))
-        assert instructions[0] == "cd /home/user/php-proj"
+        path = Path("/home/user/php-proj")
+        instructions = _get_setup_instructions(("php",), path)
+        _assert_cd_command(instructions[0], path)
         assert "pre-commit install" in instructions
         assert "./scripts/check-all.sh" in instructions
 
@@ -283,7 +328,7 @@ class TestGetSetupInstructions:
         """The cd command should use the exact project path."""
         path = Path("/home/user/my-awesome-project")
         instructions = _get_setup_instructions(("python",), path)
-        assert instructions[0] == "cd /home/user/my-awesome-project"
+        _assert_cd_command(instructions[0], path)
 
     def test_multi_language_python_and_typescript(self) -> None:
         """Multi-language python+typescript should include steps for both."""

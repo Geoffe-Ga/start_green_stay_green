@@ -12,6 +12,7 @@ import yaml
 from start_green_stay_green.generators.scripts import ScriptConfig
 from start_green_stay_green.generators.scripts import ScriptsGenerator
 from start_green_stay_green.utils.cpp import CPP_STANDARD
+from tests.conftest import assert_executable
 
 
 class TestScriptConfig:
@@ -171,8 +172,8 @@ class TestScriptsGeneratorPythonGeneration:
             scripts = generator.generate()
 
             for script_path in scripts.values():
-                # Check execute permission (0o755 & 0o111 should be 0o111)
-                assert script_path.stat().st_mode & 0o111
+                # Platform-aware: exact 0o755 on POSIX, existence on Windows (#380)
+                assert_executable(script_path)
 
     def test_python_check_all_script_contains_expected_content(self) -> None:
         """Test Python check-all.sh contains expected content."""
@@ -2408,11 +2409,10 @@ class TestMutationKillers:
             scripts = generator.generate()
 
             for script_path in scripts.values():
-                mode = script_path.stat().st_mode
-                # 0o755 means rwxr-xr-x
-                assert mode & 0o700 == 0o700  # Owner can read, write, execute
-                assert mode & 0o070 == 0o050  # Group can read, execute
-                assert mode & 0o007 == 0o005  # Others can read, execute
+                # assert_executable pins the exact 0o755 (rwxr-xr-x) mode on
+                # POSIX, killing chmod-value mutants; on Windows the exec bit
+                # does not exist, so it asserts existence only (#380).
+                assert_executable(script_path)
 
     def test_script_content_is_string_not_bytes(self) -> None:
         """Test script generator returns file paths, not bytes.
@@ -2703,7 +2703,8 @@ class TestPythonAnalyzeMutationsScript:
             scripts = generator.generate()
 
             script_path = scripts["analyze_mutations.py"]
-            assert script_path.stat().st_mode & 0o111
+            # Platform-aware: exact 0o755 on POSIX, existence on Windows (#380)
+            assert_executable(script_path)
 
     def test_analyze_mutations_script_has_shebang(self) -> None:
         """Test analyze_mutations.py has Python shebang."""
@@ -3080,7 +3081,8 @@ class TestPrStatusScript:
             scripts = generator.generate()
 
             script_path = scripts["pr-status.sh"]
-            assert script_path.stat().st_mode & 0o111
+            # Platform-aware: exact 0o755 on POSIX, existence on Windows (#380)
+            assert_executable(script_path)
 
     def test_pr_status_script_has_version_flag(self) -> None:
         """Test pr-status.sh supports --version flag."""

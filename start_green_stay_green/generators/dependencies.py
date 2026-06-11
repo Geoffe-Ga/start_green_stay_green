@@ -223,7 +223,7 @@ class DependenciesGenerator(BaseGenerator):
             return file_path
 
         try:
-            file_path.write_text(content)
+            file_path.write_text(content, encoding="utf-8")
         except OSError as e:
             msg = f"Failed to write {filename}: {e}"
             raise GenerationError(msg, cause=e) from e

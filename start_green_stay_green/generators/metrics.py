@@ -1573,7 +1573,9 @@ class MetricsGenerator(BaseGenerator):
         config_path = output_dir / "metrics.yml"
 
         result = self.generate()
-        config_path.write_text(yaml.dump(result["metrics_config"], sort_keys=False))
+        config_path.write_text(
+            yaml.dump(result["metrics_config"], sort_keys=False), encoding="utf-8"
+        )
 
         logger.info("Wrote metrics config to %s", config_path)
         return config_path
@@ -1602,7 +1604,7 @@ class MetricsGenerator(BaseGenerator):
 
         result = self.generate()
         if result["sonarqube_config"]:
-            sonar_path.write_text(result["sonarqube_config"])
+            sonar_path.write_text(result["sonarqube_config"], encoding="utf-8")
             logger.info("Wrote SonarQube config to %s", sonar_path)
             return sonar_path
 
@@ -1632,7 +1634,7 @@ class MetricsGenerator(BaseGenerator):
 
         result = self.generate()
         if result["dashboard_template"]:
-            dashboard_path.write_text(result["dashboard_template"])
+            dashboard_path.write_text(result["dashboard_template"], encoding="utf-8")
             logger.info("Wrote dashboard template to %s", dashboard_path)
             return dashboard_path
 
@@ -1659,7 +1661,7 @@ class MetricsGenerator(BaseGenerator):
 
         result = self.generate()
         badges_content = "# Quality Badges\n\n" + "\n".join(result["badges"])
-        badges_path.write_text(badges_content)
+        badges_path.write_text(badges_content, encoding="utf-8")
 
         logger.info("Wrote %d badges to %s", len(result["badges"]), badges_path)
         return badges_path

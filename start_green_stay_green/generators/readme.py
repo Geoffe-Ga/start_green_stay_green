@@ -143,7 +143,7 @@ class ReadmeGenerator(BaseGenerator):
             return readme_path
 
         try:
-            readme_path.write_text(content)
+            readme_path.write_text(content, encoding="utf-8")
         except OSError as e:
             msg = f"Failed to write README.md: {e}"
             raise GenerationError(msg, cause=e) from e

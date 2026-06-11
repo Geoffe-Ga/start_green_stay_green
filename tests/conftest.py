@@ -62,6 +62,29 @@ def get_env_without_api_keys() -> dict[str, str]:
     return env
 
 
+def assert_executable(path: Path) -> None:
+    """Assert that ``path`` is an executable script, platform-aware.
+
+    On POSIX this pins the exact ``0o755`` mode that
+    :func:`start_green_stay_green.utils.fs.make_executable` applies (a
+    strict assertion that kills chmod-value mutants). On Windows the
+    executable bit does not exist and ``make_executable`` is a documented
+    no-op, so only the file's existence is asserted. See Issue #380.
+
+    Args:
+        path: Path to the script file under test.
+
+    Raises:
+        AssertionError: If the file is missing, or (POSIX only) its
+            permission bits are not exactly 0o755.
+    """
+    assert path.is_file(), f"{path} does not exist or is not a file"
+    if os.name == "nt":
+        return
+    mode = path.stat().st_mode & 0o777
+    assert mode == 0o755, f"{path} mode is {mode:#o}, expected 0o755"
+
+
 # Expected file extensions per language
 LANGUAGE_EXTENSIONS: dict[str, str] = {
     "python": ".py",

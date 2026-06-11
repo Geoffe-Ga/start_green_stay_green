@@ -137,10 +137,30 @@ if [ -f "$PROJECT_ROOT/.pip-audit-known-vulnerabilities" ]; then
     done < "$PROJECT_ROOT/.pip-audit-known-vulnerabilities"
 fi
 
-pip-audit "${PIP_AUDIT_ARGS[@]}" 2>"$TMP_PIP_AUDIT_STDERR" || {
-    echo "✗ pip-audit found issues" >&2
-    exit 1
+# --vulnerability-service osv: query osv.dev (which aggregates the same PyPA
+# advisory database) instead of PyPI's JSON API — five CI failures in
+# one day were all PyPI 503 "Backend is unhealthy" responses, an
+# endpoint osv.dev does not depend on. --skip-editable: the local
+# package is not on PyPI and cannot be audited. One retry absorbs
+# transient windows without weakening the gate — a retried audit is
+# still a full audit.
+run_pip_audit() {
+    pip-audit --vulnerability-service osv --skip-editable "${PIP_AUDIT_ARGS[@]}" \
+        2>"$TMP_PIP_AUDIT_STDERR"
 }
+if ! run_pip_audit; then
+    echo "⚠ pip-audit failed once; retrying in 10s (stderr below)" >&2
+    cat "$TMP_PIP_AUDIT_STDERR" >&2
+    sleep 10
+    run_pip_audit || {
+        # Surface the captured stderr: without it a transient PyPI/OSV
+        # ServiceError is indistinguishable from a real vulnerability
+        # finding in CI logs.
+        echo "✗ pip-audit failed; stderr follows:" >&2
+        cat "$TMP_PIP_AUDIT_STDERR" >&2
+        exit 1
+    }
+fi
 
 if $FULL; then
     echo "=== Comprehensive Security Scan ==="
