@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 EXECUTABLE_MODE = 0o755
 
 
-def _is_windows() -> bool:
+def is_windows() -> bool:
     """Return True on native Windows.
 
     A patchable seam rather than an inline ``os.name`` read: tests must
@@ -51,6 +51,6 @@ def make_executable(path: Path) -> None:
         OSError: If the file does not exist or permissions cannot be
             changed (POSIX only).
     """
-    if _is_windows():
+    if is_windows():
         return
     path.chmod(EXECUTABLE_MODE)

@@ -197,6 +197,9 @@ jobs:
     name: Tests (Windows)
     runs-on: windows-latest
     needs: quality
+    # Cap a hung Windows runner; comfortably above the observed ~8 min
+    # full unit+integration runtime.
+    timeout-minutes: 30
     env:
       # Windows Python defaults text I/O to the legacy ANSI code page
       # (cp1252). The suite and generated content are UTF-8 (script

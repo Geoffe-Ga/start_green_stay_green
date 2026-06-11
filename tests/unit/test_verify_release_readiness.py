@@ -20,6 +20,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 import verify_release_readiness as vrr
 
 
+def _always_posix() -> bool:
+    """Pin the POSIX branch of the is_windows seam."""
+    return False
+
+
+def _always_windows() -> bool:
+    """Pin the Windows branch of the is_windows seam."""
+    return True
+
+
 def _make_valid_project(root: Path) -> Path:
     """Create a synthetic project tree that passes every check.
 
@@ -121,7 +131,7 @@ class TestScriptsExecutable:
         """A non-executable quality script is reported (POSIX branch)."""
         # Pin the POSIX branch: Windows has no executable bit, so the
         # exec-bit half of the check is POSIX-only (#380).
-        monkeypatch.setattr(vrr, "_is_windows", bool)
+        monkeypatch.setattr(vrr, "is_windows", _always_posix)
         project = _make_valid_project(tmp_path)
         (project / "scripts" / "lint.sh").chmod(0o644)
         failures = vrr._check_scripts_executable(project)
@@ -136,7 +146,7 @@ class TestScriptsExecutable:
         enforcing 0o111 there would flag every .sh script. The check
         degrades to existence-only.
         """
-        monkeypatch.setattr(vrr, "_is_windows", lambda: True)
+        monkeypatch.setattr(vrr, "is_windows", _always_windows)
         project = _make_valid_project(tmp_path)
         (project / "scripts" / "lint.sh").chmod(0o644)
         assert vrr._check_scripts_executable(project) == []
@@ -145,7 +155,7 @@ class TestScriptsExecutable:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Missing scripts are reported on Windows too (#380)."""
-        monkeypatch.setattr(vrr, "_is_windows", lambda: True)
+        monkeypatch.setattr(vrr, "is_windows", _always_windows)
         project = _make_valid_project(tmp_path)
         (project / "scripts" / "test.sh").unlink()
         failures = vrr._check_scripts_executable(project)

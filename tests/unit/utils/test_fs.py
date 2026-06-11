@@ -17,6 +17,16 @@ from start_green_stay_green.utils import fs
 from tests.conftest import assert_executable
 
 
+def _always_posix() -> bool:
+    """Pin the POSIX branch of the is_windows seam."""
+    return False
+
+
+def _always_windows() -> bool:
+    """Pin the Windows branch of the is_windows seam."""
+    return True
+
+
 class TestMakeExecutable:
     """Tests for fs.make_executable platform branches."""
 
@@ -24,7 +34,7 @@ class TestMakeExecutable:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """On POSIX the helper applies exactly mode 0o755."""
-        monkeypatch.setattr(fs, "_is_windows", bool)
+        monkeypatch.setattr(fs, "is_windows", _always_posix)
         target = tmp_path / "script.sh"
         target.write_text("#!/bin/sh\n", encoding="utf-8")
         recorded: list[int] = []
@@ -42,7 +52,7 @@ class TestMakeExecutable:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """On Windows the helper never calls chmod."""
-        monkeypatch.setattr(fs, "_is_windows", lambda: True)
+        monkeypatch.setattr(fs, "is_windows", _always_windows)
         target = tmp_path / "script.sh"
         target.write_text("#!/bin/sh\n", encoding="utf-8")
 
@@ -71,7 +81,7 @@ class TestMakeExecutable:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """POSIX behavior is unchanged: chmod on a missing path raises."""
-        monkeypatch.setattr(fs, "_is_windows", bool)
+        monkeypatch.setattr(fs, "is_windows", _always_posix)
 
         with pytest.raises(OSError, match="does-not-exist"):
             fs.make_executable(tmp_path / "does-not-exist.sh")
