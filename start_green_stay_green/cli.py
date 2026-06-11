@@ -1732,11 +1732,12 @@ def _check_all_command(os_name: str) -> str:
 
     On POSIX the generated ``scripts/check-all.sh`` carries the
     executable bit (see ``utils.fs.make_executable``) and is invoked
-    directly. Windows has no executable bit, and generated projects
-    have no native Windows gate runner yet (#386) — the honest
-    instruction is to run the POSIX script through Git Bash, which
-    needs no executable bit because bash receives the script path as
-    an argument.
+    directly. Windows has no executable bit, so the documented
+    cross-platform path (#386) is to run the POSIX script through Git
+    Bash, which needs no executable bit because bash receives the
+    script path as an argument. The generated ``scripts/README.md``
+    additionally documents the toolchain-native command each gate
+    wraps for environments without bash.
 
     Args:
         os_name: Platform identifier, typically ``os.name``.
@@ -1809,7 +1810,9 @@ def _print_setup_instructions(languages: Sequence[str], project_path: Path) -> N
     The command list comes from :func:`_get_setup_instructions` for the
     live platform. On Windows (via the patchable ``is_windows`` seam,
     #380) a note explains that the generated POSIX scripts run through
-    Git Bash, since no native Windows gate scripts exist yet (#386).
+    Git Bash and points at the generated ``scripts/README.md``, which
+    documents the Windows and toolchain-native invocation for every
+    gate (#386).
 
     Args:
         languages: Ordered sequence of programming languages for the
@@ -1825,8 +1828,9 @@ def _print_setup_instructions(languages: Sequence[str], project_path: Path) -> N
         console.print(
             "\nNote: 'bash scripts/check-all.sh' runs the quality gate "
             "through Git Bash (included with Git for Windows). The "
-            "generated scripts are POSIX shell; native Windows "
-            "equivalents are not generated yet."
+            "generated scripts/README.md documents the Windows "
+            "invocation and the toolchain-native cross-platform "
+            "command for every gate."
         )
     console.print()
 

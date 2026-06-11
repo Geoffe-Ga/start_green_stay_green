@@ -241,3 +241,47 @@ class TestRelativePaths:
         call_args = mock_console.print.call_args[0][0]
         assert "README.md" in call_args
         assert "SKIP" in call_args
+
+
+class TestLineEndings:
+    """Generated files keep LF endings on every platform (#386).
+
+    On Windows, text-mode writes translate \\n to \\r\\n by default —
+    fatal for the bash quality gates (bash cannot execute CRLF
+    scripts). The Windows CI leg (#380) runs these tests on a platform
+    where the assertion is load-bearing.
+    """
+
+    CONTENT = "#!/usr/bin/env bash\nset -euo pipefail\necho ok\n"
+
+    def test_write_file_uses_lf_only(self, tmp_path: Path) -> None:
+        """write_file never emits CR bytes."""
+        writer = FileWriter(project_root=tmp_path, console=MagicMock(spec=Console))
+        target = tmp_path / "config.yaml"
+
+        writer.write_file(target, self.CONTENT)
+
+        assert b"\r" not in target.read_bytes()
+
+    def test_write_script_uses_lf_only(self, tmp_path: Path) -> None:
+        """write_script never emits CR bytes."""
+        writer = FileWriter(project_root=tmp_path, console=MagicMock(spec=Console))
+        target = tmp_path / "gate.sh"
+
+        writer.write_script(target, self.CONTENT)
+
+        assert b"\r" not in target.read_bytes()
+
+    def test_force_overwrite_uses_lf_only(self, tmp_path: Path) -> None:
+        """The force-overwrite path also writes LF-only bytes."""
+        writer = FileWriter(
+            project_root=tmp_path,
+            force=True,
+            console=MagicMock(spec=Console),
+        )
+        target = tmp_path / "gate.sh"
+        target.write_text("old")
+
+        writer.write_script(target, self.CONTENT)
+
+        assert b"\r" not in target.read_bytes()
