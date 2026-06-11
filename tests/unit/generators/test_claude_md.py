@@ -518,6 +518,36 @@ class TestClaudeMdGeneratorModular:
             text = (docs_dir / f"{name}.md").read_text(encoding="utf-8")
             assert "{{PROJECT_NAME}}" not in text, f"Unsubstituted token in {name}.md"
 
+    def test_render_docs_returns_all_six_docs(self) -> None:
+        """render_docs returns rendered content for every split doc (#387)."""
+        generator = ClaudeMdGenerator()
+
+        docs = generator.render_docs(self._config())
+
+        assert set(docs) == set(CLAUDE_DOC_NAMES)
+        for name, content in docs.items():
+            assert content.strip(), f"Empty rendered doc: {name}"
+            assert "{{PROJECT_NAME}}" not in content
+
+    def test_render_docs_matches_render_modular_docs(self) -> None:
+        """render_docs is the same content render_modular emits (DRY)."""
+        generator = ClaudeMdGenerator()
+        config = self._config()
+
+        _index, modular_docs = generator.render_modular(config)
+
+        assert generator.render_docs(config) == modular_docs
+
+    def test_render_docs_missing_docs_dir_raises(self, tmp_path: Path) -> None:
+        """render_docs validates the docs directory before rendering."""
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        (ref_dir / "CLAUDE.md").write_text("# Title\n", encoding="utf-8")
+        generator = ClaudeMdGenerator(reference_dir=ref_dir)
+
+        with pytest.raises(ValueError, match="docs directory not found"):
+            generator.render_docs(self._config())
+
     def test_write_modular_quality_doc_keeps_required_content(
         self,
         tmp_path: Path,

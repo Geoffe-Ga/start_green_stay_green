@@ -122,7 +122,7 @@ class TestMultiLanguageGeneration:
                 MagicMock(),
                 "my-project",
                 ("python", "typescript"),
-                None,
+                cli_mod._Pass2Options(orchestrator=None),
                 MagicMock(),
             )
 
@@ -141,7 +141,11 @@ class TestMultiLanguageGeneration:
         """Test single language works identically to before."""
         with _patch_all_steps():
             _generate_project_files(
-                MagicMock(), "my-project", ("python",), None, MagicMock()
+                MagicMock(),
+                "my-project",
+                ("python",),
+                cli_mod._Pass2Options(orchestrator=None),
+                MagicMock(),
             )
 
             _get_mock("_generate_scripts_step").assert_called_once()
@@ -152,7 +156,11 @@ class TestMultiLanguageGeneration:
         """Test each per-language step gets the correct language arg."""
         with _patch_all_steps():
             _generate_project_files(
-                MagicMock(), "my-project", ("python", "go"), None, MagicMock()
+                MagicMock(),
+                "my-project",
+                ("python", "go"),
+                cli_mod._Pass2Options(orchestrator=None),
+                MagicMock(),
             )
 
             calls = _get_mock("_generate_structure_step").call_args_list
@@ -254,7 +262,11 @@ class TestMultiLanguageScriptsDir:
         """Test scripts_step receives subdirectory for each language."""
         with _patch_all_steps():
             _generate_project_files(
-                MagicMock(), "my-project", ("python", "go"), None, MagicMock()
+                MagicMock(),
+                "my-project",
+                ("python", "go"),
+                cli_mod._Pass2Options(orchestrator=None),
+                MagicMock(),
             )
 
             calls = _get_mock("_generate_scripts_step").call_args_list
@@ -267,7 +279,11 @@ class TestMultiLanguageScriptsDir:
         """Test single language scripts go to scripts/ (no subdirectory)."""
         with _patch_all_steps():
             _generate_project_files(
-                MagicMock(), "my-project", ("python",), None, MagicMock()
+                MagicMock(),
+                "my-project",
+                ("python",),
+                cli_mod._Pass2Options(orchestrator=None),
+                MagicMock(),
             )
 
             calls = _get_mock("_generate_scripts_step").call_args_list

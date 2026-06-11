@@ -1625,7 +1625,7 @@ class TestGenerateProjectFiles:
             mock_path,
             "my-project",
             ("python",),
-            mock_orchestrator,
+            cli._Pass2Options(orchestrator=mock_orchestrator),
             mock_writer,
         )
 
@@ -1649,7 +1649,7 @@ class TestGenerateProjectFiles:
             mock_path,
             "my-project",
             ("python",),
-            None,
+            cli._Pass2Options(orchestrator=None),
             mock_writer,
         )
 
