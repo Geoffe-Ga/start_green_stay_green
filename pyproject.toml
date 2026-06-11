@@ -161,6 +161,10 @@ ignore = [
 "start_green_stay_green/cli.py" = [
     "T201",      # Allow print in CLI
 ]
+"start_green_stay_green/gates/*.py" = [
+    "T201",      # Gate runner prints user-facing check output (#382)
+    "S603",      # subprocess runs trusted quality tools resolved from the active interpreter env (#382)
+]
 "scripts/audit_tool_configs.py" = [
     "T201",      # CLI script needs print for user feedback
 ]
