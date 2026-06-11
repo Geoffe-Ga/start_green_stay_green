@@ -40,10 +40,18 @@ dependencies = [
 anthropic = [
     "anthropic>=0.18.0",
 ]
+# OpenAI-compatible provider SDK (#385). Also covers local/OSS servers
+# (Ollama, vLLM, LM Studio, …) via the OPENAI_BASE_URL override.
+# Install with ``pip install 'start-green-stay-green[openai]'``.
+# Floor live-verified against PyPI (latest 2.41.1, 2026-06-11).
+openai = [
+    "openai>=2.0.0",
+]
 dev = [
-    # AI provider SDK — optional runtime extra (#383), but required for the
-    # test suite, so installed in dev.
+    # AI provider SDKs — optional runtime extras (#383, #385), but required
+    # for the test suite's mypy run, so installed in dev.
     "anthropic>=0.18.0",
+    "openai>=2.0.0",
 
     # Linting and formatting
     "ruff>=0.2.0",

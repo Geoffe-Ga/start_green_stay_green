@@ -33,6 +33,7 @@ from start_green_stay_green.ai.provider_selection import _coalesce
 from start_green_stay_green.ai.provider_selection import build_provider
 from start_green_stay_green.ai.provider_selection import resolve_api_key_env_var
 from start_green_stay_green.ai.provider_selection import resolve_provider_selection
+from start_green_stay_green.ai.provider_selection import supported_providers
 from start_green_stay_green.ai.providers.base import LLMProvider
 
 if TYPE_CHECKING:
@@ -125,12 +126,13 @@ def test_unknown_provider_raises_with_supported_set() -> None:
     """An unknown provider fails loudly and names the supported set."""
     with pytest.raises(ValueError, match="Unknown LLM provider") as exc:
         resolve_provider_selection(
-            provider_flag="openai",
+            provider_flag="does-not-exist",
             model_flag=None,
             config={},
             env={},
         )
     assert "anthropic" in str(exc.value)
+    assert "openai" in str(exc.value)
 
 
 def test_blank_provider_falls_through_to_next_tier() -> None:
@@ -262,7 +264,7 @@ def test_build_provider_returns_anthropic_instance() -> None:
 def test_build_provider_unknown_raises() -> None:
     """Building an unknown provider raises a clear ValueError."""
     with pytest.raises(ValueError, match="Unknown LLM provider"):
-        build_provider("openai", api_key="x", model="m")
+        build_provider("does-not-exist", api_key="x", model="m")
 
 
 def _block_anthropic_import(
@@ -324,3 +326,97 @@ def test_missing_extra_raises_actionable_error_on_use(
 def test_provider_unavailable_is_importerror_subclass() -> None:
     """Callers catching ImportError still catch the friendlier error."""
     assert issubclass(ProviderUnavailableError, ImportError)
+
+
+# --------------------------- openai (T3, #385) -----------------------------
+def test_supported_providers_includes_openai() -> None:
+    """The registry exposes both providers in sorted order."""
+    assert supported_providers() == ("anthropic", "openai")
+
+
+def test_openai_api_key_env_var() -> None:
+    """The OpenAI key is read from ``OPENAI_API_KEY``."""
+    assert resolve_api_key_env_var("openai") == "OPENAI_API_KEY"
+
+
+def test_openai_selection_uses_provider_default_model() -> None:
+    """``--provider openai`` without a model uses the OpenAI default.
+
+    The Anthropic default model id would be rejected by an OpenAI
+    endpoint, so the tier-4 default must follow the selected provider.
+    """
+    selection = resolve_provider_selection(
+        provider_flag="openai",
+        model_flag=None,
+        config={},
+        env={},
+    )
+    assert selection.provider == "openai"
+    assert selection.model == "gpt-5.5"
+    assert selection.model != DEFAULT_MODEL
+
+
+def test_openai_selection_honors_explicit_model() -> None:
+    """An explicit model flag overrides the provider default verbatim."""
+    selection = resolve_provider_selection(
+        provider_flag="openai",
+        model_flag="llama3.1:8b",
+        config={},
+        env={},
+    )
+    assert selection.model == "llama3.1:8b"
+
+
+def test_build_provider_returns_openai_instance() -> None:
+    """``build_provider`` constructs the OpenAI provider when selected."""
+    provider = build_provider(
+        "openai",
+        api_key="sk-test",  # pragma: allowlist secret
+        model="gpt-5.5",
+        max_retries=2,
+        retry_delay=0.5,
+    )
+    assert isinstance(provider, LLMProvider)
+    assert type(provider).__name__ == "OpenAIProvider"
+    assert provider.model == "gpt-5.5"
+
+
+def _block_openai_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make resolving the ``openai`` SDK raise ``ModuleNotFoundError``.
+
+    Same seam as :func:`_block_anthropic_import`, for the second extra.
+    """
+    real_import_module: Callable[..., object] = importlib.import_module
+
+    def _fake_import_module(name: str, *args: object, **kwargs: object) -> object:
+        if name == "openai" or name.startswith("openai."):
+            msg = "No module named 'openai'"
+            raise ModuleNotFoundError(msg)
+        return real_import_module(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", _fake_import_module)
+
+
+def test_build_openai_provider_succeeds_without_touching_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Constructing the OpenAI provider never imports its SDK."""
+    _block_openai_import(monkeypatch)
+    provider = build_provider("openai", api_key="x", model="m")
+    assert provider.model == "m"
+
+
+def test_missing_openai_extra_raises_actionable_error_on_use(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Using the OpenAI provider without its extra yields an install hint."""
+    _block_openai_import(monkeypatch)
+    provider = build_provider("openai", api_key="x", model="m")
+
+    with pytest.raises(ProviderUnavailableError) as exc:
+        provider.generate("hello", "yaml")
+
+    message = str(exc.value)
+    assert "pip install" in message
+    assert "[openai]" in message
+    assert isinstance(exc.value.__cause__, ImportError)

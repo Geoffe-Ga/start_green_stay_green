@@ -5,9 +5,10 @@
 # Include runtime dependencies
 -r requirements.txt
 
-# AI provider SDK — an optional runtime extra (#383), but required for
-# the test suite and local AI features, so it is always installed in dev.
+# AI provider SDKs — optional runtime extras (#383, #385), but required
+# for the test suite and local AI features, so always installed in dev.
 anthropic>=0.18.0,<1.0.0
+openai>=2.0.0,<3.0.0
 
 # Linting and formatting
 ruff>=0.2.0,<1.0.0
