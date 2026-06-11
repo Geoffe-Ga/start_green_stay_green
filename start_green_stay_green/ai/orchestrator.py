@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from start_green_stay_green.ai.batch import BatchSubmission
     from start_green_stay_green.ai.batch import ToolUseBatchRequest
     from start_green_stay_green.ai.providers.base import LLMProvider
+    from start_green_stay_green.ai.providers.base import ProviderCapabilities
 
 # Re-export shared types from ``ai.types`` so existing
 # ``from start_green_stay_green.ai.orchestrator import ToolUseResult``
@@ -126,6 +127,21 @@ class AIOrchestrator:
             max_retries=max_retries,
             retry_delay=retry_delay,
         )
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Return the injected provider's capability advertisement.
+
+        Batch-aware call sites (the CLI's ``--batch`` path) consult
+        this before dispatching so a provider that lacks batch falls
+        back to sequential calls instead of crashing on the typed
+        decline. Reading it performs no I/O and needs no vendor SDK.
+
+        Returns:
+            The provider's frozen
+            :class:`~start_green_stay_green.ai.providers.base.ProviderCapabilities`.
+        """
+        return self._provider.capabilities()
 
     @staticmethod
     def _validate_api_key(api_key: str) -> None:
