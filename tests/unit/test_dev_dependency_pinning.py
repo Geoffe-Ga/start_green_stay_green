@@ -60,11 +60,11 @@ class TestFormattingToolPinning:
             f"See Issue #280."
         )
 
-    def test_black_pinned_to_26_3_1(self, requirements_dev_content: str) -> None:
-        """Test that Black is pinned to 26.3.1 (current CI version)."""
+    def test_black_pinned_to_26_5_1(self, requirements_dev_content: str) -> None:
+        """Test that Black is pinned to 26.5.1 (current CI version)."""
         version_spec = _parse_requirement_version(requirements_dev_content, "black")
-        assert version_spec == "==26.3.1", (
-            f"Black must be pinned to ==26.3.1 to match CI. "
+        assert version_spec == "==26.5.1", (
+            f"Black must be pinned to ==26.5.1 to match CI. "
             f"Found: black{version_spec}. "
             f"See Issue #280."
         )
