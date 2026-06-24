@@ -363,7 +363,7 @@ jobs:
       # and reinstalling every dependency from scratch on each run.
       - name: Restore cached virtualenv
         id: venv-cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .venv
           key: venv-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('requirements.txt', 'requirements-dev.txt', 'pyproject.toml') }}
