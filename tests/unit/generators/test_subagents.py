@@ -12,22 +12,27 @@ Tests cover:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
 
 import pytest
 
 from start_green_stay_green.ai.types import TokenUsage
 from start_green_stay_green.ai.types import ToolUseResult
+from start_green_stay_green.generators import subagents as subagents_mod
+from start_green_stay_green.generators.subagents import DEFAULT_MAX_CONCURRENCY
 from start_green_stay_green.generators.subagents import REFERENCE_AGENTS_DIR
 from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
+from start_green_stay_green.generators.subagents import SOURCE_AGENT_CONTEXT
 from start_green_stay_green.generators.subagents import SubagentBatchEntry
 from start_green_stay_green.generators.subagents import SubagentGenerationResult
 from start_green_stay_green.generators.subagents import SubagentsGenerator
+from start_green_stay_green.generators.subagents import split_frontmatter
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from pytest_mock import MockerFixture
 
     from start_green_stay_green.ai.tuner import TuningResult
@@ -70,6 +75,11 @@ This is a test agent.
 - Do NOT do bad things
 - DO good things
 """
+
+
+def _set_attr(obj: object, field: str, value: object) -> None:
+    """Set an attribute, used to probe frozen-dataclass immutability."""
+    setattr(obj, field, value)
 
 
 # Test Dataclass
@@ -848,3 +858,318 @@ class TestSubagentsBatchPlan:
         assert "name: test-agent" in first
         assert "name: edited-after-submit" in second
         assert first != second
+
+
+# Mutation-killing tests: module constants
+
+
+def test_default_max_concurrency_is_eight() -> None:
+    """DEFAULT_MAX_CONCURRENCY is exactly 8 (kills 8->9)."""
+    assert DEFAULT_MAX_CONCURRENCY == 8
+
+
+def test_reference_agents_dir_resolves_to_claude_agents() -> None:
+    """REFERENCE_AGENTS_DIR ends with .claude/agents under the repo root."""
+    actual = REFERENCE_AGENTS_DIR
+    assert actual is not None
+    assert actual.name == "agents"
+    assert actual.parent.name == ".claude"
+    repo_root = Path(subagents_mod.__file__).parent.parent.parent
+    assert actual == repo_root / ".claude" / "agents"
+
+
+def test_source_agent_context_exact_text() -> None:
+    """SOURCE_AGENT_CONTEXT matches its exact wording (kills string mutants)."""
+    assert SOURCE_AGENT_CONTEXT == (
+        "Mojo ML research project (ml-odyssey) with multi-level "
+        "agent hierarchy, paper implementations, and research workflows"
+    )
+
+
+def test_required_agents_exact_mapping() -> None:
+    """REQUIRED_AGENTS maps exact keys to exact source filenames."""
+    assert REQUIRED_AGENTS == {
+        "chief-architect": "chief-architect.md",
+        "quality-reviewer": "code-review-orchestrator.md",
+        "test-generator": "test-specialist.md",
+        "security-auditor": "security-specialist.md",
+        "dependency-checker": "dependency-review-specialist.md",
+        "documentation": "documentation-specialist.md",
+        "refactorer": "implementation-specialist.md",
+        "performance": "performance-specialist.md",
+    }
+
+
+# Mutation-killing tests: split_frontmatter
+
+
+def test_split_frontmatter_returns_exact_parts() -> None:
+    """split_frontmatter splits delimiters from body with exact values."""
+    frontmatter, body = split_frontmatter(SAMPLE_AGENT_CONTENT)
+    assert frontmatter.startswith("---\n")
+    assert frontmatter.endswith("\n---")
+    assert body.startswith("\n# Test Agent")
+
+
+def test_split_frontmatter_missing_message_exact() -> None:
+    """Missing frontmatter raises ValueError with the exact message."""
+    with pytest.raises(ValueError, match="Agent content missing YAML") as exc:
+        split_frontmatter("no frontmatter here")
+    assert str(exc.value) == "Agent content missing YAML frontmatter"
+
+
+# Mutation-killing tests: SubagentBatchEntry frozen
+
+
+def test_subagent_batch_entry_is_frozen() -> None:
+    """SubagentBatchEntry rejects attribute assignment (kills frozen=False)."""
+    entry = SubagentBatchEntry(
+        agent_name="chief-architect",
+        custom_id="subagent:chief-architect",
+        frontmatter="---\nname: chief-architect\n---",
+        request=object(),  # type: ignore[arg-type]
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError, match="cannot assign"):
+        _set_attr(entry, "agent_name", "other")
+
+
+# Mutation-killing tests: validation error messages
+
+
+def _make_generator_no_validate(
+    mocker: MockerFixture, reference_dir: Path
+) -> SubagentsGenerator:
+    """Build a generator with reference-dir validation patched out."""
+    mocker.patch("start_green_stay_green.ai.tuner.ContentTuner")
+    mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+    return SubagentsGenerator(mocker.Mock(), reference_dir=reference_dir)
+
+
+def test_check_directory_exists_missing_message_exact(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """Missing-directory error message is exact, including the path."""
+    missing = tmp_path / "nope"
+    generator = _make_generator_no_validate(mocker, missing)
+    with pytest.raises(FileNotFoundError, match="Reference directory") as exc:
+        generator._check_directory_exists()
+    assert str(exc.value) == f"Reference directory not found: {missing}"
+
+
+def test_check_directory_exists_not_dir_message_exact(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """Not-a-directory error message is exact, including the path."""
+    file_path = tmp_path / "afile.txt"
+    file_path.write_text("x")
+    generator = _make_generator_no_validate(mocker, file_path)
+    with pytest.raises(NotADirectoryError, match="not a directory") as exc:
+        generator._check_directory_exists()
+    assert str(exc.value) == f"Reference path is not a directory: {file_path}"
+
+
+def test_check_required_agents_message_lists_each_missing(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """Missing-agents message lists every agent joined with ', '."""
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    generator = _make_generator_no_validate(mocker, agents_dir)
+    with pytest.raises(FileNotFoundError, match="Missing required") as exc:
+        generator._check_required_agents()
+    expected_parts = [
+        f"{name} (source: {src})" for name, src in REQUIRED_AGENTS.items()
+    ]
+    assert str(exc.value) == (
+        f"Missing required agent files: {', '.join(expected_parts)}"
+    )
+
+
+def test_check_required_agents_message_single_missing(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """A single missing agent yields a per-agent 'name (source: file)' entry."""
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    # Create all but chief-architect.
+    for name, src in REQUIRED_AGENTS.items():
+        if name != "chief-architect":
+            (agents_dir / src).write_text(SAMPLE_AGENT_CONTENT)
+    generator = _make_generator_no_validate(mocker, agents_dir)
+    with pytest.raises(FileNotFoundError, match="Missing required") as exc:
+        generator._check_required_agents()
+    assert str(exc.value) == (
+        "Missing required agent files: " "chief-architect (source: chief-architect.md)"
+    )
+
+
+# Mutation-killing tests: invalid agent name message
+
+
+@pytest.mark.asyncio
+async def test_generate_agent_invalid_name_message_exact(
+    mocker: MockerFixture,
+) -> None:
+    """Invalid agent name error lists all valid names joined with ', '."""
+    mocker.patch("start_green_stay_green.ai.tuner.ContentTuner")
+    mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+    generator = SubagentsGenerator(mocker.Mock())
+    with pytest.raises(ValueError, match="Invalid agent name") as exc:
+        await generator.generate_agent("bogus", "ctx")
+    valid = ", ".join(REQUIRED_AGENTS.keys())
+    assert str(exc.value) == (f"Invalid agent name: bogus. Must be one of: {valid}")
+
+
+# Mutation-killing tests: preserve_sections passed to tuner.tune
+
+
+@pytest.mark.asyncio
+async def test_tune_agent_body_passes_exact_preserve_sections(
+    mocker: MockerFixture,
+) -> None:
+    """_tune_agent_body forwards the exact preserve-section heading list."""
+    mock_tuner = AsyncMock()
+    mock_tuner.tune = AsyncMock(return_value=mocker.Mock(content="# C", changes=[]))
+    mocker.patch("start_green_stay_green.ai.tuner.ContentTuner")
+    mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+    generator = SubagentsGenerator(mocker.Mock())
+    generator.tuner = mock_tuner
+
+    await generator._tune_agent_body("chief-architect", "body", "tgt")
+
+    kwargs = mock_tuner.tune.call_args.kwargs
+    assert kwargs["source_content"] == "body"
+    assert kwargs["source_context"] == SOURCE_AGENT_CONTEXT
+    assert kwargs["target_context"] == "tgt"
+    assert kwargs["preserve_sections"] == [
+        "## Identity",
+        "## Scope",
+        "## Workflow",
+        "## Skills",
+        "## Constraints",
+    ]
+
+
+# Mutation-killing tests: build_batch_plan exact request construction
+
+
+def _build_plan_with_mock_tuner(
+    tmp_path: Path, mocker: MockerFixture
+) -> tuple[SubagentsGenerator, list[SubagentBatchEntry], MagicMock]:
+    """Build a plan with build_batch_request mocked to capture args."""
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    for source_file in REQUIRED_AGENTS.values():
+        (agents_dir / source_file).write_text(SAMPLE_AGENT_CONTENT)
+    mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+    generator = SubagentsGenerator(mocker.Mock(), reference_dir=agents_dir)
+
+    def fake_request(*, custom_id: str, **_kw: object) -> object:
+        return mocker.Mock(custom_id=custom_id)
+
+    mock_build = mocker.patch.object(
+        generator.tuner, "build_batch_request", side_effect=fake_request
+    )
+    plan = generator.build_batch_plan("Target ctx")
+    return generator, plan, mock_build
+
+
+def test_build_batch_plan_request_kwargs_exact(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """build_batch_plan calls build_batch_request with exact kwargs."""
+    _generator, _plan, mock_build = _build_plan_with_mock_tuner(tmp_path, mocker)
+
+    first_call = mock_build.call_args_list[0].kwargs
+    assert first_call["custom_id"] == "subagent:chief-architect"
+    assert first_call["source_context"] == SOURCE_AGENT_CONTEXT
+    assert first_call["target_context"] == "Target ctx"
+    assert first_call["preserve_sections"] == [
+        "## Identity",
+        "## Scope",
+        "## Workflow",
+        "## Skills",
+        "## Constraints",
+    ]
+    # source_content is the body (no leading frontmatter delimiter).
+    assert not first_call["source_content"].startswith("---")
+    assert "# Test Agent" in first_call["source_content"]
+
+
+def test_build_batch_plan_custom_id_from_request(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """Entry.custom_id is taken from the request, not recomputed."""
+    _generator, plan, _mock = _build_plan_with_mock_tuner(tmp_path, mocker)
+    assert plan[0].custom_id == "subagent:chief-architect"
+    assert plan[0].agent_name == "chief-architect"
+    assert plan[0].frontmatter.startswith("---")
+
+
+# Mutation-killing tests: apply_batch_result is a staticmethod
+
+
+def test_apply_batch_result_is_staticmethod() -> None:
+    """apply_batch_result is callable off the class without an instance."""
+    attr = SubagentsGenerator.__dict__["apply_batch_result"]
+    assert isinstance(attr, staticmethod)
+
+
+def test_apply_batch_result_content_is_frontmatter_then_body() -> None:
+    """apply_batch_result builds exactly 'frontmatter\\nbody' and tuned=True."""
+    tool_result = ToolUseResult(
+        tool_name="report_tuning",
+        tool_input={"tuned_content": "BODY", "changes": ["c1"]},
+        token_usage=TokenUsage(input_tokens=1, output_tokens=2),
+        model="claude",
+        message_id="m1",
+    )
+    result = SubagentsGenerator.apply_batch_result(
+        agent_name="performance",
+        frontmatter="---\nfm\n---",
+        tool_result=tool_result,
+    )
+    assert result.agent_name == "performance"
+    assert result.content == "---\nfm\n---\nBODY"
+    assert result.tuned
+    assert result.changes == ["c1"]
+
+
+# Mutation-killing tests: generate_all_agents zip strict ordering
+
+
+@pytest.mark.asyncio
+async def test_generate_all_agents_preserves_required_order(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """Results dict keys appear in REQUIRED_AGENTS declaration order."""
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    for source_file in REQUIRED_AGENTS.values():
+        (agents_dir / source_file).write_text(SAMPLE_AGENT_CONTENT)
+    mock_tuner = AsyncMock()
+    mock_tuner.tune = AsyncMock(return_value=mocker.Mock(content="# C", changes=[]))
+    mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+    generator = SubagentsGenerator(mocker.Mock(), reference_dir=agents_dir)
+    generator.tuner = mock_tuner
+
+    results = await generator.generate_all_agents("ctx")
+    assert list(results) == list(REQUIRED_AGENTS)
+
+
+# Mutation-killing tests: generate() NotImplementedError message
+
+
+def test_generate_sync_not_implemented_message_exact(
+    mocker: MockerFixture,
+) -> None:
+    """generate() raises NotImplementedError with the exact guidance text."""
+    mocker.patch("start_green_stay_green.ai.tuner.ContentTuner")
+    mocker.patch.object(SubagentsGenerator, "_validate_reference_dir")
+    generator = SubagentsGenerator(mocker.Mock())
+    with pytest.raises(NotImplementedError, match="requires async") as exc:
+        generator.generate()
+    assert str(exc.value) == (
+        "SubagentsGenerator requires async operations. "
+        "Use generate_all_agents() or generate_agent() instead."
+    )
