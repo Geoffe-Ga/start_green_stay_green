@@ -10,6 +10,7 @@ plumbing (typer flags, console rendering) is covered separately in
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
@@ -29,8 +30,14 @@ from start_green_stay_green.ai.batch_dispatch import BATCH_TARGET_SUBAGENTS
 from start_green_stay_green.ai.batch_dispatch import BatchPersistenceContext
 from start_green_stay_green.ai.batch_dispatch import BatchSubmitOutcome
 from start_green_stay_green.ai.batch_dispatch import BatchWaitConfig
+from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
 from start_green_stay_green.ai.batch_dispatch import ResumeStatus
+from start_green_stay_green.ai.batch_dispatch import _DEFAULT_POLL_INTERVAL_SECONDS
+from start_green_stay_green.ai.batch_dispatch import _agent_name_from_custom_id
+from start_green_stay_green.ai.batch_dispatch import _lookup_from_state
+from start_green_stay_green.ai.batch_dispatch import _poll_until_terminal
 from start_green_stay_green.ai.batch_dispatch import _write_one_agent
+from start_green_stay_green.ai.batch_dispatch import _write_results
 from start_green_stay_green.ai.batch_dispatch import resume_subagent_batch
 from start_green_stay_green.ai.batch_dispatch import submit_subagent_batch
 from start_green_stay_green.ai.types import GenerationError
@@ -715,3 +722,455 @@ class TestWriteOneAgentPathContainment:
         )
 
         assert (target_dir / "implementation-engineer.md").exists()
+
+
+class TestModuleConstants:
+    """Pin the exact literal values of module-level constants."""
+
+    def test_batch_target_subagents_is_exact_string(self) -> None:
+        """``BATCH_TARGET_SUBAGENTS`` is the literal ``"subagents"``."""
+        assert BATCH_TARGET_SUBAGENTS == "subagents"
+
+    def test_default_poll_interval_is_thirty_seconds(self) -> None:
+        """Default poll interval is exactly ``30.0`` seconds."""
+        assert _DEFAULT_POLL_INTERVAL_SECONDS == 30.0
+
+
+class TestResumeStatusValues:
+    """Pin the exact underlying string of every :class:`ResumeStatus`."""
+
+    def test_no_batch_value(self) -> None:
+        """``NO_BATCH`` serialises to ``"no-batch"``."""
+        assert ResumeStatus.NO_BATCH.value == "no-batch"
+
+    def test_expired_value(self) -> None:
+        """``EXPIRED`` serialises to ``"expired"``."""
+        assert ResumeStatus.EXPIRED.value == "expired"
+
+    def test_in_progress_value(self) -> None:
+        """``IN_PROGRESS`` serialises to ``"in-progress"``."""
+        assert ResumeStatus.IN_PROGRESS.value == "in-progress"
+
+    def test_ended_value(self) -> None:
+        """``ENDED`` serialises to ``"ended"``."""
+        assert ResumeStatus.ENDED.value == "ended"
+
+    def test_timed_out_value(self) -> None:
+        """``TIMED_OUT`` serialises to ``"timed-out"``."""
+        assert ResumeStatus.TIMED_OUT.value == "timed-out"
+
+
+def _set_attr(instance: object, field: str, value: object) -> None:
+    """Assign through a runtime field name.
+
+    Lets the frozen-dataclass tests exercise reassignment without a
+    static read-only-property error (the attribute name is dynamic) or a
+    constant-attribute ``setattr`` ruff finding.
+    """
+    setattr(instance, field, value)
+
+
+class TestDataclassFrozenAndDefaults:
+    """Pin ``frozen=True`` immutability and exact field defaults."""
+
+    def test_submit_outcome_is_frozen(self) -> None:
+        """``BatchSubmitOutcome`` rejects attribute reassignment."""
+        outcome = BatchSubmitOutcome(submission=MagicMock(), agent_count=1)
+        with pytest.raises(dataclasses.FrozenInstanceError, match="agent_count"):
+            _set_attr(outcome, "agent_count", 2)
+
+    def test_wait_config_is_frozen(self) -> None:
+        """``BatchWaitConfig`` rejects attribute reassignment."""
+        config = BatchWaitConfig()
+        with pytest.raises(dataclasses.FrozenInstanceError, match="wait"):
+            # Value is irrelevant: the frozen check fires before assignment.
+            _set_attr(config, "wait", "ignored")
+
+    def test_persistence_context_is_frozen(self, tmp_path: Path) -> None:
+        """``BatchPersistenceContext`` rejects attribute reassignment."""
+        ctx = BatchPersistenceContext(state=EnhanceState(), project_path=tmp_path)
+        with pytest.raises(dataclasses.FrozenInstanceError, match="project_path"):
+            _set_attr(ctx, "project_path", tmp_path)
+
+    def test_resume_outcome_is_frozen(self) -> None:
+        """``ResumeOutcome`` rejects attribute reassignment."""
+        outcome = ResumeOutcome(status=ResumeStatus.NO_BATCH)
+        with pytest.raises(dataclasses.FrozenInstanceError, match="status"):
+            _set_attr(outcome, "status", ResumeStatus.ENDED)
+
+    def test_wait_config_defaults_are_exact(self) -> None:
+        """``BatchWaitConfig`` defaults: ``wait=False`` with exact numbers."""
+        config = BatchWaitConfig()
+        # ``is not None`` kills the ``wait = None`` default mutant; the
+        # truthiness check pins the real ``False`` default.
+        assert config.wait is not None
+        assert not config.wait
+        assert config.poll_interval == 30.0
+        assert config.wait_timeout_seconds == 3600.0
+
+    def test_persistence_context_file_writer_defaults_none(
+        self, tmp_path: Path
+    ) -> None:
+        """``BatchPersistenceContext.file_writer`` defaults to ``None``."""
+        ctx = BatchPersistenceContext(state=EnhanceState(), project_path=tmp_path)
+        assert ctx.file_writer is None
+
+    def test_resume_outcome_optional_defaults_are_exact(self) -> None:
+        """``ResumeOutcome`` optional fields default to None / empty tuples."""
+        outcome = ResumeOutcome(status=ResumeStatus.NO_BATCH)
+        assert outcome.poll is None
+        assert outcome.bundle is None
+        assert not outcome.succeeded_agents
+        assert not outcome.failed_agents
+        assert isinstance(outcome.succeeded_agents, tuple)
+        assert isinstance(outcome.failed_agents, tuple)
+
+
+class TestCheckPrePollGuardComposition:
+    """Pin the ``or`` short-circuit in the NO_BATCH pre-poll guard (#1145)."""
+
+    @pytest.mark.asyncio
+    async def test_empty_batch_id_returns_no_batch(self, tmp_path: Path) -> None:
+        """A recorded batch with a blank id is treated as NO_BATCH."""
+        state = EnhanceState()
+        # ``has_batch()`` is False (blank id) but ``state.batch`` is not
+        # None, so ``or`` returns NO_BATCH while ``and`` would fall
+        # through to the poll path.
+        state.batch = BatchProgress(
+            batch_id="",
+            submitted_at=_recent_submitted_at(),
+            custom_id_map={"subagent:alpha": BATCH_TARGET_SUBAGENTS},
+        )
+        orchestrator = MagicMock()
+        orchestrator.poll_batch = AsyncMock()
+
+        outcome = await resume_subagent_batch(
+            orchestrator=orchestrator,
+            generator=_fake_generator(),
+            persistence=BatchPersistenceContext(
+                state=state,
+                project_path=tmp_path,
+            ),
+        )
+
+        assert outcome.status == ResumeStatus.NO_BATCH
+        orchestrator.poll_batch.assert_not_awaited()
+
+
+class TestPollUntilTerminalDeadlineBoundary:
+    """Pin the strict ``<`` deadline comparison in the wait loop (#1162)."""
+
+    @pytest.mark.asyncio
+    async def test_now_equal_to_deadline_stops_immediately(self) -> None:
+        """When ``_now() == deadline`` the loop must NOT poll again."""
+        orchestrator = MagicMock()
+        in_progress = BatchPoll(
+            batch_id="b",
+            status="in_progress",
+            processing_count=1,
+            succeeded_count=0,
+            errored_count=0,
+        )
+        orchestrator.poll_batch = AsyncMock(return_value=in_progress)
+        # First ``_now()`` sets ``deadline = 100 + 0``; the loop guard
+        # then reads ``_now() == 100``: strict ``<`` exits (one poll),
+        # ``<=`` would enter the loop and poll a second time.
+        with patch(
+            "start_green_stay_green.ai.batch_dispatch._now",
+            side_effect=[100.0, 100.0],
+        ):
+            poll = await _poll_until_terminal(
+                orchestrator=orchestrator,
+                batch_id="b",
+                config=BatchWaitConfig(
+                    wait=True,
+                    poll_interval=0.0,
+                    wait_timeout_seconds=0.0,
+                ),
+            )
+
+        assert poll.status == "in_progress"
+        orchestrator.poll_batch.assert_awaited_once()
+
+
+class TestReconcileMissingBatchGuard:
+    """Pin the RuntimeError message when reconcile runs with no batch (#1148/#1149)."""
+
+    @pytest.mark.asyncio
+    async def test_raises_with_exact_message(self, tmp_path: Path) -> None:
+        """``_reconcile_ended_batch`` raises an exact RuntimeError message.
+
+        Reaches the guard by clearing ``state.batch`` between the
+        pre-poll check and reconciliation: ``poll_batch`` reports
+        ``ended`` after the guard passed, but a patched ``clear_batch``
+        no-op leaves a window where a racing reset surfaces the error.
+        """
+        state = EnhanceState()
+        state.batch = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at=_recent_submitted_at(),
+            custom_id_map={"subagent:alpha": BATCH_TARGET_SUBAGENTS},
+        )
+        orchestrator = MagicMock()
+
+        async def poll_then_clear(_batch_id: str) -> BatchPoll:
+            state.batch = None
+            return BatchPoll(
+                batch_id="msgbatch_42",
+                status="ended",
+                processing_count=0,
+                succeeded_count=1,
+                errored_count=0,
+            )
+
+        orchestrator.poll_batch = AsyncMock(side_effect=poll_then_clear)
+        orchestrator.fetch_batch_results = AsyncMock()
+
+        with pytest.raises(
+            RuntimeError,
+            match="_reconcile_ended_batch called without an in-flight batch",
+        ) as exc:
+            await resume_subagent_batch(
+                orchestrator=orchestrator,
+                generator=_fake_generator(),
+                persistence=BatchPersistenceContext(
+                    state=state,
+                    project_path=tmp_path,
+                ),
+            )
+
+        assert str(exc.value).startswith(
+            "_reconcile_ended_batch called without an in-flight batch"
+        )
+
+
+class TestWriteResultsCreatesTargetDir:
+    """Pin ``mkdir(exist_ok=True)`` so an existing dir does not raise (#1166)."""
+
+    def test_existing_target_dir_does_not_raise(self, tmp_path: Path) -> None:
+        """Writing into an already-present agents dir succeeds."""
+        target_dir = tmp_path / ".claude" / "agents"
+        target_dir.mkdir(parents=True)  # pre-create so exist_ok matters
+        bundle = BatchResultsBundle(
+            successes={"subagent:alpha": _success("alpha")},
+            failures={},
+        )
+
+        succeeded, failed = _write_results(
+            generator=_fake_generator(),
+            bundle=bundle,
+            plan_lookup={"subagent:alpha": "alpha"},
+            target_dir=target_dir,
+            file_writer=None,
+        )
+
+        assert succeeded == ["alpha"]
+        assert not failed
+        assert (target_dir / "alpha.md").exists()
+
+
+class TestWriteOneAgentEscapeMessage:
+    """Pin the exact two-line path-escape error message (#1184/#1185)."""
+
+    def test_escape_message_names_agent_and_dirs(self, tmp_path: Path) -> None:
+        """The ValueError text contains the exact refusal phrasing."""
+        target_dir = tmp_path / "agents"
+        target_dir.mkdir()
+
+        with pytest.raises(ValueError, match="refusing to write agent") as exc:
+            _write_one_agent(
+                generator=_fake_generator(),
+                agent_name="../escape",
+                tool_result=_success("..."),
+                target_dir=target_dir,
+                file_writer=None,
+            )
+
+        message = str(exc.value)
+        assert message.startswith("refusing to write agent '../escape': path ")
+        assert "escapes target dir" in message
+        assert str(target_dir.resolve()) in message
+        # endswith (not `in`) kills an XX-wrap of the trailing fragment.
+        assert message.endswith(str(target_dir.resolve()))
+
+
+class TestPersistSuccessesContinuesPastFailures:
+    """Pin ``continue`` (not ``break``) on per-agent failures (#1176/#1177)."""
+
+    @pytest.mark.asyncio
+    async def test_unresolved_id_before_good_id_still_writes_good(
+        self, tmp_path: Path
+    ) -> None:
+        """An unresolved custom_id must not abort processing of siblings."""
+        state = EnhanceState()
+        state.batch = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at=_recent_submitted_at(),
+            custom_id_map={"subagent:alpha": BATCH_TARGET_SUBAGENTS},
+        )
+        orchestrator = MagicMock()
+        orchestrator.poll_batch = AsyncMock(
+            return_value=BatchPoll(
+                batch_id="msgbatch_42",
+                status="ended",
+                processing_count=0,
+                succeeded_count=2,
+                errored_count=0,
+            )
+        )
+        # Iteration order: rogue (unresolved → continue) then alpha.
+        orchestrator.fetch_batch_results = AsyncMock(
+            return_value=BatchResultsBundle(
+                successes={
+                    "rogue:unknown": _success("rogue"),
+                    "subagent:alpha": _success("alpha"),
+                },
+                failures={},
+            )
+        )
+
+        outcome = await resume_subagent_batch(
+            orchestrator=orchestrator,
+            generator=_fake_generator(),
+            persistence=BatchPersistenceContext(
+                state=state,
+                project_path=tmp_path,
+            ),
+        )
+
+        # ``break`` would drop alpha entirely; ``continue`` keeps it.
+        assert outcome.succeeded_agents == ("alpha",)
+        assert outcome.failed_agents == ("unresolved:rogue:unknown",)
+
+    @pytest.mark.asyncio
+    async def test_missing_source_before_good_id_still_writes_good(
+        self, tmp_path: Path
+    ) -> None:
+        """A FileNotFoundError on one agent must not abort the next."""
+        state = EnhanceState()
+        state.batch = BatchProgress(
+            batch_id="msgbatch_42",
+            submitted_at=_recent_submitted_at(),
+            custom_id_map={
+                "subagent:beta": BATCH_TARGET_SUBAGENTS,
+                "subagent:alpha": BATCH_TARGET_SUBAGENTS,
+            },
+        )
+        orchestrator = MagicMock()
+        orchestrator.poll_batch = AsyncMock(
+            return_value=BatchPoll(
+                batch_id="msgbatch_42",
+                status="ended",
+                processing_count=0,
+                succeeded_count=2,
+                errored_count=0,
+            )
+        )
+        # beta first (raises → continue), then alpha (writes).
+        orchestrator.fetch_batch_results = AsyncMock(
+            return_value=BatchResultsBundle(
+                successes={
+                    "subagent:beta": _success("beta"),
+                    "subagent:alpha": _success("alpha"),
+                },
+                failures={},
+            )
+        )
+        gen = _fake_generator()
+
+        def selective_frontmatter(name: str) -> str:
+            if name == "beta":
+                msg = "vanished"
+                raise FileNotFoundError(msg)
+            return f"---\nname: {name}\n---"
+
+        gen.get_agent_frontmatter.side_effect = selective_frontmatter
+
+        outcome = await resume_subagent_batch(
+            orchestrator=orchestrator,
+            generator=gen,
+            persistence=BatchPersistenceContext(
+                state=state,
+                project_path=tmp_path,
+            ),
+        )
+
+        # ``break`` would drop alpha; ``continue`` keeps it written.
+        assert outcome.succeeded_agents == ("alpha",)
+        assert outcome.failed_agents == ("beta",)
+
+
+class TestLookupFromState:
+    """Pin every branch of the custom_id -> agent_name lookup builder."""
+
+    def test_empty_when_no_batch(self) -> None:
+        """No in-flight batch yields an empty lookup (#1191)."""
+        result = _lookup_from_state(EnhanceState())
+        assert isinstance(result, dict)
+        assert not result
+
+    def test_maps_subagent_ids_to_agent_names(self) -> None:
+        """Subagent-target ids resolve to their encoded agent name."""
+        state = EnhanceState()
+        state.batch = BatchProgress(
+            batch_id="b",
+            submitted_at=_recent_submitted_at(),
+            custom_id_map={
+                "subagent:alpha": BATCH_TARGET_SUBAGENTS,
+                "subagent:beta": BATCH_TARGET_SUBAGENTS,
+            },
+        )
+        assert _lookup_from_state(state) == {
+            "subagent:alpha": "alpha",
+            "subagent:beta": "beta",
+        }
+
+    def test_skips_non_subagent_targets(self) -> None:
+        """Entries for other targets are filtered out (#1193/#1194)."""
+        state = EnhanceState()
+        state.batch = BatchProgress(
+            batch_id="b",
+            submitted_at=_recent_submitted_at(),
+            # ``other`` must be skipped; ``alpha`` kept. A ``break``
+            # mutation would stop at the first non-match.
+            custom_id_map={
+                "subagent:other-target": "skills",
+                "subagent:alpha": BATCH_TARGET_SUBAGENTS,
+            },
+        )
+        assert _lookup_from_state(state) == {"subagent:alpha": "alpha"}
+
+    def test_drops_unresolvable_subagent_id(self) -> None:
+        """A subagent-target id with no recoverable name is dropped (#1196)."""
+        state = EnhanceState()
+        state.batch = BatchProgress(
+            batch_id="b",
+            submitted_at=_recent_submitted_at(),
+            # ``subagent:`` with an empty name → None → excluded, while
+            # the real one is retained with its true name (not None).
+            custom_id_map={
+                "subagent:": BATCH_TARGET_SUBAGENTS,
+                "subagent:alpha": BATCH_TARGET_SUBAGENTS,
+            },
+        )
+        assert _lookup_from_state(state) == {"subagent:alpha": "alpha"}
+
+
+class TestAgentNameFromCustomId:
+    """Pin the ``subagent:`` prefix parsing and fallback behaviour."""
+
+    def test_strips_subagent_prefix(self) -> None:
+        """``subagent:alpha`` resolves to ``alpha``."""
+        assert _agent_name_from_custom_id("subagent:alpha", {}) == "alpha"
+
+    def test_empty_name_returns_none(self) -> None:
+        """A bare ``subagent:`` prefix yields ``None``, not ``""``."""
+        assert _agent_name_from_custom_id("subagent:", {}) is None
+
+    def test_unknown_shape_uses_fallback(self) -> None:
+        """An unrecognised id consults the fallback lookup."""
+        assert _agent_name_from_custom_id("x:y", {"x:y": "mapped"}) == "mapped"
+
+    def test_unknown_shape_without_fallback_returns_none(self) -> None:
+        """An unrecognised id absent from the fallback yields ``None``."""
+        assert _agent_name_from_custom_id("x:y", {}) is None

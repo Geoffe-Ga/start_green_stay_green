@@ -19,6 +19,7 @@ from __future__ import annotations
 import dataclasses
 import inspect
 from typing import TYPE_CHECKING
+from typing import get_args
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 
@@ -37,6 +38,7 @@ from start_green_stay_green.ai.providers import LLMProvider
 from start_green_stay_green.ai.providers import OpenAIProvider
 from start_green_stay_green.ai.providers import ProviderCapabilities
 from start_green_stay_green.ai.providers import UnsupportedCapabilityError
+from start_green_stay_green.ai.providers.base import OutputFormat
 from start_green_stay_green.ai.providers.outcomes import AttemptOutcome
 from start_green_stay_green.ai.providers.outcomes import ToolAttemptOutcome
 from start_green_stay_green.ai.types import GenerationError
@@ -450,6 +452,152 @@ class TestAttemptOutcomeHelpers:
         boom = ToolAttemptOutcome(result=None, error=RuntimeError("x"))
         assert boom.result is None
         assert isinstance(boom.error, RuntimeError)
+
+
+class TestTypesDataclasses:
+    """Pin exact defaults, frozen-ness, and arithmetic of ai.types."""
+
+    def test_generation_error_keeps_cause_reference(self) -> None:
+        """``GenerationError.cause`` is the exact exception passed in."""
+        cause = ValueError("boom")
+        error = GenerationError("failed", cause=cause)
+        assert error.cause is cause
+
+    def test_generation_error_cause_defaults_to_none(self) -> None:
+        """Omitting ``cause`` leaves the attribute as ``None``."""
+        assert GenerationError("failed").cause is None
+
+    def test_token_usage_is_frozen(self) -> None:
+        """``TokenUsage`` rejects field assignment after construction."""
+        usage = TokenUsage(input_tokens=1, output_tokens=2)
+        with pytest.raises(dataclasses.FrozenInstanceError, match="input_tokens"):
+            usage.input_tokens = 9  # type: ignore[misc]
+
+    def test_total_tokens_is_a_property_returning_an_int(self) -> None:
+        """``total_tokens`` is a property, so access yields an ``int``."""
+        usage = TokenUsage(input_tokens=5, output_tokens=2)
+        total = usage.total_tokens
+        assert isinstance(total, int)
+        assert total == 7
+
+    def test_total_tokens_sums_input_and_output(self) -> None:
+        """``total_tokens`` adds (not subtracts) the two counts."""
+        usage = TokenUsage(input_tokens=5, output_tokens=2)
+        assert usage.total_tokens == 7
+        assert usage.total_tokens != 3
+
+    def test_generation_result_is_frozen(self) -> None:
+        """``GenerationResult`` rejects field assignment after construction."""
+        result = _generation_result()
+        with pytest.raises(dataclasses.FrozenInstanceError, match="content"):
+            result.content = "other"  # type: ignore[misc]
+
+    def test_generation_result_cache_token_defaults_are_zero(self) -> None:
+        """Both cache-token fields default to exactly ``0`` (int)."""
+        result = _generation_result()
+        assert result.cache_read_tokens == 0
+        assert result.cache_creation_tokens == 0
+        assert isinstance(result.cache_read_tokens, int)
+        assert isinstance(result.cache_creation_tokens, int)
+
+    def test_tool_use_result_is_frozen(self) -> None:
+        """``ToolUseResult`` rejects field assignment after construction."""
+        result = _tool_use_result()
+        with pytest.raises(dataclasses.FrozenInstanceError, match="tool_name"):
+            result.tool_name = "other"  # type: ignore[misc]
+
+    def test_tool_use_result_cache_token_defaults_are_zero(self) -> None:
+        """Both cache-token fields default to exactly ``0`` (int)."""
+        result = _tool_use_result()
+        assert result.cache_read_tokens == 0
+        assert result.cache_creation_tokens == 0
+        assert isinstance(result.cache_read_tokens, int)
+        assert isinstance(result.cache_creation_tokens, int)
+
+
+class TestOutputFormatLiteral:
+    """Pin the exact, ordered membership of the ``OutputFormat`` literal."""
+
+    def test_output_format_members_are_exact(self) -> None:
+        """The four allowed formats appear verbatim and in order."""
+        assert get_args(OutputFormat) == ("yaml", "toml", "markdown", "bash")
+
+
+class TestUnsupportedCapabilityErrorMessage:
+    """Pin the exact decline message and machine-readable attributes."""
+
+    def test_message_is_exact(self) -> None:
+        """The error string is assembled verbatim from provider/capability."""
+        error = UnsupportedCapabilityError(
+            provider="openai",
+            capability="batch tool-use",
+        )
+        assert str(error) == (
+            "The 'openai' provider does not support batch tool-use. "
+            "Use a provider that implements this capability (for "
+            "batch tool-use: 'anthropic'), or run the requests "
+            "individually."
+        )
+
+    def test_attributes_are_exact(self) -> None:
+        """The provider/capability attributes echo the constructor args."""
+        error = UnsupportedCapabilityError(
+            provider="openai",
+            capability="batch tool-use",
+        )
+        assert error.provider == "openai"
+        assert error.capability == "batch tool-use"
+
+    def test_is_a_not_implemented_error(self) -> None:
+        """Subclassing ``NotImplementedError`` keeps generic handlers working."""
+        error = UnsupportedCapabilityError(
+            provider="openai",
+            capability="batch tool-use",
+        )
+        assert isinstance(error, NotImplementedError)
+
+
+class TestRaiseUnsupportedBatchRuntimeMessage:
+    """Pin the exact RuntimeError text when a batch-capable provider declines."""
+
+    def test_runtime_error_message_is_exact(self) -> None:
+        """The programmer-error message is assembled verbatim."""
+        with pytest.raises(RuntimeError) as exc:
+            AnthropicProvider._raise_unsupported_batch()
+        assert str(exc.value) == (
+            "provider 'anthropic' advertises batch support; "
+            "_raise_unsupported_batch must be unreachable"
+        )
+
+
+class TestLLMProviderDescriptorTypes:
+    """Pin the descriptor kinds (property / classmethod) on the ABC."""
+
+    def test_model_is_a_property(self) -> None:
+        """``model`` is exposed as a property, not a plain abstract method."""
+        descriptor = inspect.getattr_static(LLMProvider, "model")
+        assert isinstance(descriptor, property)
+
+    def test_capabilities_is_a_classmethod(self) -> None:
+        """``capabilities`` is a classmethod readable without an instance."""
+        descriptor = inspect.getattr_static(LLMProvider, "capabilities")
+        assert isinstance(descriptor, classmethod)
+
+
+class TestOutcomesFrozen:
+    """The retry-outcome dataclasses are immutable records."""
+
+    def test_attempt_outcome_is_frozen(self) -> None:
+        """``AttemptOutcome`` rejects field assignment after construction."""
+        outcome = AttemptOutcome(result=_generation_result(), error=None)
+        with pytest.raises(dataclasses.FrozenInstanceError, match="error"):
+            outcome.error = ValueError("x")  # type: ignore[misc]
+
+    def test_tool_attempt_outcome_is_frozen(self) -> None:
+        """``ToolAttemptOutcome`` rejects field assignment after construction."""
+        outcome = ToolAttemptOutcome(result=_tool_use_result(), error=None)
+        with pytest.raises(dataclasses.FrozenInstanceError, match="error"):
+            outcome.error = ValueError("x")  # type: ignore[misc]
 
 
 def _text_response(text: str, *, model: str = ModelConfig.SONNET) -> MagicMock:

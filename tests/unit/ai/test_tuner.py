@@ -15,6 +15,7 @@ from start_green_stay_green.ai.orchestrator import ToolUseResult
 from start_green_stay_green.ai.tuner import ContentTuner
 from start_green_stay_green.ai.tuner import TuningResult
 from start_green_stay_green.ai.tuner import _REPORT_TUNING_TOOL
+from start_green_stay_green.ai.tuner import _await_or_offload
 
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
@@ -169,6 +170,18 @@ class TestContentTunerValidation:
         """Test _validate_context passes for valid context."""
         ContentTuner._validate_context("Valid context", "Test")
 
+    def test_validate_content_error_message_is_exact(self) -> None:
+        """The empty-content message is exactly ``Content cannot be empty``."""
+        with pytest.raises(ValueError, match="empty") as exc:
+            ContentTuner._validate_content("")
+        assert str(exc.value) == "Content cannot be empty"
+
+    def test_validate_context_error_message_is_exact(self) -> None:
+        """The message interpolates the name + exact ``cannot be empty`` tail."""
+        with pytest.raises(ValueError, match="empty") as exc:
+            ContentTuner._validate_context("", "Source context")
+        assert str(exc.value) == "Source context cannot be empty"
+
 
 class TestContentTunerSystemBlocks:
     """Test the cache-controlled system-block builder."""
@@ -247,6 +260,20 @@ class TestContentTunerSystemBlocks:
             assert "cache_control" not in block
         assert blocks[-1]["cache_control"] == {"type": "ephemeral"}
 
+    def test_system_block_envelope_keys_are_exact(self) -> None:
+        """The single block is ``type=text`` with text + cache_control keys.
+
+        Pins the literal ``"type"`` key and its ``"text"`` value so a
+        rename of either (the only block-envelope mutants) is caught.
+        """
+        blocks = ContentTuner._build_system_blocks(
+            "Source", "Target", preserve_sections=None
+        )
+        block = blocks[0]
+        assert block["type"] == "text"
+        assert set(block) == {"type", "text", "cache_control"}
+        assert isinstance(block["text"], str)
+
     def test_user_message_contains_only_per_call_delta(self) -> None:
         """The user message holds the source content and nothing else.
 
@@ -263,6 +290,12 @@ class TestContentTunerSystemBlocks:
         assert "## Role" not in message
         assert "## Requirements" not in message
         assert "SOURCE CONTEXT:" not in message
+
+    def test_user_message_is_exact_template(self) -> None:
+        """The user message equals the exact ``CONTENT TO ADAPT:`` template."""
+        message = ContentTuner._build_user_message("BODY")
+        assert message == "CONTENT TO ADAPT:\nBODY"
+        assert message.startswith("CONTENT TO ADAPT:\n")
 
 
 class TestContentTunerToolUseParsing:
@@ -312,15 +345,32 @@ class TestContentTunerToolUseParsing:
         defends against an old SDK or a misuse so the failure is
         loud rather than passing through a confusing ``TypeError``.
         """
-        with pytest.raises(GenerationError, match="tuned_content"):
+        with pytest.raises(GenerationError, match="tuned_content") as exc:
             ContentTuner._parse_tool_use_input({"tuned_content": 42, "changes": []})
+        assert str(exc.value) == "report_tuning.tuned_content must be a string"
 
     def test_non_list_changes_raises_generation_error(self) -> None:
         """Same loud-failure rule for ``changes``."""
-        with pytest.raises(GenerationError, match="changes must be a list"):
+        with pytest.raises(GenerationError, match="changes must be a list") as exc:
             ContentTuner._parse_tool_use_input(
                 {"tuned_content": "x", "changes": "not a list"}
             )
+        assert str(exc.value) == "report_tuning.changes must be a list of strings"
+
+    def test_validate_tool_use_input_is_staticmethod(self) -> None:
+        """``_validate_tool_use_input`` stays a staticmethod.
+
+        Removing ``@staticmethod`` turns it into an instance method, so
+        calling it via an instance with the single ``tool_input`` dict
+        would bind ``self`` and raise ``TypeError``. Pin that it does
+        NOT — the static call shape must keep working.
+        """
+        tuner = ContentTuner(MagicMock(spec=AIOrchestrator))
+        content, changes = tuner._validate_tool_use_input(
+            {"tuned_content": "ok", "changes": ["c"]}
+        )
+        assert content == "ok"
+        assert changes == ["c"]
 
 
 class TestReportTuningTool:
@@ -335,6 +385,34 @@ class TestReportTuningTool:
         schema = _REPORT_TUNING_TOOL["input_schema"]
         assert isinstance(schema, dict)
         assert set(schema["required"]) == {"tuned_content", "changes"}
+
+    def test_tool_description_is_exact(self) -> None:
+        """Pin the tool description string verbatim (kills string mutants)."""
+        assert _REPORT_TUNING_TOOL["description"] == (
+            "Report the tuned content and a bullet list of changes made "
+            "while adapting the source content to the target context."
+        )
+
+    def test_schema_matches_exact_structure(self) -> None:
+        """The whole input_schema dict matches verbatim, keys and values."""
+        assert _REPORT_TUNING_TOOL["input_schema"] == {
+            "type": "object",
+            "properties": {
+                "tuned_content": {
+                    "type": "string",
+                    "description": "The fully adapted content.",
+                },
+                "changes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Short bullet describing each change made. "
+                        "Empty list when no changes were necessary."
+                    ),
+                },
+            },
+            "required": ["tuned_content", "changes"],
+        }
 
 
 class TestContentTunerTuneAsync:
@@ -572,6 +650,34 @@ class TestContentTunerLoggerBehavior:
         )
 
     @pytest.mark.asyncio
+    async def test_tune_logs_truncate_contexts_to_50_chars(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Long contexts are truncated to exactly 50 chars in the start log."""
+        orchestrator = MagicMock(spec=AIOrchestrator)
+        orchestrator.generate_tool_use_async.return_value = _make_tool_use_result(
+            tuned_content="Result", changes=["Done"]
+        )
+        tuner = ContentTuner(orchestrator)
+        mock_logger = mocker.patch("start_green_stay_green.ai.tuner.logger")
+
+        # 60-char contexts; chars 0-49 are "a"/"b", char 50 differs so a
+        # ``[:51]`` slice would include a 51st char the assertion rejects.
+        source = "a" * 50 + "SSSSSSSSSS"
+        target = "b" * 50 + "TTTTTTTTTT"
+        await tuner.tune(
+            source_content="Content",
+            source_context=source,
+            target_context=target,
+        )
+
+        mock_logger.info.assert_any_call(
+            "Tuning content (source: %s, target: %s)",
+            "a" * 50,
+            "b" * 50,
+        )
+
+    @pytest.mark.asyncio
     async def test_tune_logs_exception_on_error(self, mocker: MockerFixture) -> None:
         """Test logger.exception called when tuning fails."""
         orchestrator = MagicMock(spec=AIOrchestrator)
@@ -635,10 +741,10 @@ class TestContentTunerLoggerBehavior:
             target_context="Target",
         )
 
-        # Verify debug called for each change
+        # Verify debug called for each change with the exact format string.
         assert mock_logger.debug.call_count == 2
-        debug_calls = [call[0] for call in mock_logger.debug.call_args_list]
-        assert any("Change: %s" in str(call) for call in debug_calls)
+        mock_logger.debug.assert_any_call("Change: %s", "First change")
+        mock_logger.debug.assert_any_call("Change: %s", "Second change")
 
     @pytest.mark.asyncio
     async def test_tune_dry_run_does_not_call_orchestrator(self) -> None:
@@ -674,6 +780,35 @@ class TestContentTunerLoggerBehavior:
         assert result.content == original  # Same value
         assert result.dry_run
         assert result.changes == ["[DRY RUN] No changes made"]
+
+
+class TestAwaitOrOffload:
+    """Pin the dual sync/async dispatch in ``_await_or_offload``."""
+
+    @pytest.mark.asyncio
+    async def test_sync_callable_offloaded_returns_real_value(self) -> None:
+        """A plain sync callable is offloaded and its result flows back.
+
+        Guards the sync branch where ``sync_call = cast(..., call)``.
+        If that binding were dropped to ``None``, ``asyncio.to_thread``
+        would receive ``None`` and raise instead of returning ``(7, 9)``.
+        """
+
+        def sync_double(x: int, *, y: int) -> tuple[int, int]:
+            return (x, y)
+
+        result = await _await_or_offload(sync_double, 7, y=9)
+        assert result == (7, 9)
+
+    @pytest.mark.asyncio
+    async def test_async_callable_is_awaited_returns_real_value(self) -> None:
+        """A coroutine function is invoked and awaited, not offloaded."""
+
+        async def async_echo(value: str) -> str:
+            return value
+
+        result: str = await _await_or_offload(async_echo, "echoed")
+        assert result == "echoed"
 
 
 class TestContentTunerBuildBatchRequest:
@@ -728,23 +863,37 @@ class TestContentTunerBuildBatchRequest:
         assert '"Workflow"' in joined
 
     def test_empty_custom_id_rejected(self, tuner: ContentTuner) -> None:
-        with pytest.raises(ValueError, match="custom_id cannot be empty"):
+        with pytest.raises(ValueError, match="custom_id cannot be empty") as exc:
             tuner.build_batch_request(
                 custom_id="   ",
                 source_content="X",
                 source_context="A",
                 target_context="B",
             )
+        assert str(exc.value) == "custom_id cannot be empty"
 
     def test_input_validation_mirrors_tune(self, tuner: ContentTuner) -> None:
         """Same content / context validation runs on the batch path."""
-        with pytest.raises(ValueError, match="Source context"):
+        with pytest.raises(ValueError, match="Source context") as exc:
             tuner.build_batch_request(
                 custom_id="ok",
                 source_content="X",
                 source_context="",
                 target_context="B",
             )
+        # The "Source context" label is passed verbatim to the validator.
+        assert str(exc.value) == "Source context cannot be empty"
+
+    def test_target_context_label_is_exact(self, tuner: ContentTuner) -> None:
+        """The empty target raises with the exact ``Target context`` label."""
+        with pytest.raises(ValueError, match="Target context") as exc:
+            tuner.build_batch_request(
+                custom_id="ok",
+                source_content="X",
+                source_context="A",
+                target_context="",
+            )
+        assert str(exc.value) == "Target context cannot be empty"
 
 
 class TestContentTunerParseBatchResult:

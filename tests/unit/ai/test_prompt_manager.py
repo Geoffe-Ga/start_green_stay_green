@@ -1278,6 +1278,77 @@ class TestPhase4TemplatesSixComponent:
             assert manager.validate_template(name), f"{name} failed validation"
 
 
+class TestEnvironmentConfigMutants:
+    """Pin the Jinja2 Environment construction flags exactly."""
+
+    def test_jinja2_extension_autoescapes_html(self, tmp_path: Path) -> None:
+        """`.jinja2` templates autoescape HTML, proving the 'jinja2' extension."""
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "esc.jinja2").write_text("{{ html }}")
+
+        manager = PromptManager(template_dir=templates_dir)
+        result = manager.render("esc", {"html": "<b>&"})
+
+        assert result == "&lt;b&gt;&amp;"
+
+    def test_trim_blocks_strips_newline_after_block_tag(self, tmp_path: Path) -> None:
+        """trim_blocks=True drops the newline immediately after a block tag."""
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "trim.jinja2").write_text("{% if x %}\nLINE\n{% endif %}")
+
+        manager = PromptManager(template_dir=templates_dir)
+        result = manager.render("trim", {"x": True})
+
+        assert result == "LINE\n"
+
+    def test_lstrip_blocks_strips_leading_whitespace_before_block(
+        self, tmp_path: Path
+    ) -> None:
+        """lstrip_blocks=True strips leading whitespace before a block tag."""
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "ls.jinja2").write_text("   {% if x %}\nLINE{% endif %}")
+
+        manager = PromptManager(template_dir=templates_dir)
+        result = manager.render("ls", {"x": True})
+
+        assert result == "LINE"
+
+
+class TestErrorMessageStringMutants:
+    """Pin exact error-message strings so text mutations fail."""
+
+    def test_unsupported_language_message_exact_full_text(self, tmp_path: Path) -> None:
+        """The unsupported-language message matches verbatim, separators included."""
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "test.jinja2").write_text("Test")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        expected = (
+            "Unsupported language: cobol. "
+            "Supported: go, java, python, rust, swift, typescript"
+        )
+        with pytest.raises(ValueError, match="Unsupported language") as exc:
+            manager.render("test", {}, language="cobol")
+        assert str(exc.value) == expected
+
+    def test_failed_to_render_message_exact_prefix(self, tmp_path: Path) -> None:
+        """The render-failure message starts with the exact 'Failed to render' text."""
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "bad.jinja2").write_text("{{ missing }}")
+
+        manager = PromptManager(template_dir=templates_dir)
+
+        with pytest.raises(PromptTemplateError, match="Failed to render") as exc:
+            manager.render("bad", {})
+        assert str(exc.value).startswith("Failed to render template bad.jinja2: ")
+
+
 class TestGetDefaultManager:
     """Lock in the lazy-singleton contract for ``get_default_manager``."""
 
