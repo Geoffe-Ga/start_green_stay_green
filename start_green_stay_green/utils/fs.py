@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 EXECUTABLE_MODE = 0o755
 
 
-def is_windows() -> bool:
+def is_windows(os_name: str = os.name) -> bool:
     """Return True on native Windows.
 
     A patchable seam rather than an inline ``os.name`` read: tests must
@@ -28,10 +28,16 @@ def is_windows() -> bool:
     Windows runner makes every ``Path()`` call (including ones inside
     pytest plugins during report building) raise NotImplementedError.
 
+    Args:
+        os_name: Platform identifier to test, defaulting to the live
+            ``os.name`` captured at import. Injectable so tests can
+            exercise both the Windows and POSIX branches by value,
+            without the forbidden monkeypatch of the real ``os.name``.
+
     Returns:
-        Whether the current platform is native Windows.
+        Whether the platform is native Windows (``os.name == "nt"``).
     """
-    return os.name == "nt"
+    return os_name == "nt"
 
 
 def make_executable(path: Path) -> None:
