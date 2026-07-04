@@ -4,19 +4,45 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
     labels:
       - "dependencies"
     commit-message:
       prefix: "fix(deps)"
+    # Batch low-risk patch + minor bumps into a single PR per ecosystem so the
+    # Dependabot → Ralph bridge (dependabot-to-ralph-issue.yml) files one issue
+    # per batch instead of one per dependency. Major bumps stay individual
+    # (separate PRs) so they get focused review — they may carry breaking
+    # changes Ralph must adapt to.
+    groups:
+      pip-patch-minor:
+        update-types:
+          - "patch"
+          - "minor"
+    # Grouped batches can exceed the previous cap; raise the limit so a weekly
+    # batch plus outstanding majors are never throttled.
+    open-pull-requests-limit: 15
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
     labels:
       - "dependencies"
       - "ci"
     commit-message:
       prefix: "ci(deps)"
+    # Batch patch + minor action bumps; majors stay individual.
+    groups:
+      actions-patch-minor:
+        update-types:
+          - "patch"
+          - "minor"
+    open-pull-requests-limit: 15
+    # Example `ignore` shape for a dependency deliberately pinned pending a
+    # larger upgrade epic (e.g. a framework/SDK that manages several packages
+    # together, where bumping one piecemeal would desync the rest):
+    # ignore:
+    #   - dependency-name: "some-package"
+    #     versions: [">=X.0.0"]
+    #   # Note WHY it's pinned and which issue tracks the eventual upgrade —
+    #   # see the `dependencies`-PR handling in .claude/commands/ralph-tick.md.

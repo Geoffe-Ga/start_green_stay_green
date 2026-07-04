@@ -1,0 +1,44 @@
+[
+  {
+    "id": "generators",
+    "stack": "backend",
+    "paths": [
+      "start_green_stay_green/generators"
+    ],
+    "charter": "Per-component quality-infra generators (CI, pre-commit, scripts, skills, subagents, CLAUDE.md, structure). Prime sites for copy-paste generator variants, template/generator drift across the 10 supported languages, and dead code paths left behind by superseded generation strategies (e.g. the AI-tuning path vs. the direct-copy path)."
+  },
+  {
+    "id": "ai-orchestration",
+    "stack": "backend",
+    "paths": [
+      "start_green_stay_green/ai"
+    ],
+    "charter": "AI provider orchestration: providers, tuner, prompts, batch dispatch, provider selection. Prime sites for provider-specific duplication, error-handling drift between providers, and stubbed/partial fallback paths."
+  },
+  {
+    "id": "cli-and-gates",
+    "stack": "backend",
+    "paths": [
+      "start_green_stay_green/cli.py",
+      "start_green_stay_green/gates"
+    ],
+    "charter": "The `green` CLI entrypoint and the cross-platform quality-gate dispatcher (start_green_stay_green/gates/). Prime sites for flag-combination edge cases, duplicated validation logic between CLI options, and gate-runner drift from the shell-script equivalents in scripts/."
+  },
+  {
+    "id": "github-integration",
+    "stack": "backend",
+    "paths": [
+      "start_green_stay_green/github"
+    ],
+    "charter": "GitHub API client used by generators and the review workflow. Prime sites for silently-swallowed API errors, inconsistent retry/backoff handling, and untested edge cases in response parsing."
+  },
+  {
+    "id": "utils-and-config",
+    "stack": "backend",
+    "paths": [
+      "start_green_stay_green/utils",
+      "start_green_stay_green/config"
+    ],
+    "charter": "Common utilities (file writing, per-language naming helpers, timing, YAML merge) and configuration models. Prime sites for near-duplicate per-language helper functions and utility functions that have outgrown a single responsibility."
+  }
+]
