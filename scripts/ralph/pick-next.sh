@@ -31,6 +31,7 @@ if ! command -v gh >/dev/null 2>&1; then
 fi
 
 # Open issues, ascending by number, minus umbrellas and deferred labels.
+# --limit 300 is a project cap; raise it if open-issue count ever exceeds this.
 candidates=$(
   gh issue list \
     --state open \

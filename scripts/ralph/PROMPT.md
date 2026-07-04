@@ -34,8 +34,14 @@ This worker contract covers **Gates 1–2 and opening the PR**; the orchestrator
 
 3. **Verify the work isn't already done.**
    ```bash
-   gh pr list --state open --search "Closes #$RALPH_ISSUE Fixes #$RALPH_ISSUE Resolves #$RALPH_ISSUE"
+   gh pr list --state open --json number,body \
+     --jq ".[] | select(.body | test(\"(?i)(closes|fixes|resolves)\\\\s+#${RALPH_ISSUE}\\\\b\")) | .number"
    ```
+   (`--search` takes its terms as an AND query, so the three-keyword form
+   above would only ever match a PR body containing all three words. `gh`'s
+   `--jq` also takes a single filter string — not jq's own `--arg` flag — so
+   the issue number is inlined directly into the filter, matching
+   `ralph-tick.md`'s Step 0 check.)
    If a PR is already open against this issue, **do not open a second one**.
    Comment on the existing PR with what you would have done, return to the
    orchestrator.

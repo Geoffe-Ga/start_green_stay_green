@@ -196,7 +196,7 @@ for _ in $(seq 1 60); do            # ~30 min at 30s; Monitor timeout_ms backsto
     seen_verdict=1
     printf 'VERDICT: %s\n' "$(grep -oiE '(LGTM|CHANGES_REQUESTED|COMMENTS)' <<<"$v" | head -1)"
   fi
-  if grep -qiE ': (fail|failure|error)' <<<"$cur"; then echo "CI: FAILED — drop to Gate 1"; break; fi
+  if grep -qiE ': (fail|failure|error|cancelled)' <<<"$cur"; then echo "CI: FAILED — drop to Gate 1"; break; fi
   if [ -n "$cur" ] && ! grep -q ': pending' <<<"$roll" && [ -n "$seen_verdict" ]; then echo "READY: ci terminal + verdict present"; break; fi
   sleep 30
 done
