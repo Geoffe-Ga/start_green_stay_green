@@ -56,6 +56,10 @@ class TestGenerateRalphLoopStep:
             tmp_path / ".claude" / "skills" / "scan-issue-writer" / "SKILL.md"
         ).is_file()
         assert (tmp_path / ".claude" / "skills" / "de-slopify" / "SKILL.md").is_file()
+        assert (
+            tmp_path / ".claude" / "skills" / "discord-ralph-recap" / "SKILL.md"
+        ).is_file()
+        assert (tmp_path / ".github" / "workflows" / "ralph-recap.yml").is_file()
 
 
 class TestInitRalphLoopFlag:
@@ -84,6 +88,8 @@ class TestInitRalphLoopFlag:
         assert not (project / "scripts" / "ralph").exists()
         assert not (project / ".github" / "deslop-areas.json").exists()
         assert not (project / ".claude" / "skills" / "de-slopify").exists()
+        assert not (project / ".claude" / "skills" / "discord-ralph-recap").exists()
+        assert not (project / ".github" / "workflows" / "ralph-recap.yml").exists()
 
     def test_init_with_ralph_loop_generates_scaffolding(self, tmp_path: Path) -> None:
         """Opting in lands the full Ralph fleet-loop scaffolding."""
@@ -113,6 +119,10 @@ class TestInitRalphLoopFlag:
         assert (
             project / ".claude" / "skills" / "scan-issue-writer" / "SKILL.md"
         ).is_file()
+        assert (
+            project / ".claude" / "skills" / "discord-ralph-recap" / "SKILL.md"
+        ).is_file()
+        assert (project / ".github" / "workflows" / "ralph-recap.yml").is_file()
 
     def test_init_help_documents_with_ralph_loop(self) -> None:
         """--help mentions the flag so users can discover it."""

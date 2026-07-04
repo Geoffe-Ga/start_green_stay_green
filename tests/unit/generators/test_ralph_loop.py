@@ -41,10 +41,11 @@ def fake_ralph_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def fake_skills_dir(tmp_path: Path) -> Path:
-    """Build a minimal ``reference/skills/`` fixture with the required two."""
+    """Build a minimal ``reference/skills/`` fixture with the required skills."""
     root = tmp_path / "ref-skills"
     _write(root / "scan-issue-writer" / "SKILL.md")
     _write(root / "de-slopify" / "SKILL.md")
+    _write(root / "discord-ralph-recap" / "SKILL.md")
     return root
 
 
@@ -87,6 +88,9 @@ class TestCopyRalphLoopNoWriter:
             target / ".claude" / "skills" / "scan-issue-writer" / "SKILL.md"
         ).is_file()
         assert (target / ".claude" / "skills" / "de-slopify" / "SKILL.md").is_file()
+        assert (
+            target / ".claude" / "skills" / "discord-ralph-recap" / "SKILL.md"
+        ).is_file()
 
     def test_raises_when_a_tree_is_missing(
         self, tmp_path: Path, fake_ralph_dir: Path

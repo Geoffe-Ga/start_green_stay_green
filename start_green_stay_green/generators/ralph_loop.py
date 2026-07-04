@@ -27,7 +27,12 @@ REFERENCE_RALPH_DIR = Path(__file__).parent.parent.parent / "reference" / "ralph
 REFERENCE_SKILLS_DIR = Path(__file__).parent.parent.parent / "reference" / "skills"
 
 # Skills the ralph-loop bundle requires, sourced from the shared skills tree.
-RALPH_LOOP_SKILLS = ["scan-issue-writer", "de-slopify"]
+# discord-ralph-recap is a standalone skill (not part of any bundle upstream)
+# but is included here so --with-ralph-loop gives a generated project the
+# complete SGSG-parity experience in one flag; its workflow
+# (reference/ralph/github/workflows/ralph-recap.yml) needs no separate wiring
+# since RALPH_LOOP_TREES already copies that whole directory.
+RALPH_LOOP_SKILLS = ["scan-issue-writer", "de-slopify", "discord-ralph-recap"]
 
 # (reference subtree, target-relative subtree) tree-copy pairs.
 RALPH_LOOP_TREES: tuple[tuple[str, str], ...] = (
