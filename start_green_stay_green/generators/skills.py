@@ -11,6 +11,12 @@ Skills live in two parallel directories on disk by design:
 The trees are kept in lockstep (both updated in the same commit). They are
 not deduplicated because the two consumers are independent: removing one
 breaks either the generator or local sgsg sessions.
+
+Two of the skills under ``reference/skills/`` — ``scan-issue-writer`` and
+``de-slopify`` — are NOT in ``REQUIRED_SKILLS`` below and are never copied
+by this generator. They belong to the opt-in Ralph fleet-loop bundle and
+are copied only when ``green init --with-ralph-loop`` is passed, by
+:func:`start_green_stay_green.generators.ralph_loop.copy_ralph_loop`.
 """
 
 from __future__ import annotations

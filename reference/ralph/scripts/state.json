@@ -1,0 +1,13 @@
+{
+  "completed_since_groom": 0,
+  "total_completed": 0,
+  "groom_interval": 10,
+  "last_groom_at": null,
+  "completed_since_deslop": 0,
+  "deslop_interval": 30,
+  "last_deslop_at": null,
+  "last_completed_issue": null,
+  "started_at": null,
+  "parallel_enabled": true,
+  "max_workers": 4
+}

@@ -135,6 +135,7 @@ start-green-stay-green init [OPTIONS]
 - `--no-interactive`: Run in non-interactive mode (requires all options)
 - `--config, --config-file PATH`: Path to configuration file (YAML or TOML)
 - `--windows-ci`: Add an opt-in `windows-latest` job to the generated CI workflow (default off; see below)
+- `--with-ralph-loop`: Generate the opt-in Ralph autonomous fleet-loop scaffolding — subagent taxonomy, fleet orchestrator, worktree scripts, and maintenance-scan GitHub Actions (default off; assumes a GitHub-hosted issue/PR backlog and git worktrees)
 
 **Examples:**
 
