@@ -427,3 +427,312 @@ class TestBatchProgressExpiry:
             custom_id_map={"subagent:foo": "subagents"},
         )
         assert progress.is_potentially_expired(now=now)
+
+
+class TestStateFileVersionConstant:
+    """Pin the on-the-wire schema version literal."""
+
+    def test_version_constant_is_one(self) -> None:
+        """The current schema version is exactly 1 (bumping is breaking)."""
+        assert STATE_FILE_VERSION == 1
+
+
+class TestBatchProgressDefaults:
+    """Pin the exact default field values of ``BatchProgress``."""
+
+    def test_default_batch_id_is_empty_string(self) -> None:
+        """A default ``BatchProgress`` has an empty-string ``batch_id``."""
+        assert BatchProgress().batch_id == ""
+
+    def test_default_submitted_at_is_empty_string(self) -> None:
+        """A default ``BatchProgress`` has an empty-string ``submitted_at``."""
+        assert BatchProgress().submitted_at == ""
+
+    def test_default_custom_id_map_is_empty_dict(self) -> None:
+        """A default ``BatchProgress`` has an empty (not ``None``) map."""
+        progress = BatchProgress()
+        # isinstance kills a None default; emptiness pins the rest.
+        assert isinstance(progress.custom_id_map, dict)
+        assert not progress.custom_id_map
+
+    def test_batch_progress_is_frozen(self) -> None:
+        """``BatchProgress`` is immutable — assignment raises ``AttributeError``."""
+        progress = BatchProgress(batch_id="msgbatch_42")
+        with pytest.raises(AttributeError):
+            progress.batch_id = "other"  # type: ignore[misc]
+
+
+class TestParsedSubmittedAtGuard:
+    """Pin the ``or`` short-circuit in ``_parsed_submitted_at``."""
+
+    def test_empty_batch_id_with_valid_timestamp_is_never_expired(self) -> None:
+        """Missing ``batch_id`` defeats expiry even with a stale timestamp.
+
+        The guard is ``not batch_id or not submitted_at`` — if it were
+        ``and`` an empty ``batch_id`` paired with a 25 h-old
+        ``submitted_at`` would parse and flag expired. The ``or`` form
+        must short-circuit to "no batch" (never expired) instead.
+        """
+        now = datetime(2026, 5, 10, 1, 0, tzinfo=UTC)
+        progress = BatchProgress(
+            batch_id="",  # no batch in flight
+            submitted_at="2026-05-09T00:00:00+00:00",  # 25 h before ``now``
+        )
+        assert not progress.is_potentially_expired(now=now)
+
+
+class TestStartBatchErrorMessage:
+    """Pin the exact wording of the in-flight-batch guard message."""
+
+    def test_overwrite_error_message_is_exact(self) -> None:
+        """The double-start error message matches verbatim end to end."""
+        state = EnhanceState()
+        state.start_batch(
+            "msgbatch_first",
+            {"subagent:foo": "subagents"},
+            "2026-05-09T00:00:00Z",
+        )
+        with pytest.raises(BatchStateError) as exc:
+            state.start_batch(
+                "msgbatch_second",
+                {"subagent:bar": "subagents"},
+                "2026-05-09T01:00:00Z",
+            )
+        assert str(exc.value) == (
+            "An in-flight batch is already recorded; clear it via "
+            "clear_batch() before starting another."
+        )
+
+
+class TestToDictExactStructure:
+    """Pin the exact serialized key set and values of ``to_dict``."""
+
+    def test_to_dict_top_level_keys_are_exact(self) -> None:
+        """A batchless state serializes to exactly version/last_run/completed."""
+        state = EnhanceState()
+        state.mark_completed("claude-md", "sha256:abc", "claude-sonnet")
+        payload = state.to_dict()
+        assert set(payload) == {"version", "last_run", "completed"}
+        assert payload["version"] == 1
+
+    def test_completed_record_keys_are_exact(self) -> None:
+        """Each completed record serializes to exactly hash/model/timestamp."""
+        state = EnhanceState()
+        state.mark_completed("claude-md", "sha256:abc", "claude-sonnet")
+        record = state.to_dict()["completed"]["claude-md"]
+        assert set(record) == {"hash", "model", "timestamp"}
+
+
+class TestFromDictVersionHandling:
+    """Pin the ``version`` key read and its ``or`` fallback."""
+
+    def test_explicit_version_is_read_from_payload(self) -> None:
+        """A present truthy ``version`` flows through verbatim, not the default.
+
+        Kills the ``"version"`` → ``"XXversionXX"`` key mutant (which
+        would fall back to the default) and the ``or`` → ``and`` mutant
+        (which would collapse any present version to the default).
+        """
+        loaded = EnhanceState.from_dict({"version": 7})
+        assert loaded.version == 7
+
+    def test_missing_version_falls_back_to_default(self) -> None:
+        """An absent ``version`` defaults to the schema constant."""
+        loaded = EnhanceState.from_dict({})
+        assert loaded.version == STATE_FILE_VERSION
+
+
+class TestFromDictLastRunHandling:
+    """Pin the ``last_run`` default and ``or`` fallback."""
+
+    def test_missing_last_run_is_empty_string(self) -> None:
+        """An absent ``last_run`` defaults to the empty string, not a literal."""
+        loaded = EnhanceState.from_dict({})
+        assert loaded.last_run == ""
+
+    def test_blank_last_run_stays_empty_string(self) -> None:
+        """A present blank ``last_run`` stays empty (``or ""`` fallback)."""
+        loaded = EnhanceState.from_dict({"last_run": ""})
+        assert loaded.last_run == ""
+
+    def test_present_last_run_is_preserved(self) -> None:
+        """A present non-empty ``last_run`` flows through verbatim."""
+        loaded = EnhanceState.from_dict({"last_run": "2026-05-06T07:00:00+00:00"})
+        assert loaded.last_run == "2026-05-06T07:00:00+00:00"
+
+
+class TestValidHashPredicate:
+    """Pin the ``isinstance and truthy`` predicate guarding hash records."""
+
+    def test_non_string_hash_drops_record(self) -> None:
+        """A non-string ``hash`` (truthy) drops the record, not keeps it.
+
+        Pins ``isinstance(raw, str) and raw`` against the ``or`` mutant:
+        a truthy non-string would pass an ``or`` form and produce a
+        record with a non-string hash.
+        """
+        loaded = EnhanceState.from_dict(
+            {"completed": {"bad": {"hash": 123, "model": "x", "timestamp": "y"}}}
+        )
+        assert not loaded.completed
+
+    def test_empty_string_hash_drops_record(self) -> None:
+        """An empty-string ``hash`` drops the record (falsy → invalid)."""
+        loaded = EnhanceState.from_dict(
+            {"completed": {"bad": {"hash": "", "model": "x", "timestamp": "y"}}}
+        )
+        assert not loaded.completed
+
+
+class TestNonemptyStrPredicate:
+    """Pin the ``isinstance and truthy`` predicate guarding ``batch_id``."""
+
+    def test_non_string_batch_id_drops_batch(self) -> None:
+        """A non-string ``batch_id`` (truthy) drops the batch, not keeps it."""
+        loaded = EnhanceState.from_dict({"batch": {"batch_id": 123}})
+        assert loaded.batch is None
+
+    def test_empty_string_batch_id_drops_batch(self) -> None:
+        """An empty-string ``batch_id`` drops the batch (falsy → invalid)."""
+        loaded = EnhanceState.from_dict({"batch": {"batch_id": ""}})
+        assert loaded.batch is None
+
+
+class TestParseRecordModelAndTimestampDefaults:
+    """Pin the model/timestamp default-and-fallback handling in records."""
+
+    def test_missing_model_defaults_to_empty_string(self) -> None:
+        """A record without ``model`` parses ``model`` to ``""`` (not a literal)."""
+        loaded = EnhanceState.from_dict(
+            {"completed": {"t": {"hash": "sha256:abc", "timestamp": "ts"}}}
+        )
+        assert loaded.completed["t"].model == ""
+
+    def test_blank_model_stays_empty_string(self) -> None:
+        """A present blank ``model`` stays empty (``or ""`` fallback)."""
+        loaded = EnhanceState.from_dict(
+            {"completed": {"t": {"hash": "sha256:abc", "model": "", "timestamp": "ts"}}}
+        )
+        assert loaded.completed["t"].model == ""
+
+    def test_present_model_is_preserved(self) -> None:
+        """A present non-empty ``model`` flows through verbatim."""
+        loaded = EnhanceState.from_dict(
+            {
+                "completed": {
+                    "t": {"hash": "sha256:abc", "model": "claude-x", "timestamp": "ts"}
+                }
+            }
+        )
+        assert loaded.completed["t"].model == "claude-x"
+
+    def test_missing_timestamp_defaults_to_empty_string(self) -> None:
+        """A record without ``timestamp`` parses it to ``""`` (not a literal)."""
+        loaded = EnhanceState.from_dict(
+            {"completed": {"t": {"hash": "sha256:abc", "model": "m"}}}
+        )
+        assert loaded.completed["t"].timestamp == ""
+
+    def test_blank_timestamp_stays_empty_string(self) -> None:
+        """A present blank ``timestamp`` stays empty (``or ""`` fallback)."""
+        loaded = EnhanceState.from_dict(
+            {"completed": {"t": {"hash": "sha256:abc", "model": "m", "timestamp": ""}}}
+        )
+        assert loaded.completed["t"].timestamp == ""
+
+    def test_present_timestamp_is_preserved(self) -> None:
+        """A present non-empty ``timestamp`` flows through verbatim."""
+        loaded = EnhanceState.from_dict(
+            {
+                "completed": {
+                    "t": {"hash": "sha256:abc", "model": "m", "timestamp": "2026-01-01"}
+                }
+            }
+        )
+        assert loaded.completed["t"].timestamp == "2026-01-01"
+
+
+class TestParseBatchSubmittedAtHandling:
+    """Pin the ``submitted_at`` key read and ``or ""`` fallback in batches."""
+
+    def test_present_submitted_at_is_preserved(self) -> None:
+        """A present ``submitted_at`` is read from the right key, verbatim.
+
+        Kills the ``"submitted_at"`` → ``"XXsubmitted_atXX"`` key mutant
+        (wrong key → ``""``) and the ``or`` → ``and`` mutant (a present
+        value ``and ""`` collapses to ``""``).
+        """
+        loaded = EnhanceState.from_dict(
+            {
+                "batch": {
+                    "batch_id": "msgbatch_42",
+                    "submitted_at": "2026-05-09T00:00:00",
+                }
+            }
+        )
+        assert loaded.batch is not None
+        assert loaded.batch.submitted_at == "2026-05-09T00:00:00"
+
+    def test_missing_submitted_at_defaults_to_empty_string(self) -> None:
+        """An absent ``submitted_at`` defaults to ``""`` (not a literal)."""
+        loaded = EnhanceState.from_dict({"batch": {"batch_id": "msgbatch_42"}})
+        assert loaded.batch is not None
+        assert loaded.batch.submitted_at == ""
+
+    def test_blank_submitted_at_stays_empty_string(self) -> None:
+        """A present blank ``submitted_at`` stays empty (``or ""`` fallback)."""
+        loaded = EnhanceState.from_dict(
+            {"batch": {"batch_id": "msgbatch_42", "submitted_at": ""}}
+        )
+        assert loaded.batch is not None
+        assert loaded.batch.submitted_at == ""
+
+
+class TestSaveStateDirectoryAndFormatting:
+    """Pin ``save_state``'s directory creation and JSON formatting."""
+
+    def test_save_state_creates_nested_missing_parents(self, tmp_path: Path) -> None:
+        """Saving into a deep, not-yet-existing project path creates all parents.
+
+        Pins ``mkdir(parents=True)``: with ``parents=False`` the missing
+        ``project/.claude`` grandparents would raise ``FileNotFoundError``.
+        """
+        project = tmp_path / "deep" / "nested" / "project"
+        state = EnhanceState()
+        state.mark_completed("claude-md", "sha256:abc", "claude-sonnet")
+
+        save_state(project, state)
+
+        assert state_path_for(project).is_file()
+
+    def test_save_state_is_idempotent_when_dir_exists(self, tmp_path: Path) -> None:
+        """A second save into an existing ``.claude`` succeeds (``exist_ok=True``).
+
+        Pins ``exist_ok=True``: with ``exist_ok=False`` the second
+        ``mkdir`` would raise ``FileExistsError``.
+        """
+        state = EnhanceState()
+        state.mark_completed("claude-md", "sha256:abc", "claude-sonnet")
+
+        save_state(tmp_path, state)
+        save_state(tmp_path, state)  # must not raise
+
+        assert state_path_for(tmp_path).is_file()
+
+    def test_save_state_uses_indent_two(self, tmp_path: Path) -> None:
+        """The on-disk JSON is indented with exactly two spaces.
+
+        Pins ``indent=2`` against the ``indent=3`` mutant by comparing
+        the file byte-for-byte to the canonical two-space dump.
+        """
+        state = EnhanceState()
+        state.mark_completed("claude-md", "sha256:abc", "claude-sonnet")
+
+        save_state(tmp_path, state)
+
+        raw = state_path_for(tmp_path).read_text(encoding="utf-8")
+        expected = json.dumps(state.to_dict(), indent=2, sort_keys=True)
+        assert raw == expected
+        # A nested completed key sits at exactly four spaces (indent=2, depth 2).
+        assert '    "claude-md"' in raw
+        assert '     "claude-md"' not in raw

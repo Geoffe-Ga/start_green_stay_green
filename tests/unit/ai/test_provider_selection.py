@@ -19,6 +19,7 @@ Pins three contracts the selection layer must satisfy:
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 from typing import TYPE_CHECKING
 
@@ -27,13 +28,22 @@ import pytest
 from start_green_stay_green.ai.orchestrator import ModelConfig
 from start_green_stay_green.ai.provider_selection import DEFAULT_MODEL
 from start_green_stay_green.ai.provider_selection import DEFAULT_PROVIDER
+from start_green_stay_green.ai.provider_selection import ENV_PROVIDER
+from start_green_stay_green.ai.provider_selection import OPENAI_DEFAULT_MODEL
+from start_green_stay_green.ai.provider_selection import ProviderListing
 from start_green_stay_green.ai.provider_selection import ProviderSelection
+from start_green_stay_green.ai.provider_selection import ProviderSpec
 from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
 from start_green_stay_green.ai.provider_selection import _coalesce
 from start_green_stay_green.ai.provider_selection import build_provider
+from start_green_stay_green.ai.provider_selection import describe_providers
+from start_green_stay_green.ai.provider_selection import provider_capabilities
 from start_green_stay_green.ai.provider_selection import resolve_api_key_env_var
 from start_green_stay_green.ai.provider_selection import resolve_provider_selection
+from start_green_stay_green.ai.provider_selection import supported_providers
+from start_green_stay_green.ai.providers.anthropic_provider import AnthropicProvider
 from start_green_stay_green.ai.providers.base import LLMProvider
+from start_green_stay_green.ai.providers.base import ProviderCapabilities
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -125,12 +135,13 @@ def test_unknown_provider_raises_with_supported_set() -> None:
     """An unknown provider fails loudly and names the supported set."""
     with pytest.raises(ValueError, match="Unknown LLM provider") as exc:
         resolve_provider_selection(
-            provider_flag="openai",
+            provider_flag="does-not-exist",
             model_flag=None,
             config={},
             env={},
         )
     assert "anthropic" in str(exc.value)
+    assert "openai" in str(exc.value)
 
 
 def test_blank_provider_falls_through_to_next_tier() -> None:
@@ -262,7 +273,7 @@ def test_build_provider_returns_anthropic_instance() -> None:
 def test_build_provider_unknown_raises() -> None:
     """Building an unknown provider raises a clear ValueError."""
     with pytest.raises(ValueError, match="Unknown LLM provider"):
-        build_provider("openai", api_key="x", model="m")
+        build_provider("does-not-exist", api_key="x", model="m")
 
 
 def _block_anthropic_import(
@@ -324,3 +335,298 @@ def test_missing_extra_raises_actionable_error_on_use(
 def test_provider_unavailable_is_importerror_subclass() -> None:
     """Callers catching ImportError still catch the friendlier error."""
     assert issubclass(ProviderUnavailableError, ImportError)
+
+
+# --------------------------- openai (T3, #385) -----------------------------
+def test_supported_providers_includes_openai() -> None:
+    """The registry exposes both providers in sorted order."""
+    assert supported_providers() == ("anthropic", "openai")
+
+
+def test_openai_api_key_env_var() -> None:
+    """The OpenAI key is read from ``OPENAI_API_KEY``."""
+    assert resolve_api_key_env_var("openai") == "OPENAI_API_KEY"
+
+
+def test_openai_selection_uses_provider_default_model() -> None:
+    """``--provider openai`` without a model uses the OpenAI default.
+
+    The Anthropic default model id would be rejected by an OpenAI
+    endpoint, so the tier-4 default must follow the selected provider.
+    """
+    selection = resolve_provider_selection(
+        provider_flag="openai",
+        model_flag=None,
+        config={},
+        env={},
+    )
+    assert selection.provider == "openai"
+    assert selection.model == OPENAI_DEFAULT_MODEL
+    assert selection.model != DEFAULT_MODEL
+
+
+def test_openai_selection_honors_explicit_model() -> None:
+    """An explicit model flag overrides the provider default verbatim."""
+    selection = resolve_provider_selection(
+        provider_flag="openai",
+        model_flag="llama3.1:8b",
+        config={},
+        env={},
+    )
+    assert selection.model == "llama3.1:8b"
+
+
+def test_build_provider_returns_openai_instance() -> None:
+    """``build_provider`` constructs the OpenAI provider when selected."""
+    provider = build_provider(
+        "openai",
+        api_key="sk-test",  # pragma: allowlist secret
+        model="gpt-5.5",
+        max_retries=2,
+        retry_delay=0.5,
+    )
+    assert isinstance(provider, LLMProvider)
+    assert type(provider).__name__ == "OpenAIProvider"
+    assert provider.model == "gpt-5.5"
+
+
+def _block_openai_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make resolving the ``openai`` SDK raise ``ModuleNotFoundError``.
+
+    Same seam as :func:`_block_anthropic_import`, for the second extra.
+    """
+    real_import_module: Callable[..., object] = importlib.import_module
+
+    def _fake_import_module(name: str, *args: object, **kwargs: object) -> object:
+        if name == "openai" or name.startswith("openai."):
+            msg = "No module named 'openai'"
+            raise ModuleNotFoundError(msg)
+        return real_import_module(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", _fake_import_module)
+
+
+def test_build_openai_provider_succeeds_without_touching_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Constructing the OpenAI provider never imports its SDK."""
+    _block_openai_import(monkeypatch)
+    provider = build_provider("openai", api_key="x", model="m")
+    assert provider.model == "m"
+
+
+def test_missing_openai_extra_raises_actionable_error_on_use(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Using the OpenAI provider without its extra yields an install hint."""
+    _block_openai_import(monkeypatch)
+    provider = build_provider("openai", api_key="x", model="m")
+
+    with pytest.raises(ProviderUnavailableError) as exc:
+        provider.generate("hello", "yaml")
+
+    message = str(exc.value)
+    assert "pip install" in message
+    assert "[openai]" in message
+    assert isinstance(exc.value.__cause__, ImportError)
+
+
+# ----------------------- capabilities (T5, #389) ---------------------------
+def test_provider_capabilities_anthropic_supports_batch() -> None:
+    """The registry surfaces Anthropic's full capability set."""
+    caps = provider_capabilities("anthropic")
+    assert caps == ProviderCapabilities(
+        provider="anthropic",
+        batch=True,
+        tool_use=True,
+        token_accounting=True,
+    )
+
+
+def test_provider_capabilities_openai_lacks_batch() -> None:
+    """The registry surfaces OpenAI's batch-unsupported advertisement."""
+    caps = provider_capabilities("openai")
+    assert not caps.batch
+    assert caps.tool_use
+    assert caps.token_accounting
+    assert caps.provider == "openai"
+
+
+def test_provider_capabilities_normalizes_name() -> None:
+    """Provider names are case-insensitive registry keys here too."""
+    assert provider_capabilities("  OpenAI ") == provider_capabilities("openai")
+
+
+def test_provider_capabilities_unknown_provider_raises() -> None:
+    """An unknown provider raises the standard registry ValueError."""
+    with pytest.raises(ValueError, match="Unknown LLM provider"):
+        provider_capabilities("does-not-exist")
+
+
+def test_provider_capabilities_readable_without_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Capabilities resolve with the vendor SDK absent (lazy-import seam).
+
+    ``green providers`` must list every provider's capabilities even
+    when an optional extra is not installed, so the advertisement is
+    read from the (import-clean) provider class, never from an SDK.
+    """
+    _block_openai_import(monkeypatch)
+    assert not provider_capabilities("openai").batch
+
+
+def test_describe_providers_lists_every_registered_provider() -> None:
+    """The listing covers the whole registry in sorted name order."""
+    listings = describe_providers()
+    assert tuple(entry.name for entry in listings) == ("anthropic", "openai")
+
+
+def test_describe_providers_carries_spec_and_capabilities() -> None:
+    """Each row pairs registry metadata with the advertisement."""
+    by_name = {entry.name: entry for entry in describe_providers()}
+    anthropic = by_name["anthropic"]
+    assert anthropic.default_model == DEFAULT_MODEL
+    assert anthropic.api_key_env_var == "ANTHROPIC_API_KEY"  # pragma: allowlist secret
+    assert anthropic.capabilities.batch
+    openai = by_name["openai"]
+    assert openai.default_model == OPENAI_DEFAULT_MODEL
+    assert openai.api_key_env_var == "OPENAI_API_KEY"  # pragma: allowlist secret
+    assert not openai.capabilities.batch
+
+
+def test_describe_providers_works_without_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The full listing also resolves with an optional extra absent."""
+    _block_openai_import(monkeypatch)
+    names = [entry.name for entry in describe_providers()]
+    assert "openai" in names
+
+
+# ----------------------- module-constant exactness -------------------------
+def test_openai_default_model_constant_is_exact() -> None:
+    """``OPENAI_DEFAULT_MODEL`` is byte-for-byte the live flagship id."""
+    assert OPENAI_DEFAULT_MODEL == "gpt-5.5"
+
+
+def test_env_provider_constant_is_exact() -> None:
+    """``ENV_PROVIDER`` is exactly the documented env-var name."""
+    assert ENV_PROVIDER == "GREEN_LLM_PROVIDER"
+
+
+def test_env_provider_selects_non_default_provider() -> None:
+    """``GREEN_LLM_PROVIDER`` actually drives selection (key is read)."""
+    selection = resolve_provider_selection(
+        provider_flag=None,
+        model_flag=None,
+        config={},
+        env={"GREEN_LLM_PROVIDER": "openai"},
+    )
+    assert selection.provider == "openai"
+
+
+def test_config_provider_key_selects_non_default_provider() -> None:
+    """The ``llm_provider`` config key actually drives selection."""
+    selection = resolve_provider_selection(
+        provider_flag=None,
+        model_flag=None,
+        config={"llm_provider": "openai"},
+        env={},
+    )
+    assert selection.provider == "openai"
+
+
+# --------------------------- _coalesce folding -----------------------------
+def test_coalesce_folds_by_default() -> None:
+    """``_coalesce`` case-folds its chosen candidate unless told otherwise."""
+    assert _coalesce("  ANTHROPIC  ") == "anthropic"
+
+
+# ----------------------- error-message exactness ---------------------------
+def test_unknown_provider_message_is_exact() -> None:
+    """The unknown-provider message uses the exact prefix and separator."""
+    with pytest.raises(ValueError, match="Unknown LLM provider") as exc:
+        resolve_provider_selection(
+            provider_flag="does-not-exist",
+            model_flag=None,
+            config={},
+            env={},
+        )
+    message = str(exc.value)
+    assert message.startswith("Unknown LLM provider 'does-not-exist'.")
+    assert message.endswith("Supported providers: anthropic, openai.")
+
+
+def test_blank_provider_in_api_key_lookup_reports_empty_repr() -> None:
+    """A blank provider name reaches the registry as ``''``, not a sentinel."""
+    with pytest.raises(ValueError, match="Unknown LLM provider") as exc:
+        resolve_api_key_env_var("   ")
+    assert str(exc.value).startswith("Unknown LLM provider ''.")
+
+
+def test_blank_provider_in_build_reports_empty_repr() -> None:
+    """``build_provider`` reports a blank provider as ``''``, not a sentinel."""
+    with pytest.raises(ValueError, match="Unknown LLM provider") as exc:
+        build_provider("   ", api_key="x", model="m")
+    assert str(exc.value).startswith("Unknown LLM provider ''.")
+
+
+def test_blank_provider_in_capabilities_reports_empty_repr() -> None:
+    """``provider_capabilities`` reports a blank provider as ``''``."""
+    with pytest.raises(ValueError, match="Unknown LLM provider") as exc:
+        provider_capabilities("   ")
+    assert str(exc.value).startswith("Unknown LLM provider ''.")
+
+
+# --------------------------- constructor defaults --------------------------
+def test_build_provider_default_max_retries_is_three() -> None:
+    """Omitting ``max_retries`` yields exactly three attempts."""
+    provider = build_provider("anthropic", api_key="x", model="m")
+    assert isinstance(provider, AnthropicProvider)
+    assert provider.max_retries == 3
+
+
+def test_build_provider_default_retry_delay_is_one_second() -> None:
+    """Omitting ``retry_delay`` yields exactly a one-second initial delay."""
+    provider = build_provider("anthropic", api_key="x", model="m")
+    assert isinstance(provider, AnthropicProvider)
+    assert provider.retry_delay == 1.0
+
+
+# ------------------------------- frozen-ness -------------------------------
+def _assign_field(instance: object, field: str, value: object) -> None:
+    """Assign ``value`` to ``instance.field`` by a runtime field name.
+
+    The field name is a parameter (not a literal), so frozen-dataclass
+    assignment can be exercised without a constant-attribute ``setattr``
+    that ruff's B010 flags.
+    """
+    setattr(instance, field, value)
+
+
+def test_provider_selection_is_frozen() -> None:
+    """``ProviderSelection`` is immutable (attribute assignment rejected)."""
+    selection = ProviderSelection(provider="anthropic", model="m")
+    with pytest.raises(dataclasses.FrozenInstanceError, match="cannot assign"):
+        _assign_field(selection, "provider", "openai")
+
+
+def test_provider_spec_is_frozen() -> None:
+    """``ProviderSpec`` is immutable (attribute assignment rejected)."""
+    spec = ProviderSpec(
+        module="m",
+        class_name="C",
+        api_key_env_var="K",
+        default_model="d",
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError, match="cannot assign"):
+        _assign_field(spec, "module", "other")
+
+
+def test_provider_listing_is_frozen() -> None:
+    """``ProviderListing`` is immutable (attribute assignment rejected)."""
+    listing = describe_providers()[0]
+    assert isinstance(listing, ProviderListing)
+    with pytest.raises(dataclasses.FrozenInstanceError, match="cannot assign"):
+        _assign_field(listing, "name", "other")

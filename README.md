@@ -17,8 +17,8 @@ Start Green Stay Green is a meta-tool that scaffolds new software projects with 
 
 - **Enterprise-Grade Quality**: 90%+ code coverage, mutation testing, comprehensive linting
 - **AI Integration**: Pre-configured AI subagent profiles and code review workflows
-- **Multi-Language Support**: Python, TypeScript, Go, Rust, Swift (watchOS), Kotlin (Wear OS), C/C++ (Tizen), Java (Wear OS legacy), and C# (.NET)
-- **Architecture Enforcement**: import-linter (Python), dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust), SwiftLint custom rules (Swift), Konsist (Kotlin), an include-boundary checker (C/C++), ArchUnit (Java), and NetArchTest (C#)
+- **Multi-Language Support**: Python, TypeScript, Go, Rust, Swift (watchOS), Kotlin (Wear OS), C/C++ (Tizen), Java (Wear OS legacy), C# (.NET), and Ruby
+- **Architecture Enforcement**: import-linter (Python), dependency-cruiser (TypeScript), go-arch-lint (Go), cargo-deny (Rust), SwiftLint custom rules (Swift), Konsist (Kotlin), an include-boundary checker (C/C++), ArchUnit (Java), NetArchTest (C#), and Packwerk (Ruby)
 - **Complete CI/CD**: GitHub Actions workflows with quality gates
 - **Additive Init**: Safe to re-run in existing directories — preserves your files
 - **Developer Experience**: Rich console output, interactive prompts, dry-run mode
@@ -134,6 +134,7 @@ start-green-stay-green init [OPTIONS]
 - `--dry-run`: Preview what would be generated without creating files
 - `--no-interactive`: Run in non-interactive mode (requires all options)
 - `--config, --config-file PATH`: Path to configuration file (YAML or TOML)
+- `--windows-ci`: Add an opt-in `windows-latest` job to the generated CI workflow (default off; see below)
 
 **Examples:**
 
@@ -147,6 +148,9 @@ start-green-stay-green init -n my-app -l python --no-interactive
 # Multi-language project
 start-green-stay-green init -n fullstack-app -l python -l typescript
 
+# Opt into a Windows CI leg for the generated project
+start-green-stay-green init -n my-app -l python --windows-ci
+
 # Re-run safely in existing project (skips existing files)
 start-green-stay-green init -n my-app -l python
 
@@ -159,6 +163,40 @@ start-green-stay-green init -n my-app -l python --interactive
 # Dry run to preview
 start-green-stay-green init -n my-app -l typescript --dry-run
 ```
+
+#### `--windows-ci`: opt-in Windows CI leg for generated projects
+
+By default the generated `.github/workflows/ci.yml` runs on Linux only.
+Passing `--windows-ci` appends a `quality-windows` job that runs the
+project's quality gates on `windows-latest` through Git Bash — the same
+`bash scripts/<gate>.sh` invocation documented in the generated
+`scripts/README.md` — gated behind the Linux quality job so a red Linux
+run never burns Windows minutes. Default off: without the flag the
+generated CI is byte-for-byte unchanged and uses no Windows runner
+minutes.
+
+Supported languages: python, typescript, go, rust, java, csharp, ruby.
+Not supported (the flag fails fast with an explanation): swift and cpp
+(their gate toolchains are not available on `windows-latest`) and
+kotlin (the gate scripts need a Gradle wrapper jar that `init` cannot
+write). For a multi-language project the leg follows the primary
+language (the first `-l` value), matching how the CI workflow itself is
+generated. The go leg runs only its test gate — golangci-lint is
+provisioned by a Linux-only action in the quality job.
+
+To add the leg to an **existing** scaffolded repo, re-run init with the
+flag plus a conflict-resolution mode, since init never overwrites your
+files by default:
+
+```bash
+green init -n my-app -l python --windows-ci --interactive  # choose
+# "overwrite" for .github/workflows/ci.yml when prompted
+```
+
+(There is no YAML-aware merge for workflow files yet — unlike
+`.pre-commit-config.yaml`, which init merges — so overwriting the
+generated `ci.yml` is the supported path; copy your own edits back in
+afterwards.)
 
 ### `version` - Display Version Information
 
@@ -434,6 +472,7 @@ Project names must follow these rules:
 - **C/C++**: ctest (≥90% coverage via gcov/lcov), clang-format, clang-tidy + cppcheck, lizard, flawfinder
 - **Java**: mvn test (≥90% coverage via JaCoCo), google-java-format, Checkstyle + PMD, SpotBugs, OWASP dependency-check
 - **C#**: dotnet test (≥90% coverage via Coverlet), dotnet format, Roslyn analyzers (CA1502 complexity ≤10), SecurityCodeScan + vulnerable-package scan
+- **Ruby**: bundle exec rspec (≥90% coverage via SimpleCov), RuboCop (format + lint + complexity ≤10 + Security cops in one `.rubocop.yml` policy home), bundler-audit
 
 See the [CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for the
 full per-language toolchain table and prerequisites.
@@ -622,6 +661,65 @@ generated output and the
 [CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
 the full Java toolchain table.
 
+### Example 9: C# (.NET) Project
+
+```bash
+# Prerequisites: the .NET 8 SDK - dotnet format, the Roslyn analyzers,
+# and NuGet all ship inside it, so nothing else to install
+# (Debian/Ubuntu: apt-get install dotnet-sdk-8.0):
+brew install dotnet-sdk
+
+start-green-stay-green init \
+  --project-name wrist-ledger \
+  --language csharp \
+  --no-interactive
+
+cd wrist-ledger
+dotnet test
+pre-commit install
+./scripts/check-all.sh  # dotnet format, Roslyn analyzers as errors (CA1502 complexity ≤10), dotnet test + ≥90% Coverlet coverage, vulnerable NuGet package scan
+```
+
+The generated CI pipeline runs on ubuntu runners with a .NET 8 SDK
+quality job (the generated csproj targets net8.0) running the same
+dotnet CLI gates as the local build — the csproj is the single home of
+the analyzer policy and the ≥90% Coverlet coverage bound, so the
+scripts, hooks, and CI cannot drift from it. See
+[examples/csharp/](examples/csharp/) for real generated output and the
+[CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
+the full C# toolchain table.
+
+### Example 10: Ruby Project
+
+```bash
+# Prerequisites: Ruby 3.3+ and Bundler - every quality gem (RSpec,
+# SimpleCov, RuboCop, bundler-audit, Packwerk) is pinned in the
+# generated Gemfile, so bundle install provisions the whole toolchain
+# (Debian/Ubuntu: apt-get install ruby-full):
+brew install ruby
+
+start-green-stay-green init \
+  --project-name wrist-cadence \
+  --language ruby \
+  --no-interactive
+
+cd wrist-cadence
+bundle install
+bundle exec rspec
+pre-commit install
+./scripts/check-all.sh  # RuboCop format check + lint + complexity ≤10 + Security cops, RSpec + ≥90% SimpleCov coverage, bundler-audit dependency CVE scan
+```
+
+The generated CI pipeline runs on ubuntu runners with a Ruby 3.3/3.4
+quality matrix (the maintained Ruby lines) running the same gates as
+the local build — RuboCop reads the same `.rubocop.yml` (the single
+home of the format/lint/complexity/security-cop policy) and the ≥90%
+SimpleCov coverage bound lives only in `spec/spec_helper.rb`, so the
+scripts, hooks, and CI cannot drift from them. See
+[examples/ruby/](examples/ruby/) for real generated output and the
+[CLI Reference](docs/CLI_REFERENCE.md#--language---l-text-optional) for
+the full Ruby toolchain table.
+
 ## Project Structure
 
 After running `start-green-stay-green init`, your project will have:
@@ -795,7 +893,8 @@ All contributions must:
 - ✅ Kotlin (Wear OS) language support — scaffold, quality tooling, CI, tests (#356, #357, #358, #359)
 - ✅ C/C++ (Tizen native) language support — scaffold, quality tooling, CI, tests (#361, #362, #363, #364)
 - ✅ Java (Wear OS legacy) language support — scaffold, quality tooling, CI, tests, docs (#366, #367, #368, #369)
-- ✅ C# (.NET) quality tooling on top of the foundation scaffold + CI (#370)
+- ✅ C# (.NET) language support — quality tooling on the foundation scaffold + CI, tests, docs (#370, #371, #372)
+- ✅ Ruby language support — quality tooling on the foundation scaffold + CI, tests, docs (#373, #374, #375)
 
 ### Planned
 

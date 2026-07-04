@@ -74,6 +74,41 @@ Phase 6 follow-ups in progress (issues #316–#319).
   documentation (#369). A real generated example lives in
   `examples/java/`.
 
+- **C# (.NET) language support** — `green init --language csharp`
+  generates a general .NET 8 scaffold (a console app plus xUnit tests
+  compiling into one assembly) where every quality gate runs inside
+  the dotnet CLI and the generated `.csproj` is the single source of
+  the quality policy: Roslyn analyzers with warnings-as-errors in
+  every build, dotnet format in check mode as a pre-commit hook, a
+  CA1502 cyclomatic-complexity gate (≤10, bound in
+  `CodeMetricsConfig.txt`), a ≥90% Coverlet line-coverage gate bound
+  in the csproj, gitleaks/detect-secrets secret scanning, the
+  SecurityCodeScan analyzer plus a `dotnet list package --vulnerable`
+  CVE scan, a NetArchTest architecture test, and an ubuntu CI pipeline
+  on the .NET 8 SDK running the same dotnet gates as the local build.
+  Quality tooling on the foundation scaffold + CI (#370), tests
+  (#371), documentation (#372). A real generated example lives in
+  `examples/csharp/`.
+
+- **Ruby language support** — `green init --language ruby` generates
+  a plain-Ruby scaffold (a `lib/` module plus RSpec specs) where
+  RuboCop is one tool wearing four hats — formatter (Layout cops),
+  linter (Lint/Style), cyclomatic-complexity gate (≤10 via
+  `Metrics/CyclomaticComplexity`), and source-level security (the
+  Security cop department) — with the generated `.rubocop.yml` as the
+  single home of that whole policy. The toolchain: a check-mode
+  RuboCop pre-commit hook from the official rubocop/rubocop manifest
+  (the upstream `--autocorrect` default overridden), RSpec with a
+  ≥90% SimpleCov line-coverage gate bound in `spec/spec_helper.rb`
+  and activated by `COVERAGE=true`, gitleaks/detect-secrets secret
+  scanning, a bundler-audit dependency CVE scan (Brakeman is
+  documented as the add-on for when Rails is adopted — it errors on
+  plain-Ruby projects), parked Packwerk architecture-boundary
+  templates, and an ubuntu CI pipeline with a Ruby 3.3/3.4 matrix
+  running the same gates as the local build. Quality tooling on the
+  foundation scaffold + CI (#373), tests (#374), documentation
+  (#375). A real generated example lives in `examples/ruby/`.
+
 ## [1.0.0] — 2026-05-10
 
 First tagged release. Bundles the entire claude-init optimization

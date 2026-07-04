@@ -133,6 +133,8 @@ Primary programming language for the project.
 - `kotlin` - Kotlin 2.0 with Gradle (Kotlin DSL) on JDK 17/21, Wear OS-ready
 - `cpp` - C/C++ (C++17 pinned, C++20-ready sources) with CMake ≥3.20 + Conan 2, Tizen-watch-ready
 - `java` - Java 17 with Maven (pure logic), Wear OS (legacy Android Wear)-ready
+- `csharp` - C# on .NET 8 (net8.0) with the dotnet CLI, xUnit, and NuGet
+- `ruby` - Ruby 3.3/3.4 (the maintained lines) with Bundler, RSpec, and RuboCop
 
 **Examples**:
 ```bash
@@ -144,12 +146,14 @@ Primary programming language for the project.
 --language kotlin
 --language cpp
 --language java
+--language csharp
+--language ruby
 ```
 
 **Interactive Fallback**:
 If not provided, will prompt with options:
 ```
-Primary language: [python/typescript/go/rust/swift/kotlin/cpp/java]
+Primary language: [python/typescript/go/rust/swift/kotlin/cpp/java/csharp/ruby]
 ```
 
 **Swift Toolchain**:
@@ -272,6 +276,81 @@ build the APK with Android tooling (Android Studio / Gradle), adding
 pom pins `maven.compiler.release` 17, within CI's 17/21 matrix), Maven,
 and `brew install google-java-format` for the generated pre-commit
 format hook.
+
+**C# Toolchain**:
+
+A `--language csharp` project is a general .NET 8 scaffold (a console
+app plus xUnit tests compiling into one assembly) wired with this
+quality toolchain. Every gate runs inside the dotnet CLI, and the
+generated `.csproj` is the single source of the quality policy — the
+analyzer configuration, the coverage bound, and the quality packages
+all live there, so the scripts, hooks, and CI cannot version-drift
+from the build:
+
+| Concern | Tool | Where it runs |
+|---------|------|---------------|
+| Formatting | dotnet format (a `repo: local` system hook in check mode — `--verify-no-changes`, because a bare `dotnet format` rewrites files and exits 0 either way; `scripts/format.sh` keeps the fixing path; reads `.editorconfig`) | `scripts/format.sh`, pre-commit, CI |
+| Lint + source security | Roslyn analyzers in every `dotnet build` — the csproj enables the .NET SDK analyzers and treats warnings as errors, and the SecurityCodeScan analyzer runs in the same compiler pass | `scripts/lint.sh`, pre-commit, CI |
+| Complexity (≤10) | The Roslyn CA1502 rule — enabled in `.editorconfig`, with the bound's single home in the companion `CodeMetricsConfig.txt` at the project root (wired in via the csproj's AdditionalFiles; 10 reports 11+) | every `dotnet build` |
+| Tests | xUnit (`dotnet test` — restore, analyzer-gated build, and tests in one invocation) | `scripts/test.sh`, CI |
+| Coverage (≥90%) | Coverlet (`dotnet test /p:CollectCoverage=true` — the line bound lives in the csproj's `Threshold` properties, its single home; coverlet.msbuild hooks the test task itself, so a missed bound fails the run directly) | `scripts/test.sh --coverage`, CI |
+| Secret scanning | gitleaks + detect-secrets | pre-commit |
+| Dependency CVE scan | `dotnet list package --vulnerable` (gated on the report output, not the exit code — the command's exit code unreliably stays 0 with findings across SDK lines; needs restore + network, so offline runs warn and skip) plus the SecurityCodeScan analyzer above for source-level findings | `scripts/security.sh` |
+| Mutation testing | Stryker.NET (`dotnet stryker`) | periodic quality gate (tracked by the opt-in metrics dashboard) |
+| Documentation | DocFX | tracked by the opt-in metrics dashboard |
+| Architecture rules | NetArchTest xUnit test (`plans/architecture/`; copy it **flat** into `tests/` to enforce — C# namespaces carry no directory-matching requirement, and NetArchTest.Rules is already declared in the csproj) | `plans/architecture/run-check.sh` |
+
+CI runs on ubuntu runners with a .NET 8 SDK quality job (the generated
+csproj targets net8.0, which older SDKs cannot build, so the matrix
+pins the 8.0 line — extend it together with the TargetFramework)
+running the same dotnet CLI gates as the local build — restore, the
+analyzer-gated build, the dotnet format check, tests with the
+csproj-backed Coverlet ≥90% gate, and a best-effort Codecov upload
+(informational only: the enforced gate is the Coverlet run), plus a
+build-and-publish job. Local prerequisites: the .NET 8 SDK
+(`brew install dotnet-sdk` on macOS, `apt-get install dotnet-sdk-8.0`
+on Debian/Ubuntu) — `dotnet format`, the Roslyn analyzers, and NuGet
+all ship inside the SDK, so there is nothing else to install.
+
+**Ruby Toolchain**:
+
+A `--language ruby` project is a plain-Ruby scaffold (a `lib/` module
+plus RSpec specs) wired with this quality toolchain. The Ruby twist:
+RuboCop is one tool wearing four hats — formatter (Layout cops),
+linter (Lint/Style), complexity gate, and source-level security (the
+Security cop department) — so the generated `.rubocop.yml` is the
+single home of that whole policy, shared by the pre-commit hook, the
+scripts, and CI:
+
+| Concern | Tool | Where it runs |
+|---------|------|---------------|
+| Formatting | RuboCop Layout cops (`scripts/format.sh` owns the fixing path — `--autocorrect`; its `--check` mode runs the Layout department only, so check-all's Format and Lint slices never double-report) | `scripts/format.sh`, pre-commit, CI |
+| Lint + source security | RuboCop Lint/Style departments plus the Security cop department (Security/Eval, Security/Open, …) in the same run — the pre-commit hook comes from the official rubocop/rubocop manifest (the repo ships a `.pre-commit-hooks.yaml`, so no `repo: local` system hook is needed), with one overridden default: the manifest's args include `--autocorrect` (fixing mode, which can never fail on correctable offenses), so the generated hook overrides args to `--force-exclusion` alone — plain check-mode RuboCop exits non-zero on ANY offense | `scripts/lint.sh`, pre-commit, CI |
+| Complexity (≤10) | The RuboCop `Metrics/CyclomaticComplexity` cop — the bound's single home is `.rubocop.yml`; nothing else restates the number (flog is the documented standalone alternative for hotspot analysis, deliberately not wired so the bound keeps one home) | every full RuboCop run |
+| Tests | RSpec (`bundle exec rspec` — a plain run stays fast because the coverage gate is opt-in via `COVERAGE=true`) | `scripts/test.sh`, CI |
+| Coverage (≥90%) | SimpleCov (`COVERAGE=true bundle exec rspec` — the line bound lives in `spec/spec_helper.rb`, its single home; SimpleCov's at_exit hook fails the rspec invocation directly when the bound is missed, so there is no standalone-report no-op path) | `scripts/test.sh --coverage`, CI |
+| Secret scanning | gitleaks + detect-secrets | pre-commit |
+| Dependency CVE scan | bundler-audit against the ruby-advisory-db (the advisory database must be fetched over the network, so offline runs warn and skip; in CI the update is a hard gate). Brakeman is the deeper scanner to add WHEN the project adopts Rails — it is Rails-specific and errors on plain-Ruby projects, so it is documented rather than wired | `scripts/security.sh` |
+| Mutation testing | mutant (`bundle exec mutant run`) | periodic quality gate (tracked by the opt-in metrics dashboard; the gem is not pinned in the generated Gemfile — add it when adopting the gate) |
+| Documentation | YARD | tracked by the opt-in metrics dashboard (the gem is not pinned in the generated Gemfile) |
+| Architecture rules | Packwerk package boundaries (`plans/architecture/`; parked templates — copy `packwerk.yml` and `package.yml` to the project root to activate; the packwerk gem is already pinned in the Gemfile. Packwerk performs **static** constant-reference analysis and assumes Zeitwerk-style autoload paths, so on the flat plain-Ruby scaffold the check passes vacuously until packages are defined. It matters because Ruby's `require` does NOT reject circular requires at load time — a cycle silently yields a partially-defined module at runtime — so `packwerk validate`'s acyclic package graph is the only early signal) | `plans/architecture/run-check.sh` |
+
+CI runs on ubuntu runners with a Ruby 3.3/3.4 quality matrix (the
+lines still receiving upstream maintenance — bump together with the
+generated `.rubocop.yml`'s `TargetRubyVersion`), installing gems via
+`ruby/setup-ruby`'s bundler-cache (no separate install step), then
+running the same gates as the local build — the full RuboCop run
+against the same `.rubocop.yml`, bundler-audit (a hard gate in CI,
+where network access is guaranteed), RSpec with the
+spec_helper-backed SimpleCov ≥90% gate, and a best-effort Codecov
+upload (codecov-action@v6 with `fail_ci_if_error: false` —
+informational only: the enforced gate is the SimpleCov run). There is
+no packaging job: the scaffold ships no `.gemspec`, so a `gem build`
+job would be red on every push — add one together with the gemspec
+when the project becomes a gem. Local prerequisites: Ruby 3.3+ and
+Bundler (`brew install ruby` on macOS, `apt-get install ruby-full` on
+Debian/Ubuntu) — `bundle install` provisions every pinned quality gem
+(RSpec, SimpleCov, RuboCop, bundler-audit, Packwerk).
 
 ##### `--output-dir` / `-o PATH` (Optional)
 
@@ -494,7 +573,7 @@ The `init` command validates:
 - Not a Windows reserved name
 
 **Language**:
-- Must be one of: python, typescript, go, rust, swift, kotlin, cpp, java
+- Must be one of: python, typescript, go, rust, swift, kotlin, cpp, java, csharp, ruby
 - Case-insensitive
 
 **Output Directory**:
@@ -790,6 +869,63 @@ with plain Maven.
 
 See the [Java Toolchain](#--language---l-text-optional) table above
 for the full tool list, and [examples/java/](../examples/java/) for
+real generated output.
+
+### Creating a C# Project
+
+```bash
+# Local prerequisites: the .NET 8 SDK - dotnet format, the Roslyn
+# analyzers, and NuGet all ship inside it, so nothing else to install
+# (Debian/Ubuntu: apt-get install dotnet-sdk-8.0)
+brew install dotnet-sdk
+
+start-green-stay-green init \
+  --project-name wrist-ledger \
+  --language csharp \
+  --no-interactive
+
+cd wrist-ledger
+dotnet test
+pre-commit install
+./scripts/check-all.sh
+```
+
+`dotnet test` restores, builds (with the Roslyn analyzers as errors),
+and runs the xUnit suite in one invocation — the generated csproj owns
+the whole quality policy, so the single command verifies the scaffold.
+
+See the [C# Toolchain](#--language---l-text-optional) table above
+for the full tool list, and [examples/csharp/](../examples/csharp/)
+for real generated output.
+
+### Creating a Ruby Project
+
+```bash
+# Local prerequisites: Ruby 3.3+ and Bundler - every quality gem
+# (RSpec, SimpleCov, RuboCop, bundler-audit, Packwerk) is pinned in
+# the generated Gemfile, so bundle install provisions the toolchain
+# (Debian/Ubuntu: apt-get install ruby-full)
+brew install ruby
+
+start-green-stay-green init \
+  --project-name wrist-cadence \
+  --language ruby \
+  --no-interactive
+
+cd wrist-cadence
+bundle install
+bundle exec rspec
+pre-commit install
+./scripts/check-all.sh
+```
+
+`bundle install` provisions the pinned quality gems and
+`bundle exec rspec` verifies the scaffold (a plain run stays fast —
+the ≥90% SimpleCov coverage gate activates via `COVERAGE=true`, which
+`./scripts/test.sh --coverage` and CI set).
+
+See the [Ruby Toolchain](#--language---l-text-optional) table above
+for the full tool list, and [examples/ruby/](../examples/ruby/) for
 real generated output.
 
 ### Batch Creating Projects

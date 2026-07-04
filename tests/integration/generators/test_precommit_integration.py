@@ -102,6 +102,7 @@ class TestPreCommitGeneratorIntegration:
             "cpp",
             "java",
             "csharp",
+            "ruby",
         ]
 
         for language in languages:

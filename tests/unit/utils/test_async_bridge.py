@@ -64,3 +64,26 @@ class TestRunAsync:
 
         result = run_async(async_list_func())
         assert result == [1, 2, 3]
+
+    def test_run_async_inside_running_loop_raises_clear_message(self) -> None:
+        """Called from within a live event loop, it raises a descriptive error."""
+
+        async def driver() -> None:
+            """Invoke run_async while a loop is already running."""
+
+            async def never_runs() -> str:
+                return "unreachable"
+
+            coro = never_runs()
+            try:
+                run_async(coro)
+            finally:
+                coro.close()  # run_async raises before awaiting; avoid a warning
+
+        with pytest.raises(RuntimeError) as exc:
+            asyncio.run(driver())
+
+        # Exact wording matters: the message must not be blanked or wrapped.
+        assert str(exc.value).startswith(
+            "run_async() cannot be called from an event loop"
+        )

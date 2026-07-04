@@ -183,7 +183,7 @@ class SkillsGenerator(BaseGenerator):
             raise FileNotFoundError(msg)
 
         logger.info("Loading skill: %s", skill_name)
-        return skill_path.read_text()
+        return skill_path.read_text(encoding="utf-8")
 
     async def tune_skill(
         self,

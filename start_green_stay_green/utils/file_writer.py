@@ -19,8 +19,27 @@ from typing import TYPE_CHECKING
 from rich.console import Console
 from rich.prompt import Prompt
 
+from start_green_stay_green.utils.fs import make_executable
+
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+def _write_lf(file_path: Path, content: str) -> None:
+    r"""Write UTF-8 text with LF line endings on every platform.
+
+    The single write seam for all FileWriter output. ``newline="\n"``
+    suppresses the default platform newline translation: on Windows it
+    would turn ``\n`` into ``\r\n``, and bash cannot execute CRLF
+    scripts — the generated quality gates must stay LF everywhere
+    (#386). On POSIX the output is byte-identical to the historical
+    behavior.
+
+    Args:
+        file_path: Destination file.
+        content: Text content using ``\n`` line endings.
+    """
+    file_path.write_text(content, encoding="utf-8", newline="\n")
 
 
 class WriteResult(Enum):
@@ -181,14 +200,14 @@ class FileWriter:
             WriteResult indicating the outcome.
         """
         if self._force:
-            file_path.write_text(content, encoding="utf-8")
+            _write_lf(file_path, content)
             self.overwritten += 1
             self._console.print(f"  [red]OVERWRITE[/red] {rel}")
             return WriteResult.CREATED
 
         if self._interactive:
             if self._resolve_conflict(file_path, content, rel):
-                file_path.write_text(content, encoding="utf-8")
+                _write_lf(file_path, content)
                 self.overwritten += 1
                 self._console.print(f"  [red]OVERWRITE[/red] {rel}")
                 return WriteResult.CREATED
@@ -217,7 +236,7 @@ class FileWriter:
             return self._handle_existing(file_path, content, rel)
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content, encoding="utf-8")
+        _write_lf(file_path, content)
         self.created += 1
         self._console.print(f"  [green]CREATE[/green] {rel}")
         return WriteResult.CREATED
@@ -237,12 +256,12 @@ class FileWriter:
         if file_path.exists():
             result = self._handle_existing(file_path, content, rel)
             if result == WriteResult.CREATED:
-                file_path.chmod(0o755)
+                make_executable(file_path)
             return result
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content, encoding="utf-8")
-        file_path.chmod(0o755)
+        _write_lf(file_path, content)
+        make_executable(file_path)
         self.created += 1
         self._console.print(f"  [green]CREATE[/green] {rel}")
         return WriteResult.CREATED

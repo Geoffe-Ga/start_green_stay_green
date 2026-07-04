@@ -38,6 +38,8 @@ import tempfile
 
 import yaml
 
+from start_green_stay_green.utils.fs import is_windows
+
 # Minimum number of pre-commit hooks a generated Python project must declare.
 MIN_PRECOMMIT_HOOKS = 25
 
@@ -148,6 +150,10 @@ def _check_required_files(project_dir: Path) -> list[str]:
 def _check_scripts_executable(project_dir: Path) -> list[str]:
     """Check that each required quality script exists and is executable.
 
+    On Windows the POSIX executable bit does not exist (stat() derives
+    the exec bits from the file extension, so every .sh script would be
+    flagged), so the check degrades to existence-only there (#380).
+
     Args:
         project_dir: Root of the generated project.
 
@@ -160,13 +166,17 @@ def _check_scripts_executable(project_dir: Path) -> list[str]:
         path = scripts_dir / name
         if not path.is_file():
             failures.append(f"missing quality script: scripts/{name}")
-        elif not path.stat().st_mode & 0o111:
+        elif not is_windows() and not path.stat().st_mode & 0o111:
             failures.append(f"quality script not executable: scripts/{name}")
     return failures
 
 
 def _check_precommit_hooks(project_dir: Path) -> list[str]:
     """Check that the pre-commit config declares at least the minimum hooks.
+
+    A missing config file is not reported here: ``_check_required_files``
+    already reports it, so this check returns cleanly instead of crashing
+    with ``FileNotFoundError`` (#402).
 
     Args:
         project_dir: Root of the generated project.
@@ -175,6 +185,8 @@ def _check_precommit_hooks(project_dir: Path) -> list[str]:
         A list of failure messages (empty when enough hooks are declared).
     """
     config = project_dir / ".pre-commit-config.yaml"
+    if not config.is_file():
+        return []
     text = config.read_text(encoding="utf-8")
     hook_count = sum(
         1 for line in text.splitlines() if line.strip().startswith("- id:")

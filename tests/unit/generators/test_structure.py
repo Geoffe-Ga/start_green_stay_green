@@ -11,6 +11,7 @@ from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.structure import StructureConfig
 from start_green_stay_green.generators.structure import StructureGenerator
 from start_green_stay_green.utils.cpp import tizen_app_id
+from start_green_stay_green.utils.ruby import ruby_module_name
 from start_green_stay_green.utils.swift import package_swift
 
 # Expected source directories per language
@@ -512,6 +513,50 @@ class TestMultiLanguageStructure:
             assert "Gemfile" in files
             content = files["Gemfile"].read_text()
             assert "source" in content
+
+    def test_ruby_lib_module_uses_shared_naming_helper(self) -> None:
+        """The lib module declares the ruby_module_name constant (#373).
+
+        The RSpec scaffold describes the same constant via the shared
+        helper, so the two can never drift apart (the pre-#373 drift —
+        per-word capitalization here, ``capitalize()`` in the spec —
+        was a guaranteed NameError in the generated project).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="ruby",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["lib/test_project.rb"].read_text()
+            assert f"module {ruby_module_name('test_project')}" in content
+            assert "def self.hello" in content
+
+    def test_ruby_lib_module_carries_documentation_comment(self) -> None:
+        """The module has a doc comment so Style/Documentation passes.
+
+        RuboCop's Style/Documentation cop (on by default, and the
+        generated .rubocop.yml keeps it on) requires a comment above
+        top-level module definitions; the scaffold must be green out
+        of the box (#373).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = StructureConfig(
+                project_name="test-project",
+                language="ruby",
+                package_name="test_project",
+            )
+            generator = StructureGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            lines = files["lib/test_project.rb"].read_text().splitlines()
+            module_index = next(
+                i for i, line in enumerate(lines) if line.startswith("module ")
+            )
+            assert lines[module_index - 1].startswith("#")
 
     def test_swift_creates_package_swift(self) -> None:
         """Test Swift generates an SPM Package.swift manifest."""

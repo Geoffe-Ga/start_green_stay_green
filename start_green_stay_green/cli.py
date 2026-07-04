@@ -6,6 +6,7 @@ Implements the command-line interface using Typer with rich output formatting.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import dataclasses
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
@@ -19,6 +20,7 @@ import shutil
 import sys
 from typing import Annotated
 from typing import Any
+from typing import Final
 from typing import TYPE_CHECKING
 from typing import TypeVar
 from typing import assert_never
@@ -30,6 +32,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from collections.abc import Sequence
 
+    from start_green_stay_green.ai.providers.base import ProviderCapabilities
+    from start_green_stay_green.generators.agent_context import AgentContextContent
     from start_green_stay_green.utils.enhance_state import EnhanceState
 
 from rich.console import Console
@@ -47,8 +51,15 @@ from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerati
 from start_green_stay_green.ai.provider_selection import ProviderSelection
 from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
 from start_green_stay_green.ai.provider_selection import build_provider
+from start_green_stay_green.ai.provider_selection import describe_providers
 from start_green_stay_green.ai.provider_selection import resolve_api_key_env_var
 from start_green_stay_green.ai.provider_selection import resolve_provider_selection
+from start_green_stay_green.generators.agent_context import AGENT_CONTEXT_TARGETS
+from start_green_stay_green.generators.agent_context import TARGET_AGENTS_MD
+from start_green_stay_green.generators.agent_context import TARGET_AIDER
+from start_green_stay_green.generators.agent_context import TARGET_CLAUDE
+from start_green_stay_green.generators.agent_context import load_agent_context_content
+from start_green_stay_green.generators.agent_context import render_target_files
 from start_green_stay_green.generators.architecture import (
     ArchitectureEnforcementGenerator,
 )
@@ -56,6 +67,7 @@ from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.base import validate_language
 from start_green_stay_green.generators.ci import CIGenerator
 from start_green_stay_green.generators.ci import LANGUAGE_CONFIGS as CI_LANGUAGE_CONFIGS
+from start_green_stay_green.generators.ci_windows import WINDOWS_CI_LANGUAGES
 from start_green_stay_green.generators.claude_md import ClaudeMdGenerationResult
 from start_green_stay_green.generators.claude_md import ClaudeMdGenerator
 from start_green_stay_green.generators.dependencies import DependenciesGenerator
@@ -96,6 +108,7 @@ from start_green_stay_green.utils.enhance_state import hash_inputs
 from start_green_stay_green.utils.enhance_state import load_state
 from start_green_stay_green.utils.enhance_state import save_state
 from start_green_stay_green.utils.file_writer import FileWriter
+from start_green_stay_green.utils.fs import is_windows
 from start_green_stay_green.utils.timing import TimingReport
 from start_green_stay_green.utils.timing import set_active_report
 from start_green_stay_green.utils.timing import step_timer
@@ -161,7 +174,9 @@ provider_option = Annotated[
             "LLM provider for AI features. Precedence: this flag > "
             "GREEN_LLM_PROVIDER env > config file > default (anthropic). "
             "The provider's API key is read from its own env var "
-            "(ANTHROPIC_API_KEY for anthropic)."
+            "(ANTHROPIC_API_KEY for anthropic, OPENAI_API_KEY for openai). "
+            "For openai, OPENAI_BASE_URL points at any OpenAI-compatible "
+            "local server (a dummy key is fine there)."
         ),
     ),
 ]
@@ -250,11 +265,41 @@ def _load_config_if_specified(
             raise typer.Exit(code=1) from e
 
 
+def _version_flag_callback(value: bool) -> None:  # noqa: FBT001
+    """Print the version and exit when ``--version`` is passed.
+
+    Eager Typer callback: runs before any command or option validation,
+    so ``sgsg --version`` works regardless of other arguments. Output
+    matches the ``version`` subcommand's simple form.
+
+    Args:
+        value: ``True`` when the flag was supplied on the command line.
+
+    Raises:
+        typer.Exit: Always, after printing (exit code 0).
+    """
+    if value:
+        console.print(f"[bold cyan]Start Green Stay Green v{get_version()}[/bold cyan]")
+        raise typer.Exit
+
+
+version_flag_option = Annotated[
+    bool,
+    typer.Option(
+        "--version",
+        help="Show the version and exit.",
+        callback=_version_flag_callback,
+        is_eager=True,
+    ),
+]
+
+
 @app.callback()
 def main(
     verbose: verbose_option = False,  # noqa: FBT002
     quiet: quiet_option = False,  # noqa: FBT002
     config: config_file_option = None,
+    version: version_flag_option = False,  # noqa: FBT002
 ) -> None:
     """Start Green Stay Green - Generate quality-controlled, AI-ready repositories.
 
@@ -265,7 +310,11 @@ def main(
         verbose: Enable verbose output.
         quiet: Suppress non-essential output.
         config: Path to configuration file.
+        version: Print the version and exit (handled eagerly).
     """
+    # The eager callback consumed --version before this body runs; the
+    # parameter exists only so Typer registers the option.
+    del version
     _validate_options(verbose, quiet)
     _load_config_if_specified(config, verbose)
 
@@ -298,6 +347,64 @@ def version(
     else:
         # Simple version output
         console.print(f"[bold cyan]Start Green Stay Green v{version_str}[/bold cyan]")
+
+
+# Display labels for ProviderCapabilities flag fields whose name alone
+# doesn't read well; every other bool field falls back to its field
+# name with underscores spaced.
+_CAPABILITY_FLAG_LABELS: Final[dict[str, str]] = {"tool_use": "tool-use"}
+
+
+def _format_capability_flags(capabilities: ProviderCapabilities) -> str:
+    """Render one provider's capability flags as a short yes/no line.
+
+    Derives the flag list from the dataclass's own bool fields so a new
+    capability added to :class:`ProviderCapabilities` shows up here
+    without a second edit point.
+
+    Args:
+        capabilities: The provider's frozen advertisement.
+
+    Returns:
+        A comma-separated ``flag: yes/no`` summary, e.g.
+        ``"batch: yes, tool-use: yes, token accounting: yes"``.
+    """
+    flags = (
+        (
+            _CAPABILITY_FLAG_LABELS.get(field.name, field.name.replace("_", " ")),
+            getattr(capabilities, field.name),
+        )
+        for field in dataclasses.fields(capabilities)
+        if isinstance(getattr(capabilities, field.name), bool)
+    )
+    return ", ".join(
+        f"{label}: {'yes' if supported else 'no'}" for label, supported in flags
+    )
+
+
+@app.command()
+def providers() -> None:
+    """List registered LLM providers and their capabilities.
+
+    Shows, for each provider the ``--provider`` flag accepts: the
+    default model, the environment variable its API key is read from,
+    and which capability groups it implements (batch, tool-use, token
+    accounting). The listing is read from each provider's capability
+    advertisement — no credentials, network access, or optional vendor
+    SDK required.
+    """
+    for listing in describe_providers():
+        flags = _format_capability_flags(listing.capabilities)
+        console.print(f"[bold]{listing.name}[/bold]")
+        console.print(f"  default model:   {listing.default_model}")
+        console.print(f"  API key env var: {listing.api_key_env_var}")
+        console.print(f"  capabilities:    {flags}")
+    console.print(
+        "\n[dim]Select with --provider/--model on `green init` / "
+        "`green enhance`, or via GREEN_LLM_PROVIDER / GREEN_LLM_MODEL. "
+        "Providers without batch support fall back to sequential API "
+        "calls (with a warning) when --batch is requested.[/dim]"
+    )
 
 
 def _validate_project_name(name: str) -> None:
@@ -482,6 +589,7 @@ def _show_dry_run_preview(
     project_name: str,
     language: str,
     project_path: Path,
+    agent_targets: tuple[str, ...] = (TARGET_CLAUDE,),
 ) -> None:
     """Display dry-run preview of what would be generated.
 
@@ -489,6 +597,8 @@ def _show_dry_run_preview(
         project_name: Name of the project.
         language: Programming language.
         project_path: Path where project would be created.
+        agent_targets: Resolved ``--agent`` context targets; controls
+            which agent-context artifacts the preview lists (#387).
     """
     console.print("[bold yellow]Dry Run Mode[/bold yellow] - Preview only\n")
     console.print(f"Project: [cyan]{project_name}[/cyan]")
@@ -499,8 +609,13 @@ def _show_dry_run_preview(
     console.print("  - Pre-commit hooks")
     console.print("  - Quality scripts")
     console.print("  - Skills")
-    console.print("  - Subagent profiles")
-    console.print("  - CLAUDE.md (modular: index + .claude/docs/)")
+    if TARGET_CLAUDE in agent_targets:
+        console.print("  - Subagent profiles")
+        console.print("  - CLAUDE.md (modular: index + .claude/docs/)")
+    if TARGET_AGENTS_MD in agent_targets:
+        console.print("  - AGENTS.md (open agent-context standard)")
+    if TARGET_AIDER in agent_targets:
+        console.print("  - CONVENTIONS.md + .aider.conf.yml (aider)")
     console.print("  - GitHub Actions (AI review)")
     console.print("  - Architecture enforcement")
 
@@ -944,10 +1059,23 @@ def _scripts_dir_has_other_language(scripts_dir: Path, language: str) -> bool:
 
 # Languages with native quality-script templates in ScriptsGenerator.
 # The generator falls back to *Python* scripts for anything else, which
-# would be wrong for e.g. a Ruby project, so the init pipeline skips
-# the step instead.
+# would be wrong for e.g. a PHP project, so the init pipeline skips
+# the step instead. Every base.SUPPORTED_LANGUAGES entry now has native
+# templates (ruby joined with #373); the gate remains for typo'd or
+# future languages.
 _SCRIPTS_STEP_LANGUAGES: frozenset[str] = frozenset(
-    {"python", "typescript", "go", "rust", "swift", "kotlin", "cpp", "java", "csharp"}
+    {
+        "python",
+        "typescript",
+        "go",
+        "rust",
+        "swift",
+        "kotlin",
+        "cpp",
+        "java",
+        "csharp",
+        "ruby",
+    }
 )
 
 
@@ -962,9 +1090,9 @@ def _generate_scripts_step(
 
     If scripts/ already contains scripts from a different language,
     automatically uses scripts/{language}/ subdirectory to avoid conflicts.
-    Languages without native script templates (ruby)
-    are skipped with an informational message instead of receiving the
-    generator's Python fallback.
+    Languages without native script templates (none of the supported
+    set since ruby joined with #373) are skipped with an informational
+    message instead of receiving the generator's Python fallback.
 
     Args:
         project_path: Project root directory.
@@ -1010,9 +1138,9 @@ def _generate_precommit_step(
 ) -> None:
     """Generate pre-commit configuration, merging with existing if present.
 
-    Languages PreCommitGenerator does not support yet (ruby)
-    are skipped with an informational message instead of aborting the
-    whole init run.
+    Languages PreCommitGenerator does not support yet (none of the
+    supported set since ruby joined with #373) are skipped with an
+    informational message instead of aborting the whole init run.
     """
     if language not in PRECOMMIT_LANGUAGE_CONFIGS:
         console.print(
@@ -1107,20 +1235,24 @@ def _generate_ci_step(
     project_path: Path,
     project_name: str,
     language: str,
-    orchestrator: AIOrchestrator | None,
+    pass2: _Pass2Options | None,
     file_writer: FileWriter | None = None,
 ) -> None:
     """Generate the CI pipeline.
 
     Always runs the deterministic template path so a project is never
-    missing CI just because the user has no API key. ``orchestrator`` is
-    only used to opt into the legacy AI-tuned path for backward
-    compatibility. ``project_name`` is forwarded to the template
-    renderer so any ``<<% project_name %>>`` placeholder lands with
-    the real value rather than the empty string. Languages without a
-    CIGenerator config are skipped with an informational message instead
-    of aborting init — with kotlin wired in (#358) every CLI language
-    has one, so this guard is defensive for future additions.
+    missing CI just because the user has no API key.
+    ``pass2.orchestrator`` is only used to opt into the legacy AI-tuned
+    path for backward compatibility; ``pass2`` as a whole may be
+    ``None``, selecting the deterministic defaults. ``project_name`` is
+    forwarded to the template renderer so any ``<<% project_name %>>``
+    placeholder lands with the real value rather than the empty string.
+    ``pass2.windows_ci`` opts into the ``quality-windows`` leg (#388);
+    default off leaves the generated workflow unchanged. Languages
+    without a CIGenerator config are skipped with an informational
+    message instead of aborting init — with kotlin wired in (#358)
+    every CLI language has one, so this guard is defensive for future
+    additions.
     """
     if language not in CI_LANGUAGE_CONFIGS:
         console.print(
@@ -1129,13 +1261,16 @@ def _generate_ci_step(
         )
         return
 
+    if pass2 is None:
+        pass2 = _Pass2Options(orchestrator=None)
+
     with step_timer("ci"), console.status("Generating CI pipeline..."):
         ci_generator = CIGenerator(
-            orchestrator,
+            pass2.orchestrator,
             language,
             project_name=project_name,
         )
-        workflow = ci_generator.generate_workflow()
+        workflow = ci_generator.generate_workflow(windows_ci=pass2.windows_ci)
         workflows_dir = project_path / ".github" / "workflows"
         workflows_dir.mkdir(parents=True, exist_ok=True)
         ci_file = workflows_dir / "ci.yml"
@@ -1208,6 +1343,32 @@ def _write_modular_claude_md(
     return index_result
 
 
+def _claude_context_project_config(
+    project_name: str,
+    language: str,
+) -> dict[str, Any]:
+    """Build the project config shared by every agent-context render.
+
+    Single source for the config dict used by the CLAUDE.md init step,
+    the ``enhance`` re-tune path, and the non-Claude agent-context
+    emitters (#387) — the same canonical content inputs everywhere.
+
+    Args:
+        project_name: Name of the target project.
+        language: Primary project language.
+
+    Returns:
+        Project config with ``project_name``, ``language``, ``scripts``,
+        and ``skills`` keys.
+    """
+    return {
+        "project_name": project_name,
+        "language": language,
+        "scripts": list(_CLAUDE_MD_SCRIPTS),
+        "skills": REQUIRED_SKILLS.copy(),
+    }
+
+
 def _generate_claude_md_step(
     project_path: Path,
     project_name: str,
@@ -1223,19 +1384,7 @@ def _generate_claude_md_step(
     """
     with step_timer("claude_md"), console.status("Generating CLAUDE.md..."):
         claude_md_generator = ClaudeMdGenerator(orchestrator)
-        project_config = {
-            "project_name": project_name,
-            "language": language,
-            "scripts": [
-                "check-all.sh",
-                "test.sh",
-                "lint.sh",
-                "format.sh",
-                "security.sh",
-                "mutation.sh",
-            ],
-            "skills": REQUIRED_SKILLS.copy(),
-        }
+        project_config = _claude_context_project_config(project_name, language)
         _write_modular_claude_md(
             claude_md_generator,
             project_path,
@@ -1243,6 +1392,68 @@ def _generate_claude_md_step(
             file_writer,
         )
     console.print("[green]✓[/green] Generated CLAUDE.md (modular .claude/docs)")
+
+
+def _generate_agent_context_step(
+    project_path: Path,
+    project_name: str,
+    language: str,
+    agent_targets: tuple[str, ...],
+    file_writer: FileWriter | None = None,
+) -> None:
+    """Emit agent-context files for the non-Claude targets (#387).
+
+    Renders the shared canonical content (the same split docs and
+    subagent role descriptions the Claude target uses) into each
+    selected non-Claude format: ``AGENTS.md`` for ``agents-md``,
+    ``CONVENTIONS.md`` + ``.aider.conf.yml`` for ``aider``. Fully
+    deterministic — no orchestrator involved — so it runs identically
+    online and offline. When only the ``claude`` target is selected
+    this is a no-op, keeping the default output byte-for-byte
+    unchanged.
+    """
+    extra_targets = tuple(t for t in agent_targets if t != TARGET_CLAUDE)
+    if not extra_targets:
+        return
+
+    with step_timer("agent_context"), console.status("Generating agent context..."):
+        content = load_agent_context_content(
+            _claude_context_project_config(project_name, language)
+        )
+        emitted = _emit_agent_context_targets(
+            project_path, extra_targets, content, file_writer
+        )
+    console.print(f"[green]✓[/green] Generated agent context: {', '.join(emitted)}")
+
+
+def _emit_agent_context_targets(
+    project_path: Path,
+    targets: tuple[str, ...],
+    content: AgentContextContent,
+    file_writer: FileWriter | None,
+) -> list[str]:
+    """Write every file the selected non-Claude targets render.
+
+    Args:
+        project_path: Target project root directory.
+        targets: Non-Claude agent-context targets to emit.
+        content: The loaded shared agent-context content.
+        file_writer: Optional conflict-aware writer (additive init);
+            direct LF-only writes when ``None``.
+
+    Returns:
+        The emitted filenames, in emission order.
+    """
+    emitted: list[str] = []
+    for target in targets:
+        for filename, text in render_target_files(target, content).items():
+            target_file = project_path / filename
+            if file_writer is not None:
+                file_writer.write_file(target_file, text)
+            else:
+                target_file.write_text(text, encoding="utf-8", newline="\n")
+            emitted.append(filename)
+    return emitted
 
 
 def _generate_architecture_step(
@@ -1257,11 +1468,11 @@ def _generate_architecture_step(
     Python, dependency-cruiser for TypeScript, go-arch-lint for Go,
     cargo-deny for Rust, SwiftLint custom rules for Swift, a Konsist test
     for Kotlin, an include-boundary checker for C/C++, an ArchUnit test
-    for Java, a NetArchTest test for C#). Runs regardless of API key
-    availability; only Python, TypeScript, Go, Rust, Swift, Kotlin,
-    C/C++, Java, and C# projects produce output. The previous
-    ``orchestrator`` argument was unused and has been removed from this
-    private helper.
+    for Java, a NetArchTest test for C#, a Packwerk package config for
+    Ruby). Runs regardless of API key availability; only Python,
+    TypeScript, Go, Rust, Swift, Kotlin, C/C++, Java, C#, and Ruby
+    projects produce output. The previous ``orchestrator`` argument was
+    unused and has been removed from this private helper.
     """
     supported = {
         "python",
@@ -1273,11 +1484,12 @@ def _generate_architecture_step(
         "cpp",
         "java",
         "csharp",
+        "ruby",
     }
     if language not in supported:
         # The generator only supports these languages; surface a dim info
         # line so users understand why no architecture rules were generated
-        # for, e.g., a Ruby project rather than seeing silence.
+        # for, e.g., a PHP project rather than seeing silence.
         console.print(
             f"[dim]Architecture rules unavailable for {language} "
             f"(supported: {', '.join(sorted(supported))})[/dim]"
@@ -1436,9 +1648,10 @@ def _generate_metrics_dashboard_step(
 ) -> None:
     """Generate live metrics dashboard and workflow.
 
-    Languages MetricsGenerator does not support yet (ruby)
-    are skipped with an informational message instead of aborting init
-    when ``--enable-live-dashboard`` is passed.
+    Languages MetricsGenerator does not support yet (none of the
+    supported set since ruby joined with #373) are skipped with an
+    informational message instead of aborting init when
+    ``--enable-live-dashboard`` is passed.
     """
     if language not in METRICS_LANGUAGE_TOOLS:
         console.print(
@@ -1497,11 +1710,38 @@ def _generate_metrics_dashboard_step(
         )
 
 
+@dataclass(frozen=True)
+class _Pass2Options:
+    """Inputs that select what Pass 2 of init emits and how.
+
+    Bundles the orchestrator (which flips each step between "render
+    template" and "AI-tune the template") with the resolved ``--agent``
+    context targets (#387). Grouping them keeps
+    :func:`_generate_project_files` and :func:`_generate_pass2_polish`
+    below the ``PLR0913`` threshold — same pattern as
+    :class:`_EnhanceRunOptions`.
+
+    Attributes:
+        orchestrator: Optional AI orchestrator; ``None`` selects the
+            deterministic baseline path for every step.
+        agent_targets: Resolved agent-context targets in canonical
+            order. Defaults to Claude only (the backward-compatible
+            default).
+        windows_ci: Opt-in ``--windows-ci`` flag (#388): append the
+            ``quality-windows`` leg to the generated CI workflow.
+            Default off keeps the generated CI unchanged.
+    """
+
+    orchestrator: AIOrchestrator | None
+    agent_targets: tuple[str, ...] = (TARGET_CLAUDE,)
+    windows_ci: bool = False
+
+
 def _generate_pass2_polish(
     project_path: Path,
     project_name: str,
     language: str,
-    orchestrator: AIOrchestrator | None,
+    pass2: _Pass2Options,
     file_writer: FileWriter | None = None,
 ) -> None:
     """Run Pass 2 of the optimization roadmap's two-pass init model.
@@ -1511,22 +1751,35 @@ def _generate_pass2_polish(
     one of these has a deterministic baseline path too, so the function
     runs unconditionally; the orchestrator is what flips each step
     between "render template" and "AI-tune the template". When
-    ``orchestrator`` is ``None`` (``--offline`` / ``--no-enhance`` /
-    no API key), every step still runs and produces a complete project
+    ``pass2.orchestrator`` is ``None`` (``--offline`` / ``--no-enhance``
+    / no API key), every step still runs and produces a complete project
     via the deterministic path.
+
+    The Claude context artifacts (CLAUDE.md tree + subagent profiles)
+    are emitted only when the ``claude`` agent target is selected;
+    non-Claude targets are emitted by
+    :func:`_generate_agent_context_step` (#387). CI, review workflow,
+    and architecture rules are target-independent and always run.
 
     The roadmap (plans/2026-05-03-claude-init-optimization-roadmap.md)
     calls this Pass 2 to distinguish it from Pass 1's per-language
     scaffold steps.
     """
-    _generate_ci_step(project_path, project_name, language, orchestrator, file_writer)
+    orchestrator = pass2.orchestrator
+    emit_claude = TARGET_CLAUDE in pass2.agent_targets
+    _generate_ci_step(project_path, project_name, language, pass2, file_writer)
     _generate_review_step(project_path, file_writer)
-    _generate_claude_md_step(
-        project_path, project_name, language, orchestrator, file_writer
-    )
+    if emit_claude:
+        _generate_claude_md_step(
+            project_path, project_name, language, orchestrator, file_writer
+        )
     _generate_architecture_step(project_path, project_name, language, file_writer)
-    _generate_subagents_step(
-        project_path, project_name, language, orchestrator, file_writer
+    if emit_claude:
+        _generate_subagents_step(
+            project_path, project_name, language, orchestrator, file_writer
+        )
+    _generate_agent_context_step(
+        project_path, project_name, language, pass2.agent_targets, file_writer
     )
 
 
@@ -1534,7 +1787,7 @@ def _generate_project_files(
     project_path: Path,
     project_name: str,
     languages: tuple[str, ...],
-    orchestrator: AIOrchestrator | None,
+    pass2: _Pass2Options,
     file_writer: FileWriter,
 ) -> None:
     """Generate all project files with progress indicators.
@@ -1548,8 +1801,9 @@ def _generate_project_files(
         project_path: Path where project will be created.
         project_name: Name of the project.
         languages: Tuple of programming languages to generate for.
-        orchestrator: Optional AI orchestrator for AI-powered features.
-            None indicates fallback to template mode.
+        pass2: Pass 2 options bundling the optional AI orchestrator
+            (``None`` indicates fallback to template mode) and the
+            resolved agent-context targets (#387).
         file_writer: FileWriter instance for safe file operations.
 
     Raises:
@@ -1587,7 +1841,7 @@ def _generate_project_files(
                 project_path,
                 project_name,
                 primary_language,
-                orchestrator,
+                pass2,
                 file_writer,
             )
         except (AIGenerationError, OSError) as ai_err:
@@ -1642,6 +1896,12 @@ _LANG_SETUP_STEPS: dict[str, list[str]] = {
     # runs the xUnit suite in one invocation — the csproj owns the whole
     # quality policy (#370), so the single command verifies the scaffold.
     "csharp": ["dotnet test"],
+    # bundle install provisions the pinned quality gems (rspec,
+    # rubocop, simplecov, bundler-audit, packwerk) and `bundle exec
+    # rspec` verifies the scaffold (#373) — the csharp #371 lesson:
+    # never leave a supported language on the unknown-language default
+    # path.
+    "ruby": ["bundle install", "bundle exec rspec"],
 }
 
 
@@ -1681,28 +1941,88 @@ def _venv_activation_command(os_name: str, env: Mapping[str, str]) -> str:
     return "source .venv/bin/activate"
 
 
-def _get_setup_instructions(languages: Sequence[str], project_path: Path) -> list[str]:
+def _quote_path_for_shell(os_name: str, path: Path) -> str:
+    r"""Quote ``path`` for copy-paste into the platform's shell.
+
+    ``shlex.quote`` emits POSIX single-quote syntax, which cmd.exe does
+    not understand at all (``cd 'C:\my project'`` fails) and which is
+    unnecessary in PowerShell. Both Windows shells accept double
+    quotes, and ``"`` cannot appear in Windows file names, so on
+    Windows the path is wrapped verbatim with no escaping needed.
+
+    Args:
+        os_name: Platform identifier, typically ``os.name`` ("nt" on
+            Windows, "posix" elsewhere).
+        path: Filesystem path to quote.
+
+    Returns:
+        The path quoted for safe copy-paste into the platform's shell.
+    """
+    if os_name == "nt":
+        return f'"{path}"'
+    return shlex.quote(str(path))
+
+
+def _check_all_command(os_name: str) -> str:
+    """Return the command that runs a generated project's check-all gate.
+
+    On POSIX the generated ``scripts/check-all.sh`` carries the
+    executable bit (see ``utils.fs.make_executable``) and is invoked
+    directly. Windows has no executable bit, so the documented
+    cross-platform path (#386) is to run the POSIX script through Git
+    Bash, which needs no executable bit because bash receives the
+    script path as an argument. The generated ``scripts/README.md``
+    additionally documents the toolchain-native command each gate
+    wraps for environments without bash.
+
+    Args:
+        os_name: Platform identifier, typically ``os.name``.
+
+    Returns:
+        The shell command that runs all quality checks in the
+        generated project.
+    """
+    if os_name == "nt":
+        return "bash scripts/check-all.sh"
+    return "./scripts/check-all.sh"
+
+
+def _get_setup_instructions(
+    languages: Sequence[str],
+    project_path: Path,
+    *,
+    os_name: str,
+    env: Mapping[str, str],
+) -> list[str]:
     """Return language-specific setup commands for a generated project.
 
     For multi-language projects, language-specific steps are concatenated
     in the order the languages appear. Shared steps (cd, pre-commit
-    install, check-all) are not duplicated. The Python venv activation
-    line is shell-aware (see :func:`_venv_activation_command`); the
-    detection is a heuristic based on ``os.name`` and the ``SHELL`` /
-    ``PSModulePath`` environment variables, and defaults to the bash/zsh
-    form when the shell cannot be identified.
+    install, check-all) are not duplicated. Every shell-sensitive line
+    is platform-aware via one canonical helper each: cd quoting
+    (:func:`_quote_path_for_shell`), venv activation
+    (:func:`_venv_activation_command`), and the check-all invocation
+    (:func:`_check_all_command`). Shell detection is a heuristic based
+    on ``os_name`` and the ``SHELL`` / ``PSModulePath`` environment
+    variables, defaulting to the bash/zsh form when the shell cannot
+    be identified.
 
     Args:
         languages: Ordered sequence of programming languages (python,
             typescript, go, rust, etc.). May be empty for a sensible
             default.
         project_path: Path to the generated project directory.
+        os_name: Platform identifier, typically ``os.name``. Passed
+            explicitly so tests never patch the real ``os.name``,
+            which breaks ``pathlib.Path`` construction (#380).
+        env: Environment mapping for shell detection, typically
+            ``os.environ``.
 
     Returns:
         Ordered list of shell commands to set up and verify the project.
     """
-    cd = f"cd {shlex.quote(str(project_path))}"
-    common_tail = ["pre-commit install", "./scripts/check-all.sh"]
+    cd = f"cd {_quote_path_for_shell(os_name, project_path)}"
+    common_tail = ["pre-commit install", _check_all_command(os_name)]
 
     middle: list[str] = []
     for lang in dict.fromkeys(languages):
@@ -1710,7 +2030,7 @@ def _get_setup_instructions(languages: Sequence[str], project_path: Path) -> lis
             middle.extend(
                 [
                     "python -m venv .venv",
-                    _venv_activation_command(os.name, os.environ),
+                    _venv_activation_command(os_name, env),
                     "pip install -r requirements.txt -r requirements-dev.txt",
                 ]
             )
@@ -1718,6 +2038,37 @@ def _get_setup_instructions(languages: Sequence[str], project_path: Path) -> lis
             middle.extend(_LANG_SETUP_STEPS.get(lang, []))
 
     return [cd, *middle, *common_tail]
+
+
+def _print_setup_instructions(languages: Sequence[str], project_path: Path) -> None:
+    """Print platform-appropriate setup commands for a generated project.
+
+    The command list comes from :func:`_get_setup_instructions` for the
+    live platform. On Windows (via the patchable ``is_windows`` seam,
+    #380) a note explains that the generated POSIX scripts run through
+    Git Bash and points at the generated ``scripts/README.md``, which
+    documents the Windows and toolchain-native invocation for every
+    gate (#386).
+
+    Args:
+        languages: Ordered sequence of programming languages for the
+            project.
+        project_path: Path to the generated project directory.
+    """
+    console.print("\nTo get started, run:")
+    for cmd in _get_setup_instructions(
+        languages, project_path, os_name=os.name, env=os.environ
+    ):
+        console.print(f"  {cmd}")
+    if is_windows():
+        console.print(
+            "\nNote: 'bash scripts/check-all.sh' runs the quality gate "
+            "through Git Bash (included with Git for Windows). The "
+            "generated scripts/README.md documents the Windows "
+            "invocation and the toolchain-native cross-platform "
+            "command for every gate."
+        )
+    console.print()
 
 
 def _finalize_init(
@@ -1744,10 +2095,7 @@ def _finalize_init(
     console.print(
         f"\n[green]✓[/green] Project generated successfully at: {project_path}"
     )
-    console.print("\nTo get started, run:")
-    for cmd in _get_setup_instructions(languages, project_path):
-        console.print(f"  {cmd}")
-    console.print()
+    _print_setup_instructions(languages, project_path)
     if enable_live_dashboard:
         console.print(
             "[green]✓[/green] Live metrics dashboard enabled "
@@ -1924,6 +2272,71 @@ def _resolve_pass2_orchestrator(
     return orchestrator
 
 
+def _validate_agent_target(value: str) -> str:
+    """Normalize and validate one ``--agent`` value (#387).
+
+    Args:
+        value: A single agent-target name from the CLI.
+
+    Returns:
+        The lower-cased target name if it is recognised.
+
+    Raises:
+        typer.BadParameter: If the target is not in
+            :data:`AGENT_CONTEXT_TARGETS`.
+    """
+    normalized = value.strip().lower()
+    if normalized not in AGENT_CONTEXT_TARGETS:
+        valid = ", ".join(AGENT_CONTEXT_TARGETS)
+        msg = f"unknown agent target {value!r}; choose from: {valid}"
+        raise typer.BadParameter(msg)
+    return normalized
+
+
+def _resolve_agent_targets(agent: list[str] | None) -> tuple[str, ...]:
+    """Resolve the ``--agent`` flag list into context targets (#387).
+
+    Accepts both repeated flags (``--agent claude --agent agents-md``)
+    and comma-separated values (``--agent claude,agents-md``), matching
+    the ``-l`` multi-language flag's ergonomics. Omitting the flag
+    selects the backward-compatible Claude default.
+
+    Args:
+        agent: Raw values from the typer option, or ``None``.
+
+    Returns:
+        A deduplicated tuple of target names in the canonical order
+        defined by :data:`AGENT_CONTEXT_TARGETS`.
+
+    Raises:
+        typer.BadParameter: If any target is unknown, or the flag was
+            passed but resolves to no targets.
+    """
+    if not agent:
+        return (TARGET_CLAUDE,)
+    resolved = _canonicalize_agent_targets(_split_target_pieces(agent))
+    if not resolved:
+        msg = "--agent requires at least one target value"
+        raise typer.BadParameter(msg)
+    return resolved
+
+
+def _canonicalize_agent_targets(pieces: list[str]) -> tuple[str, ...]:
+    """Validate and dedupe agent-target pieces into canonical order.
+
+    Args:
+        pieces: Individual target values (already split on commas).
+
+    Returns:
+        The recognised targets in :data:`AGENT_CONTEXT_TARGETS` order.
+
+    Raises:
+        typer.BadParameter: If any piece is not a known target.
+    """
+    requested = {_validate_agent_target(piece) for piece in pieces}
+    return tuple(t for t in AGENT_CONTEXT_TARGETS if t in requested)
+
+
 def _validate_pass2_flags(
     *,
     offline: bool,
@@ -1970,6 +2383,41 @@ def _validate_pass2_flags(
         raise typer.Exit(code=1)
 
 
+def _validate_windows_ci_language(
+    *,
+    windows_ci: bool,
+    primary_language: str,
+) -> None:
+    """Fail fast when ``--windows-ci`` targets an unsupported language.
+
+    The generated CI workflow follows the project's primary language
+    (the first ``-l`` value), so the Windows leg is validated against
+    that language. Validation runs before any file is generated — and
+    before the ``--dry-run`` preview — so the user learns about the
+    unsupported combination immediately.
+
+    Args:
+        windows_ci: ``True`` if ``--windows-ci`` was passed.
+        primary_language: The resolved primary project language.
+
+    Raises:
+        typer.Exit: If the flag was passed for a language without a
+            supported Windows CI leg (see
+            :data:`~start_green_stay_green.generators.ci_windows.WINDOWS_CI_LANGUAGES`).
+    """
+    if not windows_ci or primary_language in WINDOWS_CI_LANGUAGES:
+        return
+    supported = ", ".join(WINDOWS_CI_LANGUAGES)
+    console.print(
+        f"[red]Error:[/red] --windows-ci is not supported for "
+        f"{primary_language!r} (supported: {supported}). The gates for "
+        "this language cannot run on a windows-latest runner — see "
+        "generators/ci_windows.py for the per-language rationale.",
+        style="bold",
+    )
+    raise typer.Exit(code=1)
+
+
 @app.command()
 def init(  # noqa: PLR0913
     project_name: Annotated[
@@ -1988,6 +2436,21 @@ def init(  # noqa: PLR0913
             help=(
                 "Programming language(s). Repeat for multi-language projects: "
                 f"-l python -l typescript. ({', '.join(SUPPORTED_LANGUAGES)})"
+            ),
+        ),
+    ] = None,
+    agent: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--agent",
+            help=(
+                "Agent-context format(s) to generate. Repeat or "
+                "comma-separate for multiple targets: --agent claude "
+                "--agent agents-md. Choices: claude (default; CLAUDE.md "
+                "+ .claude/), agents-md (AGENTS.md, the open "
+                "agent-context convention), aider (CONVENTIONS.md + "
+                ".aider.conf.yml). All formats render the same shared "
+                "content."
             ),
         ),
     ] = None,
@@ -2072,6 +2535,20 @@ def init(  # noqa: PLR0913
             help="Generate live metrics dashboard with auto-updating workflow.",
         ),
     ] = False,
+    windows_ci: Annotated[
+        bool,
+        typer.Option(
+            "--windows-ci",
+            help=(
+                "Add an opt-in windows-latest job to the generated CI "
+                "workflow that runs the quality gates through Git Bash "
+                "(bash scripts/<gate>.sh). Default off: without this "
+                "flag the generated CI is unchanged and uses no Windows "
+                "runner minutes. Applies to the primary language's "
+                "workflow; not supported for swift, cpp, or kotlin."
+            ),
+        ),
+    ] = False,
     timing_json: Annotated[
         Path | None,
         typer.Option(
@@ -2097,6 +2574,9 @@ def init(  # noqa: PLR0913
     Args:
         project_name: Name of the project.
         language: Primary programming language.
+        agent: Agent-context format(s) to generate (``--agent``).
+            Defaults to Claude (``CLAUDE.md`` + ``.claude/``); also
+            supports ``agents-md`` and ``aider``, alone or combined.
         output_dir: Output directory (defaults to current directory).
         dry_run: Preview mode without file creation.
         force: Overwrite all existing files without prompting.
@@ -2108,6 +2588,10 @@ def init(  # noqa: PLR0913
         no_enhance: Skip Pass 2 (AI tuning) but still resolve the API
             key for a future ``green enhance`` invocation.
         enable_live_dashboard: Generate live metrics dashboard with workflow.
+        windows_ci: Opt into a ``quality-windows`` CI job that runs the
+            generated project's quality gates on ``windows-latest``
+            through Git Bash (#388). Default off leaves the generated
+            workflow unchanged.
         timing_json: Optional path to write a timing/telemetry JSON report.
         config: Configuration file path.
         provider: Optional LLM provider override (``--provider``).
@@ -2133,6 +2617,11 @@ def init(  # noqa: PLR0913
     resolved_languages = _resolve_language_param(
         language, config_data, no_interactive=no_interactive
     )
+    resolved_agents = _resolve_agent_targets(agent)
+    _validate_windows_ci_language(
+        windows_ci=windows_ci,
+        primary_language=resolved_languages[0],
+    )
 
     # Validate project name and paths
     try:
@@ -2147,7 +2636,10 @@ def init(  # noqa: PLR0913
     # Handle dry-run mode (skip orchestrator initialization for preview)
     if dry_run:
         _show_dry_run_preview(
-            resolved_project_name, ", ".join(resolved_languages), project_path
+            resolved_project_name,
+            ", ".join(resolved_languages),
+            project_path,
+            resolved_agents,
         )
         return
 
@@ -2179,7 +2671,11 @@ def init(  # noqa: PLR0913
             project_path,
             resolved_project_name,
             resolved_languages,
-            orchestrator,
+            _Pass2Options(
+                orchestrator=orchestrator,
+                agent_targets=resolved_agents,
+                windows_ci=windows_ci,
+            ),
             file_writer,
         )
         _finalize_init(
@@ -2513,12 +3009,10 @@ def _enhance_claude_md(
     """
     with step_timer("enhance_claude_md"), console.status("Re-tuning CLAUDE.md..."):
         claude_md_generator = ClaudeMdGenerator(orchestrator)
-        project_config: dict[str, Any] = {
-            "project_name": project.project_name,
-            "language": project.language,
-            "scripts": list(_CLAUDE_MD_SCRIPTS),
-            "skills": REQUIRED_SKILLS.copy(),
-        }
+        project_config = _claude_context_project_config(
+            project.project_name,
+            project.language,
+        )
         if dry_run:
             index_result, _docs = claude_md_generator.render_modular(project_config)
             target = project.project_path / "CLAUDE.md"
@@ -2870,6 +3364,102 @@ def _validate_batch_targets(selected_targets: tuple[str, ...]) -> None:
     raise typer.Exit(code=1)
 
 
+def _validate_enhance_flags(
+    *,
+    batch: bool,
+    wait: bool,
+    selected_targets: tuple[str, ...],
+) -> None:
+    """Validate the ``--batch`` / ``--wait`` flag combination up front.
+
+    ``--batch`` only supports the batchable targets (see
+    :func:`_validate_batch_targets`), and ``--wait`` is meaningless
+    without ``--batch``. Both checks fail fast before any orchestrator
+    is constructed or API key resolved.
+
+    Args:
+        batch: Value of the ``--batch`` flag.
+        wait: Value of the ``--wait`` flag.
+        selected_targets: Resolved ``--targets`` selection.
+
+    Raises:
+        typer.Exit: With code 1 on an invalid combination.
+    """
+    if batch:
+        _validate_batch_targets(selected_targets)
+    if wait and not batch:
+        console.print("[red]Error:[/red] --wait only applies in --batch mode.")
+        raise typer.Exit(code=1)
+
+
+def _dispatch_enhance_batch(
+    *,
+    project: _EnhanceProjectContext,
+    orchestrator: AIOrchestrator,
+    file_writer: FileWriter,
+    dry_run: bool,
+    wait: bool,
+) -> bool:
+    """Run the batch path when the provider advertises batch support.
+
+    Capability negotiation (T5, #389): the decision derives from the
+    provider's capability advertisement, never from probing for the
+    typed batch decline. Batch-capable providers (Anthropic) take the
+    existing batch machinery unchanged; for everyone else this prints
+    the loud fallback warning and reports back so the caller runs the
+    same targets through the documented sequential pipeline instead —
+    no crash, no dropped work.
+
+    Args:
+        project: Project metadata for the enhance run.
+        orchestrator: Configured orchestrator wrapping the selected
+            provider.
+        file_writer: Conflict-resolution-aware writer.
+        dry_run: Skip API calls and writes (batch path only).
+        wait: Block in-process until the batch ends (resume calls).
+
+    Returns:
+        ``True`` when the batch path handled the run; ``False`` when
+        the provider lacks batch and the caller must fall back to the
+        sequential pipeline.
+    """
+    if not orchestrator.capabilities.batch:
+        _warn_batch_capability_fallback(orchestrator.capabilities)
+        return False
+    _run_enhance_batch(
+        project=project,
+        orchestrator=orchestrator,
+        file_writer=file_writer,
+        dry_run=dry_run,
+        wait=wait,
+    )
+    return True
+
+
+def _warn_batch_capability_fallback(capabilities: ProviderCapabilities) -> None:
+    """Print the loud fallback warning for ``--batch`` on a non-batch provider.
+
+    No work is dropped: the same subagent tunings run through the
+    documented sequential pipeline (:func:`_run_enhance_pipeline` —
+    the exact path the non-batch flow uses), producing the same
+    artifacts. What changes is the cost/latency semantics: no Batches
+    API discount, no submit/resume two-call flow — the calls run
+    in-process now.
+
+    Args:
+        capabilities: The selected provider's advertisement (its
+            ``batch`` flag is ``False`` when this fires).
+    """
+    console.print(
+        f"[yellow]Warning:[/yellow] provider {capabilities.provider!r} "
+        f"does not support batch processing — falling back to "
+        f"sequential API calls now (same results; no batch discount, "
+        f"no submit/resume flow). Run `green providers` to see "
+        f"per-provider capabilities.",
+        style="bold",
+    )
+
+
 def _run_enhance_batch(
     *,
     project: _EnhanceProjectContext,
@@ -3160,7 +3750,10 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
                 "Batches API (50% cheaper, ≤24 h SLA). Use with "
                 "``--targets subagents``. The first run submits and "
                 "exits; re-run to fetch results, or pass ``--wait`` "
-                "to block until done. See ADR-001 for the rationale."
+                "to block until done. See ADR-001 for the rationale. "
+                "Providers without batch support (see `green "
+                "providers`) fall back to sequential API calls with "
+                "a warning."
             ),
         ),
     ] = False,
@@ -3178,6 +3771,7 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
             ),
         ),
     ] = False,
+    config: config_file_option = None,
     provider: provider_option = None,
     model: model_option = None,
 ) -> None:
@@ -3210,19 +3804,26 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         force: Overwrite files without prompting.
         batch: Submit subagent tunings via the Anthropic Message
             Batches API. Submit-then-resume two-call flow; pair
-            with ``--wait`` for in-process polling.
+            with ``--wait`` for in-process polling. If the selected
+            provider does not advertise batch support, the same
+            targets fall back to sequential API calls with a loud
+            warning (never a crash, never dropped work).
         wait: Block in-process when ``--batch`` is set; polls every
             30 s until the batch ends or the timeout elapses.
+        config: Configuration file path (``--config``, YAML or TOML).
+            Loaded through the same loader as ``green init``; its
+            ``llm_provider`` / ``llm_model`` keys feed the config-file
+            tier of provider/model selection (#396).
         provider: Optional LLM provider override (``--provider``).
         model: Optional model override (``--model``). The case of the
             model id is preserved verbatim (API identifiers are
             case-sensitive).
 
     Note:
-        Unlike ``green init``, ``enhance`` has no config-file tier: it
-        loads no config file, so provider/model resolve from CLI flag >
-        env (``GREEN_LLM_PROVIDER`` / ``GREEN_LLM_MODEL``) > built-in
-        default only. Wiring a config source is tracked as issue #396.
+        Provider/model resolve with the same four-tier precedence as
+        ``green init``: CLI flag > env (``GREEN_LLM_PROVIDER`` /
+        ``GREEN_LLM_MODEL``) > config-file key (``llm_provider`` /
+        ``llm_model``, via ``--config``) > built-in default (#396).
 
     Raises:
         typer.Exit: If the path is invalid, project metadata cannot
@@ -3239,22 +3840,22 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
     )
 
     selected_targets = _resolve_enhance_targets(targets)
-    if batch:
-        _validate_batch_targets(selected_targets)
-    if wait and not batch:
-        console.print("[red]Error:[/red] --wait only applies in --batch mode.")
-        raise typer.Exit(code=1)
+    _validate_enhance_flags(
+        batch=batch,
+        wait=wait,
+        selected_targets=selected_targets,
+    )
+    # Same config-file source as ``green init`` (#396): one shared
+    # loader, so the ``llm_provider`` / ``llm_model`` keys feed tier 3
+    # of the selection precedence identically in both commands.
+    config_data = _load_config_data(config)
     orchestrator = _require_enhance_orchestrator(
         api_key,
         no_interactive=no_interactive,
-        # ``enhance`` intentionally omits the config-file tier: it has no
-        # ``--config`` flag and loads no config file, so only CLI flag >
-        # env > built-in default apply here (3 tiers, vs. ``init``'s 4).
-        # ``config_data`` is therefore left unset (``None``). Wiring a
-        # config source into ``enhance`` is tracked as issue #396.
         selection_inputs=_SelectionInputs(
             provider_flag=provider,
             model_flag=model,
+            config_data=config_data,
         ),
     )
     file_writer = FileWriter(
@@ -3270,14 +3871,16 @@ def enhance(  # noqa: PLR0913 — top-level CLI command; matches init's pattern
         language=resolved_language,
     )
 
-    if batch:
-        _run_enhance_batch(
-            project=project,
-            orchestrator=orchestrator,
-            file_writer=file_writer,
-            dry_run=dry_run,
-            wait=wait,
-        )
+    # A False return means the provider lacks batch support and a
+    # fallback warning was already printed — fall through to the
+    # sequential pipeline below instead of returning.
+    if batch and _dispatch_enhance_batch(
+        project=project,
+        orchestrator=orchestrator,
+        file_writer=file_writer,
+        dry_run=dry_run,
+        wait=wait,
+    ):
         return
 
     _run_enhance_pipeline(

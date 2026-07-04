@@ -19,6 +19,7 @@ from start_green_stay_green.utils.csharp import csharp_namespace
 from start_green_stay_green.utils.java import android_package
 from start_green_stay_green.utils.java import android_package_path
 from start_green_stay_green.utils.naming import pascal_case
+from start_green_stay_green.utils.ruby import ruby_module_name
 
 if TYPE_CHECKING:
     from start_green_stay_green.utils.file_writer import FileWriter
@@ -62,12 +63,10 @@ class TestsGenerator(BaseGenerator):
     tests/test_main.py) with a passing test for the Hello World code.
 
     All 10 supported languages (python, typescript, go, rust, java, csharp,
-    ruby, swift, kotlin, cpp) are available at the generator level. Note that
-    the full CLI pipeline (``sgsg init``) skips the pre-commit, scripts,
-    architecture, and metrics steps for ruby —
-    the CI workflow step covers every language. Kotlin (#357/#358),
-    C/C++ (#362/#363), Java (#366/#367), and C# (#370) run the full
-    pipeline.
+    ruby, swift, kotlin, cpp) are available at the generator level, and all
+    of them run the full CLI pipeline (``sgsg init``): Kotlin graduated
+    with #357/#358, C/C++ with #362/#363, Java with #366/#367, C# with
+    #370, and Ruby with #373.
 
     Attributes:
         output_dir: Directory where tests structure will be created
@@ -195,7 +194,7 @@ class TestsGenerator(BaseGenerator):
             return file_path
 
         try:
-            file_path.write_text(content)
+            file_path.write_text(content, encoding="utf-8")
         except OSError as e:
             msg = f"Failed to write {file_path.name}: {e}"
             raise GenerationError(msg, cause=e) from e
@@ -532,26 +531,35 @@ namespace {namespace}.Tests
     def _ruby_test_spec_rb(self) -> str:
         """Generate Ruby spec file content.
 
+        The described constant comes from the shared
+        :func:`~start_green_stay_green.utils.ruby.ruby_module_name`
+        helper, and the spec exercises ``.hello`` — the method the
+        structure scaffold actually defines. Before #373 the spec
+        described ``package_name.capitalize()`` (``My_project``) and
+        called ``.main``, neither of which exists in the generated
+        ``lib/`` file: a guaranteed ``NameError`` on first run.
+
         Returns:
             Content for {package_name}_spec.rb with RSpec test
         """
+        module_name = ruby_module_name(self.config.package_name)
         return f"""# frozen_string_literal: true
 
-require 'spec_helper'
-require_relative '../lib/{self.config.package_name}'
+require "spec_helper"
+require_relative "../lib/{self.config.package_name}"
 
-RSpec.describe {self.config.package_name.capitalize()} do
-  describe '.main' do
-    it 'runs without error' do
-      # Test that main method exists and can be called
-      # This verifies the Hello World entry point works correctly
-      expect {{ {self.config.package_name.capitalize()}.main }}.not_to raise_error
+RSpec.describe {module_name} do
+  describe ".hello" do
+    it "runs without error" do
+      # Test that the hello method exists and can be called.
+      # This verifies the Hello World entry point works correctly.
+      expect {{ described_class.hello }}.not_to raise_error
     end
 
-    it 'prints hello message' do
-      # Capture stdout to verify the hello message
+    it "prints hello message" do
+      # Capture stdout to verify the hello message.
       pattern = /Hello from {self.config.project_name}/
-      expect {{ {self.config.package_name.capitalize()}.main }}
+      expect {{ described_class.hello }}
         .to output(pattern).to_stdout
     end
   end
@@ -561,12 +569,34 @@ end
     def _ruby_spec_helper_rb(self) -> str:
         """Generate Ruby spec_helper.rb content.
 
+        ``spec_helper.rb`` is the single home of the >=90% SimpleCov
+        line-coverage bound (#373, the manifest-owned precedent of the
+        Kover/JaCoCo/Coverlet gates). The gate is activated by setting
+        ``COVERAGE=true`` (``scripts/test.sh --coverage`` does this),
+        so a plain ``bundle exec rspec`` stays a fast test run;
+        SimpleCov's at_exit hook fails the rspec invocation directly
+        when the bound is missed — no standalone-report no-op path.
+        Nothing else (scripts, hooks, CI) restates the number.
+
         Returns:
             Content for spec_helper.rb with RSpec configuration
         """
         return f"""# frozen_string_literal: true
 
 # RSpec configuration for {self.config.project_name}
+
+# Coverage gate, activated by COVERAGE=true (scripts/test.sh --coverage
+# and the CI workflow set it). This block is the SINGLE home of the
+# >=90% line-coverage bound — scripts, hooks, and CI never restate the
+# number. SimpleCov must start before the application code is loaded,
+# which holds because every spec requires this helper first.
+if ENV["COVERAGE"]
+  require "simplecov"
+  SimpleCov.start do
+    add_filter "/spec/"
+    minimum_coverage 90
+  end
+end
 
 RSpec.configure do |config|
   # Use the expect syntax
@@ -583,7 +613,7 @@ RSpec.configure do |config|
   config.color = true
 
   # Use the documentation formatter for detailed output
-  config.default_formatter = 'doc' if config.files_to_run.one?
+  config.default_formatter = "doc" if config.files_to_run.one?
 
   # Randomize test order
   config.order = :random

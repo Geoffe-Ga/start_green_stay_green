@@ -9,6 +9,7 @@ import pytest
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.tests_gen import TestsConfig as Config
 from start_green_stay_green.generators.tests_gen import TestsGenerator as Generator
+from start_green_stay_green.utils.ruby import ruby_module_name
 
 # Expected test file patterns per language
 EXPECTED_TEST_FILES: dict[str, list[str]] = {
@@ -448,6 +449,49 @@ class TestMultiLanguageTests:
 
             content = files["spec/test_project_spec.rb"].read_text()
             assert "describe" in content or "RSpec.describe" in content
+
+    def test_ruby_spec_describes_the_scaffolded_module(self) -> None:
+        """The spec describes the constant the lib file declares (#373).
+
+        Both sides derive the name from utils.ruby.ruby_module_name and
+        the spec exercises ``.hello`` — the method the structure
+        scaffold actually defines (the pre-#373 spec called ``.main``
+        on a constant that did not exist).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="ruby",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["spec/test_project_spec.rb"].read_text()
+            assert f"RSpec.describe {ruby_module_name('test_project')}" in content
+            assert "described_class.hello" in content
+            assert ".main" not in content
+
+    def test_ruby_spec_helper_owns_the_coverage_bound(self) -> None:
+        """spec_helper.rb is the single home of the >=90% bound (#373).
+
+        SimpleCov starts only when COVERAGE is set (scripts/test.sh
+        --coverage), so a plain rspec run stays fast while the gated
+        run fails the invocation directly when the bound is missed.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                project_name="test-project",
+                language="ruby",
+                package_name="test_project",
+            )
+            generator = Generator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["spec/spec_helper.rb"].read_text()
+            assert 'if ENV["COVERAGE"]' in content
+            assert 'require "simplecov"' in content
+            assert "minimum_coverage 90" in content
 
     def test_swift_test_has_xctest_case(self) -> None:
         """Test Swift test file uses XCTest with an XCTestCase subclass."""

@@ -1,5 +1,6 @@
 """Unit tests for Dependencies Generator."""
 
+import json
 from pathlib import Path
 import tempfile
 import tomllib
@@ -34,6 +35,12 @@ from start_green_stay_green.utils.kotlin import JUNIT_VERSION
 from start_green_stay_green.utils.kotlin import KONSIST_VERSION
 from start_green_stay_green.utils.kotlin import KOTLIN_VERSION
 from start_green_stay_green.utils.kotlin import KOVER_VERSION
+from start_green_stay_green.utils.ruby import BUNDLER_AUDIT_VERSION
+from start_green_stay_green.utils.ruby import PACKWERK_VERSION
+from start_green_stay_green.utils.ruby import RSPEC_VERSION
+from start_green_stay_green.utils.ruby import RUBOCOP_VERSION
+from start_green_stay_green.utils.ruby import SIMPLECOV_VERSION
+from start_green_stay_green.utils.ruby import ruby_gemfile
 from start_green_stay_green.utils.swift import package_swift
 
 # Expected primary dependency file per language
@@ -322,6 +329,27 @@ class TestMultiLanguageDependencies:
             assert "devDependencies" in content
             assert "typescript" in content
 
+    def test_typescript_package_json_includes_stryker_dev_dependencies(self) -> None:
+        """package.json carries StrykerJS so `npm ci` makes the mutation
+        gate runnable (parity with mutmut in requirements-dev.txt, #398).
+
+        Versions live-verified on the npm registry 2026-06-11
+        (@stryker-mutator/core latest 9.6.1).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = DependencyConfig(
+                project_name="test-project",
+                language="typescript",
+                package_name="test_project",
+            )
+            generator = DependenciesGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            parsed = json.loads(files["package.json"].read_text())
+            dev_deps = parsed["devDependencies"]
+            assert dev_deps["@stryker-mutator/core"] == "^9.6.0"
+            assert dev_deps["@stryker-mutator/jest-runner"] == "^9.6.0"
+
     def test_go_mod_has_module_name(self) -> None:
         """Test Go go.mod contains module declaration."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -393,6 +421,48 @@ class TestMultiLanguageDependencies:
 
             content = files["Gemfile"].read_text()
             assert "source" in content
+
+    def test_ruby_gemfile_pins_quality_toolchain(self) -> None:
+        """The Gemfile wires the #373 quality gems with live pins.
+
+        rspec/simplecov/rubocop/bundler-audit/packwerk back the test,
+        coverage, lint/complexity, dependency-CVE, and architecture
+        gates; the pessimistic pins come from utils.ruby (verified
+        against rubygems.org).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = DependencyConfig(
+                project_name="test-project",
+                language="ruby",
+                package_name="test_project",
+            )
+            generator = DependenciesGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            content = files["Gemfile"].read_text()
+            assert f'gem "rspec", "~> {RSPEC_VERSION}"' in content
+            assert f'gem "simplecov", "~> {SIMPLECOV_VERSION}"' in content
+            assert f'gem "rubocop", "~> {RUBOCOP_VERSION}"' in content
+            assert f'gem "bundler-audit", "~> {BUNDLER_AUDIT_VERSION}"' in content
+            assert f'gem "packwerk", "~> {PACKWERK_VERSION}"' in content
+
+    def test_ruby_gemfile_matches_structure_generator(self) -> None:
+        """The dependencies and structure generators emit one Gemfile.
+
+        Both delegate to utils.ruby.ruby_gemfile (#373) so the two can
+        never drift apart again (before #373 they emitted diverging
+        manifests with stale tool lines).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = DependencyConfig(
+                project_name="test-project",
+                language="ruby",
+                package_name="test_project",
+            )
+            generator = DependenciesGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            assert files["Gemfile"].read_text() == ruby_gemfile()
 
     def test_swift_package_swift_has_manifest(self) -> None:
         """Test Swift Package.swift contains an SPM manifest for watchOS."""

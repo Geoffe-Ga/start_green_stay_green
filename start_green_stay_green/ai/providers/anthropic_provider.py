@@ -44,6 +44,7 @@ from start_green_stay_green.ai.batch import BatchSubmission
 from start_green_stay_green.ai.batch import parse_batch_result_entry
 from start_green_stay_green.ai.providers.base import LLMProvider
 from start_green_stay_green.ai.providers.base import OutputFormat
+from start_green_stay_green.ai.providers.base import ProviderCapabilities
 from start_green_stay_green.ai.providers.outcomes import AttemptOutcome
 from start_green_stay_green.ai.providers.outcomes import ToolAttemptOutcome
 from start_green_stay_green.ai.types import GenerationError
@@ -75,6 +76,20 @@ __all__ = ["AnthropicProvider"]
 # ``pip`` extra that installs the SDK; named in the missing-dependency
 # hint so users can copy/paste the fix.
 _INSTALL_EXTRA: Final[str] = "anthropic"
+
+# Registry name of this provider, echoed in the capability advertisement.
+_PROVIDER_NAME: Final[str] = "anthropic"
+
+# Capability advertisement (tracer T5, #389). Anthropic implements
+# every optional capability group natively, including batch (the
+# Message Batches API). This frozen record is the single source of
+# truth negotiation code consults — see ``LLMProvider.capabilities``.
+_CAPABILITIES: Final[ProviderCapabilities] = ProviderCapabilities(
+    provider=_PROVIDER_NAME,
+    batch=True,
+    tool_use=True,
+    token_accounting=True,
+)
 
 # Names this module exposes lazily from the ``anthropic`` SDK via
 # :func:`__getattr__`. Resolved on first *attribute* access
@@ -272,6 +287,15 @@ class AnthropicProvider(LLMProvider):
     def model(self) -> str:
         """Return the Claude model identifier this provider uses."""
         return self._model
+
+    @classmethod
+    def capabilities(cls) -> ProviderCapabilities:
+        """Return the Anthropic capability advertisement.
+
+        Every capability group is implemented natively — including
+        batch, which maps directly onto the Message Batches API.
+        """
+        return _CAPABILITIES
 
     @staticmethod
     def _cache_tokens(usage: object) -> tuple[int, int]:

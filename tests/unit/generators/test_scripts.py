@@ -1,9 +1,11 @@
 """Unit tests for Scripts Generator."""
 
+import json
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from typing import ClassVar
 
 from defusedxml import ElementTree as DefusedElementTree
 import pytest
@@ -12,6 +14,7 @@ import yaml
 from start_green_stay_green.generators.scripts import ScriptConfig
 from start_green_stay_green.generators.scripts import ScriptsGenerator
 from start_green_stay_green.utils.cpp import CPP_STANDARD
+from tests.conftest import assert_executable
 
 
 class TestScriptConfig:
@@ -171,8 +174,8 @@ class TestScriptsGeneratorPythonGeneration:
             scripts = generator.generate()
 
             for script_path in scripts.values():
-                # Check execute permission (0o755 & 0o111 should be 0o111)
-                assert script_path.stat().st_mode & 0o111
+                # Platform-aware: exact 0o755 on POSIX, existence on Windows (#380)
+                assert_executable(script_path)
 
     def test_python_check_all_script_contains_expected_content(self) -> None:
         """Test Python check-all.sh contains expected content."""
@@ -1708,15 +1711,283 @@ class TestScriptsGeneratorCsharpGeneration:
             assert existing_metrics.read_text() == "CA1502: 25\n"
 
 
+class TestScriptsGeneratorRubyGeneration:
+    """Test Ruby script generation (#373)."""
+
+    @staticmethod
+    def _generate(tmpdir: str) -> dict[str, Path]:
+        """Generate ruby scripts into ``tmpdir`` and return the mapping."""
+        config = ScriptConfig(
+            language="ruby",
+            package_name="my_gem",
+        )
+        generator = ScriptsGenerator(Path(tmpdir), config)
+        return generator.generate()
+
+    def test_generate_ruby_scripts_creates_files(self) -> None:
+        """Test generate creates the full ruby script set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            assert "check-all.sh" in scripts
+            assert "format.sh" in scripts
+            assert "lint.sh" in scripts
+            assert "test.sh" in scripts
+            assert "security.sh" in scripts
+
+    def test_ruby_shell_scripts_pass_bash_syntax_check(self) -> None:
+        """Every generated ruby shell script parses under bash -n.
+
+        The #362 lesson: this literal syntax check caught a real
+        template-escaping bug in the cpp scripts, so every new language
+        gets it from day one.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            for name, path in scripts.items():
+                if not name.endswith(".sh"):
+                    continue
+                bash = shutil.which("bash")
+                assert bash is not None, "bash not found on PATH"
+                result = subprocess.run(  # noqa: S603  # Issue #373: bash -n on generated content, no untrusted input
+                    [bash, "-n", str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, f"{name}: {result.stderr}"
+
+    def test_ruby_shell_scripts_pass_shellcheck(self) -> None:
+        """Every generated ruby shell script is clean under shellcheck.
+
+        bash -n only catches parse errors; shellcheck catches the
+        quoting/expansion bugs that have bitten generated scripts
+        before (#425/SC2059), so the linter itself gates the templates.
+        Skips only when shellcheck is not installed (it ships on the
+        GitHub ubuntu runners and via shellcheck-py in pre-commit).
+        """
+        shellcheck = shutil.which("shellcheck")
+        if shellcheck is None:
+            pytest.skip("shellcheck not on PATH (covered in CI)")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            for name, path in scripts.items():
+                if not name.endswith(".sh"):
+                    continue
+                result = subprocess.run(  # noqa: S603  # Issue #373: shellcheck on generated content, no untrusted input
+                    [shellcheck, str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert result.returncode == 0, f"{name}: {result.stdout}"
+
+    def test_ruby_format_script_owns_the_fixing_path(self) -> None:
+        """format.sh fixes with --autocorrect; the hook stays check-mode.
+
+        The issue's "--autocorrect" belongs here, in the fixing path —
+        NOT in the pre-commit hook, where a fixing-mode formatter could
+        never fail a commit (the #430 lesson).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "bundle exec rubocop --autocorrect" in content
+
+    def test_ruby_format_check_mode_runs_the_layout_slice(self) -> None:
+        """--check verifies the Layout (formatting) cop department only.
+
+        lint.sh owns the full cop set, so the two checks in
+        check-all.sh never double-report the same offenses.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "bundle exec rubocop --only Layout" in content
+
+    def test_ruby_format_script_requires_bundler(self) -> None:
+        """format.sh fails with install instructions when bundler is absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["format.sh"].read_text()
+            assert "command -v bundle" in content
+            assert "gem install bundler" in content
+
+    def test_ruby_lint_script_runs_full_rubocop_with_config_owned_policy(
+        self,
+    ) -> None:
+        """lint.sh is a plain full RuboCop run; .rubocop.yml owns the policy.
+
+        The complexity bound, the Security cop department, and every
+        style decision live in the companion config — the script must
+        not restate any threshold via CLI flags.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "bundle exec rubocop --force-exclusion" in content
+            assert ".rubocop.yml" in content
+            assert "--only" not in content.replace("--only Layout", "")
+            assert "MAX_CCN" not in content
+
+    def test_ruby_lint_script_documents_complexity_and_flog_alternative(
+        self,
+    ) -> None:
+        """The <=10 ceiling lives once, in .rubocop.yml.
+
+        Metrics/CyclomaticComplexity owns the gate; flog is named as
+        the documented standalone alternative without being wired, so
+        the bound keeps a single home.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["lint.sh"].read_text()
+            assert "Metrics/CyclomaticComplexity" in content
+            assert "flog" in content
+
+    def test_ruby_test_script_runs_rspec(self) -> None:
+        """test.sh runs the suite via plain `bundle exec rspec`.
+
+        The literal string `rspec` doubles as the language marker
+        cli._scripts_dir_has_other_language probes for ruby.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "bundle exec rspec" in content
+            assert "command -v bundle" in content
+
+    def test_ruby_test_script_enforces_coverage_via_spec_helper_gate(self) -> None:
+        """Coverage mode sets COVERAGE=true; the bound stays in spec_helper.
+
+        SimpleCov hooks rspec's exit, so a missed bound fails the
+        invocation directly (no standalone-report no-op path). The
+        >=90% number lives only in spec/spec_helper.rb, so the script
+        must not restate it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["test.sh"].read_text()
+            assert "COVERAGE=true bundle exec rspec" in content
+            assert "spec/spec_helper.rb" in content
+            assert "THRESHOLD=" not in content
+            assert "--minimum-coverage" not in content
+
+    def test_ruby_security_script_gates_on_bundler_audit(self) -> None:
+        """security.sh owns dependency CVEs via bundler-audit."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "bundle exec bundler-audit update" in content
+            assert "bundle exec bundler-audit check" in content
+
+    def test_ruby_security_script_warns_when_offline(self) -> None:
+        """The advisory-db update needs the network; offline warns, not fails.
+
+        bundler-audit checks against the ruby-advisory-db, which must
+        be fetched over the network, so the pragmatic warn-first
+        default skips with a documented tighten-me path instead of
+        failing a fresh offline clone — the NVD_API_KEY precedent.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "network" in content
+            assert "Tighten" in content
+
+    def test_ruby_security_script_documents_division_of_labor(self) -> None:
+        """security.sh discloses where the other security passes live.
+
+        Source-level security is RuboCop's Security cop department
+        (inside lint.sh's full run); Brakeman is documented as the
+        Rails-only deeper scanner rather than wired into a plain-Ruby
+        scaffold where it can only error.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["security.sh"].read_text()
+            assert "gitleaks" in content
+            assert "detect-secrets" in content
+            assert "Security cop" in content
+            assert "Brakeman" in content
+            assert "Rails" in content
+
+    def test_ruby_check_all_runs_full_toolchain(self) -> None:
+        """check-all.sh runs format check, lint, coverage-gated tests, security."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir)
+
+            content = scripts["check-all.sh"].read_text()
+            assert 'run_check "Format" "format.sh" --check' in content
+            assert 'run_check "Linting" "lint.sh"' in content
+            assert 'run_check "Tests" "test.sh" --coverage' in content
+            assert 'run_check "Security" "security.sh"' in content
+
+    def test_ruby_writes_rubocop_config_companion(self) -> None:
+        """.rubocop.yml lands at the project root with the <=10 bound.
+
+        The companion is the single home of the RuboCop policy shared
+        by the pre-commit hook, format.sh, lint.sh, and CI; it must
+        parse as YAML (the parse-validation guardrail).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            config = Path(tmpdir) / ".rubocop.yml"
+            assert config.exists()
+            parsed = yaml.safe_load(config.read_text())
+            assert parsed["Metrics/CyclomaticComplexity"]["Max"] == 10
+            assert parsed["AllCops"]["NewCops"] == "enable"
+
+    def test_ruby_rubocop_config_excludes_specs_from_block_length(self) -> None:
+        """RSpec files are excluded from Metrics/BlockLength.
+
+        RSpec example groups are naturally long blocks; without the
+        exclusion the scaffold's own spec files would fail the lint
+        gate out of the box.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir)
+
+            parsed = yaml.safe_load((Path(tmpdir) / ".rubocop.yml").read_text())
+            assert "spec/**/*" in parsed["Metrics/BlockLength"]["Exclude"]
+
+    def test_ruby_companion_preserves_existing_file(self) -> None:
+        """An existing user .rubocop.yml is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / ".rubocop.yml"
+            existing.write_text("AllCops:\n  NewCops: disable\n")
+
+            self._generate(tmpdir)
+
+            assert existing.read_text() == "AllCops:\n  NewCops: disable\n"
+
+
 class TestScriptsGeneratorLanguageFallback:
     """Test language fallback behavior."""
 
     def test_unknown_language_falls_back_to_python(self) -> None:
-        """Test unknown language falls back to Python scripts."""
+        """Test unknown language falls back to Python scripts.
+
+        ruby graduated to its own template set with #373, so the probe
+        uses php — a language with no native script templates.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
-                language="ruby",
-                package_name="my_gem",
+                language="php",
+                package_name="my_package",
             )
             generator = ScriptsGenerator(Path(tmpdir), config)
             scripts = generator.generate()
@@ -2027,6 +2298,20 @@ class TestMutationKillers:
             content = scripts["lint.sh"].read_text()
             assert "dotnet build" in content
 
+    def test_ruby_language_dispatches_to_ruby_generator(self) -> None:
+        """Test 'ruby' language dispatches to the Ruby generator (#373)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ScriptConfig(
+                language="ruby",
+                package_name="test",
+            )
+            generator = ScriptsGenerator(Path(tmpdir), config)
+            scripts = generator.generate()
+
+            # Should generate ruby scripts with the bundler-driven gates
+            content = scripts["lint.sh"].read_text()
+            assert "bundle exec rubocop" in content
+
     def test_generated_scripts_exact_count_python(self) -> None:
         """Test Python generator creates EXACTLY 12 scripts.
 
@@ -2099,7 +2384,12 @@ class TestMutationKillers:
             ]
 
     def test_generated_scripts_exact_count_typescript(self) -> None:
-        """Test TypeScript generator creates EXACTLY 6 scripts."""
+        """Test TypeScript generator creates EXACTLY 8 scripts.
+
+        Scripts: check-all, format, lint, test, typecheck, fix-all,
+        mutation, pr-status (the stryker.conf.json companion is written
+        separately and not counted here).
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ScriptConfig(
                 language="typescript",
@@ -2108,9 +2398,9 @@ class TestMutationKillers:
             generator = ScriptsGenerator(Path(tmpdir), config)
             scripts = generator.generate()
 
-            assert len(scripts) == 7
-            assert len(scripts) > 6
-            assert len(scripts) < 8
+            assert len(scripts) == 8
+            assert len(scripts) > 7
+            assert len(scripts) < 9
 
     def test_script_file_executable_permission_exact(self) -> None:
         """Test generated scripts have EXACT executable permission (0o755).
@@ -2126,11 +2416,10 @@ class TestMutationKillers:
             scripts = generator.generate()
 
             for script_path in scripts.values():
-                mode = script_path.stat().st_mode
-                # 0o755 means rwxr-xr-x
-                assert mode & 0o700 == 0o700  # Owner can read, write, execute
-                assert mode & 0o070 == 0o050  # Group can read, execute
-                assert mode & 0o007 == 0o005  # Others can read, execute
+                # assert_executable pins the exact 0o755 (rwxr-xr-x) mode on
+                # POSIX, killing chmod-value mutants; on Windows the exec bit
+                # does not exist, so it asserts existence only (#380).
+                assert_executable(script_path)
 
     def test_script_content_is_string_not_bytes(self) -> None:
         """Test script generator returns file paths, not bytes.
@@ -2421,7 +2710,8 @@ class TestPythonAnalyzeMutationsScript:
             scripts = generator.generate()
 
             script_path = scripts["analyze_mutations.py"]
-            assert script_path.stat().st_mode & 0o111
+            # Platform-aware: exact 0o755 on POSIX, existence on Windows (#380)
+            assert_executable(script_path)
 
     def test_analyze_mutations_script_has_shebang(self) -> None:
         """Test analyze_mutations.py has Python shebang."""
@@ -2798,7 +3088,8 @@ class TestPrStatusScript:
             scripts = generator.generate()
 
             script_path = scripts["pr-status.sh"]
-            assert script_path.stat().st_mode & 0o111
+            # Platform-aware: exact 0o755 on POSIX, existence on Windows (#380)
+            assert_executable(script_path)
 
     def test_pr_status_script_has_version_flag(self) -> None:
         """Test pr-status.sh supports --version flag."""
@@ -2885,3 +3176,439 @@ class TestPrStatusScript:
 
             content = scripts["pr-status.sh"].read_text()
             assert "my_special_project" in content
+
+
+class TestScriptsGeneratorCrossPlatformDocs:
+    """Cross-platform gate documentation and Windows runnability (#386).
+
+    Generated projects must document a working Windows invocation for
+    every gate (Git Bash plus the toolchain-native command), pin LF
+    line endings so the bash gates survive Windows checkouts, and the
+    scripts themselves must execute under bash regardless of the
+    generating platform. These tests run unchanged on the Windows CI
+    leg (#380), where they exercise the real Git Bash path.
+    """
+
+    LANGUAGES = (
+        "python",
+        "typescript",
+        "go",
+        "rust",
+        "swift",
+        "kotlin",
+        "cpp",
+        "java",
+        "csharp",
+        "ruby",
+    )
+
+    @staticmethod
+    def _generate(tmpdir: str, language: str) -> dict[str, Path]:
+        """Generate scripts for ``language`` into ``tmpdir``/scripts."""
+        config = ScriptConfig(language=language, package_name="my_package")
+        generator = ScriptsGenerator(
+            Path(tmpdir) / "scripts",
+            config,
+            project_root=Path(tmpdir),
+        )
+        return generator.generate()
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_scripts_readme_documents_every_emitted_gate(self, language: str) -> None:
+        """scripts/README.md has one row per emitted .sh gate (no drift)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            readme = Path(tmpdir) / "scripts" / "README.md"
+            assert readme.exists()
+            content = readme.read_text(encoding="utf-8")
+            documented = {
+                line.split("`")[1]
+                for line in content.splitlines()
+                if line.startswith("| `")
+            }
+            emitted = {name for name in scripts if name.endswith(".sh")}
+            assert documented == emitted
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_scripts_readme_documents_git_bash_invocation(self, language: str) -> None:
+        """The documented Windows path runs each gate through Git Bash."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir, language)
+
+            content = (Path(tmpdir) / "scripts" / "README.md").read_text(
+                encoding="utf-8"
+            )
+            assert "bash scripts/check-all.sh" in content
+            assert "`bash scripts/test.sh`" in content
+            assert "`bash scripts/lint.sh`" in content
+            assert "Git Bash" in content
+
+    def test_scripts_readme_interpolates_package_name(self) -> None:
+        """Python toolchain commands name the real package."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir, "python")
+
+            content = (Path(tmpdir) / "scripts" / "README.md").read_text(
+                encoding="utf-8"
+            )
+            assert "mypy my_package/" in content
+            assert "__PACKAGE__" not in content
+
+    def test_gitattributes_pins_shell_scripts_to_lf(self) -> None:
+        """.gitattributes keeps *.sh LF so Git Bash can execute them."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir, "python")
+
+            gitattributes = Path(tmpdir) / ".gitattributes"
+            assert gitattributes.exists()
+            assert "*.sh text eol=lf" in gitattributes.read_text(encoding="utf-8")
+
+    def test_gitattributes_preserves_existing_file(self) -> None:
+        """User-owned .gitattributes is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / ".gitattributes"
+            existing.write_text("* text=auto\n", encoding="utf-8")
+
+            self._generate(tmpdir, "python")
+
+            assert existing.read_text(encoding="utf-8") == "* text=auto\n"
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_generated_artifacts_use_lf_only(self, language: str) -> None:
+        """No generated script or doc carries CR bytes.
+
+        On Windows, text-mode writes translate \\n to \\r\\n by default,
+        and bash cannot execute CRLF scripts — this is the regression
+        the Windows CI leg guards against.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            paths = [
+                *scripts.values(),
+                Path(tmpdir) / "scripts" / "README.md",
+                Path(tmpdir) / ".gitattributes",
+            ]
+            for path in paths:
+                assert b"\r" not in path.read_bytes(), path.name
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    @pytest.mark.parametrize("gate", ["check-all.sh", "test.sh", "lint.sh"])
+    def test_gates_execute_under_bash(self, language: str, gate: str) -> None:
+        """`bash scripts/<gate> --help` exits 0 with usage text.
+
+        Invoking via ``bash <path>`` (not the executable bit) is the
+        documented Windows form; on the Windows CI leg this exercises
+        the real Git Bash execution path end-to-end for every language.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            bash = shutil.which("bash")
+            assert bash is not None, "bash not found on PATH"
+            result = subprocess.run(  # noqa: S603  # Issue #386: bash on generated content, no untrusted input
+                [bash, str(scripts[gate]), "--help"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0, result.stderr
+            assert "Usage" in result.stdout
+
+
+class TestMultiLanguageMutationScripts:
+    """Mutation testing parity for TypeScript, Go, and Rust (#398).
+
+    Each implemented language emits a ``mutation.sh`` gate wired to the
+    ecosystem's maintained mutation tool (StrykerJS, gremlins,
+    cargo-mutants) with the same 80% posture as the Python gate. The
+    scripts must fail loudly on tool errors — never exit 0 because the
+    tool was missing or crashed.
+    """
+
+    LANGUAGES = ("typescript", "go", "rust")
+
+    #: Install instruction fragments each script must surface when its
+    #: tool is missing (tool names and commands live-verified
+    #: 2026-06-11). Fragments, because the emitted echo lines may wrap
+    #: long commands across bash continuations.
+    INSTALL_HINTS: ClassVar[dict[str, tuple[str, ...]]] = {
+        "typescript": (
+            "npm install --save-dev @stryker-mutator/core",
+            "@stryker-mutator/jest-runner",
+        ),
+        "go": ("go install github.com/go-gremlins/gremlins/cmd/gremlins@latest",),
+        "rust": ("cargo install --locked cargo-mutants",),
+    }
+
+    @staticmethod
+    def _generate(tmpdir: str, language: str) -> dict[str, Path]:
+        """Generate scripts for ``language`` into ``tmpdir``/scripts."""
+        config = ScriptConfig(language=language, package_name="my_package")
+        generator = ScriptsGenerator(
+            Path(tmpdir) / "scripts",
+            config,
+            project_root=Path(tmpdir),
+        )
+        return generator.generate()
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_emitted(self, language: str) -> None:
+        """Each implemented language emits a mutation.sh gate."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            assert "mutation.sh" in scripts
+            assert scripts["mutation.sh"].exists()
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_is_executable(self, language: str) -> None:
+        """mutation.sh carries the standard executable mode."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            assert_executable(scripts["mutation.sh"])
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_uses_lf_only(self, language: str) -> None:
+        """mutation.sh never carries CR bytes (bash cannot run CRLF)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            assert b"\r" not in scripts["mutation.sh"].read_bytes()
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_passes_bash_syntax_check(self, language: str) -> None:
+        """mutation.sh parses under bash -n (template-escaping guard)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            bash = shutil.which("bash")
+            assert bash is not None, "bash not found on PATH"
+            result = subprocess.run(  # noqa: S603  # Issue #398: bash -n on generated content, no untrusted input
+                [bash, "-n", str(scripts["mutation.sh"])],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0, result.stderr
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_help_executes_under_bash(self, language: str) -> None:
+        """`bash scripts/mutation.sh --help` exits 0 with usage text."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            bash = shutil.which("bash")
+            assert bash is not None, "bash not found on PATH"
+            result = subprocess.run(  # noqa: S603  # Issue #398: bash on generated content, no untrusted input
+                [bash, str(scripts["mutation.sh"]), "--help"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0, result.stderr
+            assert "Usage" in result.stdout
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_rejects_unknown_options(self, language: str) -> None:
+        """Unknown options exit 2 with a diagnostic, mirroring all gates."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            bash = shutil.which("bash")
+            assert bash is not None, "bash not found on PATH"
+            result = subprocess.run(  # noqa: S603  # Issue #398: bash on generated content, no untrusted input
+                [bash, str(scripts["mutation.sh"]), "--bogus"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 2
+            assert "Unknown option" in result.stderr
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_fails_loudly_when_tool_missing(
+        self, language: str
+    ) -> None:
+        """A missing tool exits 2 with install instructions (no vacuous 0)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            for fragment in self.INSTALL_HINTS[language]:
+                assert fragment in content
+            assert "exit 2" in content
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_mutation_script_has_bash_safety(self, language: str) -> None:
+        """mutation.sh enables strict mode like every other gate."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, language)
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "set -euo pipefail" in content
+
+    # --- TypeScript (StrykerJS) ---
+
+    def test_typescript_mutation_script_runs_stryker(self) -> None:
+        """The TS gate runs StrykerJS without npx auto-installing it."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "typescript")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "npx --no-install stryker run" in content
+
+    def test_typescript_mutation_threshold_lives_in_stryker_config(self) -> None:
+        """The 80% break threshold is single-sourced in stryker.conf.json."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "typescript")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "stryker.conf.json" in content
+            # The script must not duplicate the threshold the config owns.
+            assert "MIN_SCORE" not in content
+
+    def test_typescript_writes_stryker_config_companion(self) -> None:
+        """stryker.conf.json lands at the project root, break: 80."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir, "typescript")
+
+            config_path = Path(tmpdir) / "stryker.conf.json"
+            assert config_path.exists()
+            parsed = json.loads(config_path.read_text(encoding="utf-8"))
+            assert parsed["thresholds"]["break"] == 80
+            assert parsed["thresholds"]["high"] == 80
+            assert parsed["testRunner"] == "jest"
+
+    def test_stryker_config_preserves_existing_file(self) -> None:
+        """A user-owned stryker.conf.json is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / "stryker.conf.json"
+            existing.write_text('{"testRunner": "vitest"}\n', encoding="utf-8")
+
+            self._generate(tmpdir, "typescript")
+
+            assert existing.read_text(encoding="utf-8") == '{"testRunner": "vitest"}\n'
+
+    # --- Go (gremlins) ---
+
+    def test_go_mutation_script_runs_gremlins_unleash(self) -> None:
+        """The Go gate runs gremlins unleash."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "go")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "gremlins unleash" in content
+
+    def test_go_mutation_script_maps_gremlins_exit_codes(self) -> None:
+        """Threshold misses (gremlins exits 10/11) map to gate failure 1.
+
+        Any other non-zero gremlins exit is a tool error and must exit 2
+        — never a silent pass.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "go")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "10" in content
+            assert "11" in content
+            assert "exit 1" in content
+            assert "exit 2" in content
+
+    def test_go_mutation_threshold_lives_in_gremlins_config(self) -> None:
+        """The 80% efficacy threshold is single-sourced in .gremlins.yaml."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "go")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert ".gremlins.yaml" in content
+            assert "MIN_SCORE" not in content
+
+    def test_go_writes_gremlins_config_companion(self) -> None:
+        """.gremlins.yaml lands at the project root with efficacy: 80."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir, "go")
+
+            config_path = Path(tmpdir) / ".gremlins.yaml"
+            assert config_path.exists()
+            parsed = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            assert parsed["unleash"]["threshold"]["efficacy"] == 80
+
+    def test_gremlins_config_preserves_existing_file(self) -> None:
+        """A user-owned .gremlins.yaml is never overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = Path(tmpdir) / ".gremlins.yaml"
+            existing.write_text("silent: true\n", encoding="utf-8")
+
+            self._generate(tmpdir, "go")
+
+            assert existing.read_text(encoding="utf-8") == "silent: true\n"
+
+    # --- Rust (cargo-mutants) ---
+
+    def test_rust_mutation_script_runs_cargo_mutants(self) -> None:
+        """The Rust gate runs cargo mutants."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "rust")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "cargo mutants" in content
+
+    def test_rust_mutation_script_has_80_percent_threshold(self) -> None:
+        """The script owns the 80% score gate (cargo-mutants has no
+        manifest threshold home — documented divergence)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "rust")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "MIN_SCORE=80" in content
+            assert "--min-score" in content
+
+    def test_rust_mutation_script_computes_score_from_outcome_lists(self) -> None:
+        """Score comes from the mutants.out caught/missed/timeout lists."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "rust")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            assert "mutants.out" in content
+            assert "caught.txt" in content
+            assert "missed.txt" in content
+            assert "timeout.txt" in content
+
+    def test_rust_mutation_script_fails_on_zero_mutants(self) -> None:
+        """Zero generated mutants exits 2 — not the vacuous exit 0 the
+        legacy Python gate allowed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "rust")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            zero_mutants_block = content.split('if [ "$TOTAL" -eq 0 ]')[1]
+            first_exit = zero_mutants_block.split("exit ")[1].split()[0]
+            assert first_exit == "2"
+
+    def test_rust_mutation_script_fails_loudly_on_tool_errors(self) -> None:
+        """Baseline/usage failures (exit codes other than 0/2/3) exit 2."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scripts = self._generate(tmpdir, "rust")
+
+            content = scripts["mutation.sh"].read_text(encoding="utf-8")
+            # 0 = clean, 2 = missed mutants, 3 = timeouts: score is
+            # still computable. Everything else is a tool error.
+            assert "0|2|3)" in content
+            assert "exit 2" in content
+
+    # --- Cross-cutting: README rows and python parity ---
+
+    @pytest.mark.parametrize("language", LANGUAGES)
+    def test_scripts_readme_documents_mutation_gate(self, language: str) -> None:
+        """scripts/README.md grows a mutation.sh row per language."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._generate(tmpdir, language)
+
+            content = (Path(tmpdir) / "scripts" / "README.md").read_text(
+                encoding="utf-8"
+            )
+            assert "| `mutation.sh` |" in content
+            assert "`bash scripts/mutation.sh`" in content

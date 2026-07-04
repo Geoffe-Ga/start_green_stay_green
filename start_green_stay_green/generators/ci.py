@@ -24,6 +24,7 @@ import yaml
 
 from start_green_stay_green.ai.prompts.manager import get_default_manager
 from start_green_stay_green.generators.base import BaseGenerator
+from start_green_stay_green.generators.ci_windows import append_windows_job
 from start_green_stay_green.utils.yaml_utils import strip_markdown_fences
 
 if TYPE_CHECKING:
@@ -157,8 +158,15 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
         "test_framework": "rspec",
         "linters": ["rubocop"],
         "formatters": ["rubocop"],
-        "security_tools": ["brakeman"],
-        "supported_versions": ["3.1", "3.2"],
+        # bundler-audit owns dependency CVE scanning (#373); Brakeman is
+        # Rails-specific and errors on the plain-Ruby scaffold, so it is
+        # documented (scripts/security.sh) rather than wired.
+        "security_tools": ["bundler-audit"],
+        # The Ruby lines still receiving upstream maintenance (3.1/3.2
+        # reached EOL; verified against ruby-lang.org's branch table).
+        # Bump together with reference/ci/ruby.yml's matrix and the
+        # generated .rubocop.yml TargetRubyVersion.
+        "supported_versions": ["3.3", "3.4"],
         "package_manager": "bundler",
     },
 }
@@ -245,7 +253,7 @@ class CIGenerator(BaseGenerator):
         self.supported_versions = config["supported_versions"]
         self.reference_dir = reference_dir or REFERENCE_CI_DIR
 
-    def generate_workflow(self) -> CIWorkflow:
+    def generate_workflow(self, *, windows_ci: bool = False) -> CIWorkflow:
         """Generate a customized CI workflow.
 
         By default this renders the deterministic ``reference/ci/<language>.yml``
@@ -254,16 +262,26 @@ class CIGenerator(BaseGenerator):
         Claude-generated path is used instead, preserving backward
         compatibility for callers that rely on AI tuning.
 
+        Args:
+            windows_ci: Opt-in flag (#388): append a ``quality-windows``
+                job that runs the generated project's quality gates on
+                ``windows-latest`` through Git Bash. Default ``False``
+                leaves the generated workflow byte-for-byte unchanged.
+
         Returns:
             CIWorkflow with generated YAML content and validation status.
 
         Raises:
             GenerationError: If AI generation fails (orchestrator path).
-            ValueError: If validation fails or template missing.
+            ValueError: If validation fails, the template is missing, or
+                ``windows_ci`` is requested for a language without a
+                supported Windows leg (see
+                :data:`~.ci_windows.WINDOWS_CI_LANGUAGES`).
         """
         if self.orchestrator is None:
             return self.generate_workflow_from_template(
                 project_name=self.project_name,
+                windows_ci=windows_ci,
             )
 
         # Build context for AI generation
@@ -274,12 +292,16 @@ class CIGenerator(BaseGenerator):
         result = self._generate_with_ai(context)
 
         # Validate generated workflow
-        return self._validate_and_parse(result.content)
+        return self._maybe_append_windows_leg(
+            self._validate_and_parse(result.content),
+            windows_ci=windows_ci,
+        )
 
     def generate_workflow_from_template(
         self,
         *,
         project_name: str | None = None,
+        windows_ci: bool = False,
     ) -> CIWorkflow:
         """Render the deterministic CI template for the configured language.
 
@@ -297,6 +319,10 @@ class CIGenerator(BaseGenerator):
                 ``<<% project_name %>>`` placeholders. ``None`` is
                 coerced to ``""`` so the literal string ``"None"`` is
                 never baked into the rendered YAML.
+            windows_ci: Opt-in flag (#388): append the
+                ``quality-windows`` job after rendering. Default
+                ``False`` leaves the rendered workflow byte-for-byte
+                unchanged.
 
         Returns:
             ``CIWorkflow`` with the rendered, validated YAML.
@@ -308,7 +334,9 @@ class CIGenerator(BaseGenerator):
                 placeholder that has not been wired through this
                 method's ``render(...)`` kwargs (raised eagerly thanks
                 to ``StrictUndefined``).
-            ValueError: If the rendered YAML fails structural validation.
+            ValueError: If the rendered YAML fails structural
+                validation, or ``windows_ci`` is requested for a
+                language without a supported Windows leg.
         """
         template_path = self.reference_dir / f"{self.language}.yml"
         if not template_path.exists():
@@ -347,7 +375,41 @@ class CIGenerator(BaseGenerator):
             language=self.language,
         )
 
-        return self._validate_and_parse(rendered)
+        return self._maybe_append_windows_leg(
+            self._validate_and_parse(rendered),
+            windows_ci=windows_ci,
+        )
+
+    def _maybe_append_windows_leg(
+        self,
+        workflow: CIWorkflow,
+        *,
+        windows_ci: bool,
+    ) -> CIWorkflow:
+        """Append the opt-in Windows leg when ``windows_ci`` is set (#388).
+
+        Default off: when the flag is unset the workflow is returned
+        untouched, keeping the generated CI byte-for-byte identical to
+        the pre-flag output. When set, the ``quality-windows`` job is
+        appended under the workflow's ``jobs`` mapping and the combined
+        document is re-validated.
+
+        Args:
+            workflow: The validated baseline workflow.
+            windows_ci: ``True`` to append the Windows leg.
+
+        Returns:
+            The workflow, extended with the Windows leg when opted in.
+
+        Raises:
+            ValueError: If the language has no supported Windows leg,
+                the leg cannot attach under ``jobs``, or the combined
+                workflow fails validation.
+        """
+        if not windows_ci:
+            return workflow
+        content = append_windows_job(workflow.content, self.language)
+        return self._validate_and_parse(content)
 
     def _build_generation_context(
         self,

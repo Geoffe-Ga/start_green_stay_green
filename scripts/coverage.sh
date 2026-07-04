@@ -1,161 +1,24 @@
 #!/usr/bin/env bash
-# scripts/coverage.sh - Generate coverage reports
-# Usage: ./scripts/coverage.sh [--html] [--verbose] [--version] [--help]
+# scripts/coverage.sh - Thin POSIX delegate to the cross-platform gate runner (#382).
+#
+# All gate logic lives in start_green_stay_green/gates/ (one canonical
+# implementation, DRY). This wrapper only bootstraps a virtualenv via
+# scripts/common.sh so an interpreter with the package installed is on
+# PATH, then hands every argument to the runner:
+#
+#   python -m start_green_stay_green.gates coverage [args...]
+#
+# Usage: ./scripts/coverage.sh [args...]   (see --help for options)
 
 set -euo pipefail
 
-VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-
-HTML=false
-VERBOSE=false
-METRICS_OUTPUT=false
-START_TIME=$(date +%s)
-
-# Source common utilities
-# shellcheck disable=SC1091
-source "$SCRIPT_DIR/common.sh"
-
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --metrics)
-            METRICS_OUTPUT=true
-            shift
-            ;;
-        --html)
-            HTML=true
-            shift
-            ;;
-        --verbose)
-            VERBOSE=true
-            shift
-            ;;
-        --version)
-            echo "$(basename "$0") version $VERSION"
-            exit 0
-            ;;
-        --help)
-            cat << EOF
-Usage: $(basename "$0") [OPTIONS]
-
-Generate coverage reports using coverage/pytest-cov.
-
-OPTIONS:
-    --html      Generate HTML coverage report
-    --metrics   Output machine-readable JSON metrics to stdout
-    --verbose   Show detailed output
-    --version   Show version and exit
-    --help      Display this help message
-
-EXIT CODES:
-    0           Coverage report generated
-    1           Coverage threshold not met
-    2           Error generating report
-
-EXAMPLES:
-    $(basename "$0")          # Generate terminal report
-    $(basename "$0") --html   # Generate HTML report
-    $(basename "$0") --verbose # Show detailed output
-EOF
-            exit 0
-            ;;
-        *)
-            echo "Error: Unknown option: $1" >&2
-            exit 2
-            ;;
-    esac
-done
-
 cd "$PROJECT_ROOT"
 
-# Set verbosity
-if $VERBOSE; then
-    set -x
-fi
-
-# Create temp file for stderr capture
-TMP_COVERAGE_STDERR=$(mktemp)
-trap 'rm -f "$TMP_COVERAGE_STDERR"; cleanup_venv' EXIT
-
-# Ensure venv is available and set up cleanup
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/common.sh"
+setup_cleanup_trap
 ensure_venv || exit 2
 
-# Machine-readable metrics mode
-if $METRICS_OUTPUT; then
-    pytest -m "not integration and not e2e" \
-        --cov=start_green_stay_green \
-        --cov-branch \
-        --cov-report=json \
-        -q --tb=no tests/ >/dev/null 2>&1 || true
-
-    if [ -f coverage.json ]; then
-        python3 -c "
-import json
-data = json.load(open('coverage.json'))
-totals = data['totals']
-cov = round(totals['percent_covered'], 2)
-branches = totals.get('num_branches', 0)
-covered = totals.get('covered_branches', 0)
-branch_cov = round((covered / branches) * 100, 2) if branches > 0 else None
-result = {'coverage_pct': cov, 'branch_coverage_pct': branch_cov}  # status computed by collect_metrics.py
-print(json.dumps(result))
-"
-    else
-        echo '{"coverage_pct": null, "branch_coverage_pct": null, "status": "unknown"}'
-    fi
-    exit 0
-fi
-
-echo "=== Generating Coverage Report ==="
-
-# Run tests with coverage
-COVERAGE_ARGS=(--cov=start_green_stay_green --cov-report=term-missing)
-
-if $HTML; then
-    echo "Generating HTML coverage report..."
-    COVERAGE_ARGS+=(--cov-report=html)
-fi
-
-if $VERBOSE; then
-    echo "Running pytest with coverage..."
-fi
-
-COV_START=$(date +%s)
-pytest -m "not integration and not e2e" "${COVERAGE_ARGS[@]}" tests/ 2>"$TMP_COVERAGE_STDERR" || {
-    echo "✗ Coverage generation failed" >&2
-    exit 1
-}
-COV_END=$(date +%s)
-COV_TIME=$((COV_END - COV_START))
-
-# Check coverage threshold (90%)
-COVERAGE_THRESHOLD=90
-if command -v coverage &> /dev/null; then
-    COVERAGE_PERCENT=$(coverage report | grep TOTAL | awk '{print $NF}' | sed 's/%//')
-    if (( $(echo "$COVERAGE_PERCENT < $COVERAGE_THRESHOLD" | bc -l) )); then
-        echo "✗ Coverage ${COVERAGE_PERCENT}% is below threshold of ${COVERAGE_THRESHOLD}%" >&2
-        exit 1
-    fi
-fi
-
-END_TIME=$(date +%s)
-TOTAL_TIME=$((END_TIME - START_TIME))
-
-# Output timing if verbose
-if $VERBOSE; then
-    echo "Coverage check completed in ${TOTAL_TIME}s"
-fi
-
-if $HTML; then
-    echo "✓ HTML coverage report generated in htmlcov/index.html"
-else
-    echo "✓ Coverage report generated"
-fi
-
-if $VERBOSE; then
-    echo "Coverage execution time: $COV_TIME seconds"
-fi
-
-exit 0
+python -m start_green_stay_green.gates coverage "$@"

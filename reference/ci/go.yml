@@ -58,6 +58,15 @@ jobs:
         run: |
           go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//' | awk '{if ($1 < 90) exit 1}'
 
+      # Mirrors the python.yml mutation posture: periodic (main-branch
+      # pushes only), not a per-PR gate. The 80% efficacy threshold
+      # lives in .gremlins.yaml at the module root.
+      - name: Run mutation testing (on main branch only)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          go install github.com/go-gremlins/gremlins/cmd/gremlins@latest
+          gremlins unleash
+
   build:
     name: Build and Verify
     runs-on: ubuntu-latest

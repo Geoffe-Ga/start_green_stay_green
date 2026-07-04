@@ -29,6 +29,7 @@ def test_something(mock_path: Mock) -> None:
 import asyncio
 import json
 from pathlib import Path
+import re
 from typing import cast
 from unittest import mock
 from unittest.mock import MagicMock
@@ -43,7 +44,11 @@ from start_green_stay_green import cli
 from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.orchestrator import GenerationError as AIGenerationError
+from start_green_stay_green.ai.provider_selection import DEFAULT_MODEL
+from start_green_stay_green.ai.provider_selection import OPENAI_DEFAULT_MODEL
+from start_green_stay_green.ai.provider_selection import ProviderSelection
 from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
+from start_green_stay_green.ai.provider_selection import resolve_provider_selection
 from start_green_stay_green.generators.base import SUPPORTED_LANGUAGES
 from start_green_stay_green.generators.subagents import REQUIRED_AGENTS
 from start_green_stay_green.utils.enhance_state import BatchProgress
@@ -82,6 +87,33 @@ class TestVersionCommand:
         parts = version.split(".")
         assert len(parts) == 3
         assert all(part.isdigit() for part in parts)
+
+
+class TestVersionFlag:
+    """Top-level ``--version`` eager flag (#401)."""
+
+    def test_version_flag_prints_version_and_exits_zero(self) -> None:
+        """``sgsg --version`` prints the version and exits 0."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["--version"])
+        assert result.exit_code == 0
+        assert cli.get_version() in result.output
+
+    def test_version_flag_matches_version_subcommand_output(self) -> None:
+        """``--version`` output matches the ``version`` subcommand."""
+        runner = CliRunner()
+        flag = runner.invoke(cli.app, ["--version"])
+        sub = runner.invoke(cli.app, ["version"])
+        assert flag.exit_code == 0
+        assert sub.exit_code == 0
+        assert flag.output == sub.output
+
+    def test_version_flag_is_eager(self) -> None:
+        """``--version`` wins even alongside an invalid option combo."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["--version", "--verbose", "--quiet"])
+        assert result.exit_code == 0
+        assert cli.get_version() in result.output
 
 
 class TestConfigLoading:
@@ -1265,13 +1297,20 @@ class TestGenerateSteps:
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_ci_step(mock_path, "my-project", "python", mock_orchestrator)
+            cli._generate_ci_step(
+                mock_path,
+                "my-project",
+                "python",
+                cli._Pass2Options(orchestrator=mock_orchestrator),
+            )
 
         # ``project_name`` is now threaded through so ``<<% project_name %>>``
         # placeholders in the reference templates render with the real value.
         mock_ci_generator_class.assert_called_with(
             mock_orchestrator, "python", project_name="my-project"
         )
+        # ``windows_ci`` defaults off (#388) so generated CI is unchanged.
+        mock_generator.generate_workflow.assert_called_once_with(windows_ci=False)
 
     @patch("start_green_stay_green.cli.CIGenerator")
     def test_generate_ci_step_uses_template_without_orchestrator(
@@ -1536,6 +1575,21 @@ class TestGenerateSteps:
         assert mock_generator.generate.call_args.kwargs["language"] == "csharp"
 
     @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
+    def test_generate_architecture_step_ruby(self, mock_generator_class: Mock) -> None:
+        """Test _generate_architecture_step generates rules for Ruby."""
+        mock_generator = MagicMock()
+        mock_generator_class.return_value = mock_generator
+        mock_path = MagicMock(spec=Path)
+        mock_path.__truediv__.return_value = MagicMock(spec=Path)
+
+        with patch("start_green_stay_green.cli.console"):
+            cli._generate_architecture_step(mock_path, "my-project", "ruby")
+
+        # ruby now has architecture parity (#373): the generator runs.
+        mock_generator.generate.assert_called_once()
+        assert mock_generator.generate.call_args.kwargs["language"] == "ruby"
+
+    @patch("start_green_stay_green.cli.ArchitectureEnforcementGenerator")
     def test_generate_architecture_step_skips_unsupported(
         self, mock_generator_class: Mock
     ) -> None:
@@ -1546,7 +1600,7 @@ class TestGenerateSteps:
         mock_path.__truediv__.return_value = MagicMock(spec=Path)
 
         with patch("start_green_stay_green.cli.console"):
-            cli._generate_architecture_step(mock_path, "my-project", "ruby")
+            cli._generate_architecture_step(mock_path, "my-project", "php")
 
         mock_generator.generate.assert_not_called()
 
@@ -1610,7 +1664,7 @@ class TestGenerateProjectFiles:
             mock_path,
             "my-project",
             ("python",),
-            mock_orchestrator,
+            cli._Pass2Options(orchestrator=mock_orchestrator),
             mock_writer,
         )
 
@@ -1634,7 +1688,7 @@ class TestGenerateProjectFiles:
             mock_path,
             "my-project",
             ("python",),
-            None,
+            cli._Pass2Options(orchestrator=None),
             mock_writer,
         )
 
@@ -2198,20 +2252,70 @@ class TestEnhanceCommand:
     @patch("start_green_stay_green.cli._enhance_subagents")
     @patch("start_green_stay_green.cli._enhance_claude_md")
     @patch("start_green_stay_green.cli._initialize_orchestrator")
-    def test_omits_config_tier_by_design(
+    @patch("start_green_stay_green.cli.load_config_file")
+    def test_config_flag_threads_config_data_into_selection(
+        self,
+        mock_load: Mock,
+        mock_init: Mock,
+        mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
+        mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
+        tmp_path: Path,
+    ) -> None:
+        """``enhance --config`` wires the parsed mapping into selection (#396).
+
+        ``enhance`` now mirrors ``green init``'s config-file tier: the
+        ``--config`` flag is loaded through the same
+        :func:`load_config_file` loader and the parsed mapping reaches
+        the ``_SelectionInputs`` bundle, so all four precedence tiers
+        apply consistently across both commands.
+        """
+        config_mapping = {"llm_provider": "anthropic", "llm_model": "config-model"}
+        mock_load.return_value = config_mapping.copy()
+        _make_orch_mock(mock_init)
+        project = self._make_project(tmp_path, name="with-config", language="python")
+        config_file = tmp_path / "green.yaml"
+        config_file.write_text(
+            "llm_provider: anthropic\nllm_model: config-model\n",
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--config",
+                str(config_file),
+                "--model",
+                "Flag-Model",
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        mock_load.assert_called_once_with(config_file)
+        selection_inputs = mock_init.call_args.kwargs["selection_inputs"]
+        # The parsed config mapping flows through to the resolver.
+        assert selection_inputs.config_data == config_mapping
+        # The CLI ``--model`` flag still flows through (case preserved).
+        assert selection_inputs.model_flag == "Flag-Model"
+
+    @patch("start_green_stay_green.cli._enhance_subagents")
+    @patch("start_green_stay_green.cli._enhance_claude_md")
+    @patch("start_green_stay_green.cli._initialize_orchestrator")
+    def test_no_config_flag_threads_empty_config_data(
         self,
         mock_init: Mock,
         mock_claude: Mock,  # noqa: ARG002 — kept for @patch ordering
         mock_subagents: Mock,  # noqa: ARG002 — kept for @patch ordering
         tmp_path: Path,
     ) -> None:
-        """``enhance`` intentionally has no config-file tier (see #396).
+        """Without ``--config`` the config tier is an empty mapping (#396).
 
-        Unlike ``green init`` (4 tiers), ``enhance`` has no ``--config``
-        flag and loads no config file, so it deliberately wires only
-        CLI flag > env > built-in default. The selection inputs it builds
-        must therefore carry ``config_data is None`` — the config tier is
-        a no-op here. Tracked for future wiring as issue #396.
+        Mirrors ``init``: ``_load_config_data(None)`` returns ``{}``, so
+        the config tier is a no-op and resolution falls through to the
+        built-in default — but the bundle is no longer ``None``-typed.
         """
         _make_orch_mock(mock_init)
         project = self._make_project(tmp_path, name="no-config", language="python")
@@ -2224,10 +2328,40 @@ class TestEnhanceCommand:
 
         assert result.exit_code == 0, result.stdout
         selection_inputs = mock_init.call_args.kwargs["selection_inputs"]
-        # The config tier is omitted by design: enhance has no config input.
-        assert selection_inputs.config_data is None
-        # The CLI ``--model`` flag still flows through (case preserved).
+        assert selection_inputs.config_data == {}
         assert selection_inputs.model_flag == "Flag-Model"
+
+    def test_missing_config_file_exits(self, tmp_path: Path) -> None:
+        """``--config`` pointing at a missing file exits 1, like ``init``."""
+        project = self._make_project(tmp_path, name="bad-config", language="python")
+        runner = CliRunner()
+        result = runner.invoke(
+            cli.app,
+            [
+                "enhance",
+                str(project),
+                "--config",
+                str(tmp_path / "does-not-exist.yaml"),
+                "--no-interactive",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "Configuration file not found" in self._flat(result.stdout)
+
+    def test_help_lists_config_flag(self) -> None:
+        """``enhance --help`` advertises the ``--config`` flag (#396).
+
+        Rich styles and may hyphen-wrap option names depending on the
+        environment it detects, so strip ANSI sequences and collapse
+        box-drawing characters and whitespace before matching.
+        """
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["enhance", "--help"])
+        assert result.exit_code == 0
+        no_ansi = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+        plain = re.sub(r"[│╭╮╰╯─\s]+", "", no_ansi)
+        assert "--config" in plain
+        assert "--config-file" in plain
 
     @patch("start_green_stay_green.cli._enhance_subagents")
     @patch("start_green_stay_green.cli._enhance_claude_md")
@@ -2370,6 +2504,222 @@ class TestEnhanceCommand:
         )
         assert result.exit_code == 1
         assert "Unsupported language" in self._flat(result.stdout)
+
+
+class TestEnhanceConfigTierPrecedence:
+    """Pin the four-tier precedence through ``green enhance`` (#396).
+
+    These tests run the real :func:`resolve_provider_selection` (only
+    the loader, key lookup, provider construction, and tuning helpers
+    are mocked) so they pin the end-to-end wiring: CLI flag > env
+    (``GREEN_LLM_PROVIDER`` / ``GREEN_LLM_MODEL``) > config-file key
+    (``llm_provider`` / ``llm_model``) > built-in default.
+    """
+
+    @staticmethod
+    def _invoke_enhance(
+        tmp_path: Path,
+        *,
+        config_mapping: dict[str, str],
+        env: dict[str, str],
+        extra_args: list[str],
+    ) -> tuple[mock.MagicMock, int, str]:
+        """Run ``enhance --config`` with a stubbed loader; return build call.
+
+        Returns:
+            ``(build_provider mock, exit code, stdout)`` so each test can
+            assert on the *resolved* provider/model that reached
+            :func:`build_provider`.
+        """
+        project = TestEnhanceCommand._make_project(
+            tmp_path, name="precedence", language="python"
+        )
+        with (
+            patch(
+                "start_green_stay_green.cli.load_config_file",
+                return_value=config_mapping.copy(),
+            ),
+            patch(
+                "start_green_stay_green.cli._get_api_key_with_source",
+                return_value=("test-key", "environment variable"),
+            ),
+            patch("start_green_stay_green.cli.build_provider") as mock_build,
+            patch("start_green_stay_green.cli.AIOrchestrator"),
+            patch("start_green_stay_green.cli._enhance_claude_md"),
+            patch("start_green_stay_green.cli._enhance_subagents"),
+            patch.dict("os.environ", env, clear=True),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--config",
+                    str(tmp_path / "green.yaml"),
+                    "--dry-run",
+                    "--no-interactive",
+                    *extra_args,
+                ],
+            )
+        return mock_build, result.exit_code, result.stdout
+
+    def test_flag_beats_config(self, tmp_path: Path) -> None:
+        """Tier 1 (CLI flag) wins over tier 3 (config-file key)."""
+        mock_build, exit_code, stdout = self._invoke_enhance(
+            tmp_path,
+            config_mapping={"llm_model": "config-model"},
+            env={},
+            extra_args=["--model", "Flag-Model"],
+        )
+        assert exit_code == 0, stdout
+        assert mock_build.call_args.kwargs["model"] == "Flag-Model"
+
+    def test_env_beats_config(self, tmp_path: Path) -> None:
+        """Tier 2 (env var) wins over tier 3 (config-file key)."""
+        mock_build, exit_code, stdout = self._invoke_enhance(
+            tmp_path,
+            config_mapping={"llm_model": "config-model"},
+            env={"GREEN_LLM_MODEL": "env-model"},
+            extra_args=[],
+        )
+        assert exit_code == 0, stdout
+        assert mock_build.call_args.kwargs["model"] == "env-model"
+
+    def test_config_beats_default(self, tmp_path: Path) -> None:
+        """Tier 3 (config-file key) wins over tier 4 (built-in default)."""
+        mock_build, exit_code, stdout = self._invoke_enhance(
+            tmp_path,
+            config_mapping={"llm_model": "config-model"},
+            env={},
+            extra_args=[],
+        )
+        assert exit_code == 0, stdout
+        assert mock_build.call_args.kwargs["model"] == "config-model"
+
+    def test_config_provider_key_selects_provider(self, tmp_path: Path) -> None:
+        """``llm_provider`` from the config file drives provider + default model.
+
+        The provider name is case-folded (registry key) and, with no
+        higher-tier model, the *selected provider's* default model is
+        used — pinning that the config tier feeds both fields.
+        """
+        mock_build, exit_code, stdout = self._invoke_enhance(
+            tmp_path,
+            config_mapping={"llm_provider": "OpenAI"},
+            env={},
+            extra_args=[],
+        )
+        assert exit_code == 0, stdout
+        assert mock_build.call_args.args[0] == "openai"
+        assert mock_build.call_args.kwargs["model"] == OPENAI_DEFAULT_MODEL
+
+
+class TestInitEnhanceConfigParity:
+    """Parity: the same config file resolves identically via init and enhance.
+
+    Acceptance criterion of #396 — ``green enhance`` resolves the
+    ``llm_provider`` / ``llm_model`` config-file keys exactly as
+    ``green init`` does: same loader (:func:`load_config_file`), same
+    keys, same precedence, same resolved selection.
+    """
+
+    @staticmethod
+    def _init_selection_inputs(
+        tmp_path: Path,
+        config_file: Path,
+        config_mapping: dict[str, str],
+    ) -> cli._SelectionInputs:
+        """Run ``green init --config`` and capture its selection bundle."""
+        with (
+            patch(
+                "start_green_stay_green.cli.load_config_file",
+                return_value=config_mapping.copy(),
+            ),
+            patch(
+                "start_green_stay_green.cli._resolve_pass2_orchestrator",
+                return_value=None,  # offline-style: no Pass 2 run.
+            ) as mock_pass2,
+            patch("start_green_stay_green.cli._generate_project_files"),
+            patch("start_green_stay_green.cli._finalize_init"),
+        ):
+            cli.init(
+                project_name="parity-proj",
+                language=["python"],
+                output_dir=tmp_path,
+                config=config_file,
+                api_key=None,
+                no_interactive=True,
+            )
+        inputs = mock_pass2.call_args.kwargs["selection_inputs"]
+        return cast("cli._SelectionInputs", inputs)
+
+    @staticmethod
+    def _enhance_selection_inputs(
+        tmp_path: Path,
+        config_file: Path,
+        config_mapping: dict[str, str],
+    ) -> cli._SelectionInputs:
+        """Run ``green enhance --config`` and capture its selection bundle."""
+        project = TestEnhanceCommand._make_project(
+            tmp_path, name="parity-enhance", language="python"
+        )
+        with (
+            patch(
+                "start_green_stay_green.cli.load_config_file",
+                return_value=config_mapping.copy(),
+            ),
+            patch(
+                "start_green_stay_green.cli._initialize_orchestrator"
+            ) as mock_init_orch,
+            patch("start_green_stay_green.cli._enhance_claude_md"),
+            patch("start_green_stay_green.cli._enhance_subagents"),
+        ):
+            _make_orch_mock(mock_init_orch)
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--config",
+                    str(config_file),
+                    "--no-interactive",
+                ],
+            )
+        assert result.exit_code == 0, result.stdout
+        inputs = mock_init_orch.call_args.kwargs["selection_inputs"]
+        return cast("cli._SelectionInputs", inputs)
+
+    def test_same_config_file_resolves_identically(self, tmp_path: Path) -> None:
+        """One config file → identical ``ProviderSelection`` in both commands."""
+        config_mapping = {"llm_provider": "ANTHROPIC", "llm_model": "Config-Model"}
+        config_file = tmp_path / "green.yaml"
+        config_file.write_text(
+            "llm_provider: ANTHROPIC\nllm_model: Config-Model\n",
+            encoding="utf-8",
+        )
+
+        init_inputs = self._init_selection_inputs(tmp_path, config_file, config_mapping)
+        enhance_inputs = self._enhance_selection_inputs(
+            tmp_path, config_file, config_mapping
+        )
+
+        # The same parsed mapping reaches both commands' selection bundle…
+        assert init_inputs.config_data == config_mapping
+        assert enhance_inputs.config_data == config_mapping
+        # …and resolves to the identical selection under identical env.
+        resolved = [
+            resolve_provider_selection(
+                provider_flag=inputs.provider_flag,
+                model_flag=inputs.model_flag,
+                config=inputs.config_data or {},
+                env={},
+            )
+            for inputs in (init_inputs, enhance_inputs)
+        ]
+        expected = ProviderSelection(provider="anthropic", model="Config-Model")
+        assert resolved == [expected, expected]
 
 
 class TestEnhanceSkipUnchanged:
@@ -2777,6 +3127,35 @@ class TestEnhanceDispatchAssertion:
             cli._assert_enhance_dispatch_intact()
 
 
+class TestValidateEnhanceFlags:
+    """Direct unit tests for the extracted ``_validate_enhance_flags``."""
+
+    def test_wait_without_batch_exits(self) -> None:
+        """``--wait`` without ``--batch`` fails fast with exit code 1."""
+        with pytest.raises(typer.Exit) as exc_info:
+            cli._validate_enhance_flags(
+                batch=False, wait=True, selected_targets=("subagents",)
+            )
+        assert exc_info.value.exit_code == 1
+
+    def test_batch_with_unsupported_target_exits(self) -> None:
+        """``--batch`` with a non-batchable target fails fast."""
+        with pytest.raises(typer.Exit) as exc_info:
+            cli._validate_enhance_flags(
+                batch=True, wait=False, selected_targets=("claude-md",)
+            )
+        assert exc_info.value.exit_code == 1
+
+    def test_valid_combinations_pass(self) -> None:
+        """Supported combinations return without raising."""
+        cli._validate_enhance_flags(
+            batch=False, wait=False, selected_targets=("claude-md", "subagents")
+        )
+        cli._validate_enhance_flags(
+            batch=True, wait=True, selected_targets=("subagents",)
+        )
+
+
 class TestEnhanceBatchCLI:
     """Phase 5b: ``green enhance --batch`` flag wiring."""
 
@@ -3011,3 +3390,185 @@ class TestEnhanceBatchCLI:
 
         with pytest.raises(AssertionError, match="unreachable"):
             cli._render_batch_resume_outcome(bad)
+
+    def test_batch_with_non_batch_provider_falls_back_to_sequential(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--batch`` on a non-batch provider warns and runs sequentially.
+
+        T5 (#389): the OpenAI provider advertises ``batch=False``, so
+        requesting batch must not crash with the typed capability
+        error — instead the same subagent tunings run through the
+        documented sequential pipeline (the very path the non-batch
+        flow uses), preceded by a loud warning. No work is dropped.
+        """
+        monkeypatch.delenv("GREEN_LLM_PROVIDER", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-local")
+        project = self._make_project(tmp_path)
+
+        with (
+            mock.patch("start_green_stay_green.cli._run_enhance_batch") as run_batch,
+            mock.patch(
+                "start_green_stay_green.cli._run_enhance_pipeline"
+            ) as run_pipeline,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                    "--provider",
+                    "openai",
+                ],
+            )
+
+        assert result.exit_code == 0
+        flat = self._flat(result.stdout)
+        assert "does not support batch processing" in flat
+        assert "sequential" in flat
+        # Points the user at the capability listing for discoverability.
+        assert "green providers" in flat
+        run_batch.assert_not_called()
+        run_pipeline.assert_called_once()
+        # The fallback runs the exact targets --batch was asked for.
+        assert run_pipeline.call_args.kwargs["selected_targets"] == ("subagents",)
+
+    def test_fallback_with_wait_flag_does_not_crash(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``--batch --wait`` on a non-batch provider still falls back cleanly.
+
+        The sequential fallback completes in-process, so ``--wait`` is
+        trivially satisfied — it must not error or change the outcome.
+        """
+        monkeypatch.delenv("GREEN_LLM_PROVIDER", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-local")
+        project = self._make_project(tmp_path)
+
+        with (
+            mock.patch("start_green_stay_green.cli._run_enhance_batch") as run_batch,
+            mock.patch(
+                "start_green_stay_green.cli._run_enhance_pipeline"
+            ) as run_pipeline,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--wait",
+                    "--targets",
+                    "subagents",
+                    "--provider",
+                    "openai",
+                ],
+            )
+
+        assert result.exit_code == 0
+        run_batch.assert_not_called()
+        run_pipeline.assert_called_once()
+
+    def test_batch_with_anthropic_provider_takes_batch_path_unchanged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The Anthropic fast path is untouched by capability negotiation.
+
+        With a batch-capable provider, ``--batch`` routes straight into
+        the existing batch machinery — no fallback warning, no
+        sequential pipeline call.
+        """
+        monkeypatch.delenv("GREEN_LLM_PROVIDER", raising=False)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        project = self._make_project(tmp_path)
+
+        with (
+            mock.patch("start_green_stay_green.cli._run_enhance_batch") as run_batch,
+            mock.patch(
+                "start_green_stay_green.cli._run_enhance_pipeline"
+            ) as run_pipeline,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli.app,
+                [
+                    "enhance",
+                    str(project),
+                    "--batch",
+                    "--targets",
+                    "subagents",
+                ],
+            )
+
+        assert result.exit_code == 0
+        flat = self._flat(result.stdout)
+        assert "does not support batch processing" not in flat
+        run_batch.assert_called_once()
+        run_pipeline.assert_not_called()
+
+
+class TestProvidersCommand:
+    """``green providers``: user-facing capability discoverability (T5, #389)."""
+
+    @staticmethod
+    def _plain(text: str) -> str:
+        """Strip ANSI escapes and collapse whitespace for stable asserts."""
+        no_ansi = re.sub(r"\x1b\[[0-9;]*m", "", text)
+        return " ".join(no_ansi.split())
+
+    def test_lists_every_registered_provider(self) -> None:
+        """Both registry entries appear, with their key env vars."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["providers"])
+
+        assert result.exit_code == 0
+        plain = self._plain(result.output)
+        assert "anthropic" in plain
+        assert "openai" in plain
+        assert "ANTHROPIC_API_KEY" in plain
+        assert "OPENAI_API_KEY" in plain
+
+    def test_shows_capability_flags_per_provider(self) -> None:
+        """Anthropic shows batch yes; OpenAI shows batch no."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["providers"])
+
+        plain = self._plain(result.output)
+        assert "batch: yes, tool-use: yes, token accounting: yes" in plain
+        assert "batch: no, tool-use: yes, token accounting: yes" in plain
+        # Rows are sorted (anthropic first), so the batch-capable row
+        # precedes the batch-less one.
+        assert plain.index("batch: yes") < plain.index("batch: no")
+
+    def test_shows_per_provider_default_models(self) -> None:
+        """Each row names the model used when none is configured."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["providers"])
+
+        plain = self._plain(result.output)
+        assert DEFAULT_MODEL in plain
+        assert "gpt-5.5" in plain
+
+    def test_runs_without_api_keys_or_vendor_sdks(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The listing needs no credentials and performs no I/O."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["providers"])
+
+        assert result.exit_code == 0
+
+    def test_mentions_batch_fallback_behavior(self) -> None:
+        """The trailer documents the --batch fallback honestly."""
+        runner = CliRunner()
+        result = runner.invoke(cli.app, ["providers"])
+
+        plain = self._plain(result.output)
+        assert "fall back to sequential" in plain

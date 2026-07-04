@@ -237,3 +237,62 @@ class TestOutputFormat:
         parsed = yaml.safe_load(merged)
         assert "repos" in parsed
         assert len(parsed["repos"]) == 2
+
+
+class TestOutputFidelity:
+    """Pin the exact dump formatting and error wording the merge relies on."""
+
+    _TWO_REPOS = (
+        "repos:\n"
+        "- repo: https://github.com/pre-commit/hooks\n"
+        "  rev: v4.5.0\n"
+        "  hooks:\n"
+        "  - id: trailing-whitespace\n"
+    )
+    _GENERATED = (
+        "repos:\n"
+        "- repo: https://github.com/psf/black\n"
+        "  rev: '24.1.0'\n"
+        "  hooks:\n"
+        "  - id: black\n"
+    )
+
+    def test_output_uses_block_style_not_flow(self) -> None:
+        """``default_flow_style`` must stay False (block YAML, never inline)."""
+        merged, _, _ = merge_precommit_configs(self._TWO_REPOS, self._GENERATED)
+        # Block style puts "repos:" on its own line and uses no flow braces;
+        # default_flow_style=True would emit "repos: [{...}]" on one line.
+        assert "repos:\n" in merged
+        assert "{" not in merged
+        assert merged.count("\n") >= 5
+
+    def test_output_preserves_insertion_order_not_sorted(self) -> None:
+        """``sort_keys`` must stay False: a key sorting after 'repos' stays first."""
+        existing = "zzz_marker: keep-me\n" + self._TWO_REPOS
+        merged, _, _ = merge_precommit_configs(existing, self._GENERATED)
+        # With sort_keys=True, 'repos' would sort before 'zzz_marker'.
+        assert merged.index("zzz_marker") < merged.index("repos:")
+
+    def test_repos_key_appended_after_other_top_level_keys(self) -> None:
+        """The repos-skip in _merge_top_level_keys defers 'repos' to the end."""
+        existing = self._TWO_REPOS + "aaa_marker: keep-me\n"
+        merged, _, _ = merge_precommit_configs(existing, self._GENERATED)
+        # Without the skip, 'repos' keeps its original first position instead
+        # of being re-appended last (it sorts before 'aaa_marker' here anyway).
+        assert merged.index("aaa_marker") < merged.index("repos:")
+
+    def test_malformed_yaml_message_starts_with_invalid_yaml(self) -> None:
+        """The ValueError message begins exactly with 'Invalid YAML'."""
+        with pytest.raises(ValueError, match="Invalid YAML") as exc:
+            merge_precommit_configs("repos: [{bad yaml", "repos:\n- repo: x\n")
+        # startswith (not `in`) is what kills the XX-wrap mutation.
+        assert str(exc.value).startswith("Invalid YAML")
+
+    def test_non_mapping_existing_raises_descriptive_type_error(self) -> None:
+        """A non-mapping existing config raises a TypeError naming the bad type."""
+        with pytest.raises(TypeError, match="Invalid pre-commit config") as exc:
+            merge_precommit_configs("- item-a\n- item-b\n", "repos:\n- repo: x\n")
+        message = str(exc.value)
+        # startswith (not `in`) is what kills the XX-wrap mutation.
+        assert message.startswith("Invalid pre-commit config")
+        assert "list" in message

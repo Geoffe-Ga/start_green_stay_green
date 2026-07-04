@@ -20,11 +20,17 @@ fully deterministic and offline (no API key required).
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 
 from tests.conftest import get_env_without_api_keys
+
+# Hard ceiling for each `sgsg init` subprocess so a hang fails fast instead of
+# stalling CI (#402). Override via SGSG_E2E_INIT_TIMEOUT (seconds) for slow
+# environments.
+INIT_TIMEOUT_SECONDS = int(os.environ.get("SGSG_E2E_INIT_TIMEOUT", "120"))
 
 # Artifacts that --enable-live-dashboard must produce (relative to project root).
 EXPECTED_DASHBOARD_ARTIFACTS = (
@@ -64,6 +70,7 @@ def _run_init_with_dashboard(
         text=True,
         check=False,
         env=get_env_without_api_keys(),
+        timeout=INIT_TIMEOUT_SECONDS,
     )
 
 
@@ -159,6 +166,7 @@ class TestLiveDashboardE2E:
                 text=True,
                 check=False,
                 env=get_env_without_api_keys(),
+                timeout=INIT_TIMEOUT_SECONDS,
             )
             assert result.returncode == 0, f"sgsg init failed: {result.stdout}"
 

@@ -8,6 +8,8 @@ from pytest_mock import MockerFixture
 
 from start_green_stay_green.ai.orchestrator import AIOrchestrator
 from start_green_stay_green.ai.tuner import TuningResult
+from start_green_stay_green.generators import skills as skills_mod
+from start_green_stay_green.generators.skills import REFERENCE_SKILLS_DIR
 from start_green_stay_green.generators.skills import REQUIRED_SKILLS
 from start_green_stay_green.generators.skills import SkillGenerationResult
 from start_green_stay_green.generators.skills import SkillsGenerator
@@ -588,3 +590,198 @@ class TestSkillsGeneratorLoggerBehavior:
         result_with_ai = await gen_with_ai.tune_skill("vibe", "# Content", "Target")
         assert gen_with_ai.tuner is not None
         assert result_with_ai.content == "# Tuned"  # Tuned version
+
+
+class TestSkillsModuleConstants:
+    """Test module-level constants to kill string/operator mutants."""
+
+    def test_reference_skills_dir_exact_path(self) -> None:
+        """Test REFERENCE_SKILLS_DIR resolves to reference/skills under root."""
+        expected = (
+            Path(skills_mod.__file__).parent.parent.parent / "reference" / "skills"
+        )
+        assert expected == REFERENCE_SKILLS_DIR
+
+    def test_reference_skills_dir_name_components(self) -> None:
+        """Test final and parent path components are exact strings."""
+        assert REFERENCE_SKILLS_DIR.name == "skills"
+        assert REFERENCE_SKILLS_DIR.parent.name == "reference"
+
+    def test_required_skills_exact_list(self) -> None:
+        """Test REQUIRED_SKILLS contains the exact expected entries in order."""
+        assert REQUIRED_SKILLS == [
+            "address-feedback",
+            "architectural-decisions",
+            "backlog-grooming",
+            "bug-squashing-methodology",
+            "ci-debugging",
+            "comprehensive-pr-review",
+            "concurrency",
+            "cve-remediation",
+            "documentation",
+            "error-handling",
+            "file-naming-conventions",
+            "frontend-aesthetics",
+            "git-workflow",
+            "max-quality-no-shortcuts",
+            "mutation-testing",
+            "prompt-engineering",
+            "security",
+            "skill-craft",
+            "stay-green",
+            "testing",
+            "tracer-code",
+            "user-facing-error-messages",
+            "vibe",
+        ]
+
+
+class TestSkillsGeneratorErrorMessages:
+    """Test exact error message text to kill string-literal mutants."""
+
+    def test_missing_directory_message_exact(self, tmp_path: Path) -> None:
+        """Test missing-directory error message uses exact prefix text."""
+        orchestrator = create_autospec(AIOrchestrator)
+        missing = tmp_path / "nope"
+        generator = SkillsGenerator(orchestrator, reference_dir=missing)
+
+        with pytest.raises(FileNotFoundError, match="not found") as exc:
+            generator._validate_reference_dir()
+
+        assert str(exc.value).startswith("Reference skills directory not found: ")
+
+    def test_not_a_directory_message_exact(self, tmp_path: Path) -> None:
+        """Test not-a-directory error message uses exact prefix text."""
+        orchestrator = create_autospec(AIOrchestrator)
+        file_path = tmp_path / "skills.txt"
+        file_path.write_text("not a directory")
+        generator = SkillsGenerator(orchestrator, reference_dir=file_path)
+
+        with pytest.raises(ValueError, match="not a directory") as exc:
+            generator._validate_reference_dir()
+
+        assert str(exc.value).startswith("Reference skills path is not a directory: ")
+
+    def test_missing_skills_message_full_prefix(self, tmp_path: Path) -> None:
+        """Test missing-skills error message uses exact leading text."""
+        orchestrator = create_autospec(AIOrchestrator)
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        _create_skill(skills_dir, "vibe", "# Vibe")
+        generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
+
+        with pytest.raises(ValueError, match="Missing required") as exc:
+            generator._validate_reference_dir()
+
+        assert str(exc.value).startswith("Missing required skills: ")
+
+    def test_missing_skills_message_join_separator(self, tmp_path: Path) -> None:
+        """Test missing skills are joined with exact ', ' separator."""
+        orchestrator = create_autospec(AIOrchestrator)
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        # Create all but two skills so exactly two are reported missing.
+        present = [s for s in REQUIRED_SKILLS if s not in ("testing", "vibe")]
+        for skill in present:
+            _create_skill(skills_dir, skill, f"# {skill}")
+        generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
+
+        with pytest.raises(ValueError, match="Missing required") as exc:
+            generator._validate_reference_dir()
+
+        assert str(exc.value) == "Missing required skills: testing, vibe"
+
+    def test_missing_when_dir_present_but_skill_md_absent(self, tmp_path: Path) -> None:
+        """Test a skill dir without SKILL.md still counts as missing (or vs and)."""
+        orchestrator = create_autospec(AIOrchestrator)
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        for skill in REQUIRED_SKILLS:
+            _create_skill(skills_dir, skill, f"# {skill}")
+        # Remove SKILL.md from one skill but keep its directory present.
+        (skills_dir / "vibe" / "SKILL.md").unlink()
+        generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
+
+        with pytest.raises(ValueError, match="Missing required") as exc:
+            generator._validate_reference_dir()
+
+        assert str(exc.value) == "Missing required skills: vibe"
+
+    def test_skill_file_not_found_message_exact(self, tmp_path: Path) -> None:
+        """Test load_skill error message uses exact prefix text."""
+        orchestrator = create_autospec(AIOrchestrator)
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
+
+        with pytest.raises(FileNotFoundError, match="not found") as exc:
+            generator._load_skill("ghost")
+
+        assert str(exc.value).startswith("Skill file not found: ")
+
+    def test_generate_not_implemented_message_exact(self) -> None:
+        """Test generate() NotImplementedError uses exact message text."""
+        orchestrator = create_autospec(AIOrchestrator)
+        generator = SkillsGenerator(orchestrator)
+
+        with pytest.raises(NotImplementedError, match="async") as exc:
+            generator.generate()
+
+        assert str(exc.value) == "Use generate_all_skills() for async skill generation"
+
+
+class TestSkillsGeneratorTuneCallArgs:
+    """Test exact arguments and log text passed during tuning."""
+
+    @pytest.mark.asyncio
+    async def test_tune_passes_exact_source_context(
+        self, mocker: MockerFixture, tmp_path: Path
+    ) -> None:
+        """Test tune() receives the exact source_context string."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        orchestrator = mocker.Mock()
+        generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
+
+        tune_result = mocker.Mock()
+        tune_result.content = "# Tuned"
+        tune_result.changes = ["Change"]
+        tune_result.dry_run = False
+        mock_tune = mocker.AsyncMock(return_value=tune_result)
+        generator.tuner = mocker.Mock()
+        generator.tuner.tune = mock_tune  # type: ignore[method-assign]
+
+        await generator.tune_skill("vibe", "# Original", "Target")
+
+        assert mock_tune.await_args is not None
+        assert (
+            mock_tune.await_args.kwargs["source_context"]
+            == "Start Green Stay Green reference repository"
+        )
+
+    @pytest.mark.asyncio
+    async def test_generate_all_logs_exact_completion_format(
+        self, mocker: MockerFixture, tmp_path: Path
+    ) -> None:
+        """Test completion log uses exact format string and change count."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        for skill in REQUIRED_SKILLS:
+            _create_skill(skills_dir, skill, f"# {skill}")
+
+        orchestrator = mocker.Mock()
+        mock_logger = mocker.patch("start_green_stay_green.generators.skills.logger")
+
+        tune_result = mocker.Mock()
+        tune_result.content = "# Tuned"
+        tune_result.changes = ["Change 1", "Change 2", "Change 3"]
+        tune_result.dry_run = False
+        generator = SkillsGenerator(orchestrator, reference_dir=skills_dir)
+        generator.tuner = mocker.Mock()
+        generator.tuner.tune = mocker.AsyncMock(  # type: ignore[method-assign]
+            return_value=tune_result
+        )
+
+        await generator.generate_all_skills(target_context="Target")
+
+        mock_logger.info.assert_any_call("Generated skill %s (%d changes)", "vibe", 3)

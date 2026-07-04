@@ -145,7 +145,7 @@ jobs:
           echo "Coverage: $COVERAGE%" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         continue-on-error: true  # Don't fail CI if codecov has issues
         with:
           files: ./coverage.xml
@@ -171,6 +171,100 @@ jobs:
         with:
           name: job-timings-test-py${{ matrix.python-version }}
           path: test-py${{ matrix.python-version }}-job-timing.txt
+          retention-days: 7
+
+  # Job 2b: Windows test leg (#380, windows-compat epic #378, tracer T1).
+  #
+  # Design decisions (documented per #380):
+  # - Separate job, not a matrix axis: the ubuntu matrix and its coverage
+  #   gating stay untouched, and the matrix stays legible. Coverage
+  #   thresholds are owned by the ubuntu leg, so this job runs pytest
+  #   WITHOUT coverage flags — gating coverage here too would double-gate
+  #   the same threshold on two platforms.
+  # - Single Python version (the repo default): this leg asserts
+  #   cross-platform correctness, not Python-version compatibility, which
+  #   the ubuntu matrix already covers.
+  # - Scope: unit + integration suites via the same marker expressions
+  #   scripts/test.sh --unit/--integration --ci uses (flaky_in_ci excluded
+  #   exactly as on ubuntu). The e2e suite shells out to bash scripts and
+  #   pre-commit hooks that are POSIX-only today; it is excluded by its
+  #   existing marker (applied by tests/e2e/conftest.py), NOT by skip
+  #   decorations on individual tests. Windows e2e coverage is follow-up
+  #   work in epic #378.
+  # - The suites run through the cross-platform gate runner
+  #   (`python -m start_green_stay_green.gates`, #382) — the exact same
+  #   gate logic the POSIX scripts/*.sh wrappers delegate to — instead
+  #   of bash scripts, which assume a POSIX venv layout (.venv/bin).
+  test-windows:
+    name: Tests (Windows)
+    runs-on: windows-latest
+    needs: quality
+    # Cap a hung Windows runner; comfortably above the observed ~8 min
+    # full unit+integration runtime.
+    timeout-minutes: 30
+    env:
+      # Windows Python defaults text I/O to the legacy ANSI code page
+      # (cp1252). The suite and generated content are UTF-8 (script
+      # banners contain emoji/unicode), so enable Python's UTF-8 mode
+      # (PEP 540) for the pytest process and the sgsg subprocesses it
+      # spawns (they inherit the environment).
+      PYTHONUTF8: '1'
+    steps:
+      # Windows git defaults to core.autocrlf=true, which would check the
+      # repo out with CRLF endings and break tests that compare file
+      # content against "\n" literals. Configure before checkout.
+      - name: Force LF line endings on checkout
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # #382: the lint and test gates run through the cross-platform
+      # runner (the same logic scripts/*.sh delegates to on POSIX), so
+      # this leg verifies the documented Windows entrypoint end-to-end.
+      # Running the gates here REPLACES the direct pytest invocations —
+      # the marker selection is identical and the suites must not run
+      # twice.
+      - name: Run lint gate through cross-platform runner
+        run: python -m start_green_stay_green.gates lint
+
+      - name: Run unit tests through cross-platform runner
+        # Same marker selection as `./scripts/test.sh --unit --ci`.
+        run: python -m start_green_stay_green.gates test --unit --ci
+
+      - name: Run integration tests through cross-platform runner
+        # Same marker selection as `./scripts/test.sh --integration --ci`.
+        run: python -m start_green_stay_green.gates test --integration --ci
+
+      - name: Track job timing
+        if: always()
+        # $SECONDS is a bash builtin, so this step pins shell: bash
+        # (Git Bash on the Windows runner) like the POSIX jobs use.
+        shell: bash
+        run: echo "$SECONDS" > test-windows-job-timing.txt
+
+      - name: Upload job timing
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: job-timings-test-windows
+          path: test-windows-job-timing.txt
           retention-days: 7
 
   # Job 3: Security Scanning
@@ -422,7 +516,7 @@ jobs:
   timing-summary:
     name: Job Timing Summary
     runs-on: ubuntu-latest
-    needs: [quality, test, security, coverage]
+    needs: [quality, test, test-windows, security, coverage]
     if: always()
     steps:
       - name: Download all timing artifacts

@@ -5,8 +5,10 @@ and are properly structured for use by generators.
 """
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
+import yaml
 
 
 # Fixture for reference directory
@@ -50,6 +52,74 @@ class TestCIReferences:
             assert workflow_path.exists(), f"Missing CI workflow: {workflow}"
             assert workflow_path.is_file()
             assert workflow_path.stat().st_size > 0, f"Empty CI workflow: {workflow}"
+
+
+class TestCIMutationPosture:
+    """Mutation-testing CI steps mirror the python.yml posture (#398).
+
+    The python reference workflow runs mutation testing as a step in the
+    quality job gated to pushes on main (not per-PR). The TypeScript,
+    Go, and Rust workflows must carry the same enforcement posture; the
+    declined languages must not grow a half-wired step.
+    """
+
+    #: Language → command fragment its mutation step must run.
+    MUTATION_COMMANDS: ClassVar[dict[str, str]] = {
+        "python": "mutmut run",
+        "typescript": "npx stryker run",
+        "go": "gremlins unleash",
+        "rust": "scripts/mutation.sh",
+    }
+
+    @pytest.fixture
+    def ci_dir(self, reference_dir: Path) -> Path:
+        """Return path to CI directory."""
+        return reference_dir / "ci"
+
+    @staticmethod
+    def _mutation_steps(workflow_path: Path) -> list[dict]:
+        """Return quality-job steps whose name mentions mutation."""
+        workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        steps = workflow["jobs"]["quality"]["steps"]
+        return [
+            step for step in steps if "mutation" in str(step.get("name", "")).lower()
+        ]
+
+    @pytest.mark.parametrize("language", sorted(MUTATION_COMMANDS))
+    def test_quality_job_has_one_mutation_step(
+        self, ci_dir: Path, language: str
+    ) -> None:
+        """Each implemented language has exactly one mutation step."""
+        steps = self._mutation_steps(ci_dir / f"{language}.yml")
+        assert len(steps) == 1
+
+    @pytest.mark.parametrize("language", sorted(MUTATION_COMMANDS))
+    def test_mutation_step_is_gated_to_main(self, ci_dir: Path, language: str) -> None:
+        """The step runs on main pushes only, mirroring python.yml."""
+        (step,) = self._mutation_steps(ci_dir / f"{language}.yml")
+        assert step["if"] == "github.ref == 'refs/heads/main'"
+
+    @pytest.mark.parametrize("language", sorted(MUTATION_COMMANDS))
+    def test_mutation_step_runs_the_language_tool(
+        self, ci_dir: Path, language: str
+    ) -> None:
+        """The step invokes the language's mutation tool."""
+        (step,) = self._mutation_steps(ci_dir / f"{language}.yml")
+        assert self.MUTATION_COMMANDS[language] in step["run"]
+
+    @pytest.mark.parametrize(
+        "language", ["swift", "kotlin", "cpp", "java", "csharp", "ruby", "php"]
+    )
+    def test_declined_languages_have_no_mutation_step(
+        self, ci_dir: Path, language: str
+    ) -> None:
+        """Declined ecosystems stay honest: no mutation step at all."""
+        workflow = yaml.safe_load(
+            (ci_dir / f"{language}.yml").read_text(encoding="utf-8")
+        )
+        for job in workflow["jobs"].values():
+            for step in job.get("steps", []):
+                assert "mutation" not in str(step.get("name", "")).lower()
 
 
 class TestScriptsReferences:
@@ -153,6 +223,49 @@ class TestScriptsReferences:
         for command in test_runs:
             assert "/p:CollectCoverage=true" in command
             assert "Threshold" not in command
+
+    def test_ruby_lint_script_runs_only_gemfile_backed_tools(
+        self, scripts_dir: Path
+    ) -> None:
+        """The ruby reference lint script invokes no missing gems (#374).
+
+        The generated Gemfile pins RuboCop only for linting — Reek is
+        not in the toolchain and Brakeman is Rails-specific (it errors
+        on plain-Ruby projects), so invoking either would fail on every
+        generated project. RuboCop's full cop set is the lint gate,
+        run with --force-exclusion — parity with the generated
+        scripts/lint.sh and reference/ci/ruby.yml.
+        """
+        content = (scripts_dir / "ruby" / "lint.sh").read_text()
+        commands = [
+            line for line in content.splitlines() if not line.lstrip().startswith("#")
+        ]
+        assert any("rubocop --force-exclusion" in c for c in commands)
+        assert not any("reek" in c for c in commands)
+        assert not any("brakeman" in c for c in commands)
+
+    def test_ruby_test_script_defers_the_coverage_bound_to_spec_helper(
+        self, scripts_dir: Path
+    ) -> None:
+        """The ruby reference test script never restates the threshold (#374).
+
+        The >=90% SimpleCov bound lives in spec/spec_helper.rb (its
+        single home); COVERAGE=true activates the gate without
+        duplicating the number, matching reference/ci/ruby.yml and the
+        generated scripts/test.sh. (rspec has no --minimum-coverage
+        flag — the pre-#374 invocation restated the threshold through
+        an option rspec would reject.)
+        """
+        content = (scripts_dir / "ruby" / "test.sh").read_text()
+        commands = [
+            line for line in content.splitlines() if not line.lstrip().startswith("#")
+        ]
+        test_runs = [c for c in commands if "rspec" in c]
+        assert test_runs, "test.sh must run rspec"
+        for command in test_runs:
+            assert "COVERAGE=true" in command
+            assert "minimum-coverage" not in command
+            assert "90" not in command
 
 
 class TestSkillsReferences:

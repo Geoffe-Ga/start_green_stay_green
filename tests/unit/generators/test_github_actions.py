@@ -502,3 +502,101 @@ class TestGitHubActionsReviewGeneratorOutputPath:
         assert output_path.exists()
         workflow_data = yaml.safe_load(output_path.read_text())
         assert workflow_data["name"] == "Test Workflow"
+
+
+class TestGitHubActionsReviewGeneratorMutationKills:
+    """Tests pinning exact literals/behavior to kill surviving mutants."""
+
+    def _make_generator(
+        self,
+        tmp_path: Path,
+        template_text: str,
+    ) -> GitHubActionsReviewGenerator:
+        """Build a generator backed by a written template file."""
+        orchestrator = create_autospec(AIOrchestrator)
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        template_file = template_dir / "code_review.yml.j2"
+        template_file.write_text(template_text)
+        return GitHubActionsReviewGenerator(
+            orchestrator,
+            template_path=template_file,
+        )
+
+    def test_validate_missing_template_message_exact_prefix(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Kill 2224: error message starts with exact 'Template not found:'."""
+        orchestrator = create_autospec(AIOrchestrator)
+        missing = tmp_path / "absent.yml.j2"
+        generator = GitHubActionsReviewGenerator(
+            orchestrator,
+            template_path=missing,
+        )
+
+        with pytest.raises(GenerationError, match=r"Template not found") as exc:
+            generator._validate_template_exists()
+
+        assert str(exc.value).startswith(f"Template not found: {missing}")
+
+    def test_generate_default_workflow_name_is_code_review(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Kill 2226: generate() default workflow_name renders 'Code Review'."""
+        generator = self._make_generator(tmp_path, "name: {{ workflow_name }}\n")
+
+        result = generator.generate()
+
+        workflow_data = yaml.safe_load(result["workflow_content"])
+        assert workflow_data["name"] == "Code Review"
+
+    def test_generate_does_not_html_escape_workflow_name(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Kill 2229: autoescape=False keeps raw '&', '<', '>' in name."""
+        generator = self._make_generator(tmp_path, "name: {{ workflow_name }}\n")
+
+        result = generator.generate(workflow_name="A & B <C>")
+
+        assert result["workflow_content"] == "name: A & B <C>"
+
+    def test_generate_review_workflow_default_name_is_code_review(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Kill 2236: generate_review_workflow() default name is 'Code Review'."""
+        generator = self._make_generator(tmp_path, "name: {{ workflow_name }}\n")
+
+        result = generator.generate_review_workflow()
+
+        workflow_data = yaml.safe_load(result.workflow_content)
+        assert workflow_data["name"] == "Code Review"
+
+    def test_generate_review_workflow_returns_generated_content(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Kill 2237/2238: result flows through with rendered workflow_content."""
+        generator = self._make_generator(
+            tmp_path,
+            "name: {{ workflow_name }}\nkey: value\n",
+        )
+
+        result = generator.generate_review_workflow(workflow_name="Custom Review")
+
+        assert isinstance(result, ReviewWorkflowResult)
+        assert result.workflow_content == "name: Custom Review\nkey: value"
+
+    def test_generate_review_workflow_returns_generated_path(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Kill 2239: result['workflow_path'] flows into the dataclass path."""
+        generator = self._make_generator(tmp_path, "name: {{ workflow_name }}\n")
+
+        result = generator.generate_review_workflow()
+
+        assert result.workflow_path == Path(".github/workflows/review.yml")

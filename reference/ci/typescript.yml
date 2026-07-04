@@ -53,6 +53,14 @@ jobs:
         run: |
           npm run test:coverage
 
+      # Mirrors the python.yml mutation posture: periodic (main-branch
+      # pushes only), not a per-PR gate. StrykerJS ships in the
+      # generated devDependencies, so `npm ci` above already installed
+      # it; the 80% break threshold lives in stryker.conf.json.
+      - name: Run mutation testing (on main branch only)
+        if: github.ref == 'refs/heads/main'
+        run: npx stryker run
+
   build:
     name: Build and Package
     runs-on: ubuntu-latest

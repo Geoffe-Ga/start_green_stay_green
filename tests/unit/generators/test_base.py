@@ -187,19 +187,37 @@ class TestTemplateBasedGenerator:
         assert generator.orchestrator is None
         assert generator.template_dir is None
 
-    def test_validate_template_path_missing_raises_error(self) -> None:
+    def test_validate_template_path_missing_raises_error(self, tmp_path: Any) -> None:
         """Test validation raises for missing template."""
-        generator = ConcreteTemplateGenerator(template_dir=Path("/nonexistent"))
+        generator = ConcreteTemplateGenerator(template_dir=tmp_path)
 
-        with pytest.raises(GenerationError, match="Template not found"):
+        with pytest.raises(GenerationError, match="Template not found") as exc_info:
             generator._validate_template_path("missing.j2")
+        expected = f"Template not found: {(tmp_path / 'missing.j2').resolve()}"
+        assert str(exc_info.value) == expected
 
     def test_validate_template_path_without_template_dir_raises_error(self) -> None:
         """Test validation raises when template_dir not set."""
         generator = ConcreteTemplateGenerator(template_dir=None)
 
-        with pytest.raises(GenerationError, match="Template directory not configured"):
+        with pytest.raises(GenerationError, match="not configured") as exc_info:
             generator._validate_template_path("template.j2")
+        assert (
+            str(exc_info.value)
+            == "Template directory not configured for this generator"
+        )
+
+    def test_validate_template_path_traversal_raises_exact_message(
+        self, tmp_path: Any
+    ) -> None:
+        """Test path traversal raises GenerationError with exact escape message."""
+        generator = ConcreteTemplateGenerator(template_dir=tmp_path)
+
+        with pytest.raises(GenerationError, match="escapes") as exc_info:
+            generator._validate_template_path("../escape.j2")
+        expected = "Template path escapes template directory: ../escape.j2"
+        assert str(exc_info.value) == expected
+        assert exc_info.value.message == expected
 
     def test_validate_template_path_existing_returns_path(self, tmp_path: Any) -> None:
         """Test validation returns path for existing template."""
@@ -297,3 +315,46 @@ class TestValidateLanguage:
             validate_language("Python")
         with pytest.raises(ValueError, match="Unsupported language"):
             validate_language("PYTHON")
+
+    def test_error_message_exact_full_text(self) -> None:
+        """Test error message matches the exact full expected string."""
+        supported = ", ".join(SUPPORTED_LANGUAGES)
+        expected = (
+            "Unsupported language: 'brainfuck'. " f"Supported languages: {supported}"
+        )
+        with pytest.raises(ValueError, match="Unsupported") as exc_info:
+            validate_language("brainfuck")
+        assert str(exc_info.value) == expected
+
+    def test_error_message_starts_with_unsupported_prefix(self) -> None:
+        """Test error message starts with the exact unsupported-language prefix."""
+        with pytest.raises(ValueError, match="Unsupported") as exc_info:
+            validate_language("brainfuck")
+        assert str(exc_info.value).startswith("Unsupported language: 'brainfuck'. ")
+
+    def test_error_message_uses_comma_space_separator(self) -> None:
+        """Test the supported-language list uses ', ' as its exact separator."""
+        with pytest.raises(ValueError, match="Supported languages") as exc_info:
+            validate_language("brainfuck")
+        supported = ", ".join(SUPPORTED_LANGUAGES)
+        assert str(exc_info.value).endswith(f"Supported languages: {supported}")
+        assert "python, typescript" in str(exc_info.value)
+
+
+class TestSupportedLanguagesExactTuple:
+    """Test SUPPORTED_LANGUAGES is the exact expected tuple."""
+
+    def test_exact_tuple_value(self) -> None:
+        """Test SUPPORTED_LANGUAGES equals the exact ordered tuple."""
+        assert SUPPORTED_LANGUAGES == (
+            "python",
+            "typescript",
+            "go",
+            "rust",
+            "java",
+            "csharp",
+            "ruby",
+            "swift",
+            "kotlin",
+            "cpp",
+        )

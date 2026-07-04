@@ -529,6 +529,27 @@ LANGUAGE_TOOLS: dict[str, dict[str, str]] = {
         "security": "SecurityCodeScan (Roslyn analyzer)",
         "dependency_check": "dotnet list package --vulnerable",
     },
+    # Ruby (#373): coverage is SimpleCov, activated by COVERAGE=true
+    # with the >=90% bound living in spec/spec_helper.rb (the
+    # manifest-owned precedent of the JaCoCo/Kover/Coverlet gates).
+    # RuboCop's Metrics/CyclomaticComplexity cop owns the <=10
+    # complexity gate (.rubocop.yml is its single home; flog is the
+    # documented standalone alternative). mutant is a periodic mutation
+    # gate like pitest/mull/muter/Stryker, not a per-commit hook. Each
+    # tool appears in exactly one category: bundler-audit owns security
+    # (dependency CVEs against the ruby-advisory-db — RuboCop's
+    # Security cop department runs inside the complexity/lint pass and
+    # Brakeman applies only once Rails is adopted, so neither is
+    # double-listed here) and `bundle outdated` owns dependency
+    # staleness (the cargo-outdated/npm-check-updates analogue).
+    "ruby": {
+        "coverage": "SimpleCov (COVERAGE=true bundle exec rspec)",
+        "mutation": "mutant (bundle exec mutant run)",
+        "complexity": "RuboCop Metrics/CyclomaticComplexity (.rubocop.yml)",
+        "documentation": "YARD",
+        "security": "bundler-audit (bundle exec bundler-audit check)",
+        "dependency_check": "bundle outdated",
+    },
 }
 
 
@@ -1552,7 +1573,9 @@ class MetricsGenerator(BaseGenerator):
         config_path = output_dir / "metrics.yml"
 
         result = self.generate()
-        config_path.write_text(yaml.dump(result["metrics_config"], sort_keys=False))
+        config_path.write_text(
+            yaml.dump(result["metrics_config"], sort_keys=False), encoding="utf-8"
+        )
 
         logger.info("Wrote metrics config to %s", config_path)
         return config_path
@@ -1581,7 +1604,7 @@ class MetricsGenerator(BaseGenerator):
 
         result = self.generate()
         if result["sonarqube_config"]:
-            sonar_path.write_text(result["sonarqube_config"])
+            sonar_path.write_text(result["sonarqube_config"], encoding="utf-8")
             logger.info("Wrote SonarQube config to %s", sonar_path)
             return sonar_path
 
@@ -1611,7 +1634,7 @@ class MetricsGenerator(BaseGenerator):
 
         result = self.generate()
         if result["dashboard_template"]:
-            dashboard_path.write_text(result["dashboard_template"])
+            dashboard_path.write_text(result["dashboard_template"], encoding="utf-8")
             logger.info("Wrote dashboard template to %s", dashboard_path)
             return dashboard_path
 
@@ -1638,7 +1661,7 @@ class MetricsGenerator(BaseGenerator):
 
         result = self.generate()
         badges_content = "# Quality Badges\n\n" + "\n".join(result["badges"])
-        badges_path.write_text(badges_content)
+        badges_path.write_text(badges_content, encoding="utf-8")
 
         logger.info("Wrote %d badges to %s", len(result["badges"]), badges_path)
         return badges_path
