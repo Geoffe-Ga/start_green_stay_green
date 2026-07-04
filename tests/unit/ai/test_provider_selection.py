@@ -19,6 +19,7 @@ Pins three contracts the selection layer must satisfy:
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 from typing import TYPE_CHECKING
 
@@ -27,8 +28,11 @@ import pytest
 from start_green_stay_green.ai.orchestrator import ModelConfig
 from start_green_stay_green.ai.provider_selection import DEFAULT_MODEL
 from start_green_stay_green.ai.provider_selection import DEFAULT_PROVIDER
+from start_green_stay_green.ai.provider_selection import ENV_PROVIDER
 from start_green_stay_green.ai.provider_selection import OPENAI_DEFAULT_MODEL
+from start_green_stay_green.ai.provider_selection import ProviderListing
 from start_green_stay_green.ai.provider_selection import ProviderSelection
+from start_green_stay_green.ai.provider_selection import ProviderSpec
 from start_green_stay_green.ai.provider_selection import ProviderUnavailableError
 from start_green_stay_green.ai.provider_selection import _coalesce
 from start_green_stay_green.ai.provider_selection import build_provider
@@ -37,6 +41,7 @@ from start_green_stay_green.ai.provider_selection import provider_capabilities
 from start_green_stay_green.ai.provider_selection import resolve_api_key_env_var
 from start_green_stay_green.ai.provider_selection import resolve_provider_selection
 from start_green_stay_green.ai.provider_selection import supported_providers
+from start_green_stay_green.ai.providers.anthropic_provider import AnthropicProvider
 from start_green_stay_green.ai.providers.base import LLMProvider
 from start_green_stay_green.ai.providers.base import ProviderCapabilities
 
@@ -497,3 +502,131 @@ def test_describe_providers_works_without_sdk(
     _block_openai_import(monkeypatch)
     names = [entry.name for entry in describe_providers()]
     assert "openai" in names
+
+
+# ----------------------- module-constant exactness -------------------------
+def test_openai_default_model_constant_is_exact() -> None:
+    """``OPENAI_DEFAULT_MODEL`` is byte-for-byte the live flagship id."""
+    assert OPENAI_DEFAULT_MODEL == "gpt-5.5"
+
+
+def test_env_provider_constant_is_exact() -> None:
+    """``ENV_PROVIDER`` is exactly the documented env-var name."""
+    assert ENV_PROVIDER == "GREEN_LLM_PROVIDER"
+
+
+def test_env_provider_selects_non_default_provider() -> None:
+    """``GREEN_LLM_PROVIDER`` actually drives selection (key is read)."""
+    selection = resolve_provider_selection(
+        provider_flag=None,
+        model_flag=None,
+        config={},
+        env={"GREEN_LLM_PROVIDER": "openai"},
+    )
+    assert selection.provider == "openai"
+
+
+def test_config_provider_key_selects_non_default_provider() -> None:
+    """The ``llm_provider`` config key actually drives selection."""
+    selection = resolve_provider_selection(
+        provider_flag=None,
+        model_flag=None,
+        config={"llm_provider": "openai"},
+        env={},
+    )
+    assert selection.provider == "openai"
+
+
+# --------------------------- _coalesce folding -----------------------------
+def test_coalesce_folds_by_default() -> None:
+    """``_coalesce`` case-folds its chosen candidate unless told otherwise."""
+    assert _coalesce("  ANTHROPIC  ") == "anthropic"
+
+
+# ----------------------- error-message exactness ---------------------------
+def test_unknown_provider_message_is_exact() -> None:
+    """The unknown-provider message uses the exact prefix and separator."""
+    with pytest.raises(ValueError, match="Unknown LLM provider") as exc:
+        resolve_provider_selection(
+            provider_flag="does-not-exist",
+            model_flag=None,
+            config={},
+            env={},
+        )
+    message = str(exc.value)
+    assert message.startswith("Unknown LLM provider 'does-not-exist'.")
+    assert message.endswith("Supported providers: anthropic, openai.")
+
+
+def test_blank_provider_in_api_key_lookup_reports_empty_repr() -> None:
+    """A blank provider name reaches the registry as ``''``, not a sentinel."""
+    with pytest.raises(ValueError, match="Unknown LLM provider") as exc:
+        resolve_api_key_env_var("   ")
+    assert str(exc.value).startswith("Unknown LLM provider ''.")
+
+
+def test_blank_provider_in_build_reports_empty_repr() -> None:
+    """``build_provider`` reports a blank provider as ``''``, not a sentinel."""
+    with pytest.raises(ValueError, match="Unknown LLM provider") as exc:
+        build_provider("   ", api_key="x", model="m")
+    assert str(exc.value).startswith("Unknown LLM provider ''.")
+
+
+def test_blank_provider_in_capabilities_reports_empty_repr() -> None:
+    """``provider_capabilities`` reports a blank provider as ``''``."""
+    with pytest.raises(ValueError, match="Unknown LLM provider") as exc:
+        provider_capabilities("   ")
+    assert str(exc.value).startswith("Unknown LLM provider ''.")
+
+
+# --------------------------- constructor defaults --------------------------
+def test_build_provider_default_max_retries_is_three() -> None:
+    """Omitting ``max_retries`` yields exactly three attempts."""
+    provider = build_provider("anthropic", api_key="x", model="m")
+    assert isinstance(provider, AnthropicProvider)
+    assert provider.max_retries == 3
+
+
+def test_build_provider_default_retry_delay_is_one_second() -> None:
+    """Omitting ``retry_delay`` yields exactly a one-second initial delay."""
+    provider = build_provider("anthropic", api_key="x", model="m")
+    assert isinstance(provider, AnthropicProvider)
+    assert provider.retry_delay == 1.0
+
+
+# ------------------------------- frozen-ness -------------------------------
+def _assign_field(instance: object, field: str, value: object) -> None:
+    """Assign ``value`` to ``instance.field`` by a runtime field name.
+
+    The field name is a parameter (not a literal), so frozen-dataclass
+    assignment can be exercised without a constant-attribute ``setattr``
+    that ruff's B010 flags.
+    """
+    setattr(instance, field, value)
+
+
+def test_provider_selection_is_frozen() -> None:
+    """``ProviderSelection`` is immutable (attribute assignment rejected)."""
+    selection = ProviderSelection(provider="anthropic", model="m")
+    with pytest.raises(dataclasses.FrozenInstanceError, match="cannot assign"):
+        _assign_field(selection, "provider", "openai")
+
+
+def test_provider_spec_is_frozen() -> None:
+    """``ProviderSpec`` is immutable (attribute assignment rejected)."""
+    spec = ProviderSpec(
+        module="m",
+        class_name="C",
+        api_key_env_var="K",
+        default_model="d",
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError, match="cannot assign"):
+        _assign_field(spec, "module", "other")
+
+
+def test_provider_listing_is_frozen() -> None:
+    """``ProviderListing`` is immutable (attribute assignment rejected)."""
+    listing = describe_providers()[0]
+    assert isinstance(listing, ProviderListing)
+    with pytest.raises(dataclasses.FrozenInstanceError, match="cannot assign"):
+        _assign_field(listing, "name", "other")

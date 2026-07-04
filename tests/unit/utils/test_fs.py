@@ -9,11 +9,13 @@ end state.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from start_green_stay_green.utils import fs
+from start_green_stay_green.utils.fs import is_windows
 from tests.conftest import assert_executable
 
 
@@ -25,6 +27,26 @@ def _always_posix() -> bool:
 def _always_windows() -> bool:
     """Pin the Windows branch of the is_windows seam."""
     return True
+
+
+class TestIsWindows:
+    """Tests for the fs.is_windows platform-detection seam."""
+
+    def test_nt_is_windows(self) -> None:
+        """``os.name == "nt"`` is the sole truthy case."""
+        assert is_windows("nt")
+
+    def test_posix_is_not_windows(self) -> None:
+        """A POSIX identifier is not Windows."""
+        assert not is_windows("posix")
+
+    def test_other_platform_string_is_not_windows(self) -> None:
+        """Only the exact string "nt" counts as Windows."""
+        assert not is_windows("java")
+
+    def test_default_reflects_live_os_name(self) -> None:
+        """Called with no argument, it mirrors the real platform."""
+        assert is_windows() == (os.name == "nt")
 
 
 class TestMakeExecutable:

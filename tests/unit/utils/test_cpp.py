@@ -11,6 +11,103 @@ from start_green_stay_green.utils.cpp import TIZEN_API_VERSION
 from start_green_stay_green.utils.cpp import cpp_identifier
 from start_green_stay_green.utils.cpp import tizen_app_id
 
+# Every C++ keyword the scaffold must reject as an identifier, hardcoded so a
+# mutated _CPP_KEYWORDS entry is detected rather than silently re-derived.
+_ALL_CPP_KEYWORDS = [
+    "alignas",
+    "alignof",
+    "and",
+    "and_eq",
+    "asm",
+    "auto",
+    "bitand",
+    "bitor",
+    "bool",
+    "break",
+    "case",
+    "catch",
+    "char",
+    "char8_t",
+    "char16_t",
+    "char32_t",
+    "class",
+    "compl",
+    "concept",
+    "const",
+    "consteval",
+    "constexpr",
+    "constinit",
+    "const_cast",
+    "continue",
+    "co_await",
+    "co_return",
+    "co_yield",
+    "decltype",
+    "default",
+    "delete",
+    "do",
+    "double",
+    "dynamic_cast",
+    "else",
+    "enum",
+    "explicit",
+    "export",
+    "extern",
+    "false",
+    "float",
+    "for",
+    "friend",
+    "goto",
+    "if",
+    "inline",
+    "int",
+    "long",
+    "mutable",
+    "namespace",
+    "new",
+    "noexcept",
+    "not",
+    "not_eq",
+    "nullptr",
+    "operator",
+    "or",
+    "or_eq",
+    "private",
+    "protected",
+    "public",
+    "register",
+    "reinterpret_cast",
+    "requires",
+    "return",
+    "short",
+    "signed",
+    "sizeof",
+    "static",
+    "static_assert",
+    "static_cast",
+    "struct",
+    "switch",
+    "template",
+    "this",
+    "thread_local",
+    "throw",
+    "true",
+    "try",
+    "typedef",
+    "typeid",
+    "typename",
+    "union",
+    "unsigned",
+    "using",
+    "virtual",
+    "void",
+    "volatile",
+    "wchar_t",
+    "while",
+    "xor",
+    "xor_eq",
+]
+
 
 class TestTizenAppId:
     """Tests for :func:`tizen_app_id`."""
@@ -75,14 +172,18 @@ class TestCppIdentifier:
         """An empty or fully-invalid name falls back to ``app``."""
         assert cpp_identifier("") == "app"
 
-    @pytest.mark.parametrize("keyword", ["new", "class", "default", "int", "namespace"])
+    @pytest.mark.parametrize("keyword", _ALL_CPP_KEYWORDS)
     def test_cpp_keyword_gets_app_prefix(self, keyword: str) -> None:
-        """C++ keywords are invalid identifiers; ``app_`` is prefixed."""
+        """Every C++ keyword is an invalid identifier; ``app_`` is prefixed."""
         assert cpp_identifier(keyword) == f"app_{keyword}"
 
     def test_non_keyword_is_not_prefixed(self) -> None:
         """Ordinary names pass through without the ``app_`` prefix."""
         assert cpp_identifier("classy") == "classy"
+
+    def test_underscore_only_name_gets_app_fallback(self) -> None:
+        """An all-underscore name strips to empty and falls back to ``app``."""
+        assert cpp_identifier("___") == "app"
 
 
 class TestPinnedVersions:
