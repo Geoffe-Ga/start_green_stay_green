@@ -134,13 +134,75 @@ class TestConfigLoading:
             cli.load_config_file(mock_path)
         mock_path.exists.assert_called_once()
 
-    def test_load_config_file_returns_empty_dict_when_file_exists(self) -> None:
-        """Test load_config_file returns empty dict (stub implementation)."""
-        mock_path = MagicMock(spec=Path)
-        mock_path.exists.return_value = True
-        result = cli.load_config_file(mock_path)
-        assert not result
-        assert isinstance(result, dict)
+    def test_load_config_file_parses_yaml(self, tmp_path: Path) -> None:
+        """A ``.yaml`` file's keys land in the returned mapping as strings."""
+        config_path = tmp_path / "green.yaml"
+        config_path.write_text(
+            "project_name: from-config\nlanguage: python\n", encoding="utf-8"
+        )
+        result = cli.load_config_file(config_path)
+        assert result == {"project_name": "from-config", "language": "python"}
+
+    def test_load_config_file_parses_yml_extension(self, tmp_path: Path) -> None:
+        """The ``.yml`` extension is treated the same as ``.yaml``."""
+        config_path = tmp_path / "green.yml"
+        config_path.write_text("llm_provider: openai\n", encoding="utf-8")
+        result = cli.load_config_file(config_path)
+        assert result == {"llm_provider": "openai"}
+
+    def test_load_config_file_parses_toml(self, tmp_path: Path) -> None:
+        """A ``.toml`` file's keys land in the returned mapping as strings."""
+        config_path = tmp_path / "green.toml"
+        config_path.write_text(
+            'project_name = "from-config"\nlanguage = "python"\n', encoding="utf-8"
+        )
+        result = cli.load_config_file(config_path)
+        assert result == {"project_name": "from-config", "language": "python"}
+
+    def test_load_config_file_coerces_non_string_scalars(self, tmp_path: Path) -> None:
+        """Non-string YAML scalars (e.g. booleans) are coerced to ``str``."""
+        config_path = tmp_path / "green.yaml"
+        config_path.write_text("include_ci: true\n", encoding="utf-8")
+        result = cli.load_config_file(config_path)
+        assert result == {"include_ci": "True"}
+
+    def test_load_config_file_empty_yaml_returns_empty_dict(
+        self, tmp_path: Path
+    ) -> None:
+        """An empty YAML file parses to ``None`` and should become ``{}``."""
+        config_path = tmp_path / "green.yaml"
+        config_path.write_text("", encoding="utf-8")
+        assert not cli.load_config_file(config_path)
+
+    def test_load_config_file_rejects_unsupported_extension(
+        self, tmp_path: Path
+    ) -> None:
+        """A non-YAML/TOML extension is rejected rather than silently empty."""
+        config_path = tmp_path / "green.json"
+        config_path.write_text("{}", encoding="utf-8")
+        with pytest.raises(ValueError, match="Unsupported configuration file format"):
+            cli.load_config_file(config_path)
+
+    def test_load_config_file_rejects_invalid_yaml(self, tmp_path: Path) -> None:
+        """Malformed YAML raises ``ValueError``, not a raw parser exception."""
+        config_path = tmp_path / "green.yaml"
+        config_path.write_text("key: [unterminated\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="Failed to parse configuration file"):
+            cli.load_config_file(config_path)
+
+    def test_load_config_file_rejects_invalid_toml(self, tmp_path: Path) -> None:
+        """Malformed TOML raises ``ValueError``, not a raw parser exception."""
+        config_path = tmp_path / "green.toml"
+        config_path.write_text("not = valid = toml\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="Failed to parse configuration file"):
+            cli.load_config_file(config_path)
+
+    def test_load_config_file_rejects_non_mapping_yaml(self, tmp_path: Path) -> None:
+        """A YAML file whose top level isn't a mapping is rejected."""
+        config_path = tmp_path / "green.yaml"
+        config_path.write_text("- one\n- two\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="must contain a mapping"):
+            cli.load_config_file(config_path)
 
     def test_load_config_file_path_string_in_error_message(self) -> None:
         """Test error message includes the file path."""

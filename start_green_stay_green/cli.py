@@ -38,7 +38,9 @@ if TYPE_CHECKING:
 
 from rich.console import Console
 from rich.panel import Panel
+import toml
 import typer
+import yaml
 
 from start_green_stay_green.ai.batch_dispatch import BatchPersistenceContext
 from start_green_stay_green.ai.batch_dispatch import BatchWaitConfig
@@ -203,25 +205,77 @@ def get_version() -> str:
     return __version__
 
 
+def _parse_config_text(
+    text: str, suffix: str, config_path: Path
+) -> Any:  # noqa: ANN401
+    """Parse ``text`` as YAML or TOML based on ``suffix``.
+
+    Args:
+        text: Raw file content.
+        suffix: Lowercased file extension (including the leading dot).
+        config_path: Original path, used only for error messages.
+
+    Returns:
+        The parsed data (whatever shape the file's top level was).
+
+    Raises:
+        ValueError: If the extension is unsupported or the file doesn't parse.
+    """
+    try:
+        if suffix in {".yaml", ".yml"}:
+            return yaml.safe_load(text) or {}
+        if suffix == ".toml":
+            return toml.loads(text)
+    except (yaml.YAMLError, toml.TomlDecodeError) as e:
+        msg = f"Failed to parse configuration file {config_path}: {e}"
+        raise ValueError(msg) from e
+
+    msg = (
+        f"Unsupported configuration file format {suffix!r}: "
+        f"{config_path}. Use a .yaml, .yml, or .toml extension."
+    )
+    raise ValueError(msg)
+
+
 def load_config_file(config_path: Path) -> dict[str, str]:
     """Load configuration from YAML or TOML file.
+
+    Format is picked from the file extension: ``.yaml``/``.yml`` parses as
+    YAML, ``.toml`` parses as TOML. Every other extension is rejected so a
+    typo'd path doesn't silently resolve to an empty config.
 
     Args:
         config_path: Path to configuration file.
 
     Returns:
-        Configuration dictionary.
+        Configuration dictionary. Keys and scalar values are coerced to
+        ``str`` so callers (``_resolve_parameter``,
+        :func:`~start_green_stay_green.ai.provider_selection.resolve_provider_selection`)
+        can treat every tier of the precedence chain uniformly.
 
     Raises:
         FileNotFoundError: If config file doesn't exist.
-        ValueError: If config file format is invalid.
+        ValueError: If the extension is unsupported, the file doesn't
+            parse, or it doesn't parse to a mapping.
     """
     if not config_path.exists():
         msg = f"Configuration file not found: {config_path}"
         raise FileNotFoundError(msg)
 
-    # Implementation will be added in Issue 4.2
-    return {}
+    text = config_path.read_text(encoding="utf-8")
+    data = _parse_config_text(text, config_path.suffix.lower(), config_path)
+
+    if not isinstance(data, dict):
+        msg = (
+            f"Configuration file {config_path} must contain a mapping "
+            f"of keys to values, got {type(data).__name__}"
+        )
+        # ValueError (not TypeError) keeps every load_config_file failure
+        # mode -- missing extension, parse error, wrong top-level shape --
+        # under one exception type for callers to catch.
+        raise ValueError(msg)  # noqa: TRY004
+
+    return {str(key): str(value) for key, value in data.items()}
 
 
 def _validate_options(verbose: bool, quiet: bool) -> None:  # noqa: FBT001
@@ -253,14 +307,14 @@ def _load_config_if_specified(
         verbose: Whether to show verbose output.
 
     Raises:
-        typer.Exit: If config file not found.
+        typer.Exit: If the config file is missing, unsupported, or invalid.
     """
     if config:
         try:
             load_config_file(config)
             if verbose:
                 console.print(f"[dim]Loaded configuration from {config}[/dim]")
-        except FileNotFoundError as e:
+        except (FileNotFoundError, ValueError) as e:
             console.print(f"[red]Error:[/red] {e}", style="bold")
             raise typer.Exit(code=1) from e
 
@@ -495,14 +549,14 @@ def _load_config_data(config: Path | None) -> dict[str, str]:
         Configuration dictionary (empty if no config file).
 
     Raises:
-        typer.Exit: If config file not found.
+        typer.Exit: If the config file is missing, unsupported, or invalid.
     """
     if not config:
         return {}
 
     try:
         config_data = load_config_file(config)
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         console.print(f"[red]Error:[/red] {e}", style="bold")
         raise typer.Exit(code=1) from e
     else:
