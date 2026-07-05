@@ -51,20 +51,31 @@ Load configuration from a YAML or TOML file.
 start-green-stay-green --config project.yaml init
 ```
 
+Only `project_name`, `language`, `llm_provider`, and `llm_model` are read
+from the file — see [Configuration Files](#configuration-files) below for
+the full precedence rules. Other keys (`output_dir` included) are parsed
+but ignored; pass those on the command line.
+
 **Configuration File Format (YAML)**:
 ```yaml
 project_name: my-awesome-project
 language: python
-output_dir: ~/projects
-api_key: sk-ant-...  # Optional, only if storing in config
+llm_provider: anthropic  # optional; --provider / GREEN_LLM_PROVIDER override this
+llm_model: claude-opus-4-5  # optional; --model / GREEN_LLM_MODEL override this
 ```
 
 **Configuration File Format (TOML)**:
 ```toml
 project_name = "my-awesome-project"
 language = "python"
-output_dir = "~/projects"
+llm_provider = "anthropic"
+llm_model = "claude-opus-4-5"
 ```
+
+**Note**: API keys are never read from the config file. Set
+`ANTHROPIC_API_KEY` (or `OPENAI_API_KEY` for the `openai` provider) as an
+environment variable, or store it in the OS keyring — see
+[API Keys & Credentials](#api-keys--credentials) below.
 
 ### `--help`
 
@@ -352,6 +363,25 @@ Bundler (`brew install ruby` on macOS, `apt-get install ruby-full` on
 Debian/Ubuntu) — `bundle install` provisions every pinned quality gem
 (RSpec, SimpleCov, RuboCop, bundler-audit, Packwerk).
 
+##### `--agent TEXT` (Optional, repeatable)
+
+Agent-context format(s) to generate. Repeat the flag or comma-separate for
+multiple targets. All formats render the same shared content, just in a
+different on-disk convention.
+
+**Choices**:
+- `claude` (default) — `CLAUDE.md` + `.claude/` (skills, subagents, commands).
+- `agents-md` — `AGENTS.md`, the open cross-tool agent-context convention.
+- `aider` — `CONVENTIONS.md` + `.aider.conf.yml` for the [aider](https://aider.chat) tool.
+
+**Examples**:
+```bash
+--agent claude
+--agent agents-md
+--agent claude --agent agents-md
+--agent claude,agents-md,aider
+```
+
 ##### `--output-dir` / `-o PATH` (Optional)
 
 Output directory for the generated project.
@@ -407,6 +437,27 @@ Would generate:
 
 **Note**: Does not prompt for missing options even in interactive mode.
 
+##### `--force` / `-f` (Optional)
+
+Overwrite all existing files without prompting. Off by default, so re-running
+`init` against an existing project only adds missing files.
+
+**Example**:
+```bash
+start-green-stay-green init --project-name my-app --language python --force
+```
+
+##### `--interactive` (Optional)
+
+Prompt per-file when a conflict exists (skip/overwrite/diff), instead of the
+default additive behavior (skip existing files silently) or `--force`
+(overwrite everything silently). Mutually exclusive with `--force`.
+
+**Example**:
+```bash
+start-green-stay-green init --project-name my-app --language python --interactive
+```
+
 ##### `--no-interactive` (Optional)
 
 Run in non-interactive mode without prompts.
@@ -431,47 +482,147 @@ start-green-stay-green init \
 # Error: --language required in non-interactive mode.
 ```
 
-##### `--api-key TEXT` (Optional)
+##### `--offline` (Optional)
 
-Claude API key for AI-powered features.
+Run only Pass 1 of the two-pass init: produce a complete project from
+deterministic templates. No API key is read, no network call is made, no AI
+tuning is attempted. Equivalent to `--no-enhance` plus suppressing every
+API-key prompt. The scaffold is functionally complete either way — AI tuning
+only polishes `CLAUDE.md` and subagent content.
 
-**Behavior**:
-- If not provided, checks environment variable `ANTHROPIC_API_KEY`
-- If not found, checks OS keyring
-- If still not found, prompts interactively (unless `--no-interactive`)
-- If provided, enables AI-powered generation:
-  - Custom CI/CD pipelines
-  - Language-specific subagent profiles
-  - Tailored CLAUDE.md
-  - Custom architecture rules
+**Example**:
+```bash
+start-green-stay-green init --project-name my-app --language python --offline
+```
+
+##### `--no-enhance` (Optional)
+
+Skip Pass 2 (the AI-tuned polish over `CLAUDE.md` and subagents), but still
+resolve an API key so a later `green enhance` call can pick up where this one
+left off. Use `--offline` instead if you don't want the API-key resolution
+step to run at all (e.g. fully air-gapped).
+
+**Example**:
+```bash
+start-green-stay-green init --project-name my-app --language python --no-enhance
+```
+
+##### `--enable-live-dashboard` (Optional)
+
+Generate a live-updating metrics dashboard (coverage, CI status, mutation
+score) plus the GitHub Actions workflow that refreshes it after every merge.
+
+**Example**:
+```bash
+start-green-stay-green init --project-name my-app --language python --enable-live-dashboard
+```
+
+##### `--windows-ci` (Optional)
+
+Add an opt-in `windows-latest` job to the generated CI workflow that runs
+the project's quality gates through Git Bash (`bash scripts/<gate>.sh`).
+Default off: without this flag the generated CI is byte-for-byte unchanged
+and uses no Windows runner minutes.
+
+Supported languages: python, typescript, go, rust, java, csharp, ruby. Not
+supported (the flag fails fast with an explanation): swift, cpp (their gate
+toolchains aren't available on `windows-latest`), and kotlin (the gate
+scripts need a Gradle wrapper jar `init` doesn't write). For a multi-language
+project the leg follows the primary language (the first `-l` value).
+
+**Example**:
+```bash
+start-green-stay-green init --project-name my-app --language python --windows-ci
+```
+
+To add the leg to an **existing** scaffolded repo, re-run `init` with the
+flag plus a conflict-resolution mode (`init` never overwrites files by
+default):
+```bash
+green init -n my-app -l python --windows-ci --interactive  # choose
+# "overwrite" for .github/workflows/ci.yml when prompted
+```
+
+##### `--with-ralph-loop` (Optional)
+
+Generate the opt-in Ralph autonomous fleet-loop scaffolding: a subagent
+taxonomy under `.claude/agents/`, the fleet orchestrator
+(`.claude/commands/ralph-tick.md`), worktree-fleet mechanics under
+`scripts/ralph/`, and the maintenance-scan GitHub Actions. Default off — this
+is a heavier, opinionated system that assumes a GitHub-hosted issue/PR
+backlog and git worktrees, and requires manual secret/label setup after
+generation (see the generated `FLEET.md` and `PROMPT.md`).
+
+**Example**:
+```bash
+start-green-stay-green init --project-name my-app --language python --with-ralph-loop
+```
+
+##### `--timing-json PATH` (Optional)
+
+Write a structured timing/telemetry report (JSON) for the generation run.
+No effect on the default console output.
+
+**Example**:
+```bash
+start-green-stay-green init --project-name my-app --language python --timing-json timing.json
+```
+
+##### API Keys & Credentials
+
+There is no `--api-key` flag — passing a key on the command line would leave
+it visible in the process list and shell history. AI-powered features
+(Pass 2 tuning of `CLAUDE.md` and subagents) resolve credentials in this
+order:
+
+1. The active provider's environment variable — `ANTHROPIC_API_KEY` for the
+   default `anthropic` provider, `OPENAI_API_KEY` for `openai` (see
+   `--provider` below).
+2. The OS keyring (macOS Keychain, Linux Secret Service, Windows Credential
+   Manager) — populated by a prior interactive run.
+3. An interactive prompt (unless `--no-interactive` or `--offline`), with the
+   option to save the entered key to the keyring for next time.
 
 **Examples**:
 ```bash
-# Provide API key directly
-start-green-stay-green init \
-  --project-name my-app \
-  --language python \
-  --api-key sk-ant-abc123def456
-
-# Use environment variable
+# Recommended: environment variable
 export ANTHROPIC_API_KEY=sk-ant-abc123def456
 start-green-stay-green init --project-name my-app --language python
 
-# Use OS keyring (saved previously)
-start-green-stay-green init --project-name my-app --language python
+# No key available / fully air-gapped: skip Pass 2 entirely
+start-green-stay-green init --project-name my-app --language python --offline
 ```
 
-**API Key Priority** (in order):
-1. `--api-key` command line argument
-2. `ANTHROPIC_API_KEY` environment variable
-3. OS keyring (macOS/Linux/Windows)
-4. Interactive prompt (unless `--no-interactive`)
+Without any key, `init` still produces a complete project from deterministic
+templates (Pass 1) — AI tuning is a polish step, not a requirement.
 
-**Security**:
-- API key is never logged or displayed
-- `--api-key` input is hidden from shell history
-- Prompted input is masked in terminal
-- Use OS keyring for storage: `echo $ANTHROPIC_API_KEY | security add-generic-password -s "anthropic_api_key" -a "$USER" -w -`
+##### `--provider TEXT` (Optional)
+
+LLM provider for AI features. Precedence: this flag > `GREEN_LLM_PROVIDER`
+env var > `llm_provider` key in `--config` file > default (`anthropic`). Run
+`green providers` to list every registered provider, its default model, its
+credential env var, and its capability groups (batch, tool-use, token
+accounting).
+
+**Example**:
+```bash
+start-green-stay-green init --project-name my-app --language python --provider openai
+```
+
+For `openai`, `OPENAI_BASE_URL` can point at any OpenAI-compatible local
+server (Ollama, vLLM, LM Studio, …) — a dummy key is fine in that case.
+
+##### `--model TEXT` (Optional)
+
+Model identifier for AI features. Precedence: this flag > `GREEN_LLM_MODEL`
+env var > `llm_model` key in `--config` file > the provider's default model.
+The case of the model id is preserved verbatim (API identifiers are
+case-sensitive).
+
+**Example**:
+```bash
+start-green-stay-green init --project-name my-app --language python --model claude-opus-4-5
+```
 
 ##### `--config PATH` (Optional)
 
@@ -482,20 +633,24 @@ Path to configuration file (YAML or TOML).
 - `.yaml` / `.yml` for YAML
 - `.toml` for TOML
 
+Only `project_name`, `language`, `llm_provider`, and `llm_model` are read
+from the file; other keys are parsed but ignored (`output_dir` and every
+other `init` option must be passed on the command line).
+
 **Example Configuration (YAML)**:
 ```yaml
 project_name: my-awesome-project
 language: python
-output_dir: ~/projects
-api_key: sk-ant-...
+llm_provider: anthropic
+llm_model: claude-opus-4-5
 ```
 
 **Example Configuration (TOML)**:
 ```toml
 project_name = "my-awesome-project"
 language = "python"
-output_dir = "~/projects"
-api_key = "sk-ant-..."  # pragma: allowlist secret
+llm_provider = "anthropic"
+llm_model = "claude-opus-4-5"
 ```
 
 **Merge Behavior**:
@@ -523,17 +678,32 @@ start-green-stay-green init \
   --no-interactive
 ```
 
-**With API Key**:
+**With an API key (environment variable, recommended)**:
+```bash
+export ANTHROPIC_API_KEY=sk-ant-abc123
+start-green-stay-green init --project-name my-app --language python
+```
+
+**Offline / no AI features**:
 ```bash
 start-green-stay-green init \
   --project-name my-app \
   --language python \
-  --api-key sk-ant-abc123
+  --offline
 ```
 
 **With Configuration File**:
 ```bash
 start-green-stay-green init --config project.yaml
+```
+
+**Opt into Windows CI + the Ralph fleet loop**:
+```bash
+start-green-stay-green init \
+  --project-name my-app \
+  --language python \
+  --windows-ci \
+  --with-ralph-loop
 ```
 
 **Dry Run**:
@@ -557,9 +727,8 @@ start-green-stay-green init \
 | Code | Meaning | Example |
 |------|---------|---------|
 | 0 | Success - project generated | ✓ Project created |
-| 1 | Validation error | Invalid project name, missing option |
+| 1 | Validation error | Invalid project name, missing option, `--windows-ci` on an unsupported language |
 | 1 | Generation failed | File system error, permission denied |
-| 1 | Invalid API key | API key validation failed |
 | 2 | Missing required option | Non-interactive mode missing argument |
 
 #### Validation
@@ -579,11 +748,9 @@ The `init` command validates:
 **Output Directory**:
 - Path must be safe from traversal attacks
 - Parent directories are created if needed
-- Project directory must not already exist (to avoid conflicts)
-
-**API Key**:
-- Must be a valid Anthropic API key format
-- Validated before use
+- **Additive by default**: re-running `init` against an existing directory is
+  safe — existing files are preserved unless `--force` or `--interactive`
+  chooses to overwrite them.
 
 ### `version`
 
@@ -639,11 +806,138 @@ start-green-stay-green version --verbose
 |------|---------|
 | 0 | Success - version displayed |
 
+### `providers`
+
+List registered LLM providers and their capabilities.
+
+**Syntax**:
+```bash
+start-green-stay-green providers
+```
+
+Shows, for each provider the `--provider` flag accepts: the default model,
+the environment variable its API key is read from, and which capability
+groups it implements (batch, tool-use, token accounting). The listing is
+read from each provider's capability advertisement — no credentials,
+network access, or optional vendor SDK required, so it works even with
+nothing installed beyond the base package.
+
+**Example**:
+```bash
+start-green-stay-green providers
+```
+
+#### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success - provider list displayed |
+
+### `enhance`
+
+Re-run Pass 2 (AI tuning) on an existing `green init` project.
+
+**Syntax**:
+```bash
+start-green-stay-green enhance [PROJECT_PATH] [OPTIONS]
+```
+
+Gives users who ran `green init --offline` (or who have updated their
+reference skills/subagents) a way to add or refresh the AI-tuned artifacts
+without re-scaffolding the whole project.
+
+**Arguments**:
+
+##### `project_path` (Optional)
+
+Path to an existing `green init` project. Defaults to the current
+directory. The directory must contain a `CLAUDE.md` produced by `green
+init` — project name and language are auto-detected from it and from
+canonical project files (`pyproject.toml`, `package.json`, `go.mod`,
+`Cargo.toml`, ...).
+
+#### Options
+
+##### `--project-name` / `-n TEXT` (Optional)
+
+Override the auto-detected project name (normally parsed from the existing
+`CLAUDE.md`'s H1 title).
+
+##### `--language` / `-l TEXT` (Optional)
+
+Override the auto-detected primary language.
+
+##### `--targets` / `-t TEXT` (Optional, repeatable)
+
+Subset of artifacts to re-tune. Repeat the flag or comma-separate. Choices:
+`claude-md`, `subagents`. Default: re-tune everything.
+
+##### `--dry-run` (Optional)
+
+Make the API calls but don't write any files — useful for previewing token
+cost or expected changes before committing to a re-tune.
+
+##### `--no-interactive` (Optional)
+
+Run in non-interactive mode (skip keyring prompts).
+
+##### `--force` / `-f` (Optional)
+
+Overwrite files without prompting. Off by default.
+
+##### `--batch` (Optional)
+
+Submit subagent tunings via the Anthropic Message Batches API (50% cheaper,
+≤24h SLA). Use with `--targets subagents`. The first run submits and exits;
+re-run to fetch results, or pass `--wait` to block until done. Providers
+without batch support (see `green providers`) fall back to sequential API
+calls with a loud warning — never a crash, never silently dropped work.
+
+##### `--wait` (Optional)
+
+When used with `--batch`: block in-process, polling every 30s until the
+batch ends or the timeout elapses. Default off (the two-call
+submit-then-resume pattern is friendlier for CI). Has no effect on the
+first `--batch` invocation (submit-only); pass `--wait` on the resume call
+to block.
+
+##### `--config`, `--provider`, `--model`
+
+Same as `init` — see [API Keys & Credentials](#api-keys--credentials),
+[`--provider`](#--provider-text-optional), and [`--model`](#--model-text-optional)
+above. Provider/model resolve with the same four-tier precedence: CLI flag
+> env (`GREEN_LLM_PROVIDER` / `GREEN_LLM_MODEL`) > config-file key
+(`llm_provider` / `llm_model`, via `--config`) > built-in default.
+
+**Examples**:
+```bash
+# Re-tune everything in the current directory
+green enhance
+
+# Re-tune only CLAUDE.md in a specific project
+green enhance ./my-app --targets claude-md
+
+# Preview the token cost without writing anything
+green enhance --dry-run
+
+# Cheaper subagent tuning via the Batches API
+green enhance --targets subagents --batch
+green enhance --targets subagents --batch --wait   # or block until done
+```
+
+#### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success - artifacts re-tuned (or dry-run preview shown) |
+| 1 | Invalid path, project metadata could not be inferred, unknown `--targets` value, or no API key available |
+
 ## Environment Variables
 
 ### `ANTHROPIC_API_KEY`
 
-Claude API key for AI-powered features.
+API key for the `anthropic` provider (the default) — see
+[API Keys & Credentials](#api-keys--credentials).
 
 **Usage**:
 ```bash
@@ -651,7 +945,57 @@ export ANTHROPIC_API_KEY=sk-ant-abc123def456
 start-green-stay-green init --project-name my-app --language python
 ```
 
-**Priority**: Lower than `--api-key` CLI argument, higher than OS keyring
+**Priority**: Higher than the OS keyring; there is no CLI flag equivalent
+(passing a key on the command line would leave it visible in the process
+list, so it's deliberately not offered).
+
+### `OPENAI_API_KEY`
+
+API key for the `openai` provider (opt in with `--provider openai`, requires
+the `openai` extra: `pip install 'start-green-stay-green[openai]'`).
+
+**Usage**:
+```bash
+export OPENAI_API_KEY=sk-...
+start-green-stay-green init --project-name my-app --language python --provider openai
+```
+
+### `OPENAI_BASE_URL`
+
+Override the OpenAI API endpoint for the `openai` provider — points at any
+OpenAI-compatible local server (Ollama, vLLM, LM Studio, ...). A dummy
+`OPENAI_API_KEY` value is fine when using a local server that doesn't check it.
+
+**Usage**:
+```bash
+export OPENAI_BASE_URL=http://localhost:11434/v1
+export OPENAI_API_KEY=unused
+start-green-stay-green init --project-name my-app --language python --provider openai --model llama3
+```
+
+### `GREEN_LLM_PROVIDER`
+
+Default LLM provider, used when `--provider` is omitted. Precedence: CLI
+flag > this env var > config-file `llm_provider` key > built-in default
+(`anthropic`).
+
+**Usage**:
+```bash
+export GREEN_LLM_PROVIDER=openai
+start-green-stay-green init --project-name my-app --language python
+```
+
+### `GREEN_LLM_MODEL`
+
+Default model identifier, used when `--model` is omitted. Precedence: CLI
+flag > this env var > config-file `llm_model` key > the provider's default
+model.
+
+**Usage**:
+```bash
+export GREEN_LLM_MODEL=claude-opus-4-5
+start-green-stay-green init --project-name my-app --language python
+```
 
 ### `PYTHONUNBUFFERED`
 
@@ -667,14 +1011,20 @@ start-green-stay-green init --verbose --project-name my-app --language python
 
 ## Configuration Files
 
+Only four keys are read from a config file: `project_name`, `language`,
+`llm_provider`, and `llm_model`. Every other `init`/`enhance` option
+(`output_dir`, `force`, `windows_ci`, ...) must be passed on the command
+line — the file is parsed in full, but unrecognized keys are silently
+ignored rather than erroring, so a typo'd key doesn't fail the run.
+
 ### YAML Format
 
 ```yaml
 # project.yaml
 project_name: my-awesome-project
 language: python
-output_dir: ~/projects
-api_key: sk-ant-...  # Optional
+llm_provider: anthropic  # Optional
+llm_model: claude-opus-4-5  # Optional
 ```
 
 **Usage**:
@@ -688,8 +1038,8 @@ start-green-stay-green init --config project.yaml
 # project.toml
 project_name = "my-awesome-project"
 language = "python"
-output_dir = "~/projects"
-api_key = "sk-ant-..."  # pragma: allowlist secret
+llm_provider = "anthropic"
+llm_model = "claude-opus-4-5"
 ```
 
 **Usage**:
@@ -704,6 +1054,10 @@ When using both config file and CLI arguments:
 1. **Defaults** (lowest priority)
 2. Config file values
 3. **CLI arguments** (highest priority)
+
+(`llm_provider`/`llm_model` add a fourth tier between these two — the
+`GREEN_LLM_PROVIDER`/`GREEN_LLM_MODEL` environment variables — see
+[API Keys & Credentials](#api-keys--credentials).)
 
 Example:
 ```yaml
@@ -735,9 +1089,9 @@ Only letters, numbers, hyphens, and underscores are allowed.
 Error: --project-name required in non-interactive mode.
 ```
 
-**Invalid API Key**:
+**`--windows-ci` on an Unsupported Language**:
 ```
-Error: Invalid API key
+Error: --windows-ci is not supported for 'swift' (supported: python, typescript, go, rust, java, csharp, ruby).
 ```
 
 ### File System Errors
@@ -928,7 +1282,7 @@ See the [Ruby Toolchain](#--language---l-text-optional) table above
 for the full tool list, and [examples/ruby/](../examples/ruby/) for
 real generated output.
 
-### Batch Creating Projects
+### Scripting Multiple Projects
 
 ```bash
 #!/bin/bash
@@ -946,11 +1300,12 @@ done
 ```yaml
 # .github/workflows/generate.yml
 - name: Generate project
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
   run: |
     start-green-stay-green init \
       --project-name ${{ github.event.inputs.name }} \
       --language ${{ github.event.inputs.language }} \
-      --api-key ${{ secrets.ANTHROPIC_API_KEY }} \
       --no-interactive
 ```
 
@@ -968,7 +1323,6 @@ start-green-stay-green init \
   --project-name "$PROJECT_NAME" \
   --language "$LANGUAGE" \
   --output-dir "$OUTPUT_DIR" \
-  --api-key "$ANTHROPIC_API_KEY" \
   --no-interactive
 ```
 
@@ -978,10 +1332,15 @@ start-green-stay-green init \
 A: Yes, manually rename the directory and update references in configuration files.
 
 **Q: What if I don't have an API key?**
-A: The tool falls back to reference templates. AI features are optional.
+A: The tool falls back to reference templates (Pass 2 AI tuning is skipped).
+Use `--offline` to skip credential resolution entirely, or `--no-enhance` to
+generate without AI tuning while still saving a resolved key to the keyring
+for later `green enhance` runs. See
+[API Keys & Credentials](#api-keys--credentials).
 
 **Q: Can I use the same API key for multiple projects?**
-A: Yes, the API key is validated per-command but not stored by the CLI.
+A: Yes. The key is resolved fresh per invocation (env var, then OS keyring,
+then interactive prompt) and isn't tied to a single project.
 
 **Q: How do I update a project created by Start Green Stay Green?**
 A: The generated infrastructure is yours to customize. Make changes directly to configuration files.
