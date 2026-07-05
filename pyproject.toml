@@ -164,12 +164,19 @@ ignore = [
     "T201",      # Allow print in CLI script for user feedback
     "TRY301",    # Raise within try (intentional for CLIs)
 ]
+".claude/skills/discord-ralph-recap/scripts/recap.py" = [
+    "T201",      # Allow print in CLI script for user feedback (GH Actions log output)
+]
 "tests/**/*.py" = [
     "S101",      # Allow assert in tests
     "PLR2004",   # Allow magic values in tests
     "D",         # Don't require docstrings in tests
     "ANN",       # Don't require type annotations in tests
     "SLF001",    # Allow accessing private members in tests
+    "S106",      # Allow literal fixture tokens like token="t" in tests
+    "ARG005",    # Allow unused lambda args in monkeypatch stand-ins (lambda *a, **k: ...)
+    "TC002",     # Test-only third-party imports don't need TYPE_CHECKING gating
+    "TC003",     # Test-only stdlib imports don't need TYPE_CHECKING gating
 ]
 "tests/e2e/**/*.py" = [
     "S603",      # Allow subprocess calls in E2E tests (controlled test inputs)
