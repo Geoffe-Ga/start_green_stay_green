@@ -105,7 +105,6 @@ start-green-stay-green init \
 cat > config.yaml <<EOF
 project_name: my-project
 language: python
-include_ci: true
 EOF
 
 # Use config file
@@ -128,14 +127,21 @@ start-green-stay-green init [OPTIONS]
 
 - `--project-name, -n TEXT`: Name of the project to generate
 - `--language, -l TEXT`: Programming language(s). Repeat for multi-language: `-l python -l typescript`
+- `--agent TEXT`: Agent-context format(s) to generate. Repeat for multiple: `--agent claude --agent agents-md` (choices: `claude` (default), `agents-md`, `aider`)
 - `--output-dir, -o PATH`: Output directory for generated project (default: current directory)
 - `--force, -f`: Overwrite all existing files without prompting
 - `--interactive`: Prompt per-file when conflicts exist (skip/overwrite/diff)
 - `--dry-run`: Preview what would be generated without creating files
 - `--no-interactive`: Run in non-interactive mode (requires all options)
-- `--config, --config-file PATH`: Path to configuration file (YAML or TOML)
+- `--offline`: Run only Pass 1 (deterministic templates); no API key read, no network, no AI tuning
+- `--no-enhance`: Skip Pass 2 (AI tuning) but still resolve an API key for a later `green enhance`
+- `--enable-live-dashboard`: Generate a live metrics dashboard with an auto-updating workflow
 - `--windows-ci`: Add an opt-in `windows-latest` job to the generated CI workflow (default off; see below)
 - `--with-ralph-loop`: Generate the opt-in Ralph autonomous fleet-loop scaffolding — subagent taxonomy, fleet orchestrator, worktree scripts, and maintenance-scan GitHub Actions (default off; assumes a GitHub-hosted issue/PR backlog and git worktrees)
+- `--timing-json PATH`: Write a timing/telemetry report to PATH; no effect on default output
+- `--config, --config-file PATH`: Path to configuration file (YAML or TOML)
+- `--provider TEXT`: LLM provider override (see [AI Enhancement](#ai-enhancement))
+- `--model TEXT`: Model identifier override (see [AI Enhancement](#ai-enhancement))
 
 **Examples:**
 
@@ -232,6 +238,17 @@ These options work with all commands:
 - `--config, --config-file PATH`: Path to configuration file (YAML or TOML)
 - `--help`: Show help message and exit
 
+### `providers` - List Registered LLM Providers
+
+```bash
+start-green-stay-green providers
+```
+
+Shows, for each provider the `--provider` flag accepts: the default
+model, the environment variable its API key is read from, and which
+capability groups it implements (batch, tool-use, token accounting).
+Reads each provider's capability advertisement — no credentials, network
+access, or optional vendor SDK required.
 
 ### `green enhance` — re-tune an existing project
 
@@ -346,6 +363,28 @@ completion.
   --targets subagents`. See the [Batch mode](#batch-mode-phase-5)
   subsection above.
 
+### Choosing a provider and model
+
+`--provider`/`--model` (both `init` and `enhance`) pick the LLM backend
+for Pass 2 polish. Precedence: CLI flag > `GREEN_LLM_PROVIDER`/
+`GREEN_LLM_MODEL` env var > config-file `llm_provider`/`llm_model` key >
+built-in default (Anthropic, current Sonnet pin). Run `green providers`
+to list every registered provider, its default model, its API-key env
+var, and its capability groups (batch support, tool-use, token
+accounting) without needing credentials or the optional vendor SDK
+installed.
+
+```bash
+# Use OpenAI instead of the Anthropic default:
+export OPENAI_API_KEY=sk-...
+green init -n my-app -l python --provider openai --model gpt-5
+
+# Point at any OpenAI-compatible local server:
+export OPENAI_BASE_URL=http://localhost:11434/v1
+export OPENAI_API_KEY=unused
+green init -n my-app -l python --provider openai --model llama3
+```
+
 
 ## Documentation
 
@@ -421,7 +460,10 @@ cd my-project
 
 ### Configuration File Format
 
-Start Green Stay Green supports YAML and TOML configuration files.
+Start Green Stay Green supports YAML and TOML configuration files. Only
+`project_name`, `language`, `llm_provider`, and `llm_model` are read from
+the file today — other keys are parsed but ignored (`output_dir` and every
+other `init` option must be passed on the command line).
 
 **YAML Example:**
 
@@ -429,9 +471,8 @@ Start Green Stay Green supports YAML and TOML configuration files.
 # project-config.yaml
 project_name: my-awesome-project
 language: python
-output_dir: ~/projects
-include_ci: true
-include_tests: true
+llm_provider: anthropic  # Optional
+llm_model: claude-opus-4-5  # Optional
 ```
 
 **TOML Example:**
@@ -440,9 +481,8 @@ include_tests: true
 # project-config.toml
 project_name = "my-awesome-project"
 language = "python"
-output_dir = "~/projects"
-include_ci = true
-include_tests = true
+llm_provider = "anthropic"
+llm_model = "claude-opus-4-5"
 ```
 
 ### Configuration Priority
@@ -450,8 +490,10 @@ include_tests = true
 Configuration values are resolved in this order (highest to lowest priority):
 
 1. **Command-line arguments**: `--project-name my-app`
-2. **Configuration file**: `config.yaml` or `config.toml`
-3. **Interactive prompts**: Asked if value not provided
+2. **Environment variables** (`llm_provider`/`llm_model` only): `GREEN_LLM_PROVIDER`, `GREEN_LLM_MODEL`
+3. **Configuration file**: `config.yaml` or `config.toml`
+4. **Interactive prompts** (`project_name`/`language` only): asked if value not provided
+5. **Built-in default** (`llm_provider`/`llm_model` only)
 
 ### Project Name Validation
 
@@ -519,9 +561,8 @@ start-green-stay-green init \
 # Create team-standard.yaml
 cat > team-standard.yaml <<EOF
 language: python
-include_ci: true
-include_tests: true
-include_docs: true
+llm_provider: anthropic
+llm_model: claude-opus-4-5
 EOF
 
 # Generate project with team standards
