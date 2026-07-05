@@ -137,7 +137,7 @@ start-green-stay-green init [OPTIONS]
 - `--no-enhance`: Skip Pass 2 (AI tuning) but still resolve an API key for a later `green enhance`
 - `--enable-live-dashboard`: Generate a live metrics dashboard with an auto-updating workflow
 - `--windows-ci`: Add an opt-in `windows-latest` job to the generated CI workflow (default off; see below)
-- `--with-ralph-loop`: Generate the opt-in Ralph autonomous fleet-loop scaffolding (agents, `ralph-tick.md`, `scripts/ralph/`, maintenance-scan workflows); default off
+- `--with-ralph-loop`: Generate the opt-in Ralph autonomous fleet-loop scaffolding — subagent taxonomy, fleet orchestrator, worktree scripts, and maintenance-scan GitHub Actions (default off; assumes a GitHub-hosted issue/PR backlog and git worktrees)
 - `--timing-json PATH`: Write a timing/telemetry report to PATH; no effect on default output
 - `--config, --config-file PATH`: Path to configuration file (YAML or TOML)
 - `--provider TEXT`: LLM provider override (see [AI Enhancement](#ai-enhancement))

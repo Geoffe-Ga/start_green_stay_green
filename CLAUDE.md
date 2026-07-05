@@ -104,6 +104,9 @@ start_green_stay_green/
 ├── reference/                   # Reference implementations
 │   ├── workflows/               # Workflow documentation
 │   ├── subagents/               # Subagent profiles
+│   ├── skills/                  # Claude Code skills (also `.claude/skills/`)
+│   ├── ralph/                   # Opt-in Ralph fleet-loop scaffolding
+│   │                            #   (green init --with-ralph-loop)
 │   └── scripts/                 # Script templates
 ├── tests/                       # Test suite (97%+ coverage)
 │   ├── unit/                    # Fast, isolated tests
@@ -243,6 +246,16 @@ When delegating work to subagents, provide:
 - `plan/SPEC.md`: Complete project specification
 - `reference/MAXIMUM_QUALITY_ENGINEERING.md`: Quality framework
 - `README.md`: Project overview and quick start
+
+### Opt-in Ralph fleet loop (`green init --with-ralph-loop`)
+- `reference/ralph/`: source tree for the autonomous fleet-loop scaffolding
+  (agents, commands, scripts, GitHub Actions, prompts) generated only when
+  `--with-ralph-loop` is passed; default off.
+- `start_green_stay_green/generators/ralph_loop.py`: the generator that
+  copies it into a generated project.
+- This repo's own copy (adopted, not templated) lives at
+  `.claude/agents/ralph-*`, `.claude/commands/ralph-tick.md`, and
+  `scripts/ralph/` — see `scripts/ralph/FLEET.md`.
 
 ### Scripts
 - `scripts/check-all.sh`: Run all quality checks
