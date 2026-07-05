@@ -1,0 +1,18 @@
+[
+  {
+    "id": "backend-core",
+    "stack": "backend",
+    "paths": [
+      "backend/src"
+    ],
+    "charter": "Example area — replace with your own. Split by product surface or layer (routers/domain/services) once the backend grows past a single scan's comfortable scope. Prime sites for copy-paste endpoint variants, schema drift, dead branches, and inconsistent error handling."
+  },
+  {
+    "id": "frontend-core",
+    "stack": "frontend",
+    "paths": [
+      "frontend/src"
+    ],
+    "charter": "Example area — replace with your own. Split by feature/screen once the frontend grows past a single scan's comfortable scope. Prime sites for god-components, prop-drilling, duplicated hooks, and dead exports."
+  }
+]

@@ -88,6 +88,7 @@ from start_green_stay_green.generators.precommit import (
 )
 from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import PreCommitGenerator
+from start_green_stay_green.generators.ralph_loop import copy_ralph_loop
 from start_green_stay_green.generators.readme import ReadmeConfig
 from start_green_stay_green.generators.readme import ReadmeGenerator
 from start_green_stay_green.generators.scripts import ScriptConfig
@@ -1231,6 +1232,24 @@ def _generate_skills_step(
     console.print("[green]✓[/green] Generated skills")
 
 
+def _generate_ralph_loop_step(
+    project_path: Path,
+    *,
+    with_ralph_loop: bool,
+    file_writer: FileWriter | None = None,
+) -> None:
+    """Generate the opt-in Ralph fleet-loop scaffolding.
+
+    A no-op unless ``--with-ralph-loop`` was passed; see
+    :func:`start_green_stay_green.generators.ralph_loop.copy_ralph_loop`.
+    """
+    if not with_ralph_loop:
+        return
+    with step_timer("ralph_loop"), console.status("Generating Ralph fleet loop..."):
+        copy_ralph_loop(project_path, file_writer=file_writer)
+    console.print("[green]✓[/green] Generated Ralph fleet loop (opt-in)")
+
+
 def _generate_ci_step(
     project_path: Path,
     project_name: str,
@@ -1730,11 +1749,14 @@ class _Pass2Options:
         windows_ci: Opt-in ``--windows-ci`` flag (#388): append the
             ``quality-windows`` leg to the generated CI workflow.
             Default off keeps the generated CI unchanged.
+        with_ralph_loop: Opt-in ``--with-ralph-loop`` flag: generate the
+            Ralph fleet-loop scaffolding. Default off.
     """
 
     orchestrator: AIOrchestrator | None
     agent_targets: tuple[str, ...] = (TARGET_CLAUDE,)
     windows_ci: bool = False
+    with_ralph_loop: bool = False
 
 
 def _generate_pass2_polish(
@@ -1833,6 +1855,11 @@ def _generate_project_files(
         # Shared steps (run once, using primary language)
         _generate_readme_step(project_path, project_name, primary_language, file_writer)
         _generate_skills_step(project_path, file_writer)
+        _generate_ralph_loop_step(
+            project_path,
+            with_ralph_loop=pass2.with_ralph_loop,
+            file_writer=file_writer,
+        )
 
         # Pass 2 of the two-pass init model: AI-tunable artifacts.
         # Uses the primary language for cross-language projects.
@@ -2549,6 +2576,23 @@ def init(  # noqa: PLR0913
             ),
         ),
     ] = False,
+    with_ralph_loop: Annotated[
+        bool,
+        typer.Option(
+            "--with-ralph-loop",
+            help=(
+                "Generate the Ralph autonomous fleet-loop scaffolding: "
+                ".claude/agents (a full subagent taxonomy), "
+                ".claude/commands/ralph-tick.md (the fleet orchestrator), "
+                "scripts/ralph/ (worktree fleet mechanics), and the "
+                "maintenance-scan GitHub Actions. Opt-in and off by "
+                "default: this assumes a GitHub-hosted issue/PR backlog "
+                "and git worktrees, and requires manual secret/label "
+                "setup after generation (see the generated FLEET.md and "
+                "PROMPT.md)."
+            ),
+        ),
+    ] = False,
     timing_json: Annotated[
         Path | None,
         typer.Option(
@@ -2592,6 +2636,10 @@ def init(  # noqa: PLR0913
             generated project's quality gates on ``windows-latest``
             through Git Bash (#388). Default off leaves the generated
             workflow unchanged.
+        with_ralph_loop: Opt into generating the Ralph autonomous
+            fleet-loop scaffolding. Default off — most generated
+            projects don't want this heavier, opinionated system by
+            default.
         timing_json: Optional path to write a timing/telemetry JSON report.
         config: Configuration file path.
         provider: Optional LLM provider override (``--provider``).
@@ -2675,6 +2723,7 @@ def init(  # noqa: PLR0913
                 orchestrator=orchestrator,
                 agent_targets=resolved_agents,
                 windows_ci=windows_ci,
+                with_ralph_loop=with_ralph_loop,
             ),
             file_writer,
         )

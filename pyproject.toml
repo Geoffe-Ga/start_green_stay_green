@@ -137,6 +137,15 @@ exclude = ["tests*", "docs*", "reference*", "templates*"]
 target-version = "py311"
 line-length = 88
 src = ["start_green_stay_green", "tests"]
+# Vendored/template content for generated projects, not this repo's own
+# shipped code — mypy, bandit, coverage, and vulture already exclude these
+# same two directories; ruff never needed to until reference/ gained its
+# first Python file (the discord-ralph-recap skill script).
+extend-exclude = ["reference", "templates"]
+# Pre-commit passes explicit changed-file paths, which ruff's exclude/
+# extend-exclude otherwise ignore by default (mirroring black) — without
+# this, the exclude above would only apply to bare directory scans.
+force-exclude = true
 
 [tool.ruff.lint]
 select = [
