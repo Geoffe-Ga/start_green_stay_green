@@ -281,6 +281,34 @@ ij_add 8 "epic:cli" "epic: CLI overhaul"
 ij_finalize
 check "the umbrella issue alone yields nothing (only candidate excluded)" "" "$(run_pick)"
 
+# --- repo_root resolution from inside a REAL worktree -----------------------
+# Every prior "worktree" scenario simulates a live worker with a plain
+# `mkdir`, so pick-next.sh is always actually invoked from $REPO. A real
+# worker invokes pick-next.sh from inside its OWN worktree, where
+# `git rev-parse --show-toplevel` returns the worktree's own path rather
+# than $REPO -- silently pointing `wt_dir` at the wrong location and making
+# the worktree-exclusion check a no-op. Regression guard using a real
+# `git worktree add` (not the mkdir simulation above).
+
+# 24) Worktree exclusion still works when pick-next.sh itself runs from
+# inside a real linked worktree of $REPO.
+#
+# The real worktree is nested a level DEEPER than $REPO
+# ($WORK/deeper/real-worktree vs $WORK/repo) so `dirname` of each diverges --
+# both sitting directly under $WORK would make the bug's wrong `wt_dir`
+# computation accidentally coincide with the correct one and mask the bug.
+new_scenario real_worktree_repo_root
+candidate 10 ""; candidate 11 ""; candidate 12 ""
+worktree 10
+(cd "$REPO" && git commit -q --allow-empty -m "seed for worktree add")
+mkdir -p "$WORK/deeper"
+REAL_WT="$WORK/deeper/real-worktree"
+(cd "$REPO" && git worktree add -q -b real-worktree-branch "$REAL_WT" >/dev/null 2>&1)
+run_pick_from_worktree() { (cd "$REAL_WT" && PATH="$BIN:$PATH" "$PICK"); }
+check "worktree issue still excluded when run from inside a worktree" \
+  "11" "$(run_pick_from_worktree)"
+(cd "$REPO" && git worktree remove -f "$REAL_WT" >/dev/null 2>&1) || true
+
 echo
 echo "pick-next tests: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

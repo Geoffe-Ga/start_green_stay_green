@@ -55,9 +55,23 @@ die() {
   exit 1
 }
 
-# Resolve the repository root so the script works from any worktree/subdir.
+# Resolve the MAIN repo root so the script works from any worktree/subdir.
+#
+# `git rev-parse --show-toplevel` returns the CURRENT worktree's root, not
+# the main repo's — from inside `../sgsg-worktrees/issue-42` it returns that
+# worktree's own path. Every worker runs fleet.sh from inside its own
+# worktree, so that resolved to a nested, wrong `worktrees_root()`
+# (`.../sgsg-worktrees/issue-42/../sgsg-worktrees`) and corrupted
+# `STATE_FILE` reads and active-lane exclusion, causing the orchestrator to
+# spin retrying `assign` against a branch it already owns.
+# `--git-common-dir` always resolves to the ORIGINAL repo's `.git` (shared
+# across every linked worktree), so its dirname is the main root regardless
+# of which worktree invoked this script.
 repo_root() {
-  git rev-parse --show-toplevel 2>/dev/null || die "not inside a git repository"
+  local git_common_dir
+  git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    || die "not inside a git repository"
+  dirname "$git_common_dir"
 }
 
 # Absolute path of the worktree fleet's root — a SIBLING of the repo root

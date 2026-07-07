@@ -245,6 +245,28 @@ new_scenario prio_high_beats_medium
 ij_add 5 "priority-medium"; ij_add 9 "priority-high"; ij_finalize
 check "priority-high (tier 1) beats priority-medium (tier 2)" "9" "$(run_pick)"
 
+# --- repo_root resolution from inside a REAL worktree -----------------------
+# Every prior "worktree" scenario simulates a live worker with a plain
+# `mkdir`, so pick-next.sh is always actually invoked from $REPO. A real
+# worker invokes pick-next.sh from inside its OWN worktree, where
+# `git rev-parse --show-toplevel` returns the worktree's own path rather
+# than $REPO -- silently pointing `wt_dir` at the wrong location and making
+# the worktree-exclusion check a no-op. Regression guard using a real
+# `git worktree add` (not the mkdir simulation above).
+
+# 20) Worktree exclusion still works when pick-next.sh itself runs from
+# inside a real linked worktree of $REPO.
+new_scenario real_worktree_repo_root
+candidate 10 ""; candidate 11 ""; candidate 12 ""
+worktree 10
+(cd "$REPO" && git commit -q --allow-empty -m "seed for worktree add")
+REAL_WT="$WORK/real-worktree"
+(cd "$REPO" && git worktree add -q -b real-worktree-branch "$REAL_WT" >/dev/null 2>&1)
+run_pick_from_worktree() { (cd "$REAL_WT" && PATH="$BIN:$PATH" "$PICK"); }
+check "worktree issue still excluded when run from inside a worktree" \
+  "11" "$(run_pick_from_worktree)"
+(cd "$REPO" && git worktree remove -f "$REAL_WT" >/dev/null 2>&1) || true
+
 echo
 echo "pick-next tests: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
