@@ -234,6 +234,59 @@ class TestGenerateWithPython:
         repo_urls = [repo.get("repo", "") for repo in repos]
         assert any("black" in url for url in repo_urls)
 
+    def test_generate_python_vulture_targets_real_package(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Vulture's target substitutes the project's own package name."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        config = GenerationConfig(
+            project_name="my-cool-app",
+            language="python",
+            language_config={},
+        )
+        result = generator.generate(config)
+        repos = result["repos"]
+        vulture_repo = next(r for r in repos if "vulture" in r.get("repo", ""))
+        assert vulture_repo["hooks"][0]["args"][0] == "my_cool_app/"
+
+    def test_generate_python_twice_does_not_leak_package_name(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Substitution must not mutate the shared LANGUAGE_CONFIGS template."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        generator.generate(
+            GenerationConfig(
+                project_name="first-app", language="python", language_config={}
+            )
+        )
+        second = generator.generate(
+            GenerationConfig(
+                project_name="second-app", language="python", language_config={}
+            )
+        )
+        vulture_repo = next(
+            r for r in second["repos"] if "vulture" in r.get("repo", "")
+        )
+        assert vulture_repo["hooks"][0]["args"][0] == "second_app/"
+        assert LANGUAGE_CONFIGS["python"]["hooks"][13]["hooks"][0]["args"][0] == (
+            "{package_name}/"
+        )
+
+    def test_generate_python_mypy_has_no_additional_dependencies(
+        self, mock_orchestrator: Mock
+    ) -> None:
+        """Generated mypy hook must not reference the broken types-all package."""
+        generator = PreCommitGenerator(mock_orchestrator)
+        config = GenerationConfig(
+            project_name="test-project",
+            language="python",
+            language_config={},
+        )
+        result = generator.generate(config)
+        repos = result["repos"]
+        mypy_repo = next(r for r in repos if "mirrors-mypy" in r.get("repo", ""))
+        assert "additional_dependencies" not in mypy_repo["hooks"][0]
+
     def test_generate_python_has_default_language_version(
         self, mock_orchestrator: Mock
     ) -> None:
@@ -2242,10 +2295,10 @@ class TestMutationKillers:
         hooks = LANGUAGE_CONFIGS["python"]["hooks"][4]["hooks"]
         assert hooks[0]["id"] == "mypy"
 
-    def test_python_mypy_additional_dependencies_exact(self) -> None:
-        """Test mypy additional_dependencies are exact."""
+    def test_python_mypy_has_no_additional_dependencies(self) -> None:
+        """mypy must not pin the unresolvable ``types-all`` meta-package."""
         hooks = LANGUAGE_CONFIGS["python"]["hooks"][4]["hooks"]
-        assert hooks[0]["additional_dependencies"] == ["types-all"]
+        assert "additional_dependencies" not in hooks[0]
 
     def test_python_mypy_args_exact(self) -> None:
         """Test mypy args are exact."""
@@ -2330,9 +2383,9 @@ class TestMutationKillers:
         assert hooks[0]["id"] == "vulture"
 
     def test_python_vulture_args_exact(self) -> None:
-        """Test vulture args are exact."""
+        """Vulture's target is a template token, substituted at generate() time."""
         hooks = LANGUAGE_CONFIGS["python"]["hooks"][13]["hooks"]
-        assert hooks[0]["args"] == ["start_green_stay_green/", "--min-confidence", "80"]
+        assert hooks[0]["args"] == ["{package_name}/", "--min-confidence", "80"]
 
     def test_python_detect_secrets_hook_id_exact(self) -> None:
         """Test detect-secrets hook ID is exact."""
@@ -2572,21 +2625,21 @@ class TestMutationKillers:
     def test_ci_autofix_commit_msg_exact(self, mock_orchestrator: Mock) -> None:
         """Test CI autofix_commit_msg is exact."""
         generator = PreCommitGenerator(mock_orchestrator)
-        config_dict = generator._build_config_dict("python")
+        config_dict = generator._build_config_dict("python", "test_project")
         expected = "style: auto-fix by pre-commit hooks"
         assert config_dict["ci"]["autofix_commit_msg"] == expected
 
     def test_ci_autoupdate_commit_msg_exact(self, mock_orchestrator: Mock) -> None:
         """Test CI autoupdate_commit_msg is exact."""
         generator = PreCommitGenerator(mock_orchestrator)
-        config_dict = generator._build_config_dict("python")
+        config_dict = generator._build_config_dict("python", "test_project")
         expected = "chore: update pre-commit hooks"
         assert config_dict["ci"]["autoupdate_commit_msg"] == expected
 
     def test_ci_skip_is_empty_list(self, mock_orchestrator: Mock) -> None:
         """Test CI skip is empty list."""
         generator = PreCommitGenerator(mock_orchestrator)
-        config_dict = generator._build_config_dict("python")
+        config_dict = generator._build_config_dict("python", "test_project")
         assert config_dict["ci"]["skip"] == []
 
     # Header Generation Exact Tests

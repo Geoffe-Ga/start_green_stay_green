@@ -90,6 +90,7 @@ from start_green_stay_green.generators.precommit import (
 )
 from start_green_stay_green.generators.precommit import GenerationConfig
 from start_green_stay_green.generators.precommit import PreCommitGenerator
+from start_green_stay_green.generators.precommit import generate_secrets_baseline
 from start_green_stay_green.generators.ralph_loop import copy_ralph_loop
 from start_green_stay_green.generators.readme import ReadmeConfig
 from start_green_stay_green.generators.readme import ReadmeGenerator
@@ -1216,7 +1217,37 @@ def _generate_precommit_step(
         generated_content = precommit_result["content"]
 
         _write_precommit_config(precommit_file, generated_content, file_writer)
+        _write_secrets_baseline(project_path / ".secrets.baseline", file_writer)
     console.print("[green]✓[/green] Generated pre-commit config")
+
+
+def _write_secrets_baseline(
+    baseline_file: Path,
+    file_writer: FileWriter | None,
+) -> None:
+    """Write an initial ``.secrets.baseline`` if one doesn't already exist.
+
+    The detect-secrets pre-commit hook (wired in by every LANGUAGE_CONFIGS
+    entry) requires ``--baseline .secrets.baseline`` to already exist —
+    without this, the very first ``pre-commit run`` in a generated project
+    fails outright on a missing file.
+
+    Args:
+        baseline_file: Path to ``.secrets.baseline``.
+        file_writer: Optional FileWriter for additive/force conflict
+            resolution; when ``None``, writes directly unless the file
+            already exists.
+    """
+    if file_writer is None:
+        if not baseline_file.exists():
+            content = generate_secrets_baseline(datetime.now(UTC).isoformat())
+            baseline_file.write_text(content, encoding="utf-8")
+        return
+
+    if baseline_file.exists() and not file_writer.is_force:
+        return
+    content = generate_secrets_baseline(datetime.now(UTC).isoformat())
+    file_writer.write_file(baseline_file, content)
 
 
 def _write_precommit_config(
@@ -1678,6 +1709,31 @@ def _write_initial_metrics_json(
     )
 
 
+def _drop_regenerate_dashboard_step(workflow_content: str) -> str:
+    """Strip the "Regenerate dashboard.html" step from a copied metrics.yml.
+
+    SGSG's own ``metrics.yml`` (the source this is copied from) calls
+    ``scripts/regenerate_dashboard.py``, which depends on
+    ``start_green_stay_green.generators.metrics.MetricsGenerator`` -- not
+    installed in a generated project, so that step would crash every run.
+    That script is intentionally never copied downstream (unlike
+    ``collect_metrics.py``, its templating logic isn't reasonably portable).
+    ``dashboard.html`` is already rendered once at ``green init`` time;
+    downstream CI only needs to refresh ``metrics.json`` and republish the
+    existing ``dashboard.html`` to Pages.
+
+    Args:
+        workflow_content: The copied ``metrics.yml`` content.
+
+    Returns:
+        The content with the regenerate-dashboard step removed, if present.
+    """
+    step_pattern = re.compile(
+        r"\n *- name: Regenerate dashboard\.html from template\n" r"(?: +.*\n)*",
+    )
+    return step_pattern.sub("", workflow_content)
+
+
 def _copy_metrics_assets(project_path: Path, project_name: str) -> tuple[bool, bool]:
     """Copy the metrics workflow and collection script into the project.
 
@@ -1702,6 +1758,7 @@ def _copy_metrics_assets(project_path: Path, project_name: str) -> tuple[bool, b
         workflow_content = workflow_content.replace(
             "start-green-stay-green", project_name
         )
+        workflow_content = _drop_regenerate_dashboard_step(workflow_content)
         target_workflow.write_text(workflow_content, encoding="utf-8")
 
     scripts_dir = project_path / "scripts"

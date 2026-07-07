@@ -269,10 +269,17 @@ radon>=6.0.0
 xenon>=0.9.0
 
 # Mutation testing
-mutmut>=2.4.0
+# Upper-bounded: 3.x renamed [tool.mutmut]'s config keys (paths_to_mutate/
+# tests_dir -> different schema), so an unbounded pin resolves to 3.x and
+# crashes against the 2.x-schema config generated below.
+mutmut>=2.4.0,<3.0.0
 
 # Pre-commit hooks
 pre-commit>=3.4.0
+
+# YAML parsing (used by scripts/collect_metrics.py when
+# --enable-live-dashboard is passed)
+PyYAML>=6.0.0
 
 # Type stubs
 types-PyYAML>=6.0.0
@@ -317,8 +324,9 @@ dev = [
     "bandit>=1.7.5",
     "pip-audit>=2.7.0",
     "radon>=6.0.0",
-    "mutmut>=2.4.0",
+    "mutmut>=2.4.0,<3.0.0",
     "pre-commit>=3.4.0",
+    "PyYAML>=6.0.0",
 ]
 
 [build-system]

@@ -33,10 +33,7 @@ import sys
 from typing import Any
 from typing import TYPE_CHECKING
 
-from start_green_stay_green.generators.metrics import ci_status
-from start_green_stay_green.generators.metrics import count_ci_jobs
-from start_green_stay_green.generators.metrics import count_precommit_hooks
-from start_green_stay_green.generators.metrics import precommit_status
+import yaml
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -48,6 +45,110 @@ GITHUB_API_TIMEOUT_SECONDS = 10
 
 # ``owner/repo`` slug as provided by the GITHUB_REPOSITORY env var.
 GITHUB_REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+# --- Vendored from start_green_stay_green.generators.metrics ---------------
+# This script is copied verbatim into every `--enable-live-dashboard`
+# project (see cli.py's `_copy_metrics_assets`), which does NOT have the
+# `start_green_stay_green` package installed. These four functions (plus
+# their private helpers) are duplicated here rather than imported so the
+# copied script is fully self-contained. Keep behaviorally identical to
+# `start_green_stay_green/generators/metrics.py` — a parity test
+# (tests/unit/test_collect_metrics.py) compares both copies' outputs.
+
+
+def _load_precommit_repos(config_path: Path) -> list[object]:
+    """Load the ``repos`` list from a pre-commit config, degrading to ``[]``."""
+    if not config_path.is_file():
+        return []
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return []
+    repos = data.get("repos") if isinstance(data, dict) else None
+    return repos if isinstance(repos, list) else []
+
+
+def _repo_hook_count(repo: object) -> int:
+    """Return the number of hooks declared by a single pre-commit repo entry."""
+    if not isinstance(repo, dict):
+        return 0
+    hooks = repo.get("hooks")
+    return len(hooks) if isinstance(hooks, list) else 0
+
+
+def count_precommit_hooks(config_path: Path) -> int:
+    """Count the total number of hooks in a pre-commit config file."""
+    repos = _load_precommit_repos(config_path)
+    return sum(_repo_hook_count(repo) for repo in repos)
+
+
+def precommit_status(
+    total_hooks: int, passing_hooks: int | None = None
+) -> dict[str, object]:
+    """Build the canonical Pre-Commit Status dict for the metrics dashboard."""
+    if passing_hooks is None:
+        passing_hooks = total_hooks
+    has_hooks = total_hooks > 0
+    percentage = (passing_hooks / total_hooks * 100) if has_hooks else 0.0
+    return {
+        "total_hooks": total_hooks,
+        "passing_hooks": passing_hooks,
+        "percentage": percentage,
+        "status": "passing" if has_hooks else "unknown",
+    }
+
+
+def _workflow_job_count(workflow_path: Path) -> int:
+    """Return the number of jobs declared in a single workflow file."""
+    try:
+        data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return 0
+    jobs = data.get("jobs") if isinstance(data, dict) else None
+    return len(jobs) if isinstance(jobs, dict) else 0
+
+
+def count_ci_jobs(workflows_dir: Path) -> int:
+    """Count GitHub Actions jobs across all workflow files in a directory."""
+    if not workflows_dir.is_dir():
+        return 0
+    workflow_files = sorted(
+        [*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")]
+    )
+    return sum(_workflow_job_count(path) for path in workflow_files)
+
+
+def _ci_status_label(total_jobs: int, passing_jobs: int | None) -> str:
+    """Derive the CI status label from job counts."""
+    if passing_jobs is None or total_jobs <= 0:
+        return "unknown"
+    return "passing" if passing_jobs >= total_jobs else "failing"
+
+
+def ci_status(
+    total_jobs: int,
+    passing_jobs: int | None = None,
+    *,
+    run_url: str | None = None,
+) -> dict[str, object]:
+    """Build the canonical CI Status dict for the metrics dashboard."""
+    status = _ci_status_label(total_jobs, passing_jobs)
+    resolved_passing = passing_jobs if passing_jobs is not None else 0
+    percentage = (resolved_passing / total_jobs * 100) if total_jobs > 0 else 0.0
+
+    result: dict[str, object] = {
+        "total_jobs": total_jobs,
+        "passing_jobs": resolved_passing,
+        "percentage": percentage,
+        "status": status,
+    }
+    if run_url is not None:
+        result["run_url"] = run_url
+    return result
+
+
+# --- End vendored section ---------------------------------------------------
 
 
 def _github_api_json(path: str, token: str) -> object | None:
