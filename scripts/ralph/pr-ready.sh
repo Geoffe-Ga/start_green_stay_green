@@ -43,16 +43,20 @@ done
 [[ "$pr" =~ ^[0-9]+$ ]] || die "usage: pr-ready.sh <PR_NUMBER> [--repo <owner/repo>]"
 
 # The canonical verdict line `claude-code-review.yml` posts is
-# `## Verdict: <LGTM|CHANGES_REQUESTED|COMMENTS>` (also tolerated: `**Verdict:**`
-# and a bare `Verdict:`), sitting at the END of a longer `## Summary …` body — so
-# the match must be case-insensitive AND multiline (`m`, so `^` anchors to the
-# verdict line — which sits at the END of a multi-line `## Summary …` body, not
-# at string start), prefix-tolerant, and keyed to the verdict LINE (a stray
-# "LGTM" in prose must not count). This mirrors the canonical parser in
-# `.claude/skills/await-claude-review/SKILL.md`. Backslashes are doubled because
-# this text is spliced into a jq string literal, where `\s` is an invalid escape
-# and must reach the regex engine as `\\s`.
-readonly VERDICT_RE='(?im)^\\s*(?:#{1,6}\\s+|\\*\\*)?verdict[:*\\s]'
+# `## Verdict: <LGTM|CHANGES_REQUESTED|COMMENTS>` (also tolerated: `**Verdict:**`,
+# a bare `Verdict:`, and an emoji-decorated two-line form like
+# `## Verdict\n✅ LGTM`), sitting at the END of a longer `## Summary …` body —
+# so the match must be case-insensitive AND multiline (`m`, so `^` anchors to
+# the verdict line — which sits at the END of a multi-line `## Summary …`
+# body, not at string start), prefix-tolerant, and keyed to the verdict LINE
+# (a stray "LGTM" in prose must not count). This mirrors the canonical parser
+# in `.claude/skills/await-claude-review/SKILL.md`. The separator between
+# "verdict" and the value is any run of non-alphanumeric characters (not just
+# `[:*\s]`) so a checkmark emoji or a dash doesn't defeat the match.
+# Backslashes are doubled because this text is spliced into a jq string
+# literal, where `\s` is an invalid escape and must reach the regex engine as
+# `\\s`.
+readonly VERDICT_RE='(?im)^\\s*(?:#{1,6}\\s+|\\*\\*)?verdict[^a-zA-Z0-9]'
 readonly VERDICT_LGTM_RE="${VERDICT_RE}+lgtm"
 
 # `${arr[@]+"${arr[@]}"}` expands to nothing when the array is empty instead of

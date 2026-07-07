@@ -102,7 +102,10 @@ jobs:
         if: matrix.area.stack == 'frontend'
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
         with:
-          node-version-file: "frontend/.nvmrc"
+          # No .nvmrc: `green init` doesn't generate one for TypeScript
+          # projects. Pin a current LTS rather than depending on a file
+          # that may not exist in a flat, single-language layout.
+          node-version: "20"
 
       - name: Install backend toolbox (read-only analyzers)
         if: matrix.area.stack == 'backend'
@@ -111,12 +114,23 @@ jobs:
           # shellcheck disable=SC1091
           . .venv/bin/activate
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+          # `green init` generates a FLAT layout (requirements*.txt at repo
+          # root), not a backend/ subdir -- prefer root, fall back to
+          # backend/ for a genuine backend+frontend monorepo.
+          reqs_dir="."
+          [ -f backend/requirements.txt ] && reqs_dir="backend"
+          for req in requirements.txt requirements-dev.txt; do
+            [ -f "$reqs_dir/$req" ] && pip install -r "$reqs_dir/$req"
+          done
 
       - name: Install frontend toolbox
         if: matrix.area.stack == 'frontend'
         run: |
-          cd frontend && npm ci
+          # Same flat-vs-monorepo fallback as the Python install above.
+          pkg_dir="."
+          [ -f frontend/package.json ] && pkg_dir="frontend"
+          cd "$pkg_dir" || exit 1
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
       - name: Run targeted de-slopify scan
         uses: anthropics/claude-code-action@6c0083bb7289c31716797a039b6367b3079cc46e  # v1.0.162

@@ -111,6 +111,15 @@ if command -v jq >/dev/null 2>&1; then
        COMMENTS_JSON="$(cj '{"createdAt":"'"$FRESH"'","body":"## Summary\ngood\n\n## Verdict: LGTM\n"}')" \
        run 100)"
 
+  # Defense-in-depth: an emoji-decorated two-line verdict (checkmark on its
+  # own line before LGTM) must still count. The old separator class
+  # `[:*\s]` stopped at the emoji and never reached "LGTM"; the widened
+  # `[^a-zA-Z0-9]` separator does not.
+  check "real emoji-prefixed ## Verdict\\n✅ LGTM (fresh) → ready" "ready" \
+    "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H \
+       COMMENTS_JSON="$(cj '{"createdAt":"'"$FRESH"'","body":"## Summary\ngood\n\n## Verdict\n✅ LGTM\n"}')" \
+       run 100)"
+
   # `**Verdict:** CHANGES_REQUESTED` whose prose mentions "LGTM" must NOT count as
   # LGTM — the exact false-positive a whole-body match would cause.
   check "real CHANGES_REQUESTED w/ 'LGTM' in prose → awaiting-review" "awaiting-review" \

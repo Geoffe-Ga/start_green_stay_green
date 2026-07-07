@@ -36,11 +36,44 @@ jobs:
           fetch-depth: 1
 
       - name: Measure runway and refill if starving
+        env:
+          # Mirror pick-next.sh's own eligibility defaults exactly (same
+          # env var names/defaults) so "queue depth" here means the same
+          # thing as "what pick-next.sh will actually pick". Filtering on
+          # `--label agent-ready` alone undercounted: pick-next.sh does NOT
+          # require that label by default (RALPH_REQUIRE_LABELS is empty
+          # unless a repo opts into the stricter gate), so a real,
+          # perfectly pickable backlog with no agent-ready labels always
+          # measured depth 0 and hopper could never stand down.
+          RALPH_REQUIRE_LABELS: ${{ vars.RALPH_REQUIRE_LABELS || '' }}
+          # Matches scripts/ralph/pick-next.sh's own default exactly --
+          # note: no "epic" here (unlike the generic template default),
+          # since SGSG's pick-next.sh excludes epics by TITLE prefix
+          # instead (epic:<name> labels BOTH an umbrella issue and its
+          # children, so the label alone can't distinguish them).
+          RALPH_EXCLUDE_LABELS: >-
+            ${{ vars.RALPH_EXCLUDE_LABELS || 'wontfix duplicate invalid
+            question blocked needs-spec future-work do-not-auto-merge
+            in-progress' }}
         run: |
           set -euo pipefail
-          COUNT=$(gh issue list --label agent-ready --state open \
-                    --limit 300 --json number --jq 'length')
-          echo "Agent-ready queue depth: $COUNT" | tee -a "$GITHUB_STEP_SUMMARY"
+          # shellcheck disable=SC2086
+          require_json=$(printf '%s\n' $RALPH_REQUIRE_LABELS | jq -R . | jq -s .)
+          # shellcheck disable=SC2086
+          exclude_json=$(printf '%s\n' $RALPH_EXCLUDE_LABELS | jq -R . | jq -s .)
+          COUNT=$(
+            gh issue list --state open --limit 300 --json number,labels --jq "
+              ( $require_json | map(select(length>0)) ) as \$req
+              | ( $exclude_json | map(select(length>0)) ) as \$exc
+              | [ .[] | (.labels | map(.name)) as \$names
+                  | select(
+                      ( \$req | all(. as \$r | \$names | index(\$r)) )
+                      and ( \$exc | any(. as \$x | \$names | index(\$x)) | not )
+                    ) ]
+              | length
+            "
+          )
+          echo "Pickable queue depth: $COUNT" | tee -a "$GITHUB_STEP_SUMMARY"
 
           if [ "$COUNT" -ge "$MAX_QUEUE" ]; then
             echo "Queue bloated (>= $MAX_QUEUE) — standing down so it drains." \
