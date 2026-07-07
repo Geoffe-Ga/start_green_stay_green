@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-07-07T18:22:26.747450+00:00",
+  "timestamp": "2026-07-07T18:56:03.508832+00:00",
   "project": "start-green-stay-green",
   "thresholds": {
     "coverage": 90,
@@ -31,8 +31,8 @@
     "lint_status": "pass",
     "type_errors": 0,
     "typecheck_status": "pass",
-    "tests_total": 4089,
-    "tests_passed": 4089,
+    "tests_total": 4099,
+    "tests_passed": 4099,
     "tests_failed": 0,
     "tests_skipped": 0,
     "tests_status": "pass",
@@ -43,11 +43,11 @@
       "status": "passing"
     },
     "ci_status": {
-      "total_jobs": 0,
-      "passing_jobs": 0,
-      "percentage": 0.0,
-      "status": "unknown",
-      "run_url": "https://github.com/Geoffe-Ga/start_green_stay_green/actions/runs/28888811061"
+      "total_jobs": 1,
+      "passing_jobs": 1,
+      "percentage": 100.0,
+      "status": "passing",
+      "run_url": "https://github.com/Geoffe-Ga/start_green_stay_green/actions/runs/28890796086"
     }
   }
 }
