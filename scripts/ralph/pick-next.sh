@@ -162,8 +162,14 @@ inflight=$(
 # Issue numbers with a live worktree (started, PR not yet opened). Worktrees
 # live at ../sgsg-worktrees/issue-<N> — a SIBLING of the repo root, never
 # nested inside it (see scripts/ralph/fleet.sh).
+#
+# `--git-common-dir` (not `--show-toplevel`) so this resolves the MAIN repo
+# root even when pick-next.sh runs from inside a worker's own worktree —
+# `--show-toplevel` there returns the worktree's own path, which pointed
+# `wt_dir` at a nested, nonexistent directory (see fleet.sh's repo_root()).
 worktree_issues=""
-if repo_root=$(git rev-parse --show-toplevel 2>/dev/null); then
+if git_common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+  repo_root="$(dirname "$git_common_dir")"
   wt_dir="$(dirname "$repo_root")/sgsg-worktrees"
   if [[ -d "$wt_dir" ]]; then
     worktree_issues=$(

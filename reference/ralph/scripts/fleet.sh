@@ -55,9 +55,22 @@ die() {
   exit 1
 }
 
-# Resolve the repository root so the script works from any worktree/subdir.
+# Resolve the MAIN repo root so the script works from any worktree/subdir.
+#
+# `git rev-parse --show-toplevel` returns the CURRENT worktree's root, not
+# the main repo's — from inside a worker's own worktree it returns that
+# worktree's own path, not the repo this script actually needs (STATE_FILE
+# location, worktree-root computation, `worktree prune` target). Every
+# worker runs fleet.sh from inside its own worktree, so this silently
+# resolved to the wrong root and corrupted state reads / active-lane
+# exclusion. `--git-common-dir` always resolves to the ORIGINAL repo's
+# `.git` (shared across every linked worktree), so its dirname is the main
+# root regardless of which worktree invoked this script.
 repo_root() {
-  git rev-parse --show-toplevel 2>/dev/null || die "not inside a git repository"
+  local git_common_dir
+  git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    || die "not inside a git repository"
+  dirname "$git_common_dir"
 }
 
 # Read an integer/bool field from state.json with a fallback. Pure-python so we

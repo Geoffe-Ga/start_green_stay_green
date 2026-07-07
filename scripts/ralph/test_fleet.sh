@@ -52,6 +52,18 @@ BR="$(cd "$DIR" && git rev-parse --abbrev-ref HEAD)"
 check "branch slug sanitized"      "issue/101-add-widget-endpoint" "$BR"
 check "path resolves"              "$DIR" "$(run path 101)"
 
+# --- repo_root() resolves the MAIN repo even from inside a worktree --------
+# Every real worker invokes fleet.sh from inside its OWN worktree (not the
+# main checkout). `git rev-parse --show-toplevel` there returns the
+# worktree's own path, which silently corrupted STATE_FILE reads and
+# worktree-root computation (regression guard for that bug).
+check "count from inside worktree matches main repo" \
+  "$(run count)" "$(cd "$DIR" && "$FLEET" count)"
+check "active from inside worktree matches main repo" \
+  "$(run active)" "$(cd "$DIR" && "$FLEET" active)"
+check "path from inside worktree matches main repo" \
+  "$(run path 101)" "$(cd "$DIR" && "$FLEET" path 101)"
+
 # --- assign is idempotent (re-entrant) -------------------------------------
 DIR2="$(run assign 101 'whatever' 2>/dev/null)"
 check "re-assign returns same dir" "$DIR" "$DIR2"
