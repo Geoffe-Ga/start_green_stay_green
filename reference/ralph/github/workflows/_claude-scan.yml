@@ -76,23 +76,51 @@ jobs:
             exit 1
           fi
 
+      - name: Detect project layout
+        id: layout
+        run: |
+          set -euo pipefail
+          # `green init` generates a FLAT, single-language project (no
+          # frontend/backend monorepo split), and this workflow is a generic
+          # template shared across every --with-ralph-loop project regardless
+          # of --language, so detect what's actually present at the repo root
+          # rather than assuming a fixed layout.
+          if [ -f requirements.txt ] || [ -f requirements-dev.txt ] || [ -f pyproject.toml ]; then
+            echo "python=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "python=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -f package.json ]; then
+            echo "node=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "node=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Python
+        if: steps.layout.outputs.python == 'true'
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: "3.12"
 
       - name: Set up Node
+        if: steps.layout.outputs.node == 'true'
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
         with:
-          node-version-file: "frontend/.nvmrc"
+          # No .nvmrc: `green init` doesn't generate one for TypeScript
+          # projects. Pin a current LTS rather than depending on a file that
+          # may not exist.
+          node-version: "20"
 
-      - name: Install backend toolbox (read-only analyzers)
+      - name: Install Python toolbox (read-only analyzers)
+        if: steps.layout.outputs.python == 'true'
         run: |
           python -m venv .venv
           # shellcheck disable=SC1091
           . .venv/bin/activate
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+          for req in requirements.txt requirements-dev.txt; do
+            [ -f "$req" ] && pip install -r "$req"
+          done
           # Extra analyzers only some scans need (pip-audit→security,
           # vulture→dead-code, mutmut→mutation). A failure here must not sink a
           # scan that does not use them (the todo tracer needs only grep) — but
@@ -105,9 +133,19 @@ jobs:
               || echo "::warning::optional analyzer '$tool' is not installed; scans that rely on it should fail loudly, not report clean"
           done
 
-      - name: Install frontend toolbox
+      - name: Install Node toolbox
+        if: steps.layout.outputs.node == 'true'
         run: |
-          cd frontend && npm ci
+          # `green init` doesn't commit a package-lock.json (that lands on
+          # the user's first local `npm install`, matching the assumption
+          # the generated CI's own `npm ci` step already makes) -- prefer
+          # `npm ci` when the lockfile exists, fall back to `npm install`
+          # for a project that hasn't had that first local install yet.
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Run Claude scan
         uses: anthropics/claude-code-action@521136812280ae7ef256e06045655b9da02793f0  # v1.0.158

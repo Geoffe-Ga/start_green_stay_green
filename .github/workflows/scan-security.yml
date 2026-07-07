@@ -17,6 +17,16 @@ on:
         required: false
         default: "5"
 
+# Reusable-workflow permissions are a CEILING the caller must grant --
+# without this block the callee's `issues: write` / `id-token: write`
+# (see _claude-scan.yml) get silently dropped to the org/repo default
+# (usually read-only), and every dispatched run fails GitHub's
+# validation step with startup_failure and no job logs.
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
 jobs:
   run:
     uses: ./.github/workflows/_claude-scan.yml
