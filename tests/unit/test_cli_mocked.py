@@ -26,6 +26,7 @@ def test_something(mock_path: Mock) -> None:
 ```
 """
 
+import ast
 import asyncio
 import json
 from pathlib import Path
@@ -39,6 +40,7 @@ from unittest.mock import patch
 import pytest
 import typer
 from typer.testing import CliRunner
+import yaml
 
 from start_green_stay_green import cli
 from start_green_stay_green.ai.batch_dispatch import ResumeOutcome
@@ -55,6 +57,7 @@ from start_green_stay_green.utils.enhance_state import BatchProgress
 from start_green_stay_green.utils.enhance_state import EnhanceState
 from start_green_stay_green.utils.enhance_state import load_state
 from start_green_stay_green.utils.enhance_state import save_state
+from start_green_stay_green.utils.file_writer import FileWriter
 
 
 def _make_orch_mock(mock_init: Mock) -> MagicMock:
@@ -1079,6 +1082,53 @@ class TestMetricsDashboardGeneration:
             assert "my-new-project" in content
             assert "start-green-stay-green" not in content
 
+    def test_copy_metrics_assets_produces_self_contained_script(
+        self, tmp_path: Path
+    ) -> None:
+        """The real copied collect_metrics.py must not import start_green_stay_green.
+
+        Regression test: this script is copied verbatim into any
+        ``--enable-live-dashboard`` project, which never has the
+        ``start_green_stay_green`` package installed. Uses the real
+        ``shutil.copy`` (no mocking) against this repo's actual source
+        files so drift is caught immediately.
+        """
+        cli._copy_metrics_assets(tmp_path, "my-new-project")
+
+        script_content = (tmp_path / "scripts" / "collect_metrics.py").read_text()
+        tree = ast.parse(script_content)
+        imported_modules = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        } | {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+        assert not any(
+            mod == "start_green_stay_green" or mod.startswith("start_green_stay_green.")
+            for mod in imported_modules
+        )
+
+    def test_copy_metrics_assets_drops_regenerate_dashboard_step(
+        self, tmp_path: Path
+    ) -> None:
+        """The copied metrics.yml must not invoke regenerate_dashboard.py.
+
+        That script depends on MetricsGenerator, which isn't installed
+        downstream, and is never copied into generated projects.
+        """
+        cli._copy_metrics_assets(tmp_path, "my-new-project")
+
+        workflow_content = (
+            tmp_path / ".github" / "workflows" / "metrics.yml"
+        ).read_text()
+        assert "regenerate_dashboard.py" not in workflow_content
+        parsed = yaml.safe_load(workflow_content)
+        assert parsed["jobs"]["generate-metrics"]["steps"]
+
 
 class TestShowDryRunPreview:
     """Test dry run preview display."""
@@ -1330,6 +1380,46 @@ class TestGenerateSteps:
             cli._generate_precommit_step(mock_path, "my-project", "python")
 
         mock_generator.generate.assert_called()
+
+    def test_write_secrets_baseline_creates_file_without_writer(
+        self, tmp_path: Path
+    ) -> None:
+        """Without a FileWriter, writes the baseline if absent."""
+        baseline_file = tmp_path / ".secrets.baseline"
+        cli._write_secrets_baseline(baseline_file, None)
+        assert baseline_file.exists()
+        baseline = json.loads(baseline_file.read_text())
+        assert baseline["results"] == {}
+
+    def test_write_secrets_baseline_skips_existing_without_writer(
+        self, tmp_path: Path
+    ) -> None:
+        """Without a FileWriter, an existing baseline is never overwritten."""
+        baseline_file = tmp_path / ".secrets.baseline"
+        baseline_file.write_text("user's own baseline", encoding="utf-8")
+        cli._write_secrets_baseline(baseline_file, None)
+        assert baseline_file.read_text() == "user's own baseline"
+
+    def test_write_secrets_baseline_skips_existing_with_writer(
+        self, tmp_path: Path
+    ) -> None:
+        """FileWriter's default (non-force) mode must not clobber a real baseline."""
+        baseline_file = tmp_path / ".secrets.baseline"
+        baseline_file.write_text("user's own baseline", encoding="utf-8")
+        writer = FileWriter(project_root=tmp_path)
+        cli._write_secrets_baseline(baseline_file, writer)
+        assert baseline_file.read_text() == "user's own baseline"
+
+    def test_write_secrets_baseline_force_overwrites_with_writer(
+        self, tmp_path: Path
+    ) -> None:
+        """--force mode does overwrite an existing baseline."""
+        baseline_file = tmp_path / ".secrets.baseline"
+        baseline_file.write_text("stale baseline", encoding="utf-8")
+        writer = FileWriter(project_root=tmp_path, force=True)
+        cli._write_secrets_baseline(baseline_file, writer)
+        baseline = json.loads(baseline_file.read_text())
+        assert baseline["results"] == {}
 
     @patch("start_green_stay_green.cli._copy_reference_skills")
     def test_generate_skills_step_copies_skills(self, mock_copy: Mock) -> None:
