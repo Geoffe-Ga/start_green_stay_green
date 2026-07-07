@@ -294,6 +294,38 @@ class TestInitFlowIntegration:
         assert "repos:" in content
         assert "hooks:" in content
 
+    def test_init_generates_secrets_baseline(self, tmp_path: Path) -> None:
+        """detect-secrets' --baseline .secrets.baseline must exist on first run.
+
+        Without this, the very first `pre-commit run` in a generated
+        project fails outright on a missing baseline file.
+        """
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "init",
+                "--project-name",
+                "test-secrets-baseline",
+                "--language",
+                "python",
+                "--output-dir",
+                str(tmp_path),
+                "--no-interactive",
+            ],
+        )
+
+        assert result.exit_code == 0
+
+        project_path = tmp_path / "test-secrets-baseline"
+        baseline_file = project_path / ".secrets.baseline"
+
+        assert baseline_file.exists()
+        baseline = json.loads(baseline_file.read_text())
+        assert baseline["results"] == {}
+        assert baseline["plugins_used"]
+        assert baseline["version"]
+
     @patch("start_green_stay_green.cli._generate_review_step", _stub_review_step)
     @patch("start_green_stay_green.cli._generate_ci_step", _stub_ci_step)
     def test_init_generates_github_workflows(self, tmp_path: Path) -> None:

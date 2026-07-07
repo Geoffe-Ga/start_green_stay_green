@@ -6,7 +6,9 @@ with language-appropriate hooks for formatting, linting, security, and quality.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
+import json
 from typing import Any
 from typing import TYPE_CHECKING
 from typing import cast
@@ -89,7 +91,6 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
                 "hooks": [
                     {
                         "id": "mypy",
-                        "additional_dependencies": ["types-all"],
                         "args": ["--strict"],
                     },
                 ],
@@ -172,7 +173,7 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
                 "hooks": [
                     {
                         "id": "vulture",
-                        "args": ["start_green_stay_green/", "--min-confidence", "80"],
+                        "args": ["{package_name}/", "--min-confidence", "80"],
                     },
                 ],
             },
@@ -923,6 +924,47 @@ LANGUAGE_CONFIGS: dict[str, dict[str, Any]] = {
 }
 
 
+def _substitute_package_name(
+    repos: list[dict[str, Any]], package_name: str
+) -> list[dict[str, Any]]:
+    """Deep-copy ``repos`` substituting the ``{package_name}`` template token.
+
+    ``LANGUAGE_CONFIGS`` is a shared module-level template — hook arg lists
+    containing the literal token ``{package_name}`` (e.g. Python's vulture
+    scan target) get the target project's actual package name substituted
+    into a fresh copy, leaving the module-level template untouched for the
+    next call.
+
+    Args:
+        repos: The language's ``hooks`` (pre-commit ``repos`` entries).
+        package_name: Target project's package/module name.
+
+    Returns:
+        A deep copy of ``repos`` with every ``{package_name}`` token resolved.
+    """
+    repos_copy = copy.deepcopy(repos)
+    for repo in repos_copy:
+        for hook in repo.get("hooks", []):
+            _substitute_hook_args(hook, package_name)
+    return repos_copy
+
+
+def _substitute_hook_args(hook: dict[str, Any], package_name: str) -> None:
+    """Resolve the ``{package_name}`` token in a single hook's ``args``, in place.
+
+    Args:
+        hook: A single pre-commit hook entry (mutated in place).
+        package_name: Target project's package/module name.
+    """
+    args = hook.get("args")
+    if not args:
+        return
+    hook["args"] = [
+        arg.replace("{package_name}", package_name) if isinstance(arg, str) else arg
+        for arg in args
+    ]
+
+
 class PreCommitGenerator(BaseGenerator):
     """Generates .pre-commit-config.yaml for target projects.
 
@@ -982,19 +1024,23 @@ class PreCommitGenerator(BaseGenerator):
             )
             raise ValueError(msg)
 
-    def _build_config_dict(self, language: str) -> dict[str, Any]:
+    def _build_config_dict(self, language: str, package_name: str) -> dict[str, Any]:
         """Build pre-commit configuration dictionary.
 
         Args:
             language: Language identifier.
+            package_name: Target project's package/module name, substituted
+                into any hook arg containing the ``{package_name}`` template
+                token (e.g. Python's vulture scan target).
 
         Returns:
             Configuration dictionary with repos, CI settings, and language versions.
         """
         language_config = LANGUAGE_CONFIGS[language]
+        repos = _substitute_package_name(language_config["hooks"], package_name)
         return {
             "default_language_version": language_config["default_language_version"],
-            "repos": language_config["hooks"],
+            "repos": repos,
             "ci": {
                 "autofix_commit_msg": "style: auto-fix by pre-commit hooks",
                 "autoupdate_commit_msg": "chore: update pre-commit hooks",
@@ -1060,7 +1106,8 @@ class PreCommitGenerator(BaseGenerator):
                 raise TypeError(msg)
 
         self._validate_language_supported(config.language)
-        config_dict = self._build_config_dict(config.language)
+        package_name = config.project_name.replace("-", "_")
+        config_dict = self._build_config_dict(config.language, package_name)
 
         # Convert to YAML
         yaml_content = yaml.dump(
@@ -1187,3 +1234,79 @@ class PreCommitGenerator(BaseGenerator):
 
         hooks_config = LANGUAGE_CONFIGS[language]["hooks"]
         return self._sum_hooks_in_repos(hooks_config)
+
+
+# The exact plugin/filter set ``detect-secrets scan`` (v1.4.0, matching the
+# ``rev:`` every LANGUAGE_CONFIGS entry pins) produces on a fresh repo with
+# no findings. Every generated project's detect-secrets hook is pointed at
+# ``--baseline .secrets.baseline`` (see LANGUAGE_CONFIGS above), but nothing
+# ever wrote that file, so a project's first ``pre-commit run`` failed
+# outright on a missing baseline. ``results`` is intentionally empty: the
+# hook scans fresh and self-updates this file in place as it encounters
+# (and the user allowlists) real findings.
+_DETECT_SECRETS_BASELINE: dict[str, Any] = {
+    "version": "1.4.0",
+    "plugins_used": [
+        {"name": "ArtifactoryDetector"},
+        {"name": "AWSKeyDetector"},
+        {"name": "AzureStorageKeyDetector"},
+        {"name": "Base64HighEntropyString", "limit": 4.5},
+        {"name": "BasicAuthDetector"},
+        {"name": "CloudantDetector"},
+        {"name": "DiscordBotTokenDetector"},
+        {"name": "GitHubTokenDetector"},
+        {"name": "HexHighEntropyString", "limit": 3.0},
+        {"name": "IbmCloudIamDetector"},
+        {"name": "IbmCosHmacDetector"},
+        {"name": "JwtTokenDetector"},
+        {"name": "KeywordDetector", "keyword_exclude": ""},
+        {"name": "MailchimpDetector"},
+        {"name": "NpmDetector"},
+        {"name": "PrivateKeyDetector"},
+        {"name": "SendGridDetector"},
+        {"name": "SlackDetector"},
+        {"name": "SoftlayerDetector"},
+        {"name": "SquareOAuthDetector"},
+        {"name": "StripeDetector"},
+        {"name": "TwilioKeyDetector"},
+    ],
+    "filters_used": [
+        {"path": "detect_secrets.filters.allowlist.is_line_allowlisted"},
+        {
+            "path": "detect_secrets.filters.common.is_baseline_file",
+            "filename": ".secrets.baseline",
+        },
+        {
+            "path": (
+                "detect_secrets.filters.common."
+                "is_ignored_due_to_verification_policies"
+            ),
+            "min_level": 2,
+        },
+        {"path": "detect_secrets.filters.heuristic.is_indirect_reference"},
+        {"path": "detect_secrets.filters.heuristic.is_likely_id_string"},
+        {"path": "detect_secrets.filters.heuristic.is_lock_file"},
+        {"path": "detect_secrets.filters.heuristic.is_not_alphanumeric_string"},
+        {"path": "detect_secrets.filters.heuristic.is_potential_uuid"},
+        {"path": "detect_secrets.filters.heuristic.is_prefixed_with_dollar_sign"},
+        {"path": "detect_secrets.filters.heuristic.is_sequential_string"},
+        {"path": "detect_secrets.filters.heuristic.is_swagger_file"},
+        {"path": "detect_secrets.filters.heuristic.is_templated_secret"},
+    ],
+    "results": {},
+}
+
+
+def generate_secrets_baseline(generated_at: str) -> str:
+    """Render an initial, empty ``.secrets.baseline`` for a fresh project.
+
+    Args:
+        generated_at: ISO-8601 timestamp to embed as ``generated_at``
+            (caller-supplied so this function stays a pure renderer).
+
+    Returns:
+        JSON content for ``.secrets.baseline``, matching the shape
+        ``detect-secrets scan`` itself would produce on an empty repo.
+    """
+    baseline = _DETECT_SECRETS_BASELINE | {"generated_at": generated_at}
+    return json.dumps(baseline, indent=2) + "\n"

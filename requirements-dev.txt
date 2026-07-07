@@ -53,7 +53,10 @@ defusedxml>=0.7.1,<1.0.0
 hypothesis>=6.98.0,<7.0.0
 
 # Mutation testing
-mutmut>=2.4.0,<4.0.0
+# Pinned exact: 3.x crashes on our 2.x-schema [tool.mutmut] config, and its
+# results/show CLI crashes on py3.13's pony ORM. See pyproject.toml's
+# mutmut entry / the reference-mutmut-tooling memory doc.
+mutmut==2.5.1
 
 # Pre-commit and git hooks
 pre-commit>=3.6.0,<5.0.0

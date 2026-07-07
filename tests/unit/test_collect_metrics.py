@@ -1207,22 +1207,22 @@ class TestCollectPrecommitStatus:
 
             assert collector.metrics["precommit_status"]["total_hooks"] == 0
 
-    def test_uses_canonical_package_hook_counter(self) -> None:
-        """collect_metrics imports the canonical hook counter (no duplication).
+    def test_hook_counter_is_self_contained_with_canonical_parity(self) -> None:
+        """collect_metrics vendors its own hook counter, not an import.
 
-        Issue #154 DRY consolidation: the hook-counting helpers must live only
-        in ``start_green_stay_green.generators.metrics``. ``collect_metrics``
-        must import and reuse that canonical ``count_precommit_hooks`` rather
-        than redefining its own ``_load_precommit_repos`` / ``_repo_hook_count``
-        / ``_count_precommit_hooks`` copies.
+        ``scripts/collect_metrics.py`` is copied verbatim into every
+        ``--enable-live-dashboard`` project (cli.py's
+        ``_copy_metrics_assets``), which does NOT have the
+        ``start_green_stay_green`` package installed -- importing from
+        ``start_green_stay_green.generators.metrics`` crashed every such
+        project's metrics workflow. The script must vendor its own copy of
+        ``count_precommit_hooks``/``_load_precommit_repos``/
+        ``_repo_hook_count``, kept behaviorally identical to the canonical
+        package version (asserted below), not object-identical.
         """
-        # The duplicated private helpers must be gone from the script module.
-        assert not hasattr(collect_metrics, "_load_precommit_repos")
-        assert not hasattr(collect_metrics, "_repo_hook_count")
-        assert not hasattr(collect_metrics, "_count_precommit_hooks")
-        # The script re-exports the canonical helper (same object), so
-        # collected status matches the canonical count for the same config.
-        assert collect_metrics.__dict__["count_precommit_hooks"] is (
+        assert hasattr(collect_metrics, "_load_precommit_repos")
+        assert hasattr(collect_metrics, "_repo_hook_count")
+        assert collect_metrics.__dict__["count_precommit_hooks"] is not (
             count_precommit_hooks
         )
         with TemporaryDirectory() as tmpdir:
@@ -1231,31 +1231,29 @@ class TestCollectPrecommitStatus:
 
             collector.collect_precommit_status(config_path)
 
+            # Vendored and canonical counters must agree on the same input.
             assert collector.metrics["precommit_status"]["total_hooks"] == (
                 count_precommit_hooks(config_path)
             )
+            assert collect_metrics.count_precommit_hooks(config_path) == (
+                count_precommit_hooks(config_path)
+            )
 
-    def test_collect_precommit_status_delegates_to_shared_builder(self) -> None:
-        """The status dict is built by the canonical ``precommit_status`` helper.
+    def test_collect_precommit_status_matches_canonical_builder(self) -> None:
+        """The vendored ``precommit_status`` builder matches the canonical one.
 
-        Issue #154 DRY consolidation: ``collect_precommit_status`` must not
-        re-derive ``has_hooks``/``passing_hooks``/``percentage``/``status``;
-        it must delegate dict construction to the shared
-        ``precommit_status`` builder in the metrics generator module.
+        Behavioral parity, not shared-object delegation: the script cannot
+        import the canonical builder (see the self-containment test above),
+        so this asserts its vendored copy produces an identical dict.
         """
         with TemporaryDirectory() as tmpdir:
             config_path = self._write_config(Path(tmpdir), 13)
             collector = MetricsCollector("test", {})
 
-            with patch.object(
-                collect_metrics,
-                "precommit_status",
-                wraps=precommit_status,
-            ) as spy:
-                collector.collect_precommit_status(config_path)
+            collector.collect_precommit_status(config_path)
 
-            spy.assert_called_once_with(13)
             assert collector.metrics["precommit_status"] == precommit_status(13)
+            assert collect_metrics.precommit_status(13) == precommit_status(13)
 
 
 class TestCollectCIStatus:
@@ -1553,18 +1551,19 @@ class TestCollectCIStatus:
         mock_api.assert_not_called()
         assert collector.metrics["ci_status"]["status"] == "unknown"
 
-    def test_uses_canonical_package_job_counter(
+    def test_job_counter_is_self_contained_with_canonical_parity(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """collect_metrics imports the canonical CI helpers (no duplication).
+        """collect_metrics vendors its own CI helpers, not an import.
 
-        Issue #159 DRY: the job-counting and status-building helpers live
-        only in ``start_green_stay_green.generators.metrics``;
-        ``collect_metrics`` reuses the same objects instead of redefining
-        them.
+        Same deployability constraint as the precommit-hook counter above:
+        the copied script has no ``start_green_stay_green`` package to
+        import from, so it vendors ``count_ci_jobs``/``ci_status`` and is
+        verified for behavioral (not object) parity with the canonical
+        package version.
         """
-        assert collect_metrics.__dict__["count_ci_jobs"] is count_ci_jobs
-        assert collect_metrics.__dict__["ci_status"] is ci_status
+        assert collect_metrics.__dict__["count_ci_jobs"] is not count_ci_jobs
+        assert collect_metrics.__dict__["ci_status"] is not ci_status
 
         self._clear_github_env(monkeypatch)
         with TemporaryDirectory() as tmpdir:
@@ -1577,6 +1576,8 @@ class TestCollectCIStatus:
             assert collector.metrics["ci_status"]["total_jobs"] == (
                 count_ci_jobs(workflows)
             )
+            assert collect_metrics.count_ci_jobs(workflows) == count_ci_jobs(workflows)
+            assert collect_metrics.ci_status(3, 2) == ci_status(3, 2)
 
 
 class TestMainScriptMode:
