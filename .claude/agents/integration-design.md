@@ -4,7 +4,7 @@ description: "Level 2 Module Design Agent. Select for module integration and cro
 level: 2
 phase: Plan
 tools: Read,Write,Grep,Glob,Task
-model: sonnet
+model: opus
 delegates_to: [test-specialist, implementation-specialist, documentation-specialist]
 receives_from: [architecture-design, foundation-orchestrator, shared-library-orchestrator, tooling-orchestrator, papers-orchestrator, cicd-orchestrator, agentic-workflows-orchestrator]
 ---

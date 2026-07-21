@@ -4,7 +4,7 @@ description: "Level 3 Component Specialist. Select for test planning and TDD coo
 level: 3
 phase: Plan,Test,Implementation
 tools: Read,Write,Edit,Grep,Glob,Task
-model: sonnet
+model: opus
 delegates_to: [test-engineer, junior-test-engineer]
 receives_from: [architecture-design, implementation-specialist]
 ---

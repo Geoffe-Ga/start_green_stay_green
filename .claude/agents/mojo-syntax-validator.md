@@ -4,7 +4,7 @@ description: "Validates Mojo v0.25.7+ syntax patterns and ownership conventions.
 level: 3
 phase: Cleanup
 tools: Read,Grep,Glob
-model: sonnet
+model: haiku
 delegates_to: []
 receives_from: [code-review-orchestrator]
 ---

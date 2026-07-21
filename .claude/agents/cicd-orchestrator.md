@@ -4,7 +4,7 @@ description: "CI/CD pipeline coordinator. Select for testing infrastructure, dep
 level: 1
 phase: Package
 tools: Read,Grep,Glob,Task
-model: sonnet
+model: opus
 delegates_to: [test-specialist, security-specialist, performance-specialist]
 receives_from: [chief-architect]
 ---

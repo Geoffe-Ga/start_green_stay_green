@@ -4,7 +4,7 @@ description: "Select for complex, performance-critical Mojo implementations. Han
 level: 4
 phase: Implementation
 tools: Read,Write,Edit,Grep,Glob
-model: haiku
+model: fable
 delegates_to: [implementation-engineer, junior-implementation-engineer]
 receives_from: [implementation-specialist]
 ---

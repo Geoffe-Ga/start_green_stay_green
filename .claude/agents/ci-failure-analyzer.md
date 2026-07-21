@@ -4,7 +4,7 @@ description: "Analyzes CI failure logs to identify root causes, categorizes fail
 level: 3
 phase: Cleanup
 tools: Read,Grep,Glob
-model: sonnet
+model: haiku
 delegates_to: []
 receives_from: [cicd-orchestrator]
 ---

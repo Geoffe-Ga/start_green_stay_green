@@ -4,7 +4,7 @@ description: "Level 3 Component Specialist. Select for component implementation 
 level: 3
 phase: Plan,Implementation,Cleanup
 tools: Read,Write,Edit,Grep,Glob,Task
-model: sonnet
+model: opus
 delegates_to: [senior-implementation-engineer, implementation-engineer, junior-implementation-engineer]
 receives_from: [architecture-design, integration-design]
 ---

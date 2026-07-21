@@ -4,7 +4,7 @@ description: "Select for security implementation and testing. Implements securit
 level: 3
 phase: Implementation
 tools: Read,Write,Edit,Grep,Glob,Task
-model: sonnet
+model: fable
 delegates_to: [implementation-engineer, senior-implementation-engineer, test-engineer]
 receives_from: [security-design]
 ---

@@ -4,7 +4,7 @@ description: "Select for standard Mojo function and class implementation. Follow
 level: 4
 phase: Implementation
 tools: Read,Write,Edit,Grep,Glob
-model: haiku
+model: fable
 delegates_to: [junior-implementation-engineer]
 receives_from: [implementation-specialist]
 ---

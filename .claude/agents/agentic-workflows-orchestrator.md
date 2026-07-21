@@ -4,7 +4,7 @@ description: "Agentic workflows coordinator. Select for agent system design, res
 level: 1
 phase: Implementation
 tools: Read,Grep,Glob,Task,WebFetch
-model: sonnet
+model: opus
 delegates_to: [implementation-specialist, test-specialist, documentation-specialist]
 receives_from: [chief-architect]
 ---
