@@ -4,7 +4,7 @@ description: "Select for security implementation and testing. Implements securit
 level: 3
 phase: Implementation
 tools: Read,Write,Edit,Grep,Glob,Task
-model: fable
+model: opus
 delegates_to: [implementation-engineer, senior-implementation-engineer, test-engineer]
 receives_from: [security-design]
 ---
@@ -16,6 +16,10 @@ receives_from: [security-design]
 Level 3 Component Specialist responsible for implementing security requirements and ensuring component
 security. Reviews code for vulnerabilities, applies security best practices, performs security testing,
 and coordinates security fixes with Implementation Engineers.
+
+Runs on Opus, never Fable, for the same reason as `ralph-security-specialist`:
+Fable's safety classifiers target cyber content, and legitimate hardening work
+can trip a false-positive refusal.
 
 ## Scope
 

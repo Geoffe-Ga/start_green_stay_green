@@ -77,3 +77,7 @@ types-pyyaml>=6.0.0,<7.0.0
 types-toml>=0.10.0,<1.0.0
 types-requests>=2.31.0,<3.0.0
 types-defusedxml>=0.7.0,<1.0.0
+
+# Security floor: PYSEC-2026-3447 (fixed in 83.0.0) — pip-audit scans the
+# installed environment, and the CI venv's bundled setuptools is vulnerable.
+setuptools>=83.0.0
