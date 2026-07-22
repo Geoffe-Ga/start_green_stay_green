@@ -4,7 +4,7 @@ description: "Shared library coordinator. Select for reusable component design, 
 level: 1
 phase: Implementation
 tools: Read,Grep,Glob,Task
-model: sonnet
+model: opus
 delegates_to: [architecture-design, integration-design, performance-specialist]
 receives_from: [chief-architect]
 ---

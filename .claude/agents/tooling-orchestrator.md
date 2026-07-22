@@ -4,7 +4,7 @@ description: "Development tools coordinator. Select for CLI development, automat
 level: 1
 phase: Implementation
 tools: Read,Grep,Glob,Task
-model: sonnet
+model: opus
 delegates_to: [implementation-specialist, documentation-specialist, test-specialist]
 receives_from: [chief-architect]
 ---

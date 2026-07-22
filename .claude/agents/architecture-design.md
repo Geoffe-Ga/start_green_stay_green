@@ -4,7 +4,7 @@ description: "Level 2 Module Design Agent. Select for module-level architecture 
 level: 2
 phase: Plan
 tools: Read,Write,Grep,Glob,Task
-model: sonnet
+model: opus
 delegates_to: [implementation-specialist, test-specialist, performance-specialist]
 receives_from: [foundation-orchestrator, shared-library-orchestrator, tooling-orchestrator, papers-orchestrator, cicd-orchestrator, agentic-workflows-orchestrator]
 ---

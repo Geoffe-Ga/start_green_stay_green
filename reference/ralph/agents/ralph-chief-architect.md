@@ -4,7 +4,7 @@ description: "Strategic brain of a Ralph tick. Select to architect a single back
 level: 0
 phase: Plan
 tools: Read,Grep,Glob,Task
-model: fable
+model: opus
 delegates_to: [ralph-test-specialist, ralph-implementation-specialist, ralph-security-specialist, ralph-performance-specialist, ralph-documentation-specialist, ralph-dependency-review-specialist, ralph-code-review-orchestrator]
 receives_from: []
 ---

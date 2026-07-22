@@ -4,7 +4,7 @@ description: "Repository foundation coordinator. Select for directory structure 
 level: 1
 phase: Plan
 tools: Read,Grep,Glob,Task
-model: sonnet
+model: opus
 delegates_to: [architecture-design, integration-design, security-design]
 receives_from: [chief-architect]
 ---

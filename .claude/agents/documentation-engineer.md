@@ -4,7 +4,7 @@ description: "Select for code documentation work. Writes docstrings, creates exa
 level: 4
 phase: Package
 tools: Read,Write,Edit,Grep,Glob
-model: haiku
+model: sonnet
 delegates_to: [junior-documentation-engineer]
 receives_from: [documentation-specialist]
 ---

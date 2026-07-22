@@ -4,7 +4,7 @@ description: "Level 3 Component Specialist. Select for performance-critical comp
 level: 3
 phase: Plan,Implementation,Cleanup
 tools: Read,Write,Edit,Grep,Glob,Task
-model: sonnet
+model: opus
 delegates_to: [performance-engineer]
 receives_from: [architecture-design, implementation-specialist]
 ---

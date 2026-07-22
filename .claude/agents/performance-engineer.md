@@ -4,7 +4,7 @@ description: "Select for performance optimization work. Benchmarks, profiles, im
 level: 4
 phase: Implementation
 tools: Read,Write,Edit,Bash,Grep,Glob
-model: haiku
+model: fable
 delegates_to: []
 receives_from: [performance-specialist]
 ---

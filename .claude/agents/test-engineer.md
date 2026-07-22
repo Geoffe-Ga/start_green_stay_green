@@ -4,7 +4,7 @@ description: "Select for test suite implementation. Writes unit and integration 
 level: 4
 phase: Test
 tools: Read,Write,Edit,Bash,Grep,Glob
-model: haiku
+model: fable
 delegates_to: [junior-test-engineer]
 receives_from: [test-specialist]
 ---

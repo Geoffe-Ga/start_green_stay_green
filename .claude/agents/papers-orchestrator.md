@@ -4,7 +4,7 @@ description: "Research paper implementation coordinator. Select for paper analys
 level: 1
 phase: Implementation
 tools: Read,Grep,Glob,Task,WebFetch
-model: sonnet
+model: opus
 delegates_to: [architecture-design, implementation-specialist, test-specialist, performance-specialist]
 receives_from: [chief-architect]
 ---

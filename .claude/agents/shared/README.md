@@ -22,14 +22,14 @@ graph under a conductor is identical:
 ```
 ralph-tick (fleet ORCHESTRATOR — worker pool: reconcile · serialized-merge · lazy-sync · refill)
   └─ ralph-worker × up to 4 . L1  opus    per-issue CONDUCTOR in an isolated worktree
-       ├─ ralph-chief-architect ..... L0  fable   plan + ordered dispatch list (no code)
-       ├─ ralph-test-specialist ..... L2  sonnet  Gate 1 RED: failing tests          ─┐
-       ├─ implementation-spec.  L2  opus    Gate 1 GREEN + Refactor             │ run per
+       ├─ ralph-chief-architect ..... L0  opus    plan + ordered dispatch list (no code)
+       ├─ ralph-test-specialist ..... L2  fable   Gate 1 RED: failing tests          ─┐
+       ├─ implementation-spec.  L2  fable   Gate 1 GREEN + Refactor             │ run per
        ├─ ralph-security-specialist . L2  opus    harden auth/JWT/CORS/input/DB       │ the
-       ├─ performance-spec. ... L2  sonnet  profile/optimize hot paths          │ architect's
+       ├─ performance-spec. ... L2  fable   profile/optimize hot paths          │ architect's
        ├─ documentation-spec. . L2  sonnet  docstrings/READMEs/ADRs             │ dispatch
        ├─ dependency-review ... L2  haiku   deps/pins/licenses (read-only)      │ list
-       └─ code-review-orch. ... L1  opus    Gate 2.5 pre-push self-review      ─┘
+       └─ code-review-orch. ... L1  sonnet  Gate 2.5 pre-push self-review      ─┘
 ```
 
 **The tree above is the spawn graph: each conductor (`ralph-worker`, or
@@ -62,25 +62,30 @@ specialists are leaf workers that do their own work and do not sub-delegate.
 
 ## Model tiers (strategic mix)
 
-**Fable** for the single hardest-reasoning, long-horizon role: `ralph-chief-architect`.
-Planning is the highest-leverage decision in a tick — one wrong design compounds
-across every specialist that executes it — so the architect runs on Anthropic's
-most capable model. Fable is ~2× Opus-tier cost and can run minutes-long turns,
-which is acceptable for a once-per-issue planning pass but **not** for scoped
-worker roles. Two Fable caveats shape the fleet: its safety classifiers target
-**cyber/bio** content (so the code-writing `ralph-security-specialist` stays on **Opus**,
-never Fable — legitimate hardening work can trip a false-positive refusal), and it
-prefers **less-prescriptive prompts** (state the goal and constraints; the
-architect's Output Contract is a format spec, not step-by-step scaffolding).
+The policy is role-based: **Opus plans, Fable implements, Sonnet reviews, Haiku
+runs quick checks.**
 
-**Opus** where judgment drives quality:
-`ralph-implementation-specialist` (production code is the core quality lever),
-`ralph-security-specialist` (threat modeling — and deliberately kept off Fable per the
-caveat above), `ralph-code-review-orchestrator` (synthesis).
-**Sonnet** for well-scoped roles guided by an explicit plan: `ralph-test-specialist`,
-`ralph-performance-specialist`, `ralph-documentation-specialist`. **Haiku** for the
-purely mechanical, read-only checklist walk: `ralph-dependency-review-specialist`
-(pins/lockfile/license checks need no deep reasoning — spend the cheaper tier).
+**Opus** for planning and conducting: `ralph-worker` (the per-issue conductor)
+and `ralph-chief-architect`. Planning is the highest-leverage decision in a
+tick — one wrong design compounds across every specialist that executes it — so
+it runs on a top judgment tier. `ralph-security-specialist` also stays on Opus,
+**never Fable**: Fable's safety classifiers target **cyber/bio** content, and
+legitimate hardening work (auth/JWT/injection fixes) can trip a false-positive
+refusal.
+
+**Fable** — Anthropic's most capable model — for the code-writing roles where
+output quality is the product: `ralph-test-specialist` (Gate 1 RED),
+`ralph-implementation-specialist` (Gate 1 GREEN + Refactor, the core quality
+lever), and `ralph-performance-specialist`. Fable is ~2× Opus-tier cost and can
+run minutes-long turns, which is acceptable for scoped once-per-issue
+implementation passes. One prompting caveat: it prefers **less-prescriptive
+prompts** (state the goal and constraints, not step-by-step scaffolding).
+
+**Sonnet** for review and well-scoped writing guided by an explicit plan:
+`ralph-code-review-orchestrator` (Gate 2.5 checklist-driven review) and
+`ralph-documentation-specialist`. **Haiku** for the purely mechanical, read-only
+checklist walk: `ralph-dependency-review-specialist` (pins/lockfile/license
+checks need no deep reasoning — spend the cheaper tier).
 
 ## Gate → agent invocation matrix
 
