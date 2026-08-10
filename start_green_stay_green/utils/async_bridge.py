@@ -42,6 +42,10 @@ def run_async(coro: Coroutine[Any, Any, T]) -> T:
         # No event loop running - safe to use asyncio.run()
         return asyncio.run(coro)
     else:
-        # Event loop is running - cannot use asyncio.run()
+        # Event loop is running - cannot use asyncio.run().
+        # Close the coroutine before raising so we don't leak an
+        # un-awaited coroutine (which would emit a RuntimeWarning
+        # from the garbage collector).
+        coro.close()
         msg = "run_async() cannot be called from an event loop"
         raise RuntimeError(msg)

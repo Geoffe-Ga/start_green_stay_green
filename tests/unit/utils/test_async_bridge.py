@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import gc
+import warnings
 
 import pytest
 
@@ -74,16 +76,21 @@ class TestRunAsync:
             async def never_runs() -> str:
                 return "unreachable"
 
-            coro = never_runs()
-            try:
-                run_async(coro)
-            finally:
-                coro.close()  # run_async raises before awaiting; avoid a warning
+            with pytest.raises(RuntimeError) as exc:
+                run_async(never_runs())
 
-        with pytest.raises(RuntimeError) as exc:
+            # Exact wording matters: the message must not be blanked or wrapped.
+            assert str(exc.value).startswith(
+                "run_async() cannot be called from an event loop"
+            )
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             asyncio.run(driver())
+            gc.collect()
 
-        # Exact wording matters: the message must not be blanked or wrapped.
-        assert str(exc.value).startswith(
-            "run_async() cannot be called from an event loop"
-        )
+        assert not any(
+            issubclass(w.category, RuntimeWarning)
+            and "was never awaited" in str(w.message)
+            for w in caught
+        ), "run_async() must close the coroutine before raising, not leak it"
