@@ -89,7 +89,7 @@ dev = [
     "pytest-asyncio>=1.0.0",
     "pytest-mock>=3.12.0",
     "hypothesis>=6.98.0",
-    "mutmut==2.5.1",  # Pinned: 3.x crashes on our 2.x-schema [tool.mutmut] config
+    "mutmut==3.8.0",  # Pinned: 3.x crashes on our 2.x-schema [tool.mutmut] config
     # and its results/show CLI crashes on py3.13's pony ORM
     # ('QueryResultIterator' object is not iterable); `mutmut run` itself
     # still works on 3.x, but the reporting side doesn't. See the
