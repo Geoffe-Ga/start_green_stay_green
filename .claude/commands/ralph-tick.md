@@ -51,7 +51,7 @@ one.
 | 1 | **TDD** (Red→Green→Refactor, `stay-green`) | → Gate 2 | — |
 | 2 | **`./scripts/check-all.sh`** (backend and/or frontend) | → push → Gate 3 | **drop to Gate 1** |
 | 3 | **CI** all green | → Gate 4 | **drop to Gate 1** (via `ci-debugging`) |
-| 4 | **Claude review `Verdict:`** | `LGTM` + green + up-to-date → **merge + mark issue done + refill** | **drop to Gate 1** (via `address-feedback`) |
+| 4 | **Claude review `Verdict:`** | `LGTM`, or `COMMENTS` with its follow-ups filed, + green + up-to-date → **merge + mark issue done + refill** | `CHANGES_REQUESTED` → **drop to Gate 1** (via `address-feedback`); `COMMENTS` → file follow-ups (`address-feedback` Step 1A), **no push** |
 
 "Drop to Gate 1" means: fix the root cause with a failing-test-first cycle, re-clear Gate 2 locally, push, and climb again. Never weaken a gate to pass it.
 
@@ -177,10 +177,14 @@ into that PR's worktree only if it needs a fix (re-attach a worktree with
 `scripts/ralph/fleet.sh assign "$N" "<slug>"` if reconcile removed it — `assign`
 reuses the existing branch):
 
-- **Gate 4 failed** (`CHANGES_REQUESTED`/`COMMENTS`): worker runs the
+- **Gate 4 failed** (`CHANGES_REQUESTED`): worker runs the
   **`address-feedback`** flow in the worktree — triage, TDD fix loop dispatching
   the specialist that owns each comment, re-clear Gate 2 + Gate 2.5, push, reply,
   resolve threads.
+- **Gate 4 signed off with findings** (`COMMENTS`, status `needs-followups`):
+  **not** a failure, and **no push**. Run `address-feedback` Step 1A only — file
+  each finding as a P0–P3 follow-up issue, resolve its threads, post the
+  `Follow-ups filed:` comment — then re-classify in Step 1.
 - **Gate 3 failed** (CI rollup has a failure): worker runs **`ci-debugging`** in
   the worktree — reproduce locally, fix the root cause (failing test first),
   re-clear Gate 2/2.5, push.
