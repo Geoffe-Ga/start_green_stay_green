@@ -66,6 +66,15 @@ case "$args" in
 esac
 """
 
+# A native jq.exe on Windows writes CRLF line endings, and bash's $(...) keeps
+# the CR, so every captured value would carry a stray "\r". The workflow runs
+# on ubuntu-latest, where jq writes LF; this shim gives the test that same LF
+# output on every platform.
+JQ_SHIM = r"""#!/usr/bin/env bash
+set -o pipefail
+"$REAL_JQ" "$@" | tr -d '\r'
+"""
+
 
 def _step_script() -> str:
     """Return the ``run:`` block of the summary step."""
@@ -94,7 +103,11 @@ def _review(verdict: str, prose: str = "") -> str:
 
 def _run(tmp_path: Path, comments: list[dict[str, Any]]) -> str | None:
     """Run the step against fixtures; return the posted body, or None."""
-    if shutil.which("bash") is None or shutil.which("jq") is None:
+    # Resolve bash on PATH: on Windows a bare "bash" makes CreateProcess look in
+    # System32 first and start WSL's bash, not Git Bash.
+    bash = shutil.which("bash")
+    real_jq = shutil.which("jq")
+    if bash is None or real_jq is None:
         pytest.skip("bash and jq are required")
     fixtures = tmp_path / "fx"
     bin_dir = tmp_path / "bin"
@@ -103,6 +116,9 @@ def _run(tmp_path: Path, comments: list[dict[str, Any]]) -> str | None:
     gh = bin_dir / "gh"
     gh.write_text(GH_STUB, encoding="utf-8")
     gh.chmod(0o755)
+    jq = bin_dir / "jq"
+    jq.write_text(JQ_SHIM, encoding="utf-8")
+    jq.chmod(0o755)
     (fixtures / "comments.json").write_text(json.dumps(comments), encoding="utf-8")
     (fixtures / "runs.json").write_text(
         json.dumps({"check_runs": [{"conclusion": "success"}] * 3}), encoding="utf-8"
@@ -113,21 +129,23 @@ def _run(tmp_path: Path, comments: list[dict[str, Any]]) -> str | None:
     env = os.environ | {
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "FIXTURES": str(fixtures),
+        "REAL_JQ": Path(real_jq).as_posix(),
         "GH_TOKEN": "fake",
         "REPO": "Geoffe-Ga/start_green_stay_green",
         "PR": "4242",
         "SHA": "a" * 40,
         "MARKER": MARKER,
     }
-    subprocess.run(  # noqa: S603 - fixed argv; the script is this repo's own workflow
-        ["bash", "-c", _step_script()],  # noqa: S607 - bash resolved on PATH by design
+    result = subprocess.run(  # noqa: S603 - fixed argv; the script is this repo's own workflow
+        [bash, "-c", _step_script()],
         cwd=tmp_path,
         env=env,
-        check=True,
+        check=False,
         timeout=STEP_TIMEOUT_SECONDS,
         capture_output=True,
         text=True,
     )
+    assert result.returncode == 0, f"step failed:\n{result.stdout}\n{result.stderr}"
     posted = fixtures / "posted.txt"
     return posted.read_text(encoding="utf-8") if posted.exists() else None
 
