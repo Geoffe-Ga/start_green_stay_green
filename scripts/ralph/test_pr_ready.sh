@@ -6,7 +6,10 @@
 # lane. CI state is keyed off the `gh pr checks` EXIT CODE (0=green, 8=pending,
 # else=failed), never a text grep of its TAB-delimited output, and an LGTM
 # verdict only counts when it is fresher than the PR's HEAD commit (stale-verdict
-# guard). We put a fake, arg-aware `gh` on PATH and assert every classification.
+# guard). A COMMENTS verdict merges too, but only once address-feedback Step 1A
+# has posted its `Follow-ups filed:` comment after it; before that it reports
+# `needs-followups`. We put a fake, arg-aware `gh` on PATH and assert every
+# classification.
 #
 # Run:  bash scripts/ralph/test_pr_ready.sh
 set -euo pipefail
@@ -30,7 +33,8 @@ mkdir -p "$BIN"
 #   CHECKS_EC     — exit code `gh pr checks` should return (0 green / 8 pending / other failed)
 #   MERGE_STATE   — mergeStateStatus (CLEAN / BEHIND / ...)
 #   HEAD_DATE     — RFC3339 committedDate of the PR HEAD commit
-#   VERDICT       — the "<createdAt>|<isLGTM>" scalar the verdict jq resolves to
+#   VERDICT       — the "<createdAt>|<kind>" scalar the verdict jq resolves to
+#                   (kind: true = LGTM, comments-filed, comments, false)
 #   COMMENTS_JSON — raw `--json comments` payload; when set, the stub runs the
 #                   REAL jq with pr-ready.sh's own `--jq` expression against it,
 #                   so the production verdict regex is genuinely exercised
@@ -97,6 +101,18 @@ check "green + CLEAN + no verdict → awaiting-review" "awaiting-review" \
 check "green + CLEAN + fresh non-LGTM → awaiting-review" "awaiting-review" \
   "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H VERDICT="$FRESH|false" run 100)"
 
+# --- COMMENTS verdict: mergeable only once its follow-ups are filed --------
+check "green + CLEAN + fresh COMMENTS, follow-ups filed → ready" "ready" \
+  "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H VERDICT="$FRESH|comments-filed" run 100)"
+check "green + BEHIND + fresh COMMENTS, follow-ups filed → behind" "behind" \
+  "$(CHECKS_EC=0 MERGE_STATE=BEHIND HEAD_DATE=$H VERDICT="$FRESH|comments-filed" run 100)"
+check "green + CLEAN + fresh COMMENTS, no follow-ups → needs-followups" "needs-followups" \
+  "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H VERDICT="$FRESH|comments" run 100)"
+check "green + CLEAN + STALE COMMENTS, follow-ups filed → awaiting-review" "awaiting-review" \
+  "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H VERDICT="$STALE|comments-filed" run 100)"
+check "pending CI wins over a filed COMMENTS verdict" "pending" \
+  "$(CHECKS_EC=8 MERGE_STATE=CLEAN HEAD_DATE=$H VERDICT="$FRESH|comments-filed" run 100)"
+
 # --- REAL jq: exercise the production verdict regex against real bodies ----
 # The verdict `claude-code-review.yml` posts is `## Verdict: <X>` at the END of a
 # long `## Summary …` body. These cases feed raw comment JSON through pr-ready.sh's
@@ -143,6 +159,37 @@ if command -v jq >/dev/null 2>&1; then
   check "real ## Verdict: LGTM but stale → awaiting-review" "awaiting-review" \
     "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H \
        COMMENTS_JSON="$(cj '{"createdAt":"'"$STALE"'","body":"## Verdict: LGTM\n"}')" \
+       run 100)"
+
+  # COMMENTS verdict followed by Step 1A's summary comment → ready.
+  LATER="2026-07-01T12:00:00Z"
+  check "real ## Verdict: COMMENTS + later 'Follow-ups filed:' → ready" "ready" \
+    "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H \
+       COMMENTS_JSON="$(cj '{"createdAt":"'"$FRESH"'","body":"## Summary\nok\n\n## Verdict: COMMENTS\n"},{"createdAt":"'"$LATER"'","body":"Follow-ups filed: #142 (P2), #143 (P3)"}')" \
+       run 100)"
+
+  # `Follow-ups filed: none` (nothing actionable) also clears it.
+  check "real COMMENTS + 'Follow-ups filed: none' → ready" "ready" \
+    "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H \
+       COMMENTS_JSON="$(cj '{"createdAt":"'"$FRESH"'","body":"## Verdict: COMMENTS\n"},{"createdAt":"'"$LATER"'","body":"Follow-ups filed: none"}')" \
+       run 100)"
+
+  # COMMENTS with no summary comment yet → needs-followups.
+  check "real ## Verdict: COMMENTS, nothing filed → needs-followups" "needs-followups" \
+    "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H \
+       COMMENTS_JSON="$(cj '{"createdAt":"'"$FRESH"'","body":"## Verdict: COMMENTS\n"}')" \
+       run 100)"
+
+  # A summary posted BEFORE the COMMENTS verdict belongs to an older review → not filed.
+  check "real follow-ups summary predating the COMMENTS verdict → needs-followups" "needs-followups" \
+    "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H \
+       COMMENTS_JSON="$(cj '{"createdAt":"'"$H"'","body":"Follow-ups filed: #9 (P3)"},{"createdAt":"'"$FRESH"'","body":"## Verdict: COMMENTS\n"}')" \
+       run 100)"
+
+  # A follow-ups summary never upgrades CHANGES_REQUESTED.
+  check "real CHANGES_REQUESTED + 'Follow-ups filed:' → awaiting-review" "awaiting-review" \
+    "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H \
+       COMMENTS_JSON="$(cj '{"createdAt":"'"$FRESH"'","body":"## Verdict: CHANGES_REQUESTED\n"},{"createdAt":"'"$LATER"'","body":"Follow-ups filed: #142 (P2)"}')" \
        run 100)"
 else
   echo "  skip - real-jq verdict-regex cases (jq not installed)"

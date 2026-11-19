@@ -18,7 +18,7 @@ description: >-
   issue/branch/PR creation (use git-workflow).
 metadata:
   author: Geoff
-  version: 2.1.0
+  version: 2.2.0
 ---
 
 # Address Feedback
@@ -122,7 +122,7 @@ Reached only when the current verdict is `COMMENTS`. **A `COMMENTS` verdict neve
    - **Body** — the 6-component structure the rest of the backlog uses (see `scan-issue-writer`): the reviewer's verbatim quote, the `file:line` citation, the requested change, the test idea from the triage table, acceptance criteria, and a back-link to the source PR (`Follow-up from #<N> — <comment URL>`).
    - **Labels** — the P-label from item 3, the type (`bug` or `enhancement`/`tech-debt`), the area label, and `agent-ready` (or the repo's equivalent) when every body section is filled with real content. If a P-label does not exist yet, create it once (for example `gh label create P0`) rather than filing unlabeled.
 6. For each line-level thread that produced an issue, post a reply via `mcp__github__add_reply_to_pull_request_comment` linking the new issue number, then `mcp__github__resolve_review_thread`.
-7. Post a single summary reply on the top-level Claude comment via `mcp__github__add_issue_comment` listing every follow-up filed with its priority (e.g. `Follow-ups filed: #142 (P2), #143 (P3), #144 (P3)`), plus any moratorium deferrals.
+7. Post a single summary reply on the top-level Claude comment via `mcp__github__add_issue_comment`. Start it with the exact words `Follow-ups filed:`, then list every follow-up filed with its priority (e.g. `Follow-ups filed: #142 (P2), #143 (P3), #144 (P3)`), plus any moratorium deferrals. Post it even when nothing was actionable (`Follow-ups filed: none`). A readiness script (for example `scripts/ralph/pr-ready.sh`) reads this line, posted after the `COMMENTS` verdict, as the sign that the findings are tracked.
 8. Continue to Step 6. The merge gate accepts `COMMENTS` once every actionable item has a tracking issue, a duplicate link, or a moratorium-deferral reply.
 
 ### Step 2: Triage the Comment Body into a Fix Plan
@@ -195,7 +195,8 @@ Merge only when **every** condition is true. If any fails, stop and explain whic
   - `ready` and `behind` agree.
   - `pending` agrees only with turning on auto-merge while `mergeable_state` is `blocked`, because GitHub then keeps the wait on the running checks. It never clears a direct merge.
   - `ci-failed` always stops (hand off to `ci-debugging`).
-  - `awaiting-review` stops an `LGTM` merge. The script counts only `LGTM` as a verdict, so for a current `COMMENTS` verdict whose Step 1A filing is done, its `awaiting-review` says nothing about the PR and the Step 1 and Step 1A gates decide.
+  - `needs-followups` means a current `COMMENTS` verdict with no `Follow-ups filed:` comment after it: finish Step 1A, then check again.
+  - `awaiting-review` stops the merge.
   - Any other disagreement: stop and surface it rather than overriding it.
 
 ### Then Turn On Auto-Merge (the Default)

@@ -5,11 +5,20 @@
 # (ralph-tick.md Step 1). Prints exactly one status token and exits 0 (it is a
 # query — a non-zero exit means a usage/tooling error, never a PR verdict):
 #
-#   ready            LGTM (fresh) + CI green + up-to-date with main  → merge now
-#   behind           LGTM (fresh) + CI green but mergeStateStatus BEHIND → sync first
+#   ready            mergeable verdict (fresh) + CI green + up-to-date with main → merge now
+#   behind           mergeable verdict (fresh) + CI green but mergeStateStatus BEHIND → sync first
 #   pending          CI still running → wait for a later wake
 #   ci-failed        CI has a failing/errored check → Step 2 (ci-debugging)
-#   awaiting-review  no fresh LGTM verdict (missing, stale, or non-LGTM) → wait / Step 2
+#   needs-followups  fresh COMMENTS verdict, but no "Follow-ups filed:" comment after
+#                    it → run address-feedback Step 1A (file the follow-ups), re-check
+#   awaiting-review  no fresh mergeable verdict (missing, stale, or CHANGES_REQUESTED
+#                    / malformed) → wait / Step 2
+#
+# A MERGEABLE verdict is `LGTM`, or `COMMENTS` once its findings are tracked:
+# address-feedback Step 1A files each finding as a P0–P3 follow-up issue and
+# then posts one top-level comment starting `Follow-ups filed:` (`Follow-ups
+# filed: none` when nothing was actionable). That comment, posted AFTER the
+# COMMENTS verdict, is the signal this script reads. `COMMENTS` never iterates.
 #
 # WHY THIS EXISTS: the previous all-lanes Monitor grepped `gh pr checks` output
 # for ': pending'. That output is TAB-delimited (name<TAB>pending<TAB>...), so the
@@ -58,6 +67,9 @@ done
 # `\\s`.
 readonly VERDICT_RE='(?im)^\\s*(?:#{1,6}\\s+|\\*\\*)?verdict[^a-zA-Z0-9]'
 readonly VERDICT_LGTM_RE="${VERDICT_RE}+lgtm"
+readonly VERDICT_COMMENTS_RE="${VERDICT_RE}+comments"
+# address-feedback Step 1A's summary line, e.g. `Follow-ups filed: #142 (P2)`.
+readonly FOLLOWUPS_RE='(?im)^\\s*follow-ups filed:'
 
 # `${arr[@]+"${arr[@]}"}` expands to nothing when the array is empty instead of
 # tripping `set -u` on bash 3.2 (stock /bin/bash on macOS).
@@ -72,9 +84,12 @@ elif [[ "$ci_ec" -ne 0 ]]; then
   echo "ci-failed"; exit 0
 fi
 
-# --- CI is green: check mergeability + a FRESH LGTM verdict -----------------
+# --- CI is green: check mergeability + a FRESH mergeable verdict ------------
 # One call yields "<mergeStateStatus>|<HEAD committedDate>", another the latest
-# top-level verdict as "<createdAt>|<isLGTM>". gh applies --jq server-side.
+# top-level verdict as "<createdAt>|<kind>", where <kind> is `true` (LGTM),
+# `comments-filed` (COMMENTS with a later `Follow-ups filed:` comment),
+# `comments` (COMMENTS, follow-ups not filed yet), or `false` (anything else).
+# gh applies --jq server-side.
 merge_line="$(gh pr view "${gh_args[@]}" \
   --json mergeStateStatus,commits \
   --jq '(.mergeStateStatus // "") + "|" + (.commits[-1].committedDate // "")')"
@@ -84,21 +99,35 @@ head_date="${merge_line#*|}"
 verdict_line="$(gh pr view "${gh_args[@]}" \
   --json comments \
   --jq "([.comments[] | select(.body != null and (.body | test(\"$VERDICT_RE\")))] | last) as \$v
-        | ((\$v.createdAt // \"\") + \"|\" + ((\$v.body // \"\" | test(\"$VERDICT_LGTM_RE\")) | tostring))")"
+        | (\$v.createdAt // \"\") as \$vd
+        | (if \$v == null then \"false\"
+           elif (\$v.body | test(\"$VERDICT_LGTM_RE\")) then \"true\"
+           elif (\$v.body | test(\"$VERDICT_COMMENTS_RE\")) then
+             (if any(.comments[]; .body != null and (.createdAt // \"\") > \$vd
+                                  and (.body | test(\"$FOLLOWUPS_RE\")))
+              then \"comments-filed\" else \"comments\" end)
+           else \"false\" end) as \$kind
+        | \$vd + \"|\" + \$kind")"
 verdict_date="${verdict_line%%|*}"
-verdict_lgtm="${verdict_line#*|}"
+verdict_kind="${verdict_line#*|}"
 
 # Without a HEAD commit time we cannot prove the verdict is fresh — fail closed.
 if [[ -z "$head_date" ]]; then
   echo "awaiting-review"; exit 0
 fi
 
-# Fresh LGTM ⇔ latest verdict is LGTM AND its createdAt is strictly newer than
-# the HEAD commit. RFC3339 UTC timestamps are fixed-width, so a lexical string
-# compare is a correct chronological compare (portable — no date arithmetic).
-if [[ "$verdict_lgtm" != "true" || -z "$verdict_date" ]] || ! [[ "$verdict_date" > "$head_date" ]]; then
+# Fresh ⇔ the latest verdict's createdAt is strictly newer than the HEAD
+# commit. RFC3339 UTC timestamps are fixed-width, so a lexical string compare
+# is a correct chronological compare (portable — no date arithmetic).
+if [[ -z "$verdict_date" ]] || ! [[ "$verdict_date" > "$head_date" ]]; then
   echo "awaiting-review"; exit 0
 fi
+
+case "$verdict_kind" in
+  true|comments-filed) ;;                                # mergeable verdict
+  comments) echo "needs-followups"; exit 0 ;;            # COMMENTS, Step 1A not done
+  *)        echo "awaiting-review"; exit 0 ;;            # CHANGES_REQUESTED / malformed
+esac
 
 if [[ "$merge_state" == "CLEAN" ]]; then
   echo "ready"
