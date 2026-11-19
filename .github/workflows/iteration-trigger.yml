@@ -106,9 +106,12 @@ jobs:
           # address-feedback Step 1A has filed each finding as a P0-P3
           # follow-up issue and posted its "Follow-ups filed:" comment after
           # the verdict (the same signal scripts/ralph/pr-ready.sh reads).
+          # [[:space:]] rather than \\s keeps backslashes out of the jq program,
+          # so no layer of quoting between bash and jq can turn it into an
+          # invalid "\s" string escape.
           FILED=$(jq -r --arg since "$CREATED" '[.[] | select(.body != null
                      and (.created_at // "") > $since
-                     and (.body | test("(?im)^\\s*follow-ups filed:")))] | length' comments.json)
+                     and (.body | test("(?im)^[[:space:]]*follow-ups filed:")))] | length' comments.json)
 
           # CI status from check-runs on the head SHA.
           gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" > runs.json
