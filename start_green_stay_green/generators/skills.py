@@ -43,6 +43,7 @@ REFERENCE_SKILLS_DIR = Path(__file__).parent.parent.parent / "reference" / "skil
 REQUIRED_SKILLS = [
     "address-feedback",
     "architectural-decisions",
+    "await-claude-review",
     "backlog-grooming",
     "bug-squashing-methodology",
     "ci-debugging",

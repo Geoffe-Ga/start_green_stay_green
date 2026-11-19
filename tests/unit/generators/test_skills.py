@@ -612,6 +612,7 @@ class TestSkillsModuleConstants:
         assert REQUIRED_SKILLS == [
             "address-feedback",
             "architectural-decisions",
+            "await-claude-review",
             "backlog-grooming",
             "bug-squashing-methodology",
             "ci-debugging",
