@@ -109,6 +109,22 @@ Phase 6 follow-ups in progress (issues #316–#319).
   foundation scaffold + CI (#373), tests (#374), documentation
   (#375). A real generated example lives in `examples/ruby/`.
 
+### Changed
+
+- **`address-feedback` turns on auto-merge once every gate passes.**
+  After a current trusted `LGTM`, or a `COMMENTS` verdict with every
+  finding filed as a P0–P3 follow-up issue, the skill hands the merge
+  to GitHub with auto-merge (squash) while required checks are still
+  running, and squash-merges directly when nothing is left to wait
+  for. It turns auto-merge off before any further push, on a
+  `CHANGES_REQUESTED` verdict, or when a hold label appears. Ported
+  from `well-worn-tools` #24; applies to this repo's own
+  `.claude/skills/` and to the copy `green init` generates from
+  `reference/skills/`. The readiness-script gate now reads
+  `pr-ready.sh`'s `pending` as agreement with auto-merge, and its
+  `awaiting-review` as silent on a `COMMENTS` verdict, since the
+  script only counts `LGTM`.
+
 ## [1.0.0] — 2026-05-10
 
 First tagged release. Bundles the entire claude-init optimization
