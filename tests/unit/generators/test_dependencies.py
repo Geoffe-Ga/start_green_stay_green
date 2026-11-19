@@ -193,6 +193,29 @@ class TestDependenciesGeneration:
             assert "black" in tools or "ruff" in tools
             assert "pytest" in tools or "tool.pytest.ini_options" in str(data)
 
+    def test_pyproject_toml_registers_lane_markers(self) -> None:
+        """Test every marker the generated scripts filter on is registered.
+
+        The pytest config enables --strict-markers, and pytest >= 9.2 also
+        rejects a -m expression that names an unregistered marker, so the
+        generated scripts/test.sh ("not integration and not e2e") and the
+        CI gate ("not flaky_in_ci") fail unless each lane marker is declared.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = DependencyConfig(
+                project_name="test-project",
+                language="python",
+                package_name="test_project",
+            )
+            generator = DependenciesGenerator(Path(tmpdir), config)
+            files = generator.generate()
+
+            data = tomllib.loads(files["pyproject.toml"].read_text())
+            markers = data["tool"]["pytest"]["ini_options"]["markers"]
+            names = {marker.split(":", 1)[0] for marker in markers}
+
+            assert {"integration", "e2e", "flaky_in_ci"} <= names
+
     def test_pyproject_toml_has_project_metadata(self) -> None:
         """Test pyproject.toml contains project metadata."""
         with tempfile.TemporaryDirectory() as tmpdir:

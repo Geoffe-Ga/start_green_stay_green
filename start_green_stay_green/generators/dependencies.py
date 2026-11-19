@@ -364,6 +364,11 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "integration: marks tests as integration tests",
+    "e2e: marks tests as end-to-end tests",
+    "flaky_in_ci: marks tests that are flaky in CI (must pass locally)",
+]
 
 [tool.coverage.run]
 source = ["{self.config.package_name}"]
