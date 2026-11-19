@@ -121,9 +121,15 @@ Phase 6 follow-ups in progress (issues #316–#319).
   from `well-worn-tools` #24; applies to this repo's own
   `.claude/skills/` and to the copy `green init` generates from
   `reference/skills/`. The readiness-script gate now reads
-  `pr-ready.sh`'s `pending` as agreement with auto-merge, and its
-  `awaiting-review` as silent on a `COMMENTS` verdict, since the
-  script only counts `LGTM`.
+  `pr-ready.sh`'s `pending` as agreement with auto-merge.
+- **`pr-ready.sh` accepts a `COMMENTS` verdict once its follow-ups are
+  filed.** A fresh `COMMENTS` verdict followed by `address-feedback`
+  Step 1A's `Follow-ups filed:` comment now reports `ready` (or
+  `behind`), like a fresh `LGTM`. A fresh `COMMENTS` verdict with no
+  such comment reports the new `needs-followups` token, and
+  `ralph-tick` runs Step 1A for it. Step 1A always posts that comment
+  (`Follow-ups filed: none` when nothing was actionable). Applies to
+  this repo and to the `--with-ralph-loop` templates.
 
 ## [1.0.0] — 2026-05-10
 

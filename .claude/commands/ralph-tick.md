@@ -51,7 +51,7 @@ one.
 | 1 | **TDD** (Red→Green→Refactor, `stay-green`) | → Gate 2 | — |
 | 2 | **`./scripts/check-all.sh`** (backend and/or frontend) | → push → Gate 3 | **drop to Gate 1** |
 | 3 | **CI** all green | → Gate 4 | **drop to Gate 1** (via `ci-debugging`) |
-| 4 | **Claude review `Verdict:`** | `LGTM` + green + up-to-date → **merge + mark issue done + refill** | **drop to Gate 1** (via `address-feedback`) |
+| 4 | **Claude review `Verdict:`** | `LGTM`, or `COMMENTS` with its follow-ups filed, + green + up-to-date → **merge + mark issue done + refill** | `CHANGES_REQUESTED` → **drop to Gate 1** (via `address-feedback`); `COMMENTS` → file follow-ups (`address-feedback` Step 1A), **no push** |
 
 "Drop to Gate 1" means: fix the root cause with a failing-test-first cycle, re-clear Gate 2 locally, push, and climb again. Never weaken a gate to pass it.
 
@@ -109,10 +109,12 @@ Classify each in-flight PR with the authoritative readiness helper — never
 eyeball the CI rollup or grep `gh pr checks` (its output is TAB-delimited, so a
 `': pending'` grep silently misses a still-running check and a false READY can
 merge a pending/failing PR). The helper keys CI off the `gh pr checks` **exit
-code** (`0`=green, `8`=pending, else=failed) and only honours an LGTM verdict
-posted **after** the PR's HEAD commit (stale-verdict guard):
+code** (`0`=green, `8`=pending, else=failed) and only honours a verdict posted
+**after** the PR's HEAD commit (stale-verdict guard). A mergeable verdict is
+`LGTM`, or `COMMENTS` once `address-feedback` Step 1A has filed its findings as
+follow-up issues and posted its `Follow-ups filed:` comment:
 ```bash
-STATUS=$(scripts/ralph/pr-ready.sh "$PR_NUM")   # ready | behind | pending | ci-failed | awaiting-review
+STATUS=$(scripts/ralph/pr-ready.sh "$PR_NUM")   # ready | behind | pending | ci-failed | needs-followups | awaiting-review
 ```
 Read the PR's comments once for context (which issue it closes, verdict text):
 ```bash
@@ -120,7 +122,8 @@ gh pr view "$PR_NUM" --comments --json state,mergeable,mergeStateStatus,statusCh
 ```
 Then act on `$STATUS`:
 
-- **`ready`** (`Verdict: LGTM` fresh + CI green + `mergeStateStatus` `CLEAN`,
+- **`ready`** (fresh `Verdict: LGTM`, or fresh `Verdict: COMMENTS` with its
+  follow-ups filed, + CI green + `mergeStateStatus` `CLEAN`,
   i.e. up-to-date with `main`). **Merge it now** — do not wait for any other
   lane:
   ```bash
@@ -133,7 +136,7 @@ Then act on `$STATUS`:
   ```
   (Idempotent if `iteration-trigger.yml` or a prior wake already merged it — the
   PR shows MERGED; do the same close + `release` + state bump.)
-- **`behind`** (`LGTM` + green but `mergeStateStatus` is `BEHIND` — a sibling
+- **`behind`** (mergeable verdict + green but `mergeStateStatus` is `BEHIND` — a sibling
   merged after this lane went green). **Do not merge stale.** Sync it and let CI
   re-run:
   ```bash
@@ -142,8 +145,12 @@ Then act on `$STATUS`:
   A clean sync → dispatch its `ralph-worker` to re-clear Gate 2 locally and push;
   it re-merges on a later wake once green. `SYNC-CONFLICT` → that lane drops to
   Gate 1 (worker resolves the conflict as a root-cause change, re-greens, pushes).
-- **`pending`** / **`awaiting-review`** — CI is still running or no fresh LGTM
-  verdict exists yet. Leave the lane; its Step 5 subscription wakes you when CI
+- **`needs-followups`** — a fresh `Verdict: COMMENTS` whose findings are not
+  tracked yet. Run `address-feedback` Step 1A (file each finding as a P0–P3
+  follow-up issue, then post the `Follow-ups filed:` comment), then re-classify.
+  **Never** push a fix for a `COMMENTS` finding: that supersedes the sign-off.
+- **`pending`** / **`awaiting-review`** — CI is still running or no fresh
+  mergeable verdict exists yet. Leave the lane; its Step 5 subscription wakes you when CI
   or the verdict changes. **Exception — missing review usually means a merge
   conflict:** if the verdict never arrives and the `claude-review` check is
   absent from the rollup entirely, check
@@ -170,10 +177,14 @@ into that PR's worktree only if it needs a fix (re-attach a worktree with
 `scripts/ralph/fleet.sh assign "$N" "<slug>"` if reconcile removed it — `assign`
 reuses the existing branch):
 
-- **Gate 4 failed** (`CHANGES_REQUESTED`/`COMMENTS`): worker runs the
+- **Gate 4 failed** (`CHANGES_REQUESTED`): worker runs the
   **`address-feedback`** flow in the worktree — triage, TDD fix loop dispatching
   the specialist that owns each comment, re-clear Gate 2 + Gate 2.5, push, reply,
   resolve threads.
+- **Gate 4 signed off with findings** (`COMMENTS`, status `needs-followups`):
+  **not** a failure, and **no push**. Run `address-feedback` Step 1A only — file
+  each finding as a P0–P3 follow-up issue, resolve its threads, post the
+  `Follow-ups filed:` comment — then re-classify in Step 1.
 - **Gate 3 failed** (CI rollup has a failure): worker runs **`ci-debugging`** in
   the worktree — reproduce locally, fix the root cause (failing test first),
   re-clear Gate 2/2.5, push.
