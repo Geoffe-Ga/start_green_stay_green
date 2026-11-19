@@ -5,10 +5,11 @@ description: >-
   Use when choosing between libraries, patterns, technologies, databases,
   or API designs. Presents 2-4 options with comparison matrices and
   recommendations. Do NOT use for trivial choices, variable naming,
-  or code formatting decisions.
+  or code formatting decisions, or for laying out several open calls for
+  the user to work through interactively (use decide).
 metadata:
   author: Geoff
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # Architectural Decisions

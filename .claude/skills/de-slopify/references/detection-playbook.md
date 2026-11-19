@@ -48,38 +48,42 @@ The signal classes, strongest first:
 - "This is probably an N+1." — no query-count artifact. ❌
 - "This might be a race condition." — no reproducing test or rigorous argument
   plus a concrete interleaving. ❌
-- vulture flags a symbol that is actually a FastAPI route handler / pytest
-  fixture / dynamically dispatched — the grep refutes it. ❌ (This is why
+- vulture flags a symbol that is actually a web route handler / CLI command /
+  tool or event handler / pytest fixture / dynamically dispatched — the grep
+  refutes it. ❌ (This is why
   vulture alone is never enough.)
 
 When in doubt, **don't file it.** Null findings are a valid, healthy outcome.
 
 ---
 
-## The toolbox (already in this repo)
+## The toolbox (typically already in the repo)
 
-Everything below is already installed via `backend/requirements-dev.txt`,
-`.pre-commit-config.yaml`, and `frontend/package.json`. `collect-evidence.sh`
-runs the read-only subset and writes a report to the scratchpad.
+The tools below are the usual Python + TypeScript quality stack; check the
+repo's dev dependencies, `.pre-commit-config.yaml`, and `package.json` for what
+is actually installed. `collect-evidence.sh` runs the read-only subset over the
+auto-detected source roots (override with `DESLOP_PY_DIRS` / `DESLOP_TS_DIRS`)
+and writes a report to the scratchpad. Below, `$PY` / `$TS` stand for those
+roots (e.g. `backend/src`, `src`, a flat-layout package dir; `frontend/src`).
 
-### Backend (Python)
+### Python
 
-| Tool | Finds | Invocation (from `backend/`) |
+| Tool | Finds | Invocation (from the repo root) |
 |------|-------|------------------------------|
-| **ruff** (`select=ALL`) | bugs (`B`,`BLE`,`RUF`), simplifications (`SIM`), complexity (`PLR`), datetimes (`DTZ`), dead imports (`F401`) | `ruff check src --output-format=json` |
-| **vulture** | dead code: unused funcs/classes/vars/imports | `vulture src --min-confidence 80` |
-| **radon** | cyclomatic complexity + maintainability index | `radon cc src -s -n C` / `radon mi src -s` |
-| **xenon** | complexity grade gate | `xenon src --max-absolute B --max-average A` |
-| **mypy** (strict) | type holes, `Any` creep, unreachable code | `mypy src` |
-| **bandit** | security smells (injection, weak crypto, asserts) | `bandit -r src -f json` |
-| **interrogate** | docstring coverage gaps | `interrogate src -v` |
+| **ruff** (`select=ALL`) | bugs (`B`,`BLE`,`RUF`), simplifications (`SIM`), complexity (`PLR`), datetimes (`DTZ`), dead imports (`F401`) | `ruff check $PY --output-format=json` |
+| **vulture** | dead code: unused funcs/classes/vars/imports | `vulture $PY --min-confidence 60` (60, not 80: vulture scores unused functions/classes/methods at 60%, so 80 hides the whole dead-symbol tier) |
+| **radon** | cyclomatic complexity + maintainability index | `radon cc $PY -s -n C` / `radon mi $PY -s` |
+| **xenon** | complexity grade gate | `xenon $PY --max-absolute B --max-average A` |
+| **mypy** (strict) | type holes, `Any` creep, unreachable code | `mypy $PY` |
+| **bandit** | security smells (injection, weak crypto, asserts) | `bandit -r $PY -f json` |
+| **interrogate** | docstring coverage gaps | `interrogate $PY -v` |
 | **pip-audit** | vulnerable dependencies | `pip-audit -r requirements.txt` |
-| **detect-secrets** | hardcoded secrets | `detect-secrets scan` |
+| **detect-secrets** | hardcoded secrets | `detect-secrets scan $PY` |
 | **git** | churn / hotspots / commented-out code | `git log --format= --name-only \| sort \| uniq -c \| sort -rn` |
 
-### Frontend (TypeScript / React Native)
+### TypeScript / JavaScript
 
-| Tool | Finds | Invocation (from `frontend/`) |
+| Tool | Finds | Invocation (from the package dir) |
 |------|-------|-------------------------------|
 | **eslint** (sonarjs + unicorn) | cognitive complexity, duplication, dead code, footguns | `npx eslint . -f json` |
 | **tsc** (strict) | type holes, `any`, unreachable, hallucinated APIs | `npx tsc --noEmit` |
@@ -92,20 +96,20 @@ Run these read-only; each hit is a *candidate* needing a second signal.
 
 ```bash
 # Stubs / hollow implementations
-rg -n "NotImplementedError|not implemented|return None\s*#\s*TODO|throw new Error\(['\"]not implemented" backend/src frontend/src
+rg -n "NotImplementedError|not implemented|return None\s*#\s*TODO|throw new Error\(['\"]not implemented" $PY $TS
 # AI-tell comments
-rg -n "In a real implementation|placeholder|for now|as an AI|should probably|FIXME|HACK|XXX" backend/src frontend/src
+rg -n "In a real implementation|placeholder|for now|as an AI|should probably|FIXME|HACK|XXX" $PY $TS
 # Debt markers
-rg -n "TODO|FIXME|HACK" backend/src frontend/src
+rg -n "TODO|FIXME|HACK" $PY $TS
 # Escape hatches without an issue reference
-rg -n "type: ignore|@ts-ignore|eslint-disable|# noqa" backend/src frontend/src
+rg -n "type: ignore|@ts-ignore|eslint-disable|# noqa" $PY $TS
 # Swallowed exceptions
-rg -n "except (Exception|BaseException)?:\s*$" -U backend/src
-rg -n "catch\s*\([^)]*\)\s*\{\s*\}" frontend/src
+rg -n "except (Exception|BaseException)?:\s*$" -U $PY
+rg -n "catch\s*\([^)]*\)\s*\{\s*\}" $TS
 # Commented-out code (heuristic: lines that are commented statements)
-rg -n "^\s*#\s*(def |class |return |if |for |import )" backend/src
+rg -n "^\s*#\s*(def |class |return |if |for |import )" $PY
 # Magic numbers (review, don't auto-file)
-rg -n "[^_a-zA-Z0-9.]\d{3,}" backend/src
+rg -n "[^_a-zA-Z0-9.]\d{3,}" $PY
 ```
 
 ---
@@ -136,13 +140,14 @@ For each taxonomy family, the primary tool and the required second signal.
 
 ## What is already enforced — never file it
 
-The repo runs ruff (`select=ALL`), mypy (strict), radon/xenon, bandit, eslint
-(sonarjs+unicorn), and tsc in pre-commit **and** CI. Anything those gate cannot
-reach `main`, so it is **not a finding**:
+Whatever the repo gates in pre-commit **and** CI (read `.pre-commit-config.yaml`
+and the CI workflow — typically ruff, mypy (strict), radon/xenon, bandit,
+interrogate, eslint, and tsc) cannot reach `main`, so it is **not a finding**:
 
-- complexity grades (radon CC/MI, xenon) — already gated at A/B,
+- complexity grades (radon CC/MI, xenon) — already gated,
 - ruff/eslint lint rules and formatting,
 - mypy/tsc type errors,
+- docstring-coverage gaps, when interrogate (or similar) is gated,
 - bandit's high-confidence security rules.
 
 If the only signal for a candidate is one of these tools agreeing with itself,
@@ -162,10 +167,11 @@ the first audit.
    and anything already enforced by the gates above.
 3. **Reading pass (fan-out) — the core of the audit. EXHAUSTIVE, WHOLE-CODEBASE,
    EVERY RUN.** The bundle's `area-inventory.txt` is the authoritative coverage
-   set. Spawn one `Task` subagent for **every** area in it — every backend
-   router, every `domain/` and `services/` module, the models/schemas pair,
-   every `frontend/src/features/*`, and the shared `api/`/`design/`/`components/`/
-   `store/` — never just the changed ones. Hand each the full taxonomy and have
+   set. Spawn one `Task` subagent for **every** area in it — every entry-point
+   area (routers / CLI commands / handlers), every domain and service module,
+   each cross-boundary contract pair, every frontend feature, the shared/util
+   grab-bags, the top-level modules, and the `scripts/` tooling — never just the
+   changed ones. Hand each the full taxonomy and have
    it **read the actual source** and return corroborated candidates for the
    linter-invisible families: dead/stubbed/orphaned code, duplication (local and
    repo-wide), architecture/layering violations, lying flags, verbosity, comment

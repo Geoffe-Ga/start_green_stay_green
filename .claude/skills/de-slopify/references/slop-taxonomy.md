@@ -90,7 +90,7 @@ for; see the remediation note below the table.
 
 | Smell | The tell | Corroboration hint |
 |-------|----------|--------------------|
-| **Dead code** | unreachable branches, unused functions/classes/vars, unused imports | **vulture** (Python) / **eslint+ts** (frontend) **and** a grep proving zero references (incl. dynamic/string refs, routers, DI). |
+| **Dead code** | unreachable branches, unused functions/classes/vars, unused imports | **vulture** (Python) / **eslint+ts** (frontend) **and** a grep proving zero references (incl. dynamic/string refs, routers, CLI commands, tool/event handlers, DI). |
 | **Commented-out code** | blocks of `# old impl ...` / `// ...` left in | grep; trivially real — delete, git remembers. |
 | **Stubbed / hollow implementation** | `raise NotImplementedError`, `pass`, `return None  # TODO`, `return []` placeholder, `throw new Error('not implemented')`, a function whose body is a single `...` | grep + confirm it's referenced as if real (a stub nobody calls is dead code; a stub callers depend on is a **lie** — higher severity). |
 | **Fake/aspirational feature flag** | a flag/docstring/comment claiming a guarantee the code doesn't deliver (e.g. "encrypted at rest" with plaintext writes) | trace the claim to the implementation; confirm the gap. This is the `audit-destub` pattern — see that epic. |
@@ -105,12 +105,14 @@ for; see the remediation note below the table.
 **Remediation direction (delete vs. wire-in + e2e).** The default for
 Dead/Orphaned/Stubbed findings is still **delete** (git remembers) unless
 **both** hold: (a) **intent evidence** — a docstring/flag promise, a roadmap/
-epic/`NORTH-STAR.md` reference, or an adjacent call site that clearly meant to
+epic/product-vision doc (e.g. `NORTH-STAR.md`) reference, or an adjacent call site that clearly meant to
 use it; and (b) **completeness evidence** — the orphaned code is a finished,
 coherent, house-pattern-consistent implementation, not a husk. Both present ⇒
 recommend **wire-in + an e2e test** that exercises the newly connected path
-(backend: through the real router via `async_client`; frontend: through the
-screen via RNTL). Intent without completeness is not this case — that is the
+through the real entry point (backend: the real router via an HTTP test
+client; frontend: the screen via its component-testing library; CLI: the real
+command via the CLI framework's test runner; bot/tool server: the registered
+handler). Intent without completeness is not this case — that is the
 existing **Fake/aspirational feature flag** row above, the `audit-destub`
 "make it real" pattern. Ambiguous ⇒ file as **decision-needed** rather than
 silently deleting finished work. Neither signal ⇒ delete. The detector only
@@ -136,7 +138,7 @@ anything itself.
 |-------|----------|--------------------|
 | **Circular dependency** | module A imports B imports A | import-graph cycle detection; trivially real once found. |
 | **Layering violation** | router does DB access directly; domain imports web framework; model imports a router | confirm the dependency crosses a layer the wrong way. |
-| **Business logic in the wrong tier** | validation/pricing/billing math inside a route handler or a React component | confirm it belongs in `domain/`. |
+| **Business logic in the wrong tier** | validation/pricing/billing math inside a route handler, CLI command, event listener, or UI component | confirm it belongs in `domain/`. |
 | **Leaky abstraction** | callers must know internal details to use a thing safely | confirm the contract is insufficient. |
 | **Global mutable singleton** | module-level caches/state mutated across requests | confirm request-to-request bleed. |
 | **Missing seam / untestable design** | logic that can't be tested without network/clock/db because it hard-codes them | confirm no injection point exists. |
@@ -276,10 +278,11 @@ The detector must *not* file these. Treating them as findings is itself slop.
   with a linked issue and a real reason is allowed by CLAUDE.md. Leave it.
 - **Test fixtures and factories** — duplication and "magic" values in tests are
   often deliberate and readable.
-- **Generated code / vendored files / migrations** — Alembic migrations,
-  `package-lock.json`, build output. Out of scope.
-- **Framework-required boilerplate** — Pydantic models, SQLModel tables, React
-  Navigation config have irreducible shape.
+- **Generated code / vendored files / migrations** — DB migrations, lockfiles
+  (`package-lock.json`, `uv.lock`, ...), build output. Out of scope.
+- **Framework-required boilerplate** — Pydantic/ORM models, router/navigation
+  config, CLI command signatures, event-listener signatures have irreducible
+  shape.
 - **Domain constants that are self-explanatory** — `status_code=404`, `HTTP_200`.
 - **Style the repo has deliberately chosen** — match CLAUDE.md/AGENTS.md, not a
   generic ideal.

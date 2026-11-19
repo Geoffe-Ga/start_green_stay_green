@@ -4,7 +4,7 @@
   Each scan issue is itself a prompt: it is consumed by the Ralph agent, so it
   follows the 6-component framework (Role / Goal / Context / Output Format /
   Examples / Constraints) exactly. The scan-issue-writer skill fills every
-  component verbatim — an issue missing any component is labeled `needs-triage`
+  component verbatim — an issue missing any component is labeled `needs-spec`
   instead of `agent-ready`, and the grooming pass finishes it.
 
   Replace every [bracketed] placeholder. Leave no placeholder behind.

@@ -1,14 +1,15 @@
 ---
 name: comprehensive-pr-review
 description: >-
-  Structured 11-section PR review covering security, quality, testing,
+  Structured 10-section PR review covering security, quality, testing,
   and documentation. Use when reviewing pull requests, evaluating code
   changes, or doing code review. Produces verdicts with specific references.
-  Do NOT use for backlog grooming or issue triage (use backlog-grooming)
-  or issue-first development workflow and PR creation (use git-workflow).
+  Do NOT use for backlog grooming or issue triage (use backlog-grooming),
+  issue-first development workflow and PR creation (use git-workflow), or
+  iterating on a review's feedback as the PR author (use address-feedback).
 metadata:
   author: Geoff
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # Comprehensive PR Review
@@ -58,11 +59,11 @@ Verify against project standards (adjust to project's CLAUDE.md):
 Medium-priority suggestions that would improve the PR.
 
 ### Step 10: Deliver Verdict
-- **LGTM** - Ready to merge
-- **CHANGES_REQUESTED** - Must fix blocking issues
-- **COMMENTS** - Suggestions only, can merge as-is
+- **LGTM** - Ready to merge; nothing further worth tracking
+- **CHANGES_REQUESTED** - Must fix blocking issues. This is the **only** verdict that sends the author back into a fix loop
+- **COMMENTS** - Signed off with non-blocking suggestions; can merge as-is. The author does **not** iterate on a `COMMENTS` verdict: `address-feedback` files each actionable item as a follow-up issue labelled `P0`–`P3` by severity, then merges. So state each suggestion's severity plainly (cite `file:line`) — it sets the issue's priority. Anything that must change before merge is `CHANGES_REQUESTED`, not `COMMENTS`
 
-Include reasoning with specific file:line references.
+Include reasoning with specific file:line references. If you have non-blocking suggestions you want tracked, choose `COMMENTS` rather than `LGTM` — suggestions under an `LGTM` are not filed anywhere.
 
 #### Verdict Line Format (load-bearing)
 
@@ -77,18 +78,18 @@ End the review comment with a single canonical line so downstream automation (`a
 `await-claude-review` matches this regex (case-insensitive):
 
 ```
-^\s*(?:##\s+|\*\*)?Verdict[:\*\s]+(LGTM|CHANGES_REQUESTED|COMMENTS)
+^\s*(?:##\s+|\*\*)?Verdict[:*\s]+(LGTM|CHANGES_REQUESTED|COMMENTS)
 ```
 
-Don't paraphrase ("looks good to me", "approving"); the parser will refuse to infer a verdict from prose and the merge gate will block.
+Use exactly one of the three values. Don't paraphrase ("looks good to me", "approving") or invent a fourth value: the parser refuses to infer a verdict from prose, consumers treat any value other than an exact `LGTM` or `COMMENTS` as a refusal, and the merge gate will block.
 
 ### Step 11 (Iterative Reviewer): Wait for the Author's Response
 
-When you've delivered `CHANGES_REQUESTED` or actionable `COMMENTS` and want to follow the iteration without polling, delegate to `await-claude-review`. It subscribes to PR activity (comments + CI failures — the webhook does **not** deliver CI passes) and wakes the session on the next push's verdict comment. End the turn after subscribing.
+When you've delivered `CHANGES_REQUESTED` and want to follow the iteration without polling, delegate to `await-claude-review`. It subscribes to PR activity (comments + CI failures — the webhook does **not** deliver CI passes) and wakes the session on the next push's verdict comment. End the turn after subscribing. Do not wait after `LGTM` or `COMMENTS` — neither produces another push to review.
 
 ## Examples
 
-### Example 1: Approval with Suggestions
+### Example 1: Sign-off with Suggestions (COMMENTS)
 
 ```markdown
 ## Summary
@@ -106,11 +107,12 @@ None identified.
 None blocking.
 
 ## Code Quality
-- Consider extracting the search query builder into its own method
-- `search_users` could benefit from a `limit` parameter with default
+- (minor) Consider extracting the search query builder into its own method (src/services/search.py:40)
+- (moderate) `search_users` has no `limit` parameter, so a broad query returns every row (src/services/search.py:22)
 
-## Verdict: LGTM
-Well-structured PR with good test coverage. Suggestions are non-blocking.
+## Verdict: COMMENTS
+Well-structured PR with good test coverage. Suggestions are non-blocking and
+can be tracked as follow-up issues.
 ```
 
 ### Example 2: Changes Requested

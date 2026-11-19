@@ -16,6 +16,16 @@
 #
 # Exit codes: 0 always (collection is best-effort). 2 only on a setup error
 # (no git repo / cannot create output dir).
+#
+# Source roots are auto-detected; override them for an unusual layout:
+#   DESLOP_PY_DIRS  space-separated Python source roots (default: backend/src,
+#                   else src/, else every top-level package dir with an
+#                   __init__.py, excluding tests)
+#   DESLOP_TS_DIRS  space-separated TypeScript/JavaScript source roots
+#                   (default: frontend/src, else client/src, else src/ when it
+#                   holds .ts/.tsx files)
+# Tool config is read from the nearest pyproject.toml / package.json at or
+# above each root, so repo-specific tool settings still apply.
 
 set -uo pipefail
 
@@ -38,13 +48,65 @@ if ! mkdir -p "$OUT"; then
   exit 2
 fi
 
-# Single Python package (no frontend/backend split) — config lives at the
-# repo root (pyproject.toml, requirements*.txt), not under a subdir.
-PY_SRC="start_green_stay_green"
-
 log() { echo ">>> $*" >&2; }
 
-# Activate the project venv if present (so tools resolve).
+# nearest_up <dir> <file> — print the closest ancestor of <dir> (inclusive,
+# stopping at the repo root) that contains <file>; "." when none does.
+nearest_up() {
+  local d="$1" f="$2"
+  while [[ "$d" != "." && "$d" != "/" && -n "$d" ]]; do
+    [[ -e "$d/$f" ]] && { echo "$d"; return 0; }
+    d="$(dirname "$d")"
+  done
+  echo "."
+}
+
+# --- Python source roots ---
+PY_DIRS=()
+if [[ -n "${DESLOP_PY_DIRS:-}" ]]; then
+  for d in $DESLOP_PY_DIRS; do [[ -d "$d" ]] && PY_DIRS+=("$d"); done
+elif [[ -d backend/src ]]; then
+  PY_DIRS=(backend/src)
+elif [[ -d src ]] && find src -name '*.py' -print -quit 2>/dev/null | grep -q .; then
+  PY_DIRS=(src)
+else
+  for d in */; do
+    d="${d%/}"
+    case "$d" in tests|test|docs|node_modules|.*) continue ;; esac
+    [[ -f "$d/__init__.py" ]] && PY_DIRS+=("$d")
+  done
+fi
+
+# --- TypeScript / JavaScript source roots ---
+TS_DIRS=()
+if [[ -n "${DESLOP_TS_DIRS:-}" ]]; then
+  for d in $DESLOP_TS_DIRS; do [[ -d "$d" ]] && TS_DIRS+=("$d"); done
+else
+  for d in frontend/src client/src src; do
+    if [[ -d "$d" ]] && find "$d" \( -name '*.ts' -o -name '*.tsx' \) \
+         -not -path '*/node_modules/*' -print -quit 2>/dev/null | grep -q .; then
+      TS_DIRS=("$d"); break
+    fi
+  done
+fi
+
+# Python tool config + dependency manifest: nearest to the first root.
+PY_PROJECT="."
+[[ ${#PY_DIRS[@]} -gt 0 ]] && PY_PROJECT="$(nearest_up "${PY_DIRS[0]}" pyproject.toml)"
+PY_CONFIG_ARGS=()
+[[ -f "$PY_PROJECT/pyproject.toml" ]] && PY_CONFIG_ARGS=(--config="$PY_PROJECT/pyproject.toml")
+MYPY_CONFIG_ARGS=()
+[[ -f "$PY_PROJECT/pyproject.toml" ]] && MYPY_CONFIG_ARGS=(--config-file="$PY_PROJECT/pyproject.toml")
+BANDIT_ARGS=()
+if [[ -f "$PY_PROJECT/.bandit" ]]; then
+  BANDIT_ARGS=(-c "$PY_PROJECT/.bandit")
+elif grep -qs '^\[tool\.bandit' "$PY_PROJECT/pyproject.toml"; then
+  BANDIT_ARGS=(-c "$PY_PROJECT/pyproject.toml")
+fi
+PIP_AUDIT_ARGS=()
+[[ -f "$PY_PROJECT/requirements.txt" ]] && PIP_AUDIT_ARGS=(-r "$PY_PROJECT/requirements.txt")
+
+# Activate the project venv if present (so the Python tools resolve).
 if [[ -f .venv/bin/activate ]]; then
   # shellcheck disable=SC1091
   source .venv/bin/activate
@@ -70,18 +132,41 @@ run() {
 }
 
 # ----------------------------------------------------------------------------
-# Static analysis — read-only (config auto-discovered from root pyproject.toml)
+# Python — read-only analysis
 # ----------------------------------------------------------------------------
-if [[ -d "$PY_SRC" ]]; then
-  run ruff.json            ruff check "$PY_SRC" --output-format=json
-  run vulture.txt          vulture "$PY_SRC" --min-confidence 80
-  run radon-cc.txt         radon cc "$PY_SRC" -s -n C
-  run radon-mi.txt         radon mi "$PY_SRC" -s
-  run mypy.txt             mypy "$PY_SRC"
-  run bandit.json          bandit -r "$PY_SRC" -f json -c pyproject.toml
-  run interrogate.txt      interrogate "$PY_SRC" -v
-  run pip-audit.txt        pip-audit -r requirements.txt
-  run detect-secrets.txt   detect-secrets scan "$PY_SRC"
+if [[ ${#PY_DIRS[@]} -gt 0 ]]; then
+  run ruff.json            ruff check "${PY_DIRS[@]}" ${PY_CONFIG_ARGS[@]+"${PY_CONFIG_ARGS[@]}"} --output-format=json
+  # 60, not 80. vulture scores an unused function/method/class/property/
+  # attribute at 60% confidence, so a floor of 80 silently excludes the whole
+  # dead-symbol tier and leaves only unused imports/variables. This is evidence
+  # collection, not a gate: the extra noise is the right trade, because every
+  # hit is triaged against a second signal anyway, and a finding that was never
+  # collected cannot be triaged at all. (A repo's own vulture *gate* may use
+  # stricter per-type floors; its verdict will not match this raw sweep.)
+  run vulture.txt          vulture "${PY_DIRS[@]}" --min-confidence 60
+  run radon-cc.txt         radon cc "${PY_DIRS[@]}" -s -n C
+  run radon-mi.txt         radon mi "${PY_DIRS[@]}" -s
+  run mypy.txt             mypy "${PY_DIRS[@]}" ${MYPY_CONFIG_ARGS[@]+"${MYPY_CONFIG_ARGS[@]}"}
+  run bandit.json          bandit -r "${PY_DIRS[@]}" -f json ${BANDIT_ARGS[@]+"${BANDIT_ARGS[@]}"}
+  run interrogate.txt      interrogate "${PY_DIRS[@]}" -v
+  run pip-audit.txt        pip-audit ${PIP_AUDIT_ARGS[@]+"${PIP_AUDIT_ARGS[@]}"}
+  run detect-secrets.txt   detect-secrets scan "${PY_DIRS[@]}"
+fi
+
+# ----------------------------------------------------------------------------
+# TypeScript / JavaScript — read-only analysis
+# ----------------------------------------------------------------------------
+if [[ ${#TS_DIRS[@]} -gt 0 ]]; then
+  TS_PROJECT="$(nearest_up "${TS_DIRS[0]}" package.json)"
+  # eslint and tsc run from the package dir; capture but never abort.
+  ( cd "$TS_PROJECT" && command -v npx >/dev/null 2>&1 \
+      && npx --no-install eslint . -f json ) >"$OUT/eslint.json" 2>&1 \
+      || echo "[eslint unavailable or reported issues — inspect output]" >>"$OUT/eslint.json"
+  if [[ -f "$TS_PROJECT/tsconfig.json" ]]; then
+    ( cd "$TS_PROJECT" && command -v npx >/dev/null 2>&1 \
+        && npx --no-install tsc -p tsconfig.json --noEmit ) >"$OUT/tsc.txt" 2>&1 \
+        || echo "[tsc reported issues — inspect output]" >>"$OUT/tsc.txt"
+  fi
 fi
 
 # ----------------------------------------------------------------------------
@@ -93,8 +178,7 @@ if command -v rg >/dev/null 2>&1; then
   GREP_BIN="rg"
   GREP_FLAGS=(-n)
 fi
-SEARCH_PATHS=()
-[[ -d "$PY_SRC" ]] && SEARCH_PATHS+=("$PY_SRC")
+SEARCH_PATHS=(${PY_DIRS[@]+"${PY_DIRS[@]}"} ${TS_DIRS[@]+"${TS_DIRS[@]}"})
 
 greps() {
   local out="$1" pat="$2"
@@ -103,13 +187,13 @@ greps() {
     || echo "(no matches)" >"$OUT/$out"
 }
 
-greps grep-stubs.txt        'NotImplementedError|not implemented|return None\s*#\s*TODO|\bpass\s*#\s*(stub|placeholder)'
+greps grep-stubs.txt        'NotImplementedError|not implemented|throw new Error\(.?not implemented|return None\s*#\s*TODO|\bpass\s*#\s*(stub|placeholder)'
 greps grep-ai-tells.txt     'In a real implementation|real implementation|placeholder|for now|as an AI|should probably'
 greps grep-debt.txt         'TODO|FIXME|HACK|XXX'
-greps grep-escape-hatch.txt 'type: ?ignore|# ?noqa|# ?pylint: ?disable|cast\(Any'
-greps grep-swallow.txt      'except (Exception|BaseException)?\s*:'
+greps grep-escape-hatch.txt 'type: ?ignore|@ts-ignore|@ts-nocheck|eslint-disable|# ?noqa|cast\(Any'
+greps grep-swallow.txt      'except (Exception|BaseException)?\s*:|catch\s*\([^)]*\)\s*\{\s*\}|\.catch\(\(\)\s*=>\s*\{?\s*\}?\)'
 greps grep-commented.txt    '^\s*#\s*(def |class |return |if |for |while |import |from )'
-greps grep-any.txt          ':\s*Any\b|-> Any\b'
+greps grep-any.txt          ':\s*any\b|<any>|as any'
 
 # Git churn / hotspots (top 30 most-changed files in the last 90 days).
 # PRIORITIZATION SIGNAL ONLY — churn (and reading-targets below) decide which
@@ -117,9 +201,9 @@ greps grep-any.txt          ':\s*Any\b|-> Any\b'
 # Files untouched in 90 days never appear here, so a run anchored to this list
 # would never read stable code. Coverage is governed by area-inventory.txt
 # (every area must be read each run); this is just the order to read it in.
-if command -v git >/dev/null 2>&1; then
-  git log --since="90 days ago" --format= --name-only 2>/dev/null \
-    | grep -E "^${PY_SRC}/" \
+if command -v git >/dev/null 2>&1 && [[ ${#SEARCH_PATHS[@]} -gt 0 ]]; then
+  git log --since="90 days ago" --format= --name-only -- "${SEARCH_PATHS[@]}" 2>/dev/null \
+    | grep -v '^$' \
     | sort | uniq -c | sort -rn | head -30 >"$OUT/churn.txt" 2>/dev/null \
     || echo "(churn unavailable)" >"$OUT/churn.txt"
 fi
@@ -132,7 +216,9 @@ fi
   echo "# Largest source files (LoC) — prime reading-pass START targets."
   echo "# Prioritization order only; NOT a coverage filter (see area-inventory.txt)."
   if [[ ${#SEARCH_PATHS[@]} -gt 0 ]]; then
-    find "${SEARCH_PATHS[@]}" -type f -name '*.py' -print0 2>/dev/null \
+    find "${SEARCH_PATHS[@]}" -type f \
+      \( -name '*.py' -o -name '*.ts' -o -name '*.tsx' \) \
+      -not -path '*/node_modules/*' -not -path '*/__pycache__/*' -print0 2>/dev/null \
       | xargs -0 wc -l 2>/dev/null | sort -rn | sed '/ total$/d' | head -30
   fi
 } >"$OUT/reading-targets.txt"
@@ -149,32 +235,26 @@ fi
   echo "# Area inventory — the coverage set the reading pass MUST cover in full."
   echo "# Every area must be read each run; churn/reading-targets are order only."
   echo
-  echo "## ai (AI orchestration: providers, tuner, prompts, batch dispatch)"
-  [[ -d "$PY_SRC/ai" ]] \
-    && find "$PY_SRC/ai" -maxdepth 2 -name '*.py' ! -name '__init__.py' 2>/dev/null | sort
-  echo
-  echo "## generators (per-component quality-infra generators)"
-  [[ -d "$PY_SRC/generators" ]] \
-    && find "$PY_SRC/generators" -maxdepth 1 -name '*.py' ! -name '__init__.py' 2>/dev/null | sort
-  echo
-  echo "## gates (cross-platform quality-gate dispatcher)"
-  [[ -d "$PY_SRC/gates" ]] \
-    && find "$PY_SRC/gates" -maxdepth 1 -name '*.py' ! -name '__init__.py' 2>/dev/null | sort
-  echo
-  echo "## github (GitHub API client)"
-  [[ -d "$PY_SRC/github" ]] \
-    && find "$PY_SRC/github" -maxdepth 1 -name '*.py' ! -name '__init__.py' 2>/dev/null | sort
-  echo
-  echo "## utils (common utilities)"
-  [[ -d "$PY_SRC/utils" ]] \
-    && find "$PY_SRC/utils" -maxdepth 1 -name '*.py' ! -name '__init__.py' 2>/dev/null | sort
-  echo
-  echo "## config"
-  [[ -d "$PY_SRC/config" ]] \
-    && find "$PY_SRC/config" -maxdepth 1 -name '*.py' ! -name '__init__.py' 2>/dev/null | sort
-  echo
-  echo "## cli entrypoint"
-  [[ -f "$PY_SRC/cli.py" ]] && echo "$PY_SRC/cli.py"
+  # One section per source root: each sub-package / feature dir is an area,
+  # and so is each top-level module (small, stable modules hide easily).
+  for root in ${SEARCH_PATHS[@]+"${SEARCH_PATHS[@]}"}; do
+    echo "## $root — sub-packages / feature areas (with module counts)"
+    while IFS= read -r area; do
+      n=$(find "$area" -type f \( -name '*.py' -o -name '*.ts' -o -name '*.tsx' \) \
+            ! -name '__init__.py' -not -path '*/node_modules/*' 2>/dev/null | wc -l)
+      echo "$area ($((n)) modules)"
+    done < <(find "$root" -mindepth 1 -maxdepth 1 -type d \
+               ! -name '__pycache__' ! -name 'node_modules' ! -name '.*' 2>/dev/null | sort)
+    echo
+    echo "## $root — top-level modules"
+    find "$root" -mindepth 1 -maxdepth 1 -type f \
+      \( -name '*.py' -o -name '*.ts' -o -name '*.tsx' \) \
+      ! -name '__init__.py' 2>/dev/null | sort
+    echo
+  done
+  echo "## shell / tooling"
+  find . -maxdepth 3 -type d -name scripts -not -path './.git/*' \
+    -not -path '*/node_modules/*' -not -path './.claude/*' 2>/dev/null | sed 's|^\./||' | sort
 } >"$OUT/area-inventory.txt"
 
 # ----------------------------------------------------------------------------
@@ -184,16 +264,20 @@ fi
   echo "# De-Slop Evidence Bundle"
   echo "Repo:    $REPO_ROOT"
   echo "Out:     $OUT"
+  echo "Python roots: ${PY_DIRS[*]:-(none detected)}"
+  echo "TS roots:     ${TS_DIRS[*]:-(none detected)}"
   echo
   echo "## Files"
-  find "$OUT" -maxdepth 1 -type f -exec basename {} \; | sort | sed 's/^/  - /'
+  for f in "$OUT"/*; do
+    [[ -e "$f" ]] && echo "  - $(basename "$f")"
+  done
   echo
   echo "Each *.json / *.txt holds raw tool or grep output. Every entry is a"
   echo "CANDIDATE only — apply the Two-Signal Rule from detection-playbook.md"
   echo "before filing anything. Tool exit codes are appended as [exit N]."
   echo
   echo "## IMPORTANT — this bundle is a MAP, not the findings"
-  echo "The linter outputs (ruff/mypy/radon/bandit/interrogate) are TABLE STAKES:"
+  echo "The linter outputs (ruff/mypy/radon/bandit/eslint/tsc) are TABLE STAKES:"
   echo "the repo already passes them in pre-commit and CI, so they cannot be"
   echo "findings. Do NOT file complexity grades, lint rules, or type errors."
   echo "Drive a Task fan-out that READS the source for what linters cannot see"

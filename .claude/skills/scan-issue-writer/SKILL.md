@@ -7,11 +7,12 @@ description: >-
   prompts/scans/*.md file. Handles dedupe, priority labeling, and max-issue
   caps so the Ralph loop never starves and never bloats. Do NOT use for
   implementing fixes (use stay-green), reviewing PRs (use
-  comprehensive-pr-review), or closing/triaging existing issues (use
-  backlog-grooming).
+  comprehensive-pr-review), closing/triaging existing issues (use
+  backlog-grooming), or filing a one-off bug/feature report from a live user
+  description (use flare).
 metadata:
   author: Geoff
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # Scan Issue Writer
@@ -36,7 +37,8 @@ as a finding, the severity rubric, and the title-slug prefix (`[scan:<name>]`).
 
 ### Step 2 — Run the analysis (read-only)
 Execute the scan's tool commands. Never modify code. Record the current SHA
-with `git rev-parse HEAD` — every issue must cite it in its Context section.
+(`SCAN_SHA=$(git rev-parse HEAD)`) — every issue must cite it in its Context
+section, and Step 4.5 verifies citations against it.
 
 ### Step 3 — Rank and cap
 Sort findings by the scan's severity rubric, highest first. Keep at most
@@ -60,12 +62,50 @@ Duplicate issues inflate apparent queue depth with fake work — this step is th
 single most important behavior for keeping the hopper honest. Other scans may
 run concurrently, so re-run the dedupe search immediately before each create.
 
+### Step 4.5 — Verify every symbol citation (MANDATORY)
+
+A filed issue that names a function which does not exist sends whoever picks
+it up hunting for a symbol that was never there. Scan agents paraphrase names
+from surrounding code (`_generate_filename` filed as `_unique_filename`,
+`verify` as `verify_chain`). Coverage scans are the worst hit:
+`--cov-report=term-missing` prints line numbers and no names, so there is
+nothing to copy and the gap gets filled by invention.
+
+So the name is a **checked datum**, not prose. Every finding that names a
+function, method or class carries it in a `symbol` (or `symbols`) field
+alongside `file` and `lines`, and before any `gh issue create` you run:
+
+```bash
+printf '%s\n' "$FINDINGS_NDJSON" \
+  | SCAN_SHA="$SCAN_SHA" python3 .claude/skills/scan-issue-writer/scripts/verify_scan_citations.py
+```
+
+(If the repo ships its own, stronger citation verifier — e.g. an AST-based one
+under `scripts/` — run that instead.) It resolves each name against the blob
+**at the scan SHA** and exits non-zero naming every phantom and every citation
+it could not check. **A rejected citation must not be filed.** Re-resolve it
+against that SHA and cite the real name, or drop the symbol from the finding.
+Never substitute the nearest similar-looking name — that is the exact failure
+this gate exists to stop. Treat a "not as a definition" warning as a prompt to
+re-check which file the symbol really lives in.
+
+A symbol you are *proposing to create* — a refactor target like "extract a
+helper named `_reject_seed_conflicts`" — is not a citation. It belongs in the
+fix strategy, never in `symbol`, or the gate will correctly reject it.
+
+If the repo's scan workflow also re-verifies the issues a run actually filed
+(a post-agent backstop step), skipping this step does not hide a phantom; it
+only turns a draft you could have fixed into a red run and a public correction
+on an already-filed issue. Run it before every create.
+
 ### Step 5 — Write the issue
 Fill the canonical `prompts/templates/scan-issue-body.md` completely — all six
 components, no placeholders left. (It is the single source of truth;
 `references/issue-body-template.md` just points at it.) An issue missing any
-component gets `needs-triage` instead of `agent-ready`, and the grooming pass
-finishes it. Write the body to a file and create with:
+component gets `needs-spec` instead of `agent-ready`, and the grooming pass
+finishes it. (`needs-spec`, not an ad-hoc label like `needs-triage`: it is in
+the Ralph picker's default exclude list, so an incomplete issue is never picked
+even in a repo that does not require `agent-ready`.) Write the body to a file and create with:
 
 ```bash
 gh issue create --title "[scan:<name>] <specific finding>" \
