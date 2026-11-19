@@ -130,6 +130,16 @@ Phase 6 follow-ups in progress (issues #316–#319).
   `ralph-tick` runs Step 1A for it. Step 1A always posts that comment
   (`Follow-ups filed: none` when nothing was actionable). Applies to
   this repo and to the `--with-ralph-loop` templates.
+- **`iteration-trigger.yml` reads the review's real verdict.** It used
+  to search the whole review body for "CHANGES_REQUESTED" and then
+  "LGTM", so a COMMENTS review that mentioned LGTM was announced as
+  "cleared to squash merge", and an LGTM review that mentioned
+  CHANGES_REQUESTED as needing changes. It now reads only the
+  `## Verdict:` line, only from the accounts the review workflow posts
+  as, never from its own summaries, and only when the review is newer
+  than the head commit. A COMMENTS verdict is cleared only once its
+  follow-ups are filed. `pr-ready.sh` likewise ignores the trigger's
+  summary comments, which echo the verdict and could stand in for it.
 
 ## [1.0.0] — 2026-05-10
 

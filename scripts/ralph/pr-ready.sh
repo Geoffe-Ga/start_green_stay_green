@@ -70,6 +70,10 @@ readonly VERDICT_LGTM_RE="${VERDICT_RE}+lgtm"
 readonly VERDICT_COMMENTS_RE="${VERDICT_RE}+comments"
 # address-feedback Step 1A's summary line, e.g. `Follow-ups filed: #142 (P2)`.
 readonly FOLLOWUPS_RE='(?im)^\\s*follow-ups filed:'
+# iteration-trigger.yml posts summaries that echo the verdict as `**VERDICT**: <X>`.
+# They carry this marker and are never a review: an echoed verdict must not
+# stand in for the real one, nor make an old review look fresh.
+readonly TRIGGER_MARKER='<!-- iteration-trigger -->'
 
 # `${arr[@]+"${arr[@]}"}` expands to nothing when the array is empty instead of
 # tripping `set -u` on bash 3.2 (stock /bin/bash on macOS).
@@ -98,7 +102,8 @@ head_date="${merge_line#*|}"
 
 verdict_line="$(gh pr view "${gh_args[@]}" \
   --json comments \
-  --jq "([.comments[] | select(.body != null and (.body | test(\"$VERDICT_RE\")))] | last) as \$v
+  --jq "([.comments[] | select(.body != null and (.body | contains(\"$TRIGGER_MARKER\") | not)
+                              and (.body | test(\"$VERDICT_RE\")))] | last) as \$v
         | (\$v.createdAt // \"\") as \$vd
         | (if \$v == null then \"false\"
            elif (\$v.body | test(\"$VERDICT_LGTM_RE\")) then \"true\"

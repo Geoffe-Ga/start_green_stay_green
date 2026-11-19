@@ -191,6 +191,18 @@ if command -v jq >/dev/null 2>&1; then
     "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H \
        COMMENTS_JSON="$(cj '{"createdAt":"'"$FRESH"'","body":"## Verdict: CHANGES_REQUESTED\n"},{"createdAt":"'"$LATER"'","body":"Follow-ups filed: #142 (P2)"}')" \
        run 100)"
+
+  # iteration-trigger.yml's own summary echoes the verdict as `**VERDICT**: <X>`
+  # with its marker. That echo is not a review: an echoed LGTM must not stand
+  # in for the real review, nor make an old review look fresh.
+  check "real iteration-trigger echo of LGTM after a CHANGES_REQUESTED → awaiting-review" "awaiting-review" \
+    "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H \
+       COMMENTS_JSON="$(cj '{"createdAt":"'"$FRESH"'","body":"## Verdict: CHANGES_REQUESTED\n"},{"createdAt":"'"$LATER"'","body":"<!-- iteration-trigger -->\n**CI**: 3/3 Green\n**VERDICT**: LGTM\n**Action**: x"}')" \
+       run 100)"
+  check "real iteration-trigger echo after a stale LGTM → awaiting-review" "awaiting-review" \
+    "$(CHECKS_EC=0 MERGE_STATE=CLEAN HEAD_DATE=$H \
+       COMMENTS_JSON="$(cj '{"createdAt":"'"$STALE"'","body":"## Verdict: LGTM\n"},{"createdAt":"'"$FRESH"'","body":"<!-- iteration-trigger -->\n**VERDICT**: LGTM\n"}')" \
+       run 100)"
 else
   echo "  skip - real-jq verdict-regex cases (jq not installed)"
 fi

@@ -61,28 +61,72 @@ jobs:
             exit 0
           fi
 
-          # Find latest Claude review comment (its body contains 'Verdict').
-          CLAUDE=$(jq -c '[.[] | select(.body | test("Verdict"))] | last // empty' comments.json)
+          # The verdict line is a public literal, so only the identities
+          # claude-code-review.yml's `Post review` step posts as count: the
+          # GEOFFE_GA_PAT owner, or github-actions[bot] (its GITHUB_TOKEN
+          # fallback). Matched case-insensitively; a null user never matches.
+          # This workflow's own summaries (they carry $MARKER and a
+          # "**VERDICT**:" line) are never a review. The review must also be
+          # newer than the head commit: an older one reviewed older code.
+          # scripts/ralph/pr-ready.sh and the address-feedback skill read
+          # verdicts the same way; change them together.
+          VERDICT_AUTHORS='["geoffe-ga","github-actions[bot]"]'
+          HEAD_DATE=$(gh api "repos/$REPO/commits/$SHA" --jq '.commit.committer.date')
+          CLAUDE=$(jq -c --argjson authors "$VERDICT_AUTHORS" --arg marker "$MARKER" '[.[]
+                     | select((.user.login // "" | ascii_downcase) as $a | $authors | index([$a]))
+                     | select(.body != null and (.body | contains($marker) | not))
+                     | select(.body | test("(^|\\n)## Verdict:"))] | last // empty' comments.json)
           if [ -z "$CLAUDE" ]; then
             echo "No Claude review yet - skipping"
             exit 0
           fi
-          ID=$(jq -r '.id'   <<<"$CLAUDE")
-          BODY=$(jq -r '.body' <<<"$CLAUDE")
-
-          # Summarize verdict via grep on the Claude comment body.
-          if   grep -qE 'CHANGES[_ ]REQUESTED' <<<"$BODY"; then VERDICT='CHANGES REQUESTED'
-          elif grep -q   'LGTM'                <<<"$BODY"; then VERDICT='LGTM'
-          else                                                  VERDICT='COMMENTS'
+          ID=$(jq -r '.id'         <<<"$CLAUDE")
+          BODY=$(jq -r '.body'       <<<"$CLAUDE")
+          CREATED=$(jq -r '.created_at' <<<"$CLAUDE")
+          # RFC3339 UTC timestamps are fixed-width, so a string compare is a
+          # chronological one.
+          if [ -z "$HEAD_DATE" ] || ! [[ "$CREATED" > "$HEAD_DATE" ]]; then
+            echo "Latest review predates the head commit - skipping until it is re-reviewed"
+            exit 0
           fi
+
+          # Read the verdict off its own line only. Grepping the whole body is
+          # wrong both ways: a COMMENTS rationale can say "LGTM", and an LGTM
+          # review can mention CHANGES_REQUESTED. Anything else clears nothing.
+          VLINE=$(grep -m1 -E '^## Verdict:' <<<"$BODY" || true)
+          VALUE=$(sed -E 's/^## Verdict:[[:space:]]*//; s/[[:space:]]+$//' <<<"$VLINE")
+          case "$VALUE" in
+            LGTM)              VERDICT='LGTM' ;;
+            CHANGES_REQUESTED) VERDICT='CHANGES REQUESTED' ;;
+            COMMENTS)          VERDICT='COMMENTS' ;;
+            *)                 VERDICT='UNPARSED' ;;
+          esac
+
+          # COMMENTS is a sign-off that never iterates. It clears a merge once
+          # address-feedback Step 1A has filed each finding as a P0-P3
+          # follow-up issue and posted its "Follow-ups filed:" comment after
+          # the verdict (the same signal scripts/ralph/pr-ready.sh reads).
+          FILED=$(jq -r --arg since "$CREATED" '[.[] | select(.body != null
+                     and (.created_at // "") > $since
+                     and (.body | test("(?im)^\\s*follow-ups filed:")))] | length' comments.json)
 
           # CI status from check-runs on the head SHA.
           gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" > runs.json
           TOTAL=$(jq '.check_runs | length'                                       runs.json)
           GREEN=$(jq '[.check_runs[] | select(.conclusion=="success")] | length' runs.json)
 
-          if [ "$GREEN" = "$TOTAL" ] && [ "$VERDICT" = "LGTM" ]; then
-            ACTION="You are cleared to squash merge, delete the branch, clean any worktrees, and unsubscribe from webhooks. Please proceed."
+          CLEARED="You are cleared to squash merge, delete the branch, clean any worktrees, and unsubscribe from webhooks. Please proceed."
+          FILE_FOLLOWUPS="Do NOT iterate on this review: pull comment ${ID}, file each actionable finding as a follow-up issue with a P0-P3 label matched to its severity, and post a comment starting 'Follow-ups filed:' (address-feedback Step 1A)."
+          if [ "$VERDICT" = "COMMENTS" ] && [ "$FILED" -eq 0 ]; then
+            if [ "$GREEN" = "$TOTAL" ]; then
+              ACTION="${FILE_FOLLOWUPS} Then the PR is ready to squash merge."
+            else
+              ACTION="${FILE_FOLLOWUPS} CI is not fully green yet - fix only the failing checks."
+            fi
+          elif [ "$GREEN" = "$TOTAL" ] && { [ "$VERDICT" = "LGTM" ] || [ "$VERDICT" = "COMMENTS" ]; }; then
+            ACTION="$CLEARED"
+          elif [ "$VERDICT" = "UNPARSED" ]; then
+            ACTION="NOT cleared to merge: comment ${ID} has no readable Verdict line. Surface it to a human; do not infer a verdict."
           else
             ACTION="pull comment ${ID} to see in-depth feedback and continue iterating"
           fi
