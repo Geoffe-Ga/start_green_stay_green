@@ -853,8 +853,10 @@ class MetricsGenerator(BaseGenerator):
             "",
             "# Complexity thresholds",
             f"sonar.complexity.threshold={self.config.complexity_threshold}",
-            f"sonar.cognitive.complexity.threshold="
-            f"{self.config.cognitive_complexity_threshold}",
+            (
+                "sonar.cognitive.complexity.threshold="
+                f"{self.config.cognitive_complexity_threshold}"
+            ),
             "",
             "# Technical debt",
             f"sonar.debt.ratio.threshold={self.config.debt_ratio_threshold}",

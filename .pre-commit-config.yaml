@@ -183,6 +183,9 @@ repos:
     hooks:
       - id: refurb
         additional_dependencies: ['pydantic>=2.0.0']
+        # reference/ mirrors .claude/skills in lockstep (see generators/skills.py);
+        # linting both copies makes mypy-backed refurb fail on duplicate modules.
+        exclude: '^reference/'
 
   # Dead code detection
   - repo: https://github.com/jendrikseipp/vulture
