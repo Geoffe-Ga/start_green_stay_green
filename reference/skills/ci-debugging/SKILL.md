@@ -8,7 +8,7 @@ description: >-
   Do NOT use for local-only test failures or feature development.
 metadata:
   author: Geoff
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # CI Debugging
@@ -31,6 +31,8 @@ git diff <last-passing-commit> HEAD
 ```
 
 Ask: Did I modify config files? Add dependencies? Change imports or module structure?
+
+**Prove "pre-existing" before you claim it.** If `main` doesn't run the full CI on every merge (nightly-only, or path-filtered jobs that skip unchanged areas), two earlier PRs that broke only in combination can first fail in your PR's CI. Don't assume it; prove it: run the failing check on a clean checkout of `origin/main`, or read `main`'s most recent full run (e.g. `gh run list --workflow <ci-workflow>.yml --branch main --limit 1`, adding `--event schedule` for a nightly). Only a failure reproduced on `main` itself is pre-existing.
 
 ### Step 2: Read the Actual Error (5 minutes)
 

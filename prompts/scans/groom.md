@@ -2,7 +2,7 @@
   Grooming definition for the autonomous maintenance pipeline. Unlike the other
   prompts/scans/*.md files, groom does NOT produce issues — it CONSUMES the
   backlog: it closes resolved/stale scan issues, dedupes, and promotes complete
-  `needs-triage` issues to `agent-ready`. It runs before the day's producer
+  `needs-spec` issues to `agent-ready`. It runs before the day's producer
   scans (daily 04:00 UTC) via .github/workflows/scan-groom.yml, which invokes
   the `backlog-grooming` skill. Follows the same 6-component framework.
 -->
@@ -16,12 +16,12 @@ queue depth reflects genuine runway rather than stale or phantom work.
 Reconcile the open issue backlog against current `main` (HEAD): close issues
 already resolved by merged PRs, close scan issues whose finding no longer
 reproduces at HEAD, collapse duplicates, and promote fully-specified
-`needs-triage` scan issues to `agent-ready`. Net effect is a queue that shrinks
+`needs-spec` scan issues to `agent-ready`. Net effect is a queue that shrinks
 toward healthy rather than bloating.
 
 ## Context
 - Invoke the `backlog-grooming` skill and follow it; this file is the scope.
-- Priority/label vocabulary: `P0`–`P3`, `agent-ready`, `needs-triage`, and the
+- Priority/label vocabulary: `P0`–`P3`, `agent-ready`, `needs-spec`, and the
   `scan:<name>` provenance labels (see `scripts/setup-scan-labels.sh`).
 - Signals for action:
   - **Resolved**: a merged PR body references `Closes|Fixes|Resolves #N`, or the
@@ -34,9 +34,9 @@ toward healthy rather than bloating.
   - **Duplicate**: two issues sharing a title slug → keep the oldest, close the
     newer with a pointer comment.
   - **Incomplete**: a `scan:*` issue missing any of the six body components →
-    it should already carry `needs-triage`; if it is now complete, promote it
+    it should already carry `needs-spec`; if it is now complete, promote it
     to `agent-ready` (`gh issue edit --add-label agent-ready --remove-label
-    needs-triage`).
+    needs-spec`).
 - Re-verify against HEAD before every close — do not close on a stale read.
 
 ## Output Format
@@ -50,7 +50,7 @@ and a net-change figure (issues removed from the queue this run).
   uses `selectinload` there → close: "Fixed at `<SHA>`; no longer reproduces."
 - Two open `[scan:dead-code] unused export parseAmount` issues → keep #412,
   close #588 as duplicate with a pointer to #412.
-- A `[scan:todo]` issue that was filed `needs-triage` for a missing Examples
+- A `[scan:todo]` issue that was filed `needs-spec` for a missing Examples
   section, since filled in by a later edit → promote to `agent-ready`.
 
 ## Constraints

@@ -6,11 +6,13 @@ description: >-
   committing changes, or opening PRs. Covers the full issue-to-PR lifecycle
   using file-based templates instead of inline strings. Do NOT use for
   bug-specific debugging or RCA (use bug-squashing-methodology), PR code review
-  (use comprehensive-pr-review), or backlog cleanup and issue triage (use
-  backlog-grooming).
+  (use comprehensive-pr-review), iterating on PR review feedback (use
+  address-feedback), backlog cleanup and issue triage (use backlog-grooming),
+  or fast research-backed bug/feature report filing with Ralph labels (use
+  flare).
 metadata:
   author: Geoff
-  version: 1.0.0
+  version: 1.0.1
 ---
 
 # Git Workflow

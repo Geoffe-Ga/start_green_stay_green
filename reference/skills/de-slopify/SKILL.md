@@ -12,10 +12,11 @@ description: >-
   filing — null findings are a valid result. Do NOT use for implementing fixes
   (Ralph / continue-epic does that), for reviewing a specific PR diff (use
   comprehensive-pr-review), for fixing CI failures (use ci-debugging), or for
-  triaging a backlog of existing issues (use backlog-grooming).
+  triaging a backlog of existing issues (use backlog-grooming), or for
+  answering a structural question from the code graph (use graph).
 metadata:
   author: Geoff
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # De-Slopify — The Comprehensive Bullshit Detector
@@ -35,10 +36,11 @@ nothing because the code is clean is a success.**
 
 ## Two principles that decide whether a run is any good
 
-1. **Linters are table stakes, not the audit.** This repo already passes ruff,
-   mypy, radon, xenon, bandit, eslint, and tsc in pre-commit and CI on every
-   commit. Anything those tools gate is *already enforced* and **cannot be a
-   finding** — never report a complexity grade, a lint rule, or a type error as
+1. **Linters are table stakes, not the audit.** The repo's pre-commit and CI
+   already gate its configured toolbox on every commit (typically some mix of
+   ruff, mypy, radon/xenon, bandit, interrogate, eslint, and tsc — check
+   `.pre-commit-config.yaml` and the CI workflow for the real list). Anything
+   those tools gate is *already enforced* and **cannot be a finding** — never report a complexity grade, a lint rule, or a type error as
    slop. The evidence bundle from `collect-evidence.sh` is dominated by exactly
    that output; treat it as a *map of where to look*, not as findings. Your
    entire value is the slop linters are **blind to**.
@@ -94,19 +96,25 @@ and playbook). Understand the NOT-slop guard list before you flag anything.
 EVID=$(bash .claude/skills/de-slopify/scripts/collect-evidence.sh | tail -1)
 ```
 
-This runs ruff, vulture, radon, mypy, bandit, interrogate, pip-audit (backend);
-eslint, tsc (frontend); the grep heuristics; and git churn — capturing each
-into `$EVID`. It never modifies files and never aborts on a tool error. Read
-`$EVID/README.txt`, then work through every output file. Supplement with
-targeted `Grep`/`Read` as candidates emerge.
+This auto-detects the Python and TypeScript source roots (override with
+`DESLOP_PY_DIRS` / `DESLOP_TS_DIRS` for an unusual layout — the detected roots
+are printed in `README.txt`; if they are wrong, re-run with the override before
+going further) and runs ruff, vulture, radon, mypy, bandit, interrogate,
+pip-audit, and detect-secrets (Python); eslint and tsc (TypeScript); the grep
+heuristics; git churn; and an `area-inventory.txt` enumerating every area
+under those roots — capturing each into `$EVID`. It never modifies files and
+never aborts on a tool error. Read `$EVID/README.txt`, then work through every
+output file. Treat `area-inventory.txt` as the coverage set the Step 4 reading
+pass must cover; `churn.txt` and `reading-targets.txt` only order where to
+start. Supplement with targeted `Grep`/`Read` as candidates emerge.
 
 ### Step 3 — Triage candidates against the guard list
 
 For each candidate from the evidence bundle, **first discard** anything in the
-NOT-slop list (`slop-taxonomy.md`): generated code, Alembic migrations,
-`package-lock.json`, justified suppressions (with a linked issue), framework
-boilerplate (Pydantic/SQLModel/React Navigation), test fixtures, self-evident
-constants, deliberate repo conventions, and unmeasured "could be faster" claims.
+NOT-slop list (`slop-taxonomy.md`): generated code, migrations, lockfiles,
+justified suppressions (with a linked issue), framework boilerplate (e.g.
+Pydantic/ORM models, CLI command signatures, router/navigation config, event
+listeners), test fixtures, self-evident constants, deliberate repo conventions, and unmeasured "could be faster" claims.
 
 ### Step 4 — The reading pass (fan-out) — DO NOT SKIP
 
@@ -118,14 +126,20 @@ run.** In a full audit the coverage set is the evidence bundle's
 `area-inventory.txt`, which enumerates every area in the repo; in a targeted
 scan it is the caller-supplied scope (fan out per module/screen within it).
 Fan out with the **Task tool** and spawn a reader subagent for **every** area
-in the coverage set — never just the changed ones. For a full audit:
+in the coverage set — never just the changed ones. For a full audit, map the
+inventory onto the repo's real architecture (e.g. for a web backend + frontend):
 
-- one subagent per backend router (`backend/src/routers/*`),
-- one for each `backend/src/domain/*` and each `backend/src/services/*` module,
-- one for the models/schemas pair (look for frontend/backend shape drift),
-- one per frontend feature (`frontend/src/features/*`),
-- one for the shared areas (`api/`, `design/`, `components/`, `store/`) — prime
-  duplication + dead-code sites.
+- one subagent per entry-point area — each API router / CLI command group /
+  tool or bot handler module (split a large area per module),
+- one for each domain/service module,
+- one for each contract pair that crosses a boundary (e.g. backend schemas vs
+  frontend types — look for shape drift),
+- one per frontend feature / screen area,
+- one for the shared/util/config grab-bags (`api/`, `components/`, `utils/`,
+  `store/`, ...) — prime duplication + dead-code sites,
+- one (or more) for **every remaining area** — top-level modules, `scripts/`
+  shell tooling, and the small, stable, low-churn modules — so nothing hides
+  simply because it is small or hasn't changed in 90 days.
 
 A clean linter bundle and an unchanged file are **NOT** reasons to skip the
 reading pass for any area. **"Delta-focused", "since the last run", and "building
@@ -139,7 +153,8 @@ brief: *read the actual source in your area and return corroborated candidates
 for every family, with file:line evidence — focus on what linters miss: dead/
 stubbed/orphaned code, duplication (here and against the rest of the repo),
 architecture/layering violations, lying flags, verbosity, comment slop, AI-slop
-tells, and weak tests. Ignore anything ruff/mypy/radon/eslint already gates.*
+tells, and weak tests. Ignore anything the repo's linters/type checkers already
+gate.*
 
 Use churn / largest-file lists only to prioritize the order. Collect all
 subagent candidates before corroborating.
@@ -153,8 +168,10 @@ without **two independent signals, at least one concrete and reproducible.**
   wrongness"): **write and run a reproducing test** in a throwaway location. If
   it does not reproduce, **drop it.** Never file a bug on reasoning alone.
 - For dead code: a tool hit (vulture/eslint) **and** a grep proving zero inbound
-  references *including* dynamic dispatch, FastAPI routes, DI, and pytest
-  fixtures. vulture alone is not enough — it false-positives on dynamic use.
+  references *including* dynamic dispatch, decorator-registered entry points
+  (web routes, CLI commands, tool/plugin handlers, event listeners), DI, and
+  test fixtures. vulture alone is not enough — it false-positives on dynamic
+  use.
 - For everything else: tool/static signal + structural proof or a reading that
   explains the defect in terms of intent.
 
@@ -186,8 +203,11 @@ gh search issues --repo <owner>/<repo> "<keywords>" --state open
 ### Step 7 — File the work (Ralph-ready)
 
 Follow `references/issue-templates.md` exactly. The labels matter — Ralph's
-picker (`scripts/ralph/pick-next.sh`) skips `epic`/`blocked`/`needs-spec` and
-works everything else lowest-number-first.
+picker (`scripts/ralph/pick-next.sh`) skips `epic`/`blocked`/`needs-spec`,
+honors any required labels the repo configures (`RALPH_REQUIRE_LABELS`, often
+`agent-ready`), and works what remains by priority tier, then
+lowest-number-first. If the repo requires `agent-ready`, a finding filed
+without it is filed for a human, not the fleet.
 
 - **Standalone finding** → Template A, normal labels (no excluded label), sized
   ≤ ~300 net LoC / ≤ 5 files. Paste the corroborating evidence into the body.
@@ -298,9 +318,16 @@ delete `report_export.py`.
 ## Troubleshooting
 
 ### A tool is missing in CI / locally
-`collect-evidence.sh` skips absent tools and notes it. Install the dev deps
-(`pip install -r backend/requirements-dev.txt`, `cd frontend && npm ci`) for the
-full toolbox; proceed with whatever is available otherwise.
+`collect-evidence.sh` skips absent tools and notes it. Install the repo's dev
+dependencies the way its CLAUDE.md / README says (e.g. `pip install -r
+requirements-dev.txt` or `uv sync --all-extras`, and `npm ci` for a frontend)
+for the full toolbox; proceed with whatever is available otherwise.
+
+### The evidence bundle scanned the wrong directories
+Check the `Python roots` / `TS roots` lines in `$EVID/README.txt`. Re-run with
+`DESLOP_PY_DIRS="pkg_a pkg_b"` and/or `DESLOP_TS_DIRS="web/src"` set to the
+repo's real source roots. An inventory that misses a root makes the coverage
+ledger — and any "clean" verdict — meaningless.
 
 ### Worried about false positives
 Re-read the Two-Signal Rule and the NOT-slop guard list. When unsure, drop the
@@ -312,6 +339,10 @@ Bundle Low-severity findings per file/area into single tidy-up issues, raise the
 corroboration bar, and prefer a few ironclad high-value issues over many maybes.
 
 ### Ralph isn't picking up a filed issue
-Check labels against `scripts/ralph/pick-next.sh`: an excluded label
-(`epic`/`blocked`/`needs-spec`/etc.) or an open PR already referencing it will
-make the picker skip it. Epics are skipped by design; their sub-issues are not.
+Check required labels FIRST: if the repo sets `RALPH_REQUIRE_LABELS` (commonly
+`agent-ready`), a missing label is the most common cause by far, because it is
+an omission rather than a visible label. Then check for an excluded label
+(`epic`/`blocked`/`needs-spec`/etc.) or an open PR already referencing it,
+either of which makes the picker skip it. Epics are skipped by design; their
+sub-issues are not. Confirm by hand: `RALPH_REQUIRE_LABELS= ./scripts/ralph/pick-next.sh`
+shows what the require gate is holding back.

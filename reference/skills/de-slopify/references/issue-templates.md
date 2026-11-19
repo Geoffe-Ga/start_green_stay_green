@@ -11,16 +11,22 @@ real work or tries to implement an epic as a single PR.
 
 From `scripts/ralph/pick-next.sh`:
 
-- **Picks** the lowest-numbered open issue with **none** of these labels:
-  `epic wontfix duplicate invalid question blocked needs-spec future-work
-  do-not-auto-merge in-progress`.
+- **Requires** every label in `RALPH_REQUIRE_LABELS`, when the repo sets it
+  (commonly `agent-ready`). An issue without a required label is never a
+  candidate, whatever else it carries — check the repo's picker config (or its
+  hopper/CI env) before filing, because this decides whether the fleet sees
+  your finding at all.
+- **Picks**, among those, the highest-priority-tier open issue (`P0`/
+  `priority-critical` first; lowest number within a tier) with **none** of
+  these labels: `epic wontfix duplicate invalid question blocked needs-spec
+  future-work do-not-auto-merge in-progress`.
 - An issue already referenced by an open PR's `Closes/Fixes/Resolves #N` is
   treated as in-flight and skipped.
 
 **Consequences for de-slop filing:**
 
-- A **standalone finding** = a normal issue with **no** excluded label → Ralph
-  works it. ✅
+- A **standalone finding** = a normal issue with **no** excluded label (plus
+  `agent-ready` if the repo requires it) → Ralph works it. ✅
 - An **epic** must carry the `epic` label → Ralph skips the umbrella and works
   its decomposed sub-issues instead. ✅
 - A sub-issue that depends on an unbuilt predecessor should carry `blocked` (or
@@ -40,7 +46,8 @@ Create any that don't exist (`gh label create <name> --color <hex> --description
 | `de-slop` | Filed by the de-slopify detector | `#5319e7` |
 | `epic` | Umbrella issue; Ralph skips, works sub-issues | `#3e4b9e` |
 | `priority-critical` / `priority-high` / `priority-medium` / `priority-low` | Severity from the rubric | red→grey |
-| `backend` / `frontend` / `full-stack` | Scope | tool-matched |
+| `backend` / `frontend` / `full-stack` (or the repo's own area labels, e.g. matching `.github/deslop-areas.json` area ids) | Scope | tool-matched |
+| `agent-ready` | Fully specified; required by the picker when the repo sets `RALPH_REQUIRE_LABELS=agent-ready` | `#1D76DB` |
 | `bug` | Family 0 / 12 correctness finding (has a reproducing test) | `#d73a4a` |
 | `dead-code` | Family 3 dispensable | `#cfd3d7` |
 | `wire-in` | Family 3 finding whose remedy is connect-it + e2e test (not delete) | `#0052cc` |
@@ -51,8 +58,9 @@ Create any that don't exist (`gh label create <name> --color <hex> --description
 | `blocked` / `needs-spec` | Not ready for autonomous pickup | `#000000` |
 
 Keep labels minimal per issue: one severity + one scope + one category + `de-slop`.
-`wire-in` is **not** in `pick-next.sh`'s exclude list, so Ralph still picks
-these issues up like any other standalone finding.
+`wire-in` is **not** in `pick-next.sh`'s exclude list, so Ralph picks these
+issues up like any other standalone finding — provided they also carry any
+label the repo requires (e.g. `agent-ready`).
 
 ---
 

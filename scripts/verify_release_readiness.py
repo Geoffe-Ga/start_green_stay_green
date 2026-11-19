@@ -193,8 +193,10 @@ def _check_precommit_hooks(project_dir: Path) -> list[str]:
     )
     if hook_count < MIN_PRECOMMIT_HOOKS:
         return [
-            f"pre-commit config declares {hook_count} hooks, "
-            f"expected >= {MIN_PRECOMMIT_HOOKS}"
+            (
+                f"pre-commit config declares {hook_count} hooks, "
+                f"expected >= {MIN_PRECOMMIT_HOOKS}"
+            )
         ]
     return []
 
