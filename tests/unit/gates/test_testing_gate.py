@@ -15,7 +15,6 @@ from tests.unit.gates.conftest import completed
 def make_args(**overrides: object) -> argparse.Namespace:
     defaults = {
         "test_type": "unit",
-        "ci": False,
         "coverage": False,
         "mutation": False,
         "json_output": False,
@@ -32,31 +31,27 @@ class TestMarkerExpressions:
         args = testing.build_pytest_args(make_args(), None)
         assert args[:3] == ["-v", "-m", "not integration and not e2e"]
 
-    def test_unit_ci(self) -> None:
-        args = testing.build_pytest_args(make_args(ci=True), None)
-        assert args[2] == "not integration and not e2e and not flaky_in_ci"
-
     def test_integration(self) -> None:
         args = testing.build_pytest_args(make_args(test_type="integration"), None)
         assert args[2] == "integration"
 
-    def test_integration_ci(self) -> None:
-        args = testing.build_pytest_args(
-            make_args(test_type="integration", ci=True), None
-        )
-        assert args[2] == "integration and not flaky_in_ci"
-
-    def test_e2e_ci(self) -> None:
-        args = testing.build_pytest_args(make_args(test_type="e2e", ci=True), None)
-        assert args[2] == "e2e and not flaky_in_ci"
+    def test_e2e(self) -> None:
+        args = testing.build_pytest_args(make_args(test_type="e2e"), None)
+        assert args[2] == "e2e"
 
     def test_all_has_no_marker(self) -> None:
         args = testing.build_pytest_args(make_args(test_type="all"), None)
         assert "-m" not in args
 
-    def test_all_ci_excludes_flaky(self) -> None:
-        args = testing.build_pytest_args(make_args(test_type="all", ci=True), None)
-        assert args[2] == "not flaky_in_ci"
+    def test_no_lane_quarantines_tests(self) -> None:
+        """CI runs every test a laptop runs: no marker hides a flaky test."""
+        for marker in testing.MARKER_EXPRESSIONS.values():
+            assert marker is None or "flaky" not in marker
+
+    def test_ci_flag_is_gone(self) -> None:
+        """There is no CI-only mode that could skip what runs locally."""
+        with pytest.raises(SystemExit):
+            testing.main(["--ci"])
 
     def test_coverage_flags_pin_threshold(self) -> None:
         args = testing.build_pytest_args(make_args(coverage=True), None)
@@ -127,13 +122,6 @@ class TestTestGateRun:
         assert cmd[0] == "/fake/pytest"
         assert cmd[1] == "-v"
         assert cmd[-1] == "tests/"
-
-    def test_ci_mode_announced(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        monkeypatch.setattr(common, "run_tool", FakeRunner(completed(0)))
-        assert testing.main(["--ci"]) == 0
-        assert "CI mode: Skipping flaky_in_ci tests" in capsys.readouterr().out
 
     def test_coverage_announced(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

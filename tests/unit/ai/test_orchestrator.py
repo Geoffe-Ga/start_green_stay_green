@@ -405,7 +405,6 @@ class TestAIOrchestrator:
         # Verify Anthropic was called with correct API key
         mock_anthropic.assert_called_once_with(api_key="my-secret-key")
 
-    @pytest.mark.flaky_in_ci
     @patch("start_green_stay_green.ai.providers.anthropic_provider.time.sleep")
     @patch("start_green_stay_green.ai.providers.anthropic_provider.Anthropic")
     def test_generate_retries_on_failure(

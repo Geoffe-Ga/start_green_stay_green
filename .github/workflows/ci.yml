@@ -96,7 +96,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run unit tests with coverage
-        run: ./scripts/test.sh --unit --coverage --ci
+        run: ./scripts/test.sh --unit --coverage
 
       - name: Clean up test artifacts before integration tests
         if: always()
@@ -127,7 +127,7 @@ jobs:
       - name: Debug pytest configuration before integration tests
         run: |
           echo "=== Pytest Configuration Debug ==="
-          pytest --markers | grep -E "e2e|integration|flaky_in_ci" || echo "⚠ Custom markers NOT found!"
+          pytest --markers | grep -E "e2e|integration" || echo "⚠ Custom markers NOT found!"
           echo "=== Checking pyproject.toml markers section ==="
           grep -A 10 "^\[tool.pytest.ini_options\]" pyproject.toml | head -15
           echo "=== Python/Pytest Version ==="
@@ -135,7 +135,7 @@ jobs:
           pytest --version
 
       - name: Run integration tests
-        run: ./scripts/test.sh --integration --ci
+        run: ./scripts/test.sh --integration
 
       - name: Extract coverage percentage
         if: matrix.python-version == '3.11'
@@ -185,7 +185,7 @@ jobs:
   #   cross-platform correctness, not Python-version compatibility, which
   #   the ubuntu matrix already covers.
   # - Scope: unit + integration suites via the same marker expressions
-  #   scripts/test.sh --unit/--integration --ci uses (flaky_in_ci excluded
+  #   scripts/test.sh --unit/--integration uses (no test is quarantined,
   #   exactly as on ubuntu). The e2e suite shells out to bash scripts and
   #   pre-commit hooks that are POSIX-only today; it is excluded by its
   #   existing marker (applied by tests/e2e/conftest.py), NOT by skip
@@ -245,12 +245,12 @@ jobs:
         run: python -m start_green_stay_green.gates lint
 
       - name: Run unit tests through cross-platform runner
-        # Same marker selection as `./scripts/test.sh --unit --ci`.
-        run: python -m start_green_stay_green.gates test --unit --ci
+        # Same marker selection as `./scripts/test.sh --unit`.
+        run: python -m start_green_stay_green.gates test --unit
 
       - name: Run integration tests through cross-platform runner
-        # Same marker selection as `./scripts/test.sh --integration --ci`.
-        run: python -m start_green_stay_green.gates test --integration --ci
+        # Same marker selection as `./scripts/test.sh --integration`.
+        run: python -m start_green_stay_green.gates test --integration
 
       - name: Track job timing
         if: always()
