@@ -34,6 +34,7 @@
 5. **Quality First** - Meet MAXIMUM QUALITY standards (90% coverage, ≤10 complexity, periodic mutation testing)
 6. **Operate from project root** - Use relative paths, never `cd`
 7. **Verify before commit** - All hooks must pass
+8. **A flaky test is worse than no test** - Fix its root cause, decouple what it tests, or delete it with a stated reason; never retry, quarantine or skip it to get green
 
 **The 3 Gates**:
 1. Gate 1: `pre-commit run --all-files` passes (all hooks)
