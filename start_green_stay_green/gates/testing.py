@@ -17,17 +17,15 @@ from start_green_stay_green.gates import mutation
 if TYPE_CHECKING:
     import argparse
 
-#: Pytest ``-m`` marker expression per (test type, ci mode). ``None``
-#: means no marker filter (the ``--all`` non-CI case).
-MARKER_EXPRESSIONS: dict[tuple[str, bool], str | None] = {
-    ("unit", False): "not integration and not e2e",
-    ("unit", True): "not integration and not e2e and not flaky_in_ci",
-    ("integration", False): "integration",
-    ("integration", True): "integration and not flaky_in_ci",
-    ("e2e", False): "e2e",
-    ("e2e", True): "e2e and not flaky_in_ci",
-    ("all", False): None,
-    ("all", True): "not flaky_in_ci",
+#: Pytest ``-m`` marker expression per test type. ``None`` means no marker
+#: filter (``--all``). CI and a laptop select the same tests: there is no
+#: quarantine marker, because a flaky test is worse than no test. Fix its
+#: root cause, decouple what it tests, or delete it with a stated reason.
+MARKER_EXPRESSIONS: dict[str, str | None] = {
+    "unit": "not integration and not e2e",
+    "integration": "integration",
+    "e2e": "e2e",
+    "all": None,
 }
 
 _HEADERS = {
@@ -66,11 +64,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--mutation",
         action="store_true",
         help="Run mutation tests",
-    )
-    parser.add_argument(
-        "--ci",
-        action="store_true",
-        help="CI mode: skip flaky_in_ci tests",
     )
     parser.add_argument(
         "--json",
@@ -212,7 +205,7 @@ def build_pytest_args(args: argparse.Namespace, report_file: str | None) -> list
         Pytest arguments matching test.sh's ``PYTEST_ARGS`` construction.
     """
     pytest_args = ["-v"]
-    marker = MARKER_EXPRESSIONS[(args.test_type, args.ci)]
+    marker = MARKER_EXPRESSIONS[args.test_type]
     if marker is not None:
         pytest_args.extend(["-m", marker])
     if args.coverage:
@@ -241,8 +234,6 @@ def _announce(args: argparse.Namespace, pytest_args: list[str]) -> None:
     if args.json_output:
         return
     print(_HEADERS[args.test_type])
-    if args.ci:
-        print("CI mode: Skipping flaky_in_ci tests")
     if args.coverage:
         print("Coverage enabled")
     if args.verbose:

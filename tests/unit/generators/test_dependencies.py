@@ -198,8 +198,9 @@ class TestDependenciesGeneration:
 
         The pytest config enables --strict-markers, and pytest >= 9.2 also
         rejects a -m expression that names an unregistered marker, so the
-        generated scripts/test.sh ("not integration and not e2e") and the
-        CI gate ("not flaky_in_ci") fail unless each lane marker is declared.
+        generated scripts/test.sh ("not integration and not e2e") fails unless
+        each lane marker is declared. No marker quarantines a flaky test: a
+        generated project fixes or deletes one, never hides it from CI.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             config = DependencyConfig(
@@ -214,7 +215,8 @@ class TestDependenciesGeneration:
             markers = data["tool"]["pytest"]["ini_options"]["markers"]
             names = {marker.split(":", 1)[0] for marker in markers}
 
-            assert {"integration", "e2e", "flaky_in_ci"} <= names
+            assert {"integration", "e2e"} <= names
+            assert not any("flaky" in name for name in names)
 
     def test_pyproject_toml_has_project_metadata(self) -> None:
         """Test pyproject.toml contains project metadata."""
